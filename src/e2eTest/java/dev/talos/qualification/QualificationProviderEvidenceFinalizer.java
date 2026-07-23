@@ -118,7 +118,8 @@ final class QualificationProviderEvidenceFinalizer {
         String calibrationSha256 = QualificationScenarioBank.sha256(calibrationBytes);
         if (!java.util.Arrays.equals(calibrationBytes, QualificationJson.bytes(calibration))
                 || !QualificationRecords.CALIBRATION_SCHEMA.equals(calibration.schemaName())
-                || calibration.schemaVersion() != QualificationRecords.SCHEMA_VERSION
+                || calibration.schemaVersion()
+                        != QualificationRecords.CALIBRATION_SCHEMA_VERSION
                 || calibration.protocolVersion() != QualificationProtocol.VERSION
                 || !calibration.candidateAlias().equals(declared.campaign().candidateAlias())
                 || !calibration.configurationId().equals(declared.campaign().configId())

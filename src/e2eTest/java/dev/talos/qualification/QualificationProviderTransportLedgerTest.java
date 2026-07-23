@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -31,6 +33,50 @@ class QualificationProviderTransportLedgerTest {
         assertFalse(ledger.activeProcessBindingComplete());
         assertEquals("trc-transport-generation-1-attempt-1-transport-1",
                 ledger.generations().getFirst().selectedResponse().transportOperationId());
+    }
+
+    @Test
+    void traceV5RequiresOneExactReceiptAcrossProviderAndTransportLedgers() {
+        ObjectNode trace = validTrace();
+        ProviderProcessLaunchReceipt receipt = processReceipt();
+        upgradeToProcessBound(trace, receipt);
+
+        QualificationProviderAttemptLedger.Ledger ledger =
+                QualificationProviderAttemptLedger.parse(trace);
+
+        assertTrue(ledger.activeProcessBindingComplete());
+        assertEquals(receipt, ledger.processReceipts().receiptOptional().orElseThrow());
+
+        ObjectNode mismatched = validTrace();
+        upgradeToProcessBound(mismatched, receipt);
+        data(mismatched, "GENERATION_RESPONSE_CAPTURED")
+                .put("processReceiptId", "pr-" + "0".repeat(64));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderAttemptLedger.parse(mismatched));
+    }
+
+    @Test
+    void processBindingInvalidationCannotBeInitialDuplicateOrRevertToExact() {
+        ProviderProcessLaunchReceipt receipt = processReceipt();
+
+        ObjectNode initial = validTrace();
+        upgradeToProcessBound(initial, receipt);
+        transportEvent(initial, "HANDOFF_ADMITTED")
+                .put("processBinding", "MANAGED_QUALIFICATION_INVALIDATED");
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderAttemptLedger.parse(initial));
+
+        ObjectNode reverted = validTrace();
+        upgradeToProcessBound(reverted, receipt);
+        insertProcessInvalidations(reverted, 1, false);
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderAttemptLedger.parse(reverted));
+
+        ObjectNode duplicate = validTrace();
+        upgradeToProcessBound(duplicate, receipt);
+        insertProcessInvalidations(duplicate, 2, true);
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderAttemptLedger.parse(duplicate));
     }
 
     @Test
@@ -704,6 +750,105 @@ class QualificationProviderTransportLedgerTest {
         return root;
     }
 
+    private static void upgradeToProcessBound(
+            ObjectNode trace,
+            ProviderProcessLaunchReceipt receipt) {
+        trace.put("schemaVersion", QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION);
+        ArrayNode events = (ArrayNode) trace.path("events");
+        int dispatchIndex = eventIndex(trace, "GENERATION_REQUEST_DISPATCHED");
+        events.insert(dispatchIndex,
+                event("MODEL_IDENTITY_RESOLVED", processModelIdentity(receipt)));
+        events.insert(dispatchIndex + 1,
+                event("PROVIDER_PROCESS_LAUNCH_RECEIPT", receipt.traceData()));
+        for (JsonNode event : events) {
+            String type = event.path("type").asText();
+            ObjectNode eventData = (ObjectNode) event.path("data");
+            if (eventData.has("providerLedgerVersion")) {
+                eventData.put("providerLedgerVersion", 2);
+            }
+            if (eventData.has("transportLedgerVersion")) {
+                eventData.put("transportLedgerVersion", 2);
+                eventData.put("processBinding", "MANAGED_QUALIFICATION_EXACT");
+                eventData.put("processReceiptId", receipt.receiptId());
+            }
+            if (Set.of(
+                    "GENERATION_REQUEST_DISPATCHED",
+                    "GENERATION_RESPONSE_CAPTURED",
+                    "GENERATION_COMPLETED").contains(type)) {
+                eventData.put("transportOperationId",
+                        "trc-transport-generation-1-attempt-1-transport-1");
+                eventData.put("processReceiptId", receipt.receiptId());
+            }
+        }
+    }
+
+    private static Map<String, Object> processModelIdentity(
+            ProviderProcessLaunchReceipt receipt) {
+        return ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(receipt.resolvedProfile())
+                .resolvedProfile(receipt.resolvedProfile())
+                .artifactState("EXACT")
+                .engineExecutableIdentity(receipt.engineExecutableSha256())
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .propsState("AVAILABLE")
+                .propsResponseSha256(receipt.propsResponseSha256())
+                .chatAvailable(true)
+                .build()
+                .traceData();
+    }
+
+    private static ProviderProcessLaunchReceipt processReceipt() {
+        return new ProviderProcessLaunchReceipt(
+                42, 1_000, 1_001, 1_002,
+                "0123456789abcdef0123456789abcdef",
+                "1".repeat(64), "2".repeat(64), "3".repeat(64),
+                "4".repeat(64),
+                ProviderProcessLaunchReceipt.LaunchArgumentSet.STANDARD,
+                "5".repeat(64),
+                ProviderProcessLaunchReceipt.EnvironmentContract.QUALIFICATION_RELEVANT_ALLOWLIST_V1,
+                "127.0.0.1", 8080, true, "6".repeat(64), "candidate",
+                ProviderProcessLaunchReceipt.ServedIdentity.MATCHED,
+                ProviderProcessLaunchReceipt.EndpointObserverKind
+                        .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                "7".repeat(64),
+                ProviderProcessLaunchReceipt.EndpointOwnershipBoundary
+                        .WINDOWS_NETSTAT_LISTENER_OWNER_PID_START_AT_READINESS_BIND_AND_TRANSPORT,
+                ProviderProcessLaunchReceipt.StableEndpointAssumption
+                        .WINDOWS_TRUSTED_HELPER_AND_STABLE_LISTENER_OWNER_BETWEEN_OBSERVATION_AND_NETWORK_TRANSITION,
+                ProviderProcessLaunchReceipt.ContentVerificationBoundary
+                        .IMMEDIATE_PRELAUNCH_NOFOLLOW_SHA256,
+                ProviderProcessLaunchReceipt.StableFilesystemAssumption
+                        .STABLE_LOCAL_FILES_DURING_PROCESS_LOAD);
+    }
+
+    private static void insertProcessInvalidations(
+            ObjectNode trace,
+            int count,
+            boolean retainInvalidatedState) {
+        ArrayNode events = (ArrayNode) trace.path("events");
+        int handoffIndex = transportEventIndex(trace, "HANDOFF_ADMITTED");
+        ObjectNode template = eventAtTransition(trace, "HANDOFF_ADMITTED").deepCopy();
+        for (JsonNode event : events) {
+            if (!"PROVIDER_TRANSPORT_LIFECYCLE".equals(event.path("type").asText())) continue;
+            ObjectNode data = (ObjectNode) event.path("data");
+            long sequence = data.path("transportSequence").asLong();
+            if (sequence > 1) data.put("transportSequence", sequence + count);
+            if (retainInvalidatedState && sequence > 1) {
+                data.put("processBinding", "MANAGED_QUALIFICATION_INVALIDATED");
+            }
+        }
+        for (int index = 0; index < count; index++) {
+            ObjectNode invalidation = template.deepCopy();
+            ObjectNode data = (ObjectNode) invalidation.path("data");
+            data.put("transportSequence", 2 + index);
+            data.put("transition", "PROCESS_BINDING_INVALIDATED");
+            data.put("processBinding", "MANAGED_QUALIFICATION_INVALIDATED");
+            events.insert(handoffIndex + 1 + index, invalidation);
+        }
+    }
+
     private static ObjectNode cancelledInFlightTrace(boolean providerTerminal) {
         List<Map<String, Object>> lifecycle = new ArrayList<>();
         lifecycle.add(transport(1, "HANDOFF_ADMITTED", "OBSERVED", "NONE", "NONE",
@@ -946,6 +1091,7 @@ class QualificationProviderTransportLedgerTest {
 
     private static ObjectNode transportOnlyTrace(List<Map<String, Object>> lifecycle) {
         ObjectNode root = MAPPER.createObjectNode();
+        root.put("schemaVersion", QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION);
         ArrayNode events = root.putArray("events");
         for (Map<String, Object> event : lifecycle) {
             events.add(event("PROVIDER_TRANSPORT_LIFECYCLE", event));

@@ -1,11 +1,15 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 final class QualificationRecords {
     static final int SCHEMA_VERSION = 1;
+    static final int ENGINE_SCHEMA_VERSION = 2;
+    static final int CALIBRATION_SCHEMA_VERSION = 2;
     static final int LEGACY_RUN_SCHEMA_VERSION = 1;
     static final int RUN_SCHEMA_VERSION = 2;
     static final int CAUSAL_SCHEMA_VERSION = 2;
@@ -260,6 +264,10 @@ final class QualificationRecords {
             String sha256,
             List<String> launchArguments,
             List<String> verificationLaunchArguments,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String launchEnvironmentSha256,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String launchEnvironmentContract,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String endpointObserverKind,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String endpointObserverIdentitySha256,
             String backend,
             boolean offloadVerified,
             String offloadEvidence,
@@ -268,6 +276,8 @@ final class QualificationRecords {
         EngineFacts {
             launchArguments = immutable(launchArguments);
             verificationLaunchArguments = immutable(verificationLaunchArguments);
+            requireEndpointObserverIdentity(
+                    schemaVersion, endpointObserverKind, endpointObserverIdentitySha256);
         }
     }
 
@@ -331,6 +341,10 @@ final class QualificationRecords {
             List<String> launchArguments,
             List<String> verificationLaunchArguments,
             List<String> directPreflightLaunchArguments,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String launchEnvironmentSha256,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String launchEnvironmentContract,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String endpointObserverKind,
+            @JsonInclude(JsonInclude.Include.NON_EMPTY) String endpointObserverIdentitySha256,
             String requestLayout,
             String directPreflightEvidenceManifestSha256,
             String toolMode,
@@ -353,6 +367,8 @@ final class QualificationRecords {
             launchArguments = immutable(launchArguments);
             verificationLaunchArguments = immutable(verificationLaunchArguments);
             directPreflightLaunchArguments = immutable(directPreflightLaunchArguments);
+            requireEndpointObserverIdentity(
+                    schemaVersion, endpointObserverKind, endpointObserverIdentitySha256);
             risks = immutable(risks);
             expectedFailureShapes = immutable(expectedFailureShapes);
             knownLimitations = immutable(knownLimitations);
@@ -360,6 +376,34 @@ final class QualificationRecords {
             stopConditions = immutable(stopConditions);
             evidenceRequirements = immutable(evidenceRequirements);
             permittedDeviations = immutable(permittedDeviations);
+        }
+    }
+
+    private static void requireEndpointObserverIdentity(
+            int schemaVersion,
+            String endpointObserverKind,
+            String endpointObserverIdentitySha256) {
+        String kind = endpointObserverKind == null ? "" : endpointObserverKind;
+        String identity = endpointObserverIdentitySha256 == null
+                ? "" : endpointObserverIdentitySha256;
+        if (schemaVersion == SCHEMA_VERSION) {
+            if (!kind.isEmpty() || !identity.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "legacy engine/calibration identity cannot declare endpoint observer authority");
+            }
+            return;
+        }
+        if (schemaVersion != ENGINE_SCHEMA_VERSION) return;
+        try {
+            dev.talos.spi.types.ProviderProcessLaunchReceipt.EndpointObserverKind
+                    .valueOf(kind);
+        } catch (RuntimeException unsupported) {
+            throw new IllegalArgumentException(
+                    "endpoint observer kind is missing or unsupported", unsupported);
+        }
+        if (!identity.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException(
+                    "endpoint observer identity SHA-256 is not canonical");
         }
     }
 

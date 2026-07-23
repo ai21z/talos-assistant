@@ -201,6 +201,8 @@ class QualificationPacketPublisherSchemaOwnershipTest {
                 List.of("PROVIDER_EVIDENCE"));
         requiredKinds.put("QualificationProviderEvidenceFinalizer.java",
                 List.of("PROVIDER_EVIDENCE"));
+        requiredKinds.put("QualificationTraceEvidencePublication.java",
+                List.of("TRACE_EVIDENCE"));
         requiredKinds.put("QualificationRunFinalizer.java",
                 List.of("RUN_FINALIZATION"));
         requiredKinds.put("QualificationCampaignCompletion.java",

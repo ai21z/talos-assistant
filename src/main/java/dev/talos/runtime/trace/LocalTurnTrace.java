@@ -11,7 +11,8 @@ import java.util.List;
 /**
  * First-class local trace artifact for one Talos turn.
  *
- * <p>Version 4 adds closed, typed executable tool-authority evidence. It remains
+ * <p>Version 5 adds closed, typed managed-provider process identity evidence.
+ * Version 4 added executable tool-authority evidence. The trace remains
  * intentionally Java-record/JSON friendly and conservative:
  * raw prompts, assistant answers, file contents, and write/edit payloads are
  * summarized by hashes and counts in the default redaction mode.
@@ -39,7 +40,7 @@ public record LocalTurnTrace(
         RedactionSummary redaction
 ) {
     public LocalTurnTrace {
-        schemaVersion = schemaVersion <= 0 ? 4 : schemaVersion;
+        schemaVersion = schemaVersion <= 0 ? 5 : schemaVersion;
         traceId = safe(traceId);
         sessionId = safe(sessionId);
         timestamp = safe(timestamp);
@@ -595,7 +596,7 @@ public record LocalTurnTrace(
 
         public LocalTurnTrace build() {
             return new LocalTurnTrace(
-                    4,
+                    5,
                     traceId,
                     sessionId,
                     turnNumber,

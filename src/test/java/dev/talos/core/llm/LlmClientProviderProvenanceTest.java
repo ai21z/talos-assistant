@@ -9,6 +9,7 @@ import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
@@ -633,6 +634,36 @@ class LlmClientProviderProvenanceTest {
     }
 
     @Test
+    void processBindingInvalidationAfterDispatchIsRuntimeOwnedAndNeverEntersSend() {
+        beginTrace("trace-process-binding-invalidation");
+        try (LlmClient client = new LlmClient(
+                engineConfig(1_000),
+                new PostDispatchProcessBindingInvalidationResolver())) {
+            EngineException.ResponseError failure = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> client.chatFull(
+                            List.of(ChatMessage.user("inspect")), 5_000L));
+            assertTrue(failure.getCause()
+                    instanceof ProviderTransportHandoff.ProcessBindingInvalidated);
+        }
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertEquals(1, events(trace, "GENERATION_REQUEST_DISPATCHED").size());
+        assertEquals(
+                "RUNTIME_EXCEPTION",
+                event(trace, "GENERATION_ATTEMPT_FAILED").data().get("failure"));
+        assertEquals(
+                "RUNTIME_EXCEPTION",
+                event(trace, "GENERATION_FAILED").data().get("failure"));
+        assertTrue(events(trace, "PROVIDER_TRANSPORT_LIFECYCLE").stream().anyMatch(event ->
+                "PROCESS_BINDING_INVALIDATED".equals(event.data().get("transition"))
+                        && "SEND_API_NOT_ENTERED".equals(
+                                event.data().get("wireDisposition"))));
+        assertTrue(events(trace, "PROVIDER_TRANSPORT_LIFECYCLE").stream().noneMatch(event ->
+                "SEND_API_ENTERED".equals(event.data().get("transition"))));
+    }
+
+    @Test
     void interruptedTransportWithoutOwnedInterruptHasUnprovenCausalOwner() {
         beginTrace("trace-interrupted-after-handoff");
         try (LlmClient client = new LlmClient(
@@ -838,6 +869,40 @@ class LlmClientProviderProvenanceTest {
         limits.put("llm_idle_ms", 0L);
         config.data.put("limits", limits);
         return config;
+    }
+
+    private static ProviderProcessLaunchReceipt processReceipt(long processId) {
+        return new ProviderProcessLaunchReceipt(
+                processId,
+                1_721_600_000_000L,
+                1_721_600_000_100L,
+                1_721_600_000_200L,
+                "0123456789abcdef0123456789abcdef",
+                "a".repeat(64),
+                "b".repeat(64),
+                "c".repeat(64),
+                "e".repeat(64),
+                ProviderProcessLaunchReceipt.LaunchArgumentSet.STANDARD,
+                "f".repeat(64),
+                ProviderProcessLaunchReceipt.EnvironmentContract
+                        .QUALIFICATION_RELEVANT_ALLOWLIST_V1,
+                "127.0.0.1",
+                8080,
+                true,
+                "1".repeat(64),
+                "qualification-model",
+                ProviderProcessLaunchReceipt.ServedIdentity.MATCHED,
+                ProviderProcessLaunchReceipt.EndpointObserverKind
+                        .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                "2".repeat(64),
+                ProviderProcessLaunchReceipt.EndpointOwnershipBoundary
+                        .WINDOWS_NETSTAT_LISTENER_OWNER_PID_START_AT_READINESS_BIND_AND_TRANSPORT,
+                ProviderProcessLaunchReceipt.StableEndpointAssumption
+                        .WINDOWS_TRUSTED_HELPER_AND_STABLE_LISTENER_OWNER_BETWEEN_OBSERVATION_AND_NETWORK_TRANSITION,
+                ProviderProcessLaunchReceipt.ContentVerificationBoundary
+                        .IMMEDIATE_PRELAUNCH_NOFOLLOW_SHA256,
+                ProviderProcessLaunchReceipt.StableFilesystemAssumption
+                        .STABLE_LOCAL_FILES_DURING_PROCESS_LOAD);
     }
 
     private static void beginTrace(String traceId) {
@@ -1246,6 +1311,40 @@ class LlmClientProviderProvenanceTest {
                 throw new IllegalStateException(
                         "local parser invariant failed after dispatch");
             });
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static final class PostDispatchProcessBindingInvalidationResolver
+            implements LlmEngineResolver {
+        @Override
+        public void select(String backend, String model) {}
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, true, false, 32_768);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            throw new AssertionError("dispatch-aware overload required");
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) throws Exception {
+            AtomicReference<ProviderProcessLaunchReceipt> active =
+                    new AtomicReference<>(processReceipt(8101L));
+            ProviderTransportAttempt transport =
+                    ProviderTransportHandoff.bindProcessReceipt(
+                            handoff, active::get).admitTransport(
+                                    ProviderTransportHandoff.DispatchEvidence.unbound());
+            active.set(processReceipt(8102L));
+            return transport.invokeSend(() ->
+                    Stream.of(TokenChunk.of("must not send"), TokenChunk.eos()));
         }
 
         @Override

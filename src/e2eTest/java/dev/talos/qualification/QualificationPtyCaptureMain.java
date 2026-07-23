@@ -116,6 +116,26 @@ public final class QualificationPtyCaptureMain {
         QualificationRecords.CalibrationRules calibration = QualificationJson.read(
                 packetFiles.readAllBytes(calibrationPath),
                 QualificationRecords.CalibrationRules.class);
+        String environmentContract =
+                dev.talos.spi.types.ProviderProcessLaunchReceipt.EnvironmentContract
+                        .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name();
+        String launchEnvironmentSha256 =
+                dev.talos.spi.types.ProviderProcessLaunchReceipt
+                        .digestEffectiveEnvironment(System.getenv());
+        dev.talos.engine.llamacpp.LlamaCppQualificationObserverIdentity observer =
+                dev.talos.engine.llamacpp.LlamaCppQualificationObserverIdentity.current();
+        if (calibration.protocolVersion() != QualificationProtocol.VERSION
+                || calibration.schemaVersion()
+                        != QualificationRecords.CALIBRATION_SCHEMA_VERSION
+                || !environmentContract.equals(calibration.launchEnvironmentContract())
+                || !launchEnvironmentSha256.equals(
+                        calibration.launchEnvironmentSha256())
+                || !observer.kind().name().equals(calibration.endpointObserverKind())
+                || !observer.sha256().equals(
+                        calibration.endpointObserverIdentitySha256())) {
+            throw new IllegalStateException(
+                    "current provider launch environment or endpoint observer differs from frozen calibration");
+        }
         String serverPortText = argumentValue(calibration.launchArguments(), "--port");
         this.serverPort = Integer.parseInt(serverPortText);
         this.modelArtifact = NoFollowPathPolicy.requireUnlinkedRegularFile(Path.of(

@@ -3,6 +3,7 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,6 +50,8 @@ final class QualificationPreResultEvidence {
             QualificationRecords.MachineFacts machine,
             QualificationExecutionIdentity.Binding executionIdentity,
             QualificationTraceEvidence.Facts trace,
+            String traceId,
+            boolean incompleteTerminalTrace,
             QualificationRecords.TimingEvidence timings,
             QualificationRecords.ResourceEvidence resources,
             QualificationResourceSamples.Summary resourceSamples,
@@ -71,6 +74,15 @@ final class QualificationPreResultEvidence {
             scenario = Objects.requireNonNull(scenario, "scenario");
             executionIdentity = Objects.requireNonNull(
                     executionIdentity, "executionIdentity");
+            traceId = traceId == null ? "" : traceId;
+            if (trace != null && !trace.traceId().equals(traceId)) {
+                throw new IllegalArgumentException(
+                        "snapshot trace identity differs from score-bearing facts");
+            }
+            if (incompleteTerminalTrace && trace != null) {
+                throw new IllegalArgumentException(
+                        "incomplete terminal trace cannot expose score-bearing facts");
+            }
             answer = answer == null ? "" : answer;
             transcript = transcript == null ? "" : transcript;
             beforeFiles = immutableBytes(beforeFiles);
@@ -312,7 +324,10 @@ final class QualificationPreResultEvidence {
 
         byte[] traceBytes = runArtifacts.get(runRoot.resolve("trace.json"));
         QualificationTraceEvidence.Facts trace = null;
+        String traceId = "";
+        boolean incompleteTerminalTrace = false;
         int traceSchemaVersion = -1;
+        boolean tracePublicationCommitted = false;
         if (traceBytes != null) {
             try {
                 JsonNode traceSchema = QualificationJson.readTree(traceBytes)
@@ -324,13 +339,46 @@ final class QualificationPreResultEvidence {
                             "trace schemaVersion must be an exact integer");
                 }
                 traceSchemaVersion = traceSchema.intValue();
-                trace = QualificationTraceEvidence.read(traceBytes, scenario);
-                QualificationAuthorityPolicy.mismatch(
-                                scenario, trace.taskType(), trace.mutationAllowed(),
-                                trace.actionObligation())
-                        .ifPresent(mismatch -> findings.add("TRACE_AUTHORITY_MISMATCH:" + mismatch));
             } catch (IOException | RuntimeException invalid) {
                 findings.add("TRACE_INVALID");
+            }
+            if (traceSchemaVersion >= 0) {
+                try {
+                    java.util.Optional<QualificationTraceEvidencePublication.CommittedTrace>
+                            committedTrace = QualificationTraceEvidencePublication
+                                    .requireCommittedForSchema(
+                                            root, runRoot, traceSchemaVersion, traceBytes);
+                    tracePublicationCommitted = committedTrace.isPresent();
+                    if (traceSchemaVersion
+                                == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                            && !tracePublicationCommitted) {
+                        findings.add("ACTIVE_PROCESS_TRACE_PUBLICATION_UNAVAILABLE");
+                    }
+                } catch (IOException | RuntimeException invalid) {
+                    if (traceSchemaVersion
+                            == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION) {
+                        findings.add("ACTIVE_PROCESS_TRACE_PUBLICATION_UNAVAILABLE");
+                    }
+                }
+                try {
+                    QualificationTraceEvidenceEnvelope.Result envelope =
+                            QualificationTraceEvidenceEnvelope.validate(
+                                    traceBytes, scenario);
+                    traceId = envelope.traceId();
+                    if (envelope.incompleteTerminal()) {
+                        incompleteTerminalTrace = true;
+                        findings.add("TRACE_EVIDENCE_INCOMPLETE_TERMINAL");
+                    } else {
+                        trace = envelope.scoreBearingFacts();
+                        QualificationAuthorityPolicy.mismatch(
+                                        scenario, trace.taskType(), trace.mutationAllowed(),
+                                        trace.actionObligation())
+                                .ifPresent(mismatch -> findings.add(
+                                        "TRACE_AUTHORITY_MISMATCH:" + mismatch));
+                    }
+                } catch (IOException | RuntimeException invalid) {
+                    findings.add("TRACE_INVALID");
+                }
             }
         }
         QualificationExecutionIdentity.Binding executionIdentity =
@@ -338,12 +386,19 @@ final class QualificationPreResultEvidence {
                         root, campaign, candidate, calibration, machine, engine,
                         traceBytes, true);
         if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
-            // T1188: packet-time hashes and later metadata continuity do not prove
-            // which engine/model bytes the active provider process consumed. No
-            // forgeable packet file is accepted as a substitute. Protocol v6
-            // therefore remains non-comparative until the runtime emits and the
-            // harness verifies a typed launch receipt rooted in that process.
-            findings.add("ACTIVE_PROCESS_LAUNCH_RECEIPT_UNAVAILABLE");
+            boolean activeProcessIdentity = validateActiveProcessIdentity(
+                    traceSchemaVersion,
+                    tracePublicationCommitted,
+                    trace,
+                    campaign,
+                    candidate,
+                    calibration,
+                    calibrationBytes,
+                    engine,
+                    findings);
+            if (!activeProcessIdentity) {
+                findings.add("ACTIVE_PROCESS_LAUNCH_RECEIPT_UNAVAILABLE");
+            }
         }
 
         QualificationRecords.TimingEvidence timings = parse(
@@ -396,9 +451,11 @@ final class QualificationPreResultEvidence {
         String answer = text(runArtifacts.get(runRoot.resolve("answer.txt")));
         String transcript = text(runArtifacts.get(runRoot.resolve("transcript.txt")));
         QualificationRecords.AnswerOrigin matchedOrigin =
-                QualificationCausalOwnership.matchedAnswerOrigin(
-                        runArtifacts.get(runRoot.resolve("answer.txt")), traceBytes,
-                        catalog.protocolVersion());
+                incompleteTerminalTrace
+                        ? QualificationRecords.AnswerOrigin.NONE
+                        : QualificationCausalOwnership.matchedAnswerOrigin(
+                                runArtifacts.get(runRoot.resolve("answer.txt")), traceBytes,
+                                catalog.protocolVersion());
         if (catalog.protocolVersion() == QualificationProtocol.VERSION
                 && matchedOrigin == QualificationRecords.AnswerOrigin.MODEL_PROVIDER
                 && trace != null
@@ -467,7 +524,8 @@ final class QualificationPreResultEvidence {
                 before, finalFiles, complete);
         return new Snapshot(root, runRoot, scenario, request, campaign, calibration, machine,
                 executionIdentity,
-                trace, timings, resources, resourceSamples, answer, transcript,
+                trace, traceId, incompleteTerminalTrace,
+                timings, resources, resourceSamples, answer, transcript,
                 before, after, finalFiles, artifactHashes,
                 requirements, canaryScan,
                 complete ? matchedOrigin : QualificationRecords.AnswerOrigin.NONE,
@@ -505,6 +563,83 @@ final class QualificationPreResultEvidence {
         if (!capture.tty()) return true;
         return !capture.transport().isBlank()
                 && !QualificationPtyEvidence.TRANSPORTS.contains(capture.transport());
+    }
+
+    private static boolean validateActiveProcessIdentity(
+            int traceSchemaVersion,
+            boolean tracePublicationCommitted,
+            QualificationTraceEvidence.Facts trace,
+            QualificationRecords.CampaignManifest campaign,
+            QualificationRecords.CandidateManifest candidate,
+            QualificationRecords.CalibrationRules calibration,
+            byte[] calibrationBytes,
+            QualificationRecords.EngineFacts engine,
+            List<String> findings) {
+        if (traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                || !tracePublicationCommitted
+                || trace == null
+                || campaign == null
+                || candidate == null
+                || calibration == null
+                || calibrationBytes == null
+                || engine == null
+                || !trace.providerAttempts().activeProcessBindingComplete()) {
+            return false;
+        }
+        ProviderProcessLaunchReceipt receipt = trace.providerAttempts()
+                .processReceipts().receiptOptional().orElse(null);
+        if (receipt == null) return false;
+        List<String> launchArguments = calibration.launchArguments();
+        List<String> command = new ArrayList<>(launchArguments.size() + 1);
+        command.add(engine.executable());
+        command.addAll(launchArguments);
+        String expectedModel = QualificationEvidenceValidator.expectedRuntimeModel(calibration);
+        boolean exact = scoreBearingLaunchReceipt(receipt)
+                && receipt.candidateDeclarationSha256().equals(
+                        QualificationScenarioBank.sha256(calibrationBytes))
+                && receipt.engineExecutableSha256().equals(engine.sha256())
+                && receipt.engineExecutableSha256().equals(calibration.executableSha256())
+                && receipt.modelArtifactSha256().equals(candidate.sha256())
+                && receipt.modelArtifactSha256().equals(calibration.artifactSha256())
+                && receipt.effectiveEnvironmentSha256().equals(
+                        calibration.launchEnvironmentSha256())
+                && receipt.effectiveEnvironmentSha256().equals(
+                        engine.launchEnvironmentSha256())
+                && receipt.endpointObserverKind().name().equals(
+                        calibration.endpointObserverKind())
+                && receipt.endpointObserverKind().name().equals(
+                        engine.endpointObserverKind())
+                && receipt.endpointObserverIdentitySha256().equals(
+                        calibration.endpointObserverIdentitySha256())
+                && receipt.endpointObserverIdentitySha256().equals(
+                        engine.endpointObserverIdentitySha256())
+                && receipt.launchCommandSha256().equals(
+                        ProviderProcessLaunchReceipt.digestOrderedValues(command))
+                && receipt.resolvedProfile().equals(campaign.candidateAlias())
+                && receipt.resolvedProfile().equals(expectedModel)
+                && receipt.resolvedProfile().equals(trace.modelId())
+                && endpointValue(launchArguments, "--host").equals(receipt.managedHost())
+                && endpointValue(launchArguments, "--port").equals(
+                        Integer.toString(receipt.managedPort()));
+        if (!exact) findings.add("ACTIVE_PROCESS_LAUNCH_RECEIPT_IDENTITY_MISMATCH");
+        return exact;
+    }
+
+    static boolean scoreBearingLaunchReceipt(ProviderProcessLaunchReceipt receipt) {
+        return receipt != null
+                && receipt.launchArgumentSet()
+                        == ProviderProcessLaunchReceipt.LaunchArgumentSet.STANDARD;
+    }
+
+    private static String endpointValue(List<String> arguments, String flag) {
+        String value = "";
+        for (int index = 0; index < arguments.size(); index++) {
+            if (!flag.equals(arguments.get(index))) continue;
+            if (!value.isBlank() || index + 1 >= arguments.size()) return "";
+            value = arguments.get(++index);
+        }
+        return value;
     }
 
     private static void validateIdentity(
@@ -587,7 +722,11 @@ final class QualificationPreResultEvidence {
             findings.add("ENGINE_IDENTITY_UNAVAILABLE");
         } else {
             validateSchema(engine.schemaName(), engine.schemaVersion(),
-                    QualificationRecords.ENGINE_SCHEMA, "ENGINE_SCHEMA_MISMATCH", findings);
+                    QualificationRecords.ENGINE_SCHEMA,
+                    catalog.protocolVersion() == QualificationProtocol.VERSION
+                            ? QualificationRecords.ENGINE_SCHEMA_VERSION
+                            : QualificationRecords.SCHEMA_VERSION,
+                    "ENGINE_SCHEMA_MISMATCH", findings);
             if (!Objects.equals(engine.laneId(), campaign.engineLaneId())) {
                 findings.add("ENGINE_LANE_MISMATCH");
             }
@@ -597,7 +736,11 @@ final class QualificationPreResultEvidence {
             return;
         }
         validateSchema(calibration.schemaName(), calibration.schemaVersion(),
-                QualificationRecords.CALIBRATION_SCHEMA, "CALIBRATION_SCHEMA_MISMATCH", findings);
+                QualificationRecords.CALIBRATION_SCHEMA,
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? QualificationRecords.CALIBRATION_SCHEMA_VERSION
+                        : QualificationRecords.SCHEMA_VERSION,
+                "CALIBRATION_SCHEMA_MISMATCH", findings);
         if (!Objects.equals(calibration.configurationId(), campaign.configId())
                 || !Objects.equals(calibration.candidateAlias(), campaign.candidateAlias())
                 || calibration.protocolVersion() != campaign.protocolVersion()
@@ -616,8 +759,29 @@ final class QualificationPreResultEvidence {
                 || !Objects.equals(calibration.backend(), engine.backend())
                 || !calibration.launchArguments().equals(engine.launchArguments())
                 || !calibration.verificationLaunchArguments().equals(
-                        engine.verificationLaunchArguments()))) {
+                        engine.verificationLaunchArguments())
+                || catalog.protocolVersion() == QualificationProtocol.VERSION
+                    && (!hash(calibration.launchEnvironmentSha256())
+                        || !calibration.launchEnvironmentSha256().equals(
+                                engine.launchEnvironmentSha256())
+                        || !Objects.equals(calibration.launchEnvironmentContract(),
+                                engine.launchEnvironmentContract())
+                         || !Objects.equals(engine.launchEnvironmentContract(),
+                                dev.talos.spi.types.ProviderProcessLaunchReceipt
+                                         .EnvironmentContract
+                                         .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name())))) {
             findings.add("CALIBRATION_ENGINE_IDENTITY_MISMATCH");
+        }
+        if (engine != null
+                && catalog.protocolVersion() == QualificationProtocol.VERSION
+                && (!Objects.equals(calibration.endpointObserverKind(),
+                            engine.endpointObserverKind())
+                    || !Objects.equals(calibration.endpointObserverIdentitySha256(),
+                            engine.endpointObserverIdentitySha256())
+                    || !endpointObserverKind(calibration.endpointObserverKind())
+                    || !hash(calibration.endpointObserverIdentitySha256())
+                    || !hash(engine.endpointObserverIdentitySha256()))) {
+            findings.add("CALIBRATION_ENGINE_ENDPOINT_OBSERVER_IDENTITY_MISMATCH");
         }
     }
 
@@ -798,10 +962,12 @@ final class QualificationPreResultEvidence {
             QualificationTraceEvidence.Facts trace,
             QualificationRecords.TimingEvidence timing,
             List<String> findings) {
-        int expectedTraceSchema = protocolVersion == QualificationProtocol.VERSION
-                ? QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION
-                : 2;
-        if (traceSchemaVersion != expectedTraceSchema) {
+        boolean expectedTraceSchema = protocolVersion == QualificationProtocol.VERSION
+                ? traceSchemaVersion == QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION
+                    || traceSchemaVersion
+                        == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                : traceSchemaVersion == 2;
+        if (!expectedTraceSchema) {
             findings.add("PROTOCOL_TRACE_SCHEMA_MISMATCH");
             return;
         }
@@ -1064,7 +1230,18 @@ final class QualificationPreResultEvidence {
             String expected,
             String finding,
             List<String> findings) {
-        if (!Objects.equals(name, expected) || version != QualificationRecords.SCHEMA_VERSION) {
+        validateSchema(name, version, expected, QualificationRecords.SCHEMA_VERSION,
+                finding, findings);
+    }
+
+    private static void validateSchema(
+            String name,
+            int version,
+            String expected,
+            int expectedVersion,
+            String finding,
+            List<String> findings) {
+        if (!Objects.equals(name, expected) || version != expectedVersion) {
             findings.add(finding);
         }
     }
@@ -1091,5 +1268,18 @@ final class QualificationPreResultEvidence {
 
     private static boolean equalHash(String first, String second) {
         return first != null && second != null && first.equalsIgnoreCase(second);
+    }
+
+    private static boolean hash(String value) {
+        return value != null && value.matches("[0-9a-f]{64}");
+    }
+
+    private static boolean endpointObserverKind(String value) {
+        try {
+            ProviderProcessLaunchReceipt.EndpointObserverKind.valueOf(value);
+            return true;
+        } catch (RuntimeException unsupported) {
+            return false;
+        }
     }
 }

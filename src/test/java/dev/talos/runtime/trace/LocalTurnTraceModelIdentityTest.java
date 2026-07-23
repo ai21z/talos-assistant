@@ -4,10 +4,14 @@ import dev.talos.spi.types.ModelIdentitySnapshot;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalTurnTraceModelIdentityTest {
 
@@ -235,5 +239,70 @@ class LocalTurnTraceModelIdentityTest {
         assertEquals("Qwen3.5-9B-Q4_K_M.gguf", event.data().get("observedModelFile"));
         assertEquals("SINGLE_LEADING_SYSTEM", event.data().get("effectiveRequestLayout"));
         assertFalse(event.data().toString().contains("C:/private"));
+    }
+
+    @Test
+    void redactsEmbeddedWindowsPosixAndUncPathsAcrossMetadataFields() {
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("backend=C:/private/engine")
+                .configuredModel("model=C:/private/model.gguf")
+                .declaredProfile("profile=/srv/private/profile")
+                .resolvedProfile("profile=\\\\server\\share\\profile")
+                .engineLane("lane=//server/share/engine")
+                .disposition("build=/opt/private/disposition")
+                .engineBuildInfo("build=C:/toolchain/private/build")
+                .effectiveToolMode("mode:/private/tool")
+                .chatAvailable(true)
+                .build();
+
+        Map<String, Object> data = identity.traceData();
+
+        assertEquals("path redacted", data.get("backend"));
+        assertEquals("model.gguf", data.get("configuredModel"));
+        assertEquals("path redacted", data.get("declaredProfile"));
+        assertEquals("path redacted", data.get("resolvedProfile"));
+        assertEquals("path redacted", data.get("engineLane"));
+        assertEquals("path redacted", data.get("disposition"));
+        assertEquals("path redacted", data.get("engineBuildInfo"));
+        assertFalse(data.containsKey("effectiveToolMode"));
+        assertFalse(data.toString().contains("C:/private"));
+        assertFalse(data.toString().contains("/srv/private"));
+        assertFalse(data.toString().contains("server\\share"));
+        assertFalse(data.toString().contains("/opt/private"));
+    }
+
+    @Test
+    void reconstructsOnlyExactClosedCanonicalTraceData() {
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel("candidate")
+                .resolvedProfile("candidate")
+                .artifactState("EXACT")
+                .engineExecutableIdentity("1".repeat(64))
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .propsState("AVAILABLE")
+                .propsResponseSha256("2".repeat(64))
+                .chatAvailable(true)
+                .build();
+        Map<String, Object> canonical = identity.traceData();
+
+        assertEquals(identity, ModelIdentitySnapshot.fromTraceData(canonical));
+
+        Map<String, Object> unknown = new LinkedHashMap<>(canonical);
+        unknown.put("modelPath", "C:/secret/model.gguf");
+        assertThrows(IllegalArgumentException.class,
+                () -> ModelIdentitySnapshot.fromTraceData(unknown));
+
+        Map<String, Object> pathBearing = new LinkedHashMap<>(canonical);
+        pathBearing.put("engineBuildInfo", "build=/private/toolchain");
+        assertThrows(IllegalArgumentException.class,
+                () -> ModelIdentitySnapshot.fromTraceData(pathBearing));
+
+        Map<String, Object> wrongType = new LinkedHashMap<>(canonical);
+        wrongType.put("chatAvailable", "true");
+        assertThrows(IllegalArgumentException.class,
+                () -> ModelIdentitySnapshot.fromTraceData(wrongType));
+        assertTrue(ModelIdentitySnapshot.TRACE_FIELDS.containsAll(canonical.keySet()));
     }
 }

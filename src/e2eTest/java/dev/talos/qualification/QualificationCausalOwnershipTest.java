@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -404,6 +405,39 @@ class QualificationCausalOwnershipTest {
 
         assertEquals(1, continuationExit(packet.root(),
                 resultPath.getParent().getParent().getFileName().toString(), 1));
+    }
+
+    @Test
+    void structurallyValidUnboundTraceV5CannotClaimModelAnswerOrigin() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("unbound-trace-v5"), catalog, scenario);
+        ObjectNode trace = trace(packet);
+        trace.put("schemaVersion", QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION);
+        String operationId = event(trace, "GENERATION_RESPONSE_CAPTURED")
+                .path("data").path("transportOperationId").asText();
+        for (var rawEvent : trace.withArray("events")) {
+            ObjectNode data = (ObjectNode) rawEvent.path("data");
+            if (data.has("providerLedgerVersion")) {
+                data.put("providerLedgerVersion", 2);
+            }
+            if (data.has("transportLedgerVersion")) {
+                data.put("transportLedgerVersion", 2);
+            }
+            if ("GENERATION_REQUEST_DISPATCHED".equals(
+                    rawEvent.path("type").asText())) {
+                data.put("transportOperationId", operationId);
+            }
+        }
+
+        assertDoesNotThrow(() -> QualificationTraceEvidence.read(
+                QualificationJson.bytes(trace), scenario));
+        assertEquals(QualificationRecords.AnswerOrigin.NONE,
+                QualificationCausalOwnership.matchedAnswerOrigin(
+                        Files.readAllBytes(packet.runRoot().resolve("answer.txt")),
+                        QualificationJson.bytes(trace),
+                        QualificationProtocol.VERSION));
     }
 
     @Test

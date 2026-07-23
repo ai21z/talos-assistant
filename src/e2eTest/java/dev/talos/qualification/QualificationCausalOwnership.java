@@ -317,13 +317,34 @@ final class QualificationCausalOwnership {
                             != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
                 return QualificationRecords.AnswerOrigin.NONE;
             }
+            byte[] traceBytes = runFiles.readAllBytes(tracePath);
+            if (protocolVersion == QualificationProtocol.VERSION) {
+                JsonNode trace = QualificationJson.readTree(traceBytes);
+                int schemaVersion = exactInt(trace.path("schemaVersion"));
+                QualificationTraceEvidencePublication.requireCommittedForSchema(
+                        packetRootForRun(runRoot), runRoot, schemaVersion, traceBytes);
+            }
             return matchedAnswerOrigin(
                     runFiles.readAllBytes(answerPath),
-                    runFiles.readAllBytes(tracePath),
+                    traceBytes,
                     protocolVersion);
         } catch (IOException | RuntimeException failure) {
             return QualificationRecords.AnswerOrigin.NONE;
         }
+    }
+
+    private static Path packetRootForRun(Path runRoot) {
+        Path packetRoot = runRoot.toAbsolutePath().normalize();
+        for (int level = 0; level < 6; level++) {
+            packetRoot = packetRoot == null ? null : packetRoot.getParent();
+        }
+        if (packetRoot == null
+                || !runRoot.toAbsolutePath().normalize().startsWith(
+                        packetRoot.resolve("runs"))) {
+            throw new IllegalArgumentException(
+                    "run path is not inside a qualification packet");
+        }
+        return packetRoot;
     }
 
     private static byte[] committedResultBytes(Path requestedResult) throws IOException {
@@ -380,9 +401,11 @@ final class QualificationCausalOwnership {
             byte[] traceBytes) throws IOException {
         List<AnswerFingerprint> expected = answerFingerprints(answerBytes);
         JsonNode root = QualificationJson.readTree(traceBytes);
+        int traceSchemaVersion = exactInt(root.path("schemaVersion"));
         if (!root.isObject()
-                || exactInt(root.path("schemaVersion"))
-                        != QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION) {
+                || (traceSchemaVersion != QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION
+                    && traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION)) {
             return QualificationRecords.AnswerOrigin.NONE;
         }
         JsonNode events = root.path("events");
@@ -402,6 +425,11 @@ final class QualificationCausalOwnership {
             return QualificationRecords.AnswerOrigin.NONE;
         }
         if (chain.origin() == QualificationRecords.AnswerOrigin.MODEL_PROVIDER) {
+            if (traceSchemaVersion
+                            == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                    && !ledger.activeProcessBindingComplete()) {
+                return QualificationRecords.AnswerOrigin.NONE;
+            }
             QualificationProviderAttemptLedger.Generation generation =
                     ledger.selectedGeneration(
                             chain.sourceGenerationId(), chain.sourceAttemptId());

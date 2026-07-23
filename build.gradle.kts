@@ -716,6 +716,15 @@ tasks.register<JavaExec>("modelQualificationBankHash") {
     args("bank-hash")
 }
 
+tasks.register<JavaExec>("printModelQualificationLaunchEnvironmentIdentity") {
+    description = "Prints the provider environment and endpoint-observer identities for protocol v6."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    args("launch-environment-hash")
+}
+
 tasks.register<JavaExec>("validateModelQualificationEvidence") {
     description = "Validates a local model-qualification packet before scoring."
     group = "verification"
@@ -846,6 +855,34 @@ tasks.register<JavaExec>("finalizeModelQualificationProviderEvidence") {
             "--scenario", scenario,
             "--run", runRoot,
             "--server-port", serverPort,
+        )
+    })
+}
+
+tasks.register<JavaExec>("finalizeModelQualificationTraceEvidence") {
+    description = "Publishes the committed run's exact /last trace artifact as immutable qualification evidence."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        listOf(
+            "trace-evidence",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
         )
     })
 }

@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -10,9 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Writes the redacted provider-attempt ledger contract used by trace schemas v3/v4. */
+/** Writes the redacted provider-attempt ledger contract used by trace schemas v3-v5. */
 final class ProviderResponseTraceRecorder {
-    static final int LEDGER_VERSION = 1;
+    static final int LEDGER_VERSION = 2;
 
     private ProviderResponseTraceRecorder() {}
 
@@ -28,6 +29,13 @@ final class ProviderResponseTraceRecorder {
         emit(builder, "GENERATION_ATTEMPT_STARTED", attemptData(event));
     }
 
+    static void processReceiptBound(
+            LocalTurnTrace.Builder builder,
+            ProviderProcessLaunchReceipt receipt) {
+        if (receipt == null) return;
+        emit(builder, "PROVIDER_PROCESS_LAUNCH_RECEIPT", receipt.traceData());
+    }
+
     static void requestDispatched(
             LocalTurnTrace.Builder builder,
             ProviderResponseCapture.RequestDispatch dispatched) {
@@ -38,6 +46,10 @@ final class ProviderResponseTraceRecorder {
         if (!dispatched.evidence().providerBodyHash().isBlank()) {
             data.put("providerBodyHash", dispatched.evidence().providerBodyHash());
             data.put("dispatchedNativeTools", dispatched.evidence().nativeTools());
+        }
+        data.put("transportOperationId", dispatched.transportOperationId());
+        if (!dispatched.processReceiptId().isBlank()) {
+            data.put("processReceiptId", dispatched.processReceiptId());
         }
         data.put("toolAuthoritySurface", toolAuthoritySurface(
                 dispatched.attempt().toolAuthorityContract()));
@@ -71,6 +83,9 @@ final class ProviderResponseTraceRecorder {
         data.put("quarantineRequired", event.quarantineRequired());
         data.put("lateAfterGenerationTerminal", event.lateAfterGenerationTerminal());
         data.put("processBinding", event.processBinding().name());
+        if (!event.processReceiptId().isBlank()) {
+            data.put("processReceiptId", event.processReceiptId());
+        }
         emit(builder, "PROVIDER_TRANSPORT_LIFECYCLE", data);
     }
 
@@ -100,6 +115,9 @@ final class ProviderResponseTraceRecorder {
         data.put("truncated", response.truncated());
         if (!returned.receipt().transportOperationId().isBlank()) {
             data.put("transportOperationId", returned.receipt().transportOperationId());
+        }
+        if (!returned.receipt().processReceiptId().isBlank()) {
+            data.put("processReceiptId", returned.receipt().processReceiptId());
         }
         emit(builder, "GENERATION_RESPONSE_CAPTURED", data);
 
@@ -156,6 +174,9 @@ final class ProviderResponseTraceRecorder {
         if (!receipt.transportOperationId().isBlank()) {
             data.put("transportOperationId", receipt.transportOperationId());
         }
+        if (!receipt.processReceiptId().isBlank()) {
+            data.put("processReceiptId", receipt.processReceiptId());
+        }
         emit(builder, "GENERATION_COMPLETED", data);
     }
 
@@ -201,6 +222,12 @@ final class ProviderResponseTraceRecorder {
         data.put("source", event.source().name());
         data.put("purpose", event.purpose().name());
         data.put("toolAuthorityMode", event.toolAuthorityMode().name());
+        if (!event.transportOperationId().isBlank()) {
+            data.put("transportOperationId", event.transportOperationId());
+        }
+        if (!event.processReceiptId().isBlank()) {
+            data.put("processReceiptId", event.processReceiptId());
+        }
         return data;
     }
 
@@ -214,6 +241,12 @@ final class ProviderResponseTraceRecorder {
         data.put("attemptKind", event.attemptKind().name());
         data.put("retryReason", event.retryReason().name());
         data.put("requestDispatched", event.requestDispatched());
+        if (!event.transportOperationId().isBlank()) {
+            data.put("transportOperationId", event.transportOperationId());
+        }
+        if (!event.processReceiptId().isBlank()) {
+            data.put("processReceiptId", event.processReceiptId());
+        }
         return data;
     }
 

@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -143,6 +144,51 @@ class ProviderResponseTraceHardeningTest {
                 dispatch.data().get("generationId"));
         assertEquals(completed.data().get("selectedAttemptId"),
                 dispatch.data().get("attemptId"));
+    }
+
+    @Test
+    void processReceiptIsEmittedOnceAndReferencedByEveryPhysicalEvent() {
+        begin("trace-process-receipt");
+        ProviderProcessLaunchReceipt process = processReceipt();
+        ProviderTransportHandoff.DispatchEvidence evidence =
+                ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
+                                "{\"messages\":[]}", List.of())
+                        .withProcessReceipt(process);
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        ObservedProviderTransportFixture.completeTerminal(attempt, evidence);
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        "answer", List.of(),
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false, false, false));
+        generation.complete(receipt);
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        List<TurnTraceEvent> receipts = trace.events().stream()
+                .filter(candidate -> "PROVIDER_PROCESS_LAUNCH_RECEIPT".equals(candidate.type()))
+                .toList();
+        TurnTraceEvent dispatch = event(trace, "GENERATION_REQUEST_DISPATCHED");
+        TurnTraceEvent response = event(trace, "GENERATION_RESPONSE_CAPTURED");
+        TurnTraceEvent completed = event(trace, "GENERATION_COMPLETED");
+        List<TurnTraceEvent> lifecycle = trace.events().stream()
+                .filter(candidate -> "PROVIDER_TRANSPORT_LIFECYCLE".equals(candidate.type()))
+                .toList();
+
+        assertEquals(5, trace.schemaVersion());
+        assertEquals(1, receipts.size());
+        assertEquals(process.traceData(), receipts.getFirst().data());
+        assertEquals(process.receiptId(), dispatch.data().get("processReceiptId"));
+        assertEquals(process.receiptId(), response.data().get("processReceiptId"));
+        assertEquals(process.receiptId(), completed.data().get("processReceiptId"));
+        assertTrue(lifecycle.stream().allMatch(item ->
+                process.receiptId().equals(item.data().get("processReceiptId"))));
+        assertTrue(trace.events().indexOf(receipts.getFirst()) < trace.events().indexOf(dispatch));
     }
 
     @Test
@@ -339,5 +385,31 @@ class ProviderResponseTraceHardeningTest {
                 "test",
                 "model",
                 "provider provenance hardening");
+    }
+
+    private static ProviderProcessLaunchReceipt processReceipt() {
+        return new ProviderProcessLaunchReceipt(
+                9001L,
+                1_721_600_000_000L,
+                1_721_600_000_100L,
+                1_721_600_000_200L,
+                "0123456789abcdef0123456789abcdef",
+                "a".repeat(64), "b".repeat(64), "c".repeat(64),
+                "e".repeat(64), ProviderProcessLaunchReceipt.LaunchArgumentSet.VERIFICATION,
+                "f".repeat(64),
+                ProviderProcessLaunchReceipt.EnvironmentContract.QUALIFICATION_RELEVANT_ALLOWLIST_V1,
+                "127.0.0.1", 8080, true, "1".repeat(64), "qualification-model",
+                ProviderProcessLaunchReceipt.ServedIdentity.MATCHED,
+                ProviderProcessLaunchReceipt.EndpointObserverKind
+                        .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                "2".repeat(64),
+                ProviderProcessLaunchReceipt.EndpointOwnershipBoundary
+                        .WINDOWS_NETSTAT_LISTENER_OWNER_PID_START_AT_READINESS_BIND_AND_TRANSPORT,
+                ProviderProcessLaunchReceipt.StableEndpointAssumption
+                        .WINDOWS_TRUSTED_HELPER_AND_STABLE_LISTENER_OWNER_BETWEEN_OBSERVATION_AND_NETWORK_TRANSITION,
+                ProviderProcessLaunchReceipt.ContentVerificationBoundary
+                        .IMMEDIATE_PRELAUNCH_NOFOLLOW_SHA256,
+                ProviderProcessLaunchReceipt.StableFilesystemAssumption
+                        .STABLE_LOCAL_FILES_DURING_PROCESS_LOAD);
     }
 }

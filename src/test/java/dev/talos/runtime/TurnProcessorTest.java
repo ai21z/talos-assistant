@@ -1429,7 +1429,7 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
 
         assertNotNull(result.audit().localTrace());
         LocalTurnTrace trace = result.audit().localTrace();
-        assertEquals(4, trace.schemaVersion());
+        assertEquals(5, trace.schemaVersion());
         assertFalse(trace.traceId().isBlank());
         assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "ROUTED_ANSWER_CAPTURED".equals(event.type())));

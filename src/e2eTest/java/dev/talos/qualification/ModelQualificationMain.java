@@ -1,6 +1,8 @@
 package dev.talos.qualification;
 
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.engine.llamacpp.LlamaCppQualificationObserverIdentity;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -27,6 +29,18 @@ public final class ModelQualificationMain {
                     out.println(catalog.sha256());
                     yield 0;
                 }
+                case "launch-environment-hash" -> {
+                    LlamaCppQualificationObserverIdentity observer =
+                            LlamaCppQualificationObserverIdentity.current();
+                    out.println(ProviderProcessLaunchReceipt.EnvironmentContract
+                            .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name()
+                            + " "
+                             + ProviderProcessLaunchReceipt.digestEffectiveEnvironment(
+                                     System.getenv())
+                            + " " + observer.kind().name()
+                            + " " + observer.sha256());
+                    yield 0;
+                }
                 case "preflight" -> preflight(parsed.root(), catalogForPacket(parsed.root()), out, err);
                 case "validate" -> validate(parsed.root(), catalogForPacket(parsed.root()), out, err);
                 case "assert-writable-campaign" -> assertWritableCampaign(
@@ -46,6 +60,9 @@ public final class ModelQualificationMain {
                 case "provider-evidence" -> providerEvidence(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
                         parsed.serverPort(), catalogForMutation(parsed.root()), out);
+                case "trace-evidence" -> traceEvidence(
+                        parsed.root(), parsed.runRoot(), parsed.scenarioId(),
+                        catalogForMutation(parsed.root()), out);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -306,6 +323,24 @@ public final class ModelQualificationMain {
         return 0;
     }
 
+    private static int traceEvidence(
+            Path root,
+            Path runRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out) throws Exception {
+        catalog.scenario(scenarioId);
+        QualificationTraceEvidencePublication.Result result =
+                QualificationTraceEvidencePublication.publish(
+                        root, runRoot, scenarioId, catalog);
+        out.println("Qualification trace evidence: trace="
+                + result.trace().toAbsolutePath().normalize()
+                + " traceId=" + result.traceId()
+                + " sha256=" + result.sha256()
+                + " created=" + result.created());
+        return 0;
+    }
+
     private record Arguments(
             String command,
             Path root,
@@ -317,8 +352,11 @@ public final class ModelQualificationMain {
             List<String> args = raw == null ? List.of() : List.of(raw);
             if (args.isEmpty()) throw new IllegalArgumentException("A command is required");
             String command = args.getFirst().trim().toLowerCase(Locale.ROOT);
-            if (command.equals("bank-hash")) {
-                if (args.size() != 1) throw new IllegalArgumentException("bank-hash accepts no arguments");
+            if (command.equals("bank-hash")
+                    || command.equals("launch-environment-hash")) {
+                if (args.size() != 1) {
+                    throw new IllegalArgumentException(command + " accepts no arguments");
+                }
                 return new Arguments(command, null, null, "", null, -1);
             }
             Path root = null;
@@ -356,6 +394,7 @@ public final class ModelQualificationMain {
             if ((command.equals("requirements")
                     || command.equals("approvals")
                     || command.equals("provider-evidence")
+                    || command.equals("trace-evidence")
                     || command.equals("reconcile-run-publication"))
                     && (scenarioId.isBlank() || runRoot == null)) {
                 throw new IllegalArgumentException(
@@ -373,14 +412,17 @@ public final class ModelQualificationMain {
                     && !command.equals("reconcile-run-publication")
                     && !command.equals("requirements")
                     && !command.equals("approvals")
-                    && !command.equals("provider-evidence")) {
+                    && !command.equals("provider-evidence")
+                    && !command.equals("trace-evidence")) {
                 throw new IllegalArgumentException("Unknown command: " + command);
             }
-            return new Arguments(command, root, bank, scenarioId, runRoot, serverPort);
+            return new Arguments(
+                    command, root, bank, scenarioId, runRoot, serverPort);
         }
 
         static String usage() {
-            return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
+            return "Usage: bank-hash | launch-environment-hash | "
+                    + "preflight --root <packet> | validate --root <packet> | "
                     + "assert-writable-campaign --root <packet> | "
                      + "complete-campaign --root <packet> --bank admission|full | "
                      + "reconcile-run-publication --root <packet> --scenario <id> "
@@ -388,7 +430,8 @@ public final class ModelQualificationMain {
                     + "score --root <packet> --bank admission|full | requirements --root <packet> "
                     + "--scenario <id> --run <run-root> | approvals --root <packet> "
                     + "--scenario <id> --run <run-root> | provider-evidence --root <packet> "
-                    + "--scenario <id> --run <run-root> --server-port <port>";
+                    + "--scenario <id> --run <run-root> --server-port <port> | "
+                    + "trace-evidence --root <packet> --scenario <id> --run <run-root>";
         }
     }
 }

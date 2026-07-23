@@ -383,26 +383,36 @@ class QualificationRunFinalizerTest {
         assertTrue(script.contains("-PqualificationRoot="));
         assertTrue(script.contains("-PqualificationRunRoot="));
         assertTrue(script.contains("-PqualificationScenario="));
+        assertFalse(script.contains("qualificationTraceSource"));
+        assertFalse(script.contains("QualificationTraceSource"));
+        assertTrue(script.contains("finalizeModelQualificationTraceEvidence"));
+        assertEquals(script.indexOf("finalizeModelQualificationTraceEvidence"),
+                script.lastIndexOf("finalizeModelQualificationTraceEvidence"));
         assertTrue(script.contains("reconcileModelQualificationRunPublication"));
         assertEquals(script.indexOf("reconcileModelQualificationRunPublication"),
                 script.lastIndexOf("reconcileModelQualificationRunPublication"));
         assertTrue(script.indexOf("assertWritableModelQualificationCampaign")
+                < script.indexOf("finalizeModelQualificationTraceEvidence"));
+        assertTrue(script.indexOf("finalizeModelQualificationTraceEvidence")
                 < script.indexOf("reconcileModelQualificationRunPublication"));
         assertTrue(script.indexOf("reconcileModelQualificationRunPublication")
                 < script.indexOf("finalizeModelQualificationResult"));
         assertTrue(script.contains("-PqualificationServerPort="));
         assertTrue(script.contains(
+                "Qualification trace evidence publication failed with exit code"));
+        assertTrue(script.contains(
                 "Qualification publication reconciliation failed with exit code"));
         assertTrue(script.contains("$GradleExitCode = $LASTEXITCODE"));
         assertTrue(script.contains("if ($GradleExitCode -ne 0)"));
         assertTrue(script.contains("throw \"Java qualification result finalization failed"));
-        assertEquals("048545b159177ae6833babc3fcc2386b88cc2c354c95fb462756387d70b40778",
+        assertEquals("f48dfb7fe89df8c31d37491bb6dd66e116b787bab388238331d44b3ba55445e1",
                 QualificationScenarioBank.sha256(canonical.getBytes(StandardCharsets.UTF_8)));
         for (String forbidden : Arrays.asList(
                 "result.json", "causal-finalization.json", "canary.json",
                 "convertto-json", "convertfrom-json", "writealltext", "readalltext",
                 "set-content", "out-file", "get-content", "invoke-expression",
-                "start-process", "causalowner", "causalreason", "answerorigin",
+                "start-process", "copy-item", "move-item", "rename-item", "new-item",
+                "remove-item", "trace.json", "causalowner", "causalreason", "answerorigin",
                 "failureclass", "trustgate", "utilitypass", "comparativescore",
                 "scoreeligible", "protocolversion")) {
             assertFalse(script.toLowerCase(java.util.Locale.ROOT).contains(forbidden), forbidden);

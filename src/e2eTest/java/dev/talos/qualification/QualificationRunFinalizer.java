@@ -162,7 +162,11 @@ final class QualificationRunFinalizer {
                 causal.reasonCode(),
                 causal.comparativeScoreEligible(),
                 causal.causalLedger(),
-                trace == null ? "EVIDENCE_UNAVAILABLE" : trace.terminalState(),
+                trace == null
+                        ? evidence.incompleteTerminalTrace()
+                                ? "EVIDENCE_INCOMPLETE"
+                                : "EVIDENCE_UNAVAILABLE"
+                        : trace.terminalState(),
                 trust,
                 timings != null && timings.timedOut(),
                 timings != null && timings.outputCapHit(),
@@ -401,6 +405,9 @@ final class QualificationRunFinalizer {
                 && Objects.equals(expected.machine(), actual.machine())
                 && Objects.equals(expected.executionIdentity(), actual.executionIdentity())
                 && Objects.equals(expected.trace(), actual.trace())
+                && expected.traceId().equals(actual.traceId())
+                && expected.incompleteTerminalTrace()
+                        == actual.incompleteTerminalTrace()
                 && Objects.equals(expected.timings(), actual.timings())
                 && Objects.equals(expected.resources(), actual.resources())
                 && Objects.equals(expected.resourceSamples(), actual.resourceSamples())

@@ -37,7 +37,7 @@ public final class ProviderResponseCapture {
     /** Hard bound on provider-authored argument-key hashes persisted for one proposal. */
     public static final int MAX_TRACE_ARGUMENT_NAME_HASHES = 32;
     /** Current independent transport-operation ledger revision. */
-    public static final int TRANSPORT_LEDGER_VERSION = 1;
+    public static final int TRANSPORT_LEDGER_VERSION = 2;
     /** Bounded cooperative-cancellation drain before conservative quarantine. */
     public static final long TRANSPORT_SETTLEMENT_GRACE_MS = 1_000L;
 
@@ -296,12 +296,22 @@ public final class ProviderResponseCapture {
             Source source,
             Purpose purpose,
             ToolAuthorityMode toolAuthorityMode,
-            ToolAuthorityContract toolAuthorityContract) {
+            ToolAuthorityContract toolAuthorityContract,
+            String transportOperationId,
+            String processReceiptId) {
         public GenerationEvent {
             toolAuthorityMode = requireToolAuthorityMode(
                     source, purpose, toolAuthorityMode);
             toolAuthorityContract = requireToolAuthorityContract(
                     source, purpose, toolAuthorityMode, toolAuthorityContract);
+            transportOperationId = optionalSafeIdentifier(
+                    transportOperationId, "transportOperationId");
+            processReceiptId = optionalSafeIdentifier(
+                    processReceiptId, "processReceiptId");
+            if (!processReceiptId.isBlank() && transportOperationId.isBlank()) {
+                throw new IllegalArgumentException(
+                        "generation process receipt requires a transport operation");
+            }
         }
 
         public GenerationEvent(
@@ -312,7 +322,7 @@ public final class ProviderResponseCapture {
                 ToolAuthorityMode toolAuthorityMode
         ) {
             this(ledgerSequence, generationId, source, purpose, toolAuthorityMode,
-                    ToolAuthorityContract.unbound(toolAuthorityMode));
+                    ToolAuthorityContract.unbound(toolAuthorityMode), "", "");
         }
 
         public GenerationEvent(
@@ -322,7 +332,7 @@ public final class ProviderResponseCapture {
                 Purpose purpose
         ) {
             this(ledgerSequence, generationId, source, purpose, ToolAuthorityMode.NONE,
-                    ToolAuthorityContract.none());
+                    ToolAuthorityContract.none(), "", "");
         }
     }
 
@@ -337,12 +347,22 @@ public final class ProviderResponseCapture {
             RetryReason retryReason,
             boolean requestDispatched,
             ToolAuthorityMode toolAuthorityMode,
-            ToolAuthorityContract toolAuthorityContract) {
+            ToolAuthorityContract toolAuthorityContract,
+            String transportOperationId,
+            String processReceiptId) {
         public AttemptEvent {
             toolAuthorityMode = requireToolAuthorityMode(
                     source, purpose, toolAuthorityMode);
             toolAuthorityContract = requireToolAuthorityContract(
                     source, purpose, toolAuthorityMode, toolAuthorityContract);
+            transportOperationId = optionalSafeIdentifier(
+                    transportOperationId, "transportOperationId");
+            processReceiptId = optionalSafeIdentifier(
+                    processReceiptId, "processReceiptId");
+            if (!processReceiptId.isBlank() && transportOperationId.isBlank()) {
+                throw new IllegalArgumentException(
+                        "attempt process receipt requires a transport operation");
+            }
         }
 
         public AttemptEvent(
@@ -359,7 +379,7 @@ public final class ProviderResponseCapture {
         ) {
             this(ledgerSequence, generationId, attemptId, attemptOrdinal,
                     source, purpose, attemptKind, retryReason, requestDispatched,
-                    toolAuthorityMode, ToolAuthorityContract.unbound(toolAuthorityMode));
+                    toolAuthorityMode, ToolAuthorityContract.unbound(toolAuthorityMode), "", "");
         }
 
         public AttemptEvent(
@@ -375,18 +395,31 @@ public final class ProviderResponseCapture {
         ) {
             this(ledgerSequence, generationId, attemptId, attemptOrdinal,
                     source, purpose, attemptKind, retryReason, requestDispatched,
-                    ToolAuthorityMode.NONE, ToolAuthorityContract.none());
+                    ToolAuthorityMode.NONE, ToolAuthorityContract.none(), "", "");
         }
     }
 
     public record RequestDispatch(
             AttemptEvent attempt,
-            ProviderTransportHandoff.DispatchEvidence evidence) {
+            ProviderTransportHandoff.DispatchEvidence evidence,
+            String transportOperationId,
+            String processReceiptId) {
         public RequestDispatch {
             attempt = Objects.requireNonNull(attempt, "dispatch attempt");
             evidence = evidence == null
                     ? ProviderTransportHandoff.DispatchEvidence.unbound()
                     : evidence;
+            transportOperationId = requireSafeIdentifier(
+                    transportOperationId, "transportOperationId");
+            processReceiptId = optionalSafeIdentifier(
+                    processReceiptId, "processReceiptId");
+            String evidenceReceipt = evidence.processReceipt()
+                    .map(ProviderProcessLaunchReceipt::receiptId)
+                    .orElse("");
+            if (!processReceiptId.equals(evidenceReceipt)) {
+                throw new IllegalArgumentException(
+                        "dispatch process receipt ID differs from its typed evidence");
+            }
         }
     }
 
@@ -407,7 +440,8 @@ public final class ProviderResponseCapture {
             ProviderTransportAttempt.WireDisposition wireDisposition,
             boolean quarantineRequired,
             boolean lateAfterGenerationTerminal,
-            ProviderTransportAttempt.ProcessBinding processBinding) {
+            ProviderTransportAttempt.ProcessBinding processBinding,
+            String processReceiptId) {
         public TransportLifecycleEvent {
             if (transportLedgerVersion != TRANSPORT_LEDGER_VERSION) {
                 throw new IllegalArgumentException("unsupported transport ledger version");
@@ -435,6 +469,13 @@ public final class ProviderResponseCapture {
                     wireDisposition, "transport wire disposition");
             processBinding = Objects.requireNonNull(
                     processBinding, "transport process binding");
+            processReceiptId = optionalSafeIdentifier(
+                    processReceiptId, "processReceiptId");
+            if ((processBinding == ProviderTransportAttempt.ProcessBinding.UNAVAILABLE)
+                    != processReceiptId.isBlank()) {
+                throw new IllegalArgumentException(
+                        "transport process binding and receipt ID disagree");
+            }
         }
     }
 
@@ -627,6 +668,7 @@ public final class ProviderResponseCapture {
         private final ToolAuthorityContract toolAuthorityContract;
         private final ToolAuthorityBinding toolAuthorityBinding;
         private final String transportOperationId;
+        private final String processReceiptId;
         private final String assistantHash;
         private final List<ToolProposalReceipt> toolProposals;
         private final Generation ownerGeneration;
@@ -641,7 +683,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, false, ToolAuthorityMode.NONE,
                     ToolAuthorityContract.none(), ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", "", List.of(), null, null);
+                    "", "", "", List.of(), null, null);
         }
 
         public Receipt(
@@ -653,7 +695,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, "", "",
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", "", "",
                     List.of(), null, null);
         }
 
@@ -667,7 +709,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, "", assistantHash,
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", "", assistantHash,
                     List.of(), null, null);
         }
 
@@ -684,7 +726,7 @@ public final class ProviderResponseCapture {
             this(generationId, attemptId, attemptOrdinal, source, purpose, completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, "", assistantHash,
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", "", assistantHash,
                     List.of(), null, null);
         }
 
@@ -701,6 +743,7 @@ public final class ProviderResponseCapture {
                 ToolAuthorityContract toolAuthorityContract,
                 ToolAuthorityBinding toolAuthorityBinding,
                 String transportOperationId,
+                String processReceiptId,
                 String assistantHash,
                 List<ToolProposalReceipt> toolProposals,
                 Generation ownerGeneration,
@@ -719,6 +762,8 @@ public final class ProviderResponseCapture {
                     ? ToolAuthorityBinding.NOT_APPLICABLE
                     : toolAuthorityBinding;
             this.transportOperationId = safe(transportOperationId);
+            this.processReceiptId = optionalSafeIdentifier(
+                    processReceiptId, "processReceiptId");
             this.terminalEligibilityClaim = providerTerminalEligible
                     && !this.generationId.isBlank()
                     && !this.attemptId.isBlank()
@@ -747,6 +792,7 @@ public final class ProviderResponseCapture {
         public ToolAuthorityContract toolAuthorityContract() { return toolAuthorityContract; }
         public ToolAuthorityBinding toolAuthorityBinding() { return toolAuthorityBinding; }
         public String transportOperationId() { return transportOperationId; }
+        public String processReceiptId() { return processReceiptId; }
         public String assistantHash() { return assistantHash; }
 
         /** True only after the owning generation selected this exact receipt. */
@@ -789,7 +835,7 @@ public final class ProviderResponseCapture {
             return new Receipt("", "", 0, source, purposeFor(source), completion,
                     false, false, ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", "", List.of(), null, null);
+                    "", "", "", List.of(), null, null);
         }
 
         public static Receipt none() {
@@ -1164,9 +1210,15 @@ public final class ProviderResponseCapture {
         }
 
         private GenerationEvent event(long sequence) {
+            String operationId = activeAttempt == null || activeAttempt.transport == null
+                    ? ""
+                    : activeAttempt.transport.operationId();
+            String receiptId = activeAttempt == null || activeAttempt.transport == null
+                    ? ""
+                    : activeAttempt.transport.processReceiptId();
             return new GenerationEvent(
                     sequence, generationId, source, purpose, toolAuthorityMode,
-                    toolAuthorityContract);
+                    toolAuthorityContract, operationId, receiptId);
         }
     }
 
@@ -1271,7 +1323,10 @@ public final class ProviderResponseCapture {
             transport = new OwnedProviderTransportAttempt(this, observationMode);
             owner.transportOpened(transport);
             owner.listener.requestDispatched(new RequestDispatch(
-                    event(owner.nextSequence()), dispatchEvidence));
+                    event(owner.nextSequence()),
+                    dispatchEvidence,
+                    transport.operationId(),
+                    transport.processReceiptId()));
             transport.handoffAdmitted();
             return transport;
         }
@@ -1359,6 +1414,7 @@ public final class ProviderResponseCapture {
                         generation.toolAuthorityContract,
                         toolAuthorityBinding,
                         transport == null ? "" : transport.operationId(),
+                        transport == null ? "" : transport.processReceiptId(),
                         sha256(response.assistantText()),
                         proposalReceipts(response.nativeToolCalls()),
                         generation,
@@ -1428,7 +1484,9 @@ public final class ProviderResponseCapture {
                     retryReason,
                     requestDispatched,
                     generation.toolAuthorityMode,
-                    generation.toolAuthorityContract);
+                    generation.toolAuthorityContract,
+                    transport == null ? "" : transport.operationId(),
+                    transport == null ? "" : transport.processReceiptId());
         }
 
         private boolean transportLive() {
@@ -1463,6 +1521,8 @@ public final class ProviderResponseCapture {
         private final Attempt attempt;
         private final String operationId;
         private final ObservationMode observationMode;
+        private final String processReceiptId;
+        private ProcessBinding processBinding;
         private final CountDownLatch settledSignal = new CountDownLatch(1);
         private long transportSequence;
         private boolean sendEntered;
@@ -1490,6 +1550,12 @@ public final class ProviderResponseCapture {
             this.observationMode = Objects.requireNonNull(
                     observationMode, "transport observation mode");
             this.operationId = attempt.attemptId + "-transport-1";
+            this.processReceiptId = attempt.dispatchEvidence.processReceipt()
+                    .map(ProviderProcessLaunchReceipt::receiptId)
+                    .orElse("");
+            this.processBinding = processReceiptId.isBlank()
+                    ? ProcessBinding.UNAVAILABLE
+                    : ProcessBinding.MANAGED_QUALIFICATION_EXACT;
             this.wireDisposition = observationMode == ObservationMode.OBSERVED
                     ? WireDisposition.SEND_API_NOT_ENTERED
                     : WireDisposition.UNKNOWN;
@@ -1501,6 +1567,19 @@ public final class ProviderResponseCapture {
 
         private String operationId() {
             return operationId;
+        }
+
+        private String processReceiptId() {
+            return processReceiptId;
+        }
+
+        @Override
+        public synchronized void processBindingInvalidated() {
+            if (!settled
+                    && processBinding == ProcessBinding.MANAGED_QUALIFICATION_EXACT) {
+                processBinding = ProcessBinding.MANAGED_QUALIFICATION_INVALIDATED;
+                emit(Transition.PROCESS_BINDING_INVALIDATED);
+            }
         }
 
         @Override
@@ -1750,6 +1829,8 @@ public final class ProviderResponseCapture {
 
         private synchronized boolean provesProviderTerminal() {
             return observationMode == ObservationMode.OBSERVED
+                    && processBinding
+                            != ProcessBinding.MANAGED_QUALIFICATION_INVALIDATED
                     && settled
                     && settlement == Settlement.COMPLETED_PROVIDER_TERMINAL
                     && providerTerminalObserved
@@ -1846,7 +1927,8 @@ public final class ProviderResponseCapture {
                     wireDisposition,
                     quarantineRequired,
                     generationTerminal,
-                    ProcessBinding.UNAVAILABLE));
+                    processBinding,
+                    processReceiptId));
         }
     }
 
@@ -2047,6 +2129,11 @@ public final class ProviderResponseCapture {
             throw new IllegalArgumentException(label + " is not a safe bounded identifier");
         }
         return exact;
+    }
+
+    private static String optionalSafeIdentifier(String value, String label) {
+        String exact = Objects.toString(value, "");
+        return exact.isBlank() ? "" : requireSafeIdentifier(exact, label);
     }
 
     private static String safe(String value) {

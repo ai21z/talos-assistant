@@ -2,15 +2,22 @@ package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationJsonStrictnessTest {
+    @TempDir
+    Path temp;
+
     private record IntegralValue(int value) {}
 
     private record BooleanValue(boolean value) {}
@@ -200,5 +207,174 @@ class QualificationJsonStrictnessTest {
                 () -> QualificationJson.read(
                         QualificationJson.bytes(result),
                         QualificationRecords.RunResult.class));
+    }
+
+    @Test
+    void legacyEngineAndCalibrationSchemasAdaptWithoutInventingEnvironmentEvidence()
+            throws Exception {
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("legacy-launch-environment"),
+                QualificationScenarioBank.load(5));
+
+        Path enginePath = packet.root().resolve("engines/cuda.json");
+        Path calibrationPath = packet.root().resolve(
+                "candidates/qwen14/calibration-rules.json");
+        ObjectNode rawEngine = (ObjectNode) QualificationJson.readTree(enginePath);
+        ObjectNode rawCalibration = (ObjectNode) QualificationJson.readTree(calibrationPath);
+        assertLegacyLaunchEnvironmentShape(rawEngine);
+        assertLegacyLaunchEnvironmentShape(rawCalibration);
+
+        QualificationRecords.EngineFacts engine = QualificationJson.read(
+                enginePath, QualificationRecords.EngineFacts.class);
+        QualificationRecords.CalibrationRules calibration = QualificationJson.read(
+                calibrationPath, QualificationRecords.CalibrationRules.class);
+        assertEquals("", engine.launchEnvironmentSha256());
+        assertEquals("", engine.launchEnvironmentContract());
+        assertEquals("", calibration.launchEnvironmentSha256());
+        assertEquals("", calibration.launchEnvironmentContract());
+        assertEquals("", engine.endpointObserverKind());
+        assertEquals("", engine.endpointObserverIdentitySha256());
+        assertEquals("", calibration.endpointObserverKind());
+        assertEquals("", calibration.endpointObserverIdentitySha256());
+
+        assertLegacyLaunchEnvironmentShape((ObjectNode) QualificationJson.readTree(
+                QualificationJson.bytes(engine)));
+        assertLegacyLaunchEnvironmentShape((ObjectNode) QualificationJson.readTree(
+                QualificationJson.bytes(calibration)));
+        QualificationJson.read(
+                QualificationJson.bytes(engine), QualificationRecords.EngineFacts.class);
+        QualificationJson.read(
+                QualificationJson.bytes(calibration), QualificationRecords.CalibrationRules.class);
+
+        for (String field : List.of(
+                "launchEnvironmentSha256", "launchEnvironmentContract",
+                "endpointObserverKind", "endpointObserverIdentitySha256")) {
+            ObjectNode changedEngine = rawEngine.deepCopy();
+            changedEngine.put(field, field.endsWith("Sha256")
+                    ? "a".repeat(64) : field.equals("endpointObserverKind")
+                            ? "WINDOWS_NETSTAT_NOFOLLOW_SHA256"
+                            : "QUALIFICATION_RELEVANT_ALLOWLIST_V1");
+            assertThrows(IllegalArgumentException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(changedEngine),
+                            QualificationRecords.EngineFacts.class),
+                    "legacy engine " + field);
+
+            ObjectNode changedCalibration = rawCalibration.deepCopy();
+            changedCalibration.put(field, field.endsWith("Sha256")
+                    ? "a".repeat(64) : field.equals("endpointObserverKind")
+                            ? "WINDOWS_NETSTAT_NOFOLLOW_SHA256"
+                            : "QUALIFICATION_RELEVANT_ALLOWLIST_V1");
+            assertThrows(IllegalArgumentException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(changedCalibration),
+                            QualificationRecords.CalibrationRules.class),
+                    "legacy calibration " + field);
+        }
+    }
+
+    @Test
+    void currentEngineAndCalibrationSchemasRequireTypedEnvironmentEvidenceAndRoundTrip()
+            throws Exception {
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("current-launch-environment"),
+                QualificationScenarioBank.loadDefault());
+
+        ObjectNode engine = (ObjectNode) QualificationJson.readTree(
+                packet.root().resolve("engines/cuda.json"));
+        ObjectNode calibration = (ObjectNode) QualificationJson.readTree(
+                packet.root().resolve("candidates/qwen14/calibration-rules.json"));
+        assertCurrentLaunchEnvironmentShape(engine);
+        assertCurrentLaunchEnvironmentShape(calibration);
+        assertCurrentLaunchEnvironmentStrictAndRoundTrips(
+                engine, QualificationRecords.EngineFacts.class);
+        assertCurrentLaunchEnvironmentStrictAndRoundTrips(
+                calibration, QualificationRecords.CalibrationRules.class);
+    }
+
+    private static void assertLegacyLaunchEnvironmentShape(ObjectNode record) {
+        assertEquals(QualificationRecords.SCHEMA_VERSION,
+                record.path("schemaVersion").asInt());
+        assertFalse(record.has("launchEnvironmentSha256"));
+        assertFalse(record.has("launchEnvironmentContract"));
+        assertFalse(record.has("endpointObserverKind"));
+        assertFalse(record.has("endpointObserverIdentitySha256"));
+    }
+
+    private static void assertCurrentLaunchEnvironmentShape(ObjectNode record) {
+        assertEquals(2, record.path("schemaVersion").asInt());
+        assertTrue(record.path("launchEnvironmentSha256").isTextual());
+        assertTrue(record.path("launchEnvironmentSha256").asText()
+                .matches("[0-9a-f]{64}"));
+        assertEquals("QUALIFICATION_RELEVANT_ALLOWLIST_V1",
+                record.path("launchEnvironmentContract").asText());
+        assertEquals("WINDOWS_NETSTAT_NOFOLLOW_SHA256",
+                record.path("endpointObserverKind").asText());
+        assertTrue(record.path("endpointObserverIdentitySha256").asText()
+                .matches("[0-9a-f]{64}"));
+    }
+
+    private static void assertCurrentLaunchEnvironmentStrictAndRoundTrips(
+            ObjectNode canonical,
+            Class<?> recordType) throws Exception {
+        Object restored = QualificationJson.read(
+                QualificationJson.bytes(canonical), recordType);
+        ObjectNode serialized = (ObjectNode) QualificationJson.readTree(
+                QualificationJson.bytes(restored));
+        assertEquals(canonical.path("launchEnvironmentSha256"),
+                serialized.path("launchEnvironmentSha256"));
+        assertEquals(canonical.path("launchEnvironmentContract"),
+                serialized.path("launchEnvironmentContract"));
+        assertEquals(canonical.path("endpointObserverKind"),
+                serialized.path("endpointObserverKind"));
+        assertEquals(canonical.path("endpointObserverIdentitySha256"),
+                serialized.path("endpointObserverIdentitySha256"));
+        QualificationJson.read(QualificationJson.bytes(serialized), recordType);
+
+        for (String field : List.of(
+                "launchEnvironmentSha256", "launchEnvironmentContract",
+                "endpointObserverKind", "endpointObserverIdentitySha256")) {
+            ObjectNode missing = canonical.deepCopy();
+            missing.remove(field);
+            assertThrows(IOException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(missing), recordType),
+                    recordType.getSimpleName() + " missing " + field);
+
+            ObjectNode nullValue = canonical.deepCopy();
+            nullValue.putNull(field);
+            assertThrows(IOException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(nullValue), recordType),
+                    recordType.getSimpleName() + " null " + field);
+
+            ObjectNode numeric = canonical.deepCopy();
+            numeric.put(field, 7);
+            assertThrows(IOException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(numeric), recordType),
+                    recordType.getSimpleName() + " numeric " + field);
+
+            ObjectNode object = canonical.deepCopy();
+            object.putObject(field);
+            assertThrows(IOException.class,
+                    () -> QualificationJson.read(
+                            QualificationJson.bytes(object), recordType),
+                    recordType.getSimpleName() + " object " + field);
+        }
+
+        ObjectNode unknownKind = canonical.deepCopy();
+        unknownKind.put("endpointObserverKind", "UNDECLARED");
+        assertThrows(IOException.class,
+                () -> QualificationJson.read(
+                        QualificationJson.bytes(unknownKind), recordType),
+                recordType.getSimpleName() + " unknown endpointObserverKind");
+
+        ObjectNode uppercaseHash = canonical.deepCopy();
+        uppercaseHash.put("endpointObserverIdentitySha256", "A".repeat(64));
+        assertThrows(IOException.class,
+                () -> QualificationJson.read(
+                        QualificationJson.bytes(uppercaseHash), recordType),
+                recordType.getSimpleName() + " uppercase endpoint observer hash");
     }
 }

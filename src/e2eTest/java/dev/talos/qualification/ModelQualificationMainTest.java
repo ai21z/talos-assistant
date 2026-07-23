@@ -30,6 +30,23 @@ class ModelQualificationMainTest {
     }
 
     @Test
+    void launchEnvironmentIdentityIncludesFrozenEndpointObserverAuthority() {
+        Capture capture = run("launch-environment-hash");
+
+        assertEquals(0, capture.exit(), capture.err());
+        String[] fields = capture.out().strip().split("\\s+");
+        assertEquals(4, fields.length);
+        assertEquals("QUALIFICATION_RELEVANT_ALLOWLIST_V1", fields[0]);
+        assertTrue(fields[1].matches("[0-9a-f]{64}"));
+        assertTrue(List.of(
+                        "WINDOWS_NETSTAT_NOFOLLOW_SHA256",
+                        "LINUX_PROCFS_MANAGED_PROCESS_TREE_V1")
+                .contains(fields[2]));
+        assertTrue(fields[3].matches("[0-9a-f]{64}"));
+        assertTrue(capture.err().isBlank());
+    }
+
+    @Test
     void validateCommandFailsClosedForIncompletePacket() {
         Capture capture = run("validate", "--root", temp.toString());
 
@@ -89,6 +106,23 @@ class ModelQualificationMainTest {
             assertTrue(capture.err().isBlank(), capture.err());
             assertTrue(capture.out().contains("Validated runs: 1"), capture.out());
             assertEquals(before, treeState(packet.root()), "protocol=" + protocol);
+
+            for (Path historicalIdentity : List.of(
+                    packet.root().resolve("engines/cuda.json"),
+                    packet.root().resolve("candidates/qwen14/calibration-rules.json"))) {
+                var rawIdentity = QualificationJson.readTree(historicalIdentity);
+                assertEquals(QualificationRecords.SCHEMA_VERSION,
+                        rawIdentity.path("schemaVersion").asInt(),
+                        "protocol=" + protocol + " path=" + historicalIdentity);
+                assertFalse(rawIdentity.has("launchEnvironmentSha256"),
+                        "protocol=" + protocol + " path=" + historicalIdentity);
+                assertFalse(rawIdentity.has("launchEnvironmentContract"),
+                        "protocol=" + protocol + " path=" + historicalIdentity);
+                assertFalse(rawIdentity.has("endpointObserverKind"),
+                        "protocol=" + protocol + " path=" + historicalIdentity);
+                assertFalse(rawIdentity.has("endpointObserverIdentitySha256"),
+                        "protocol=" + protocol + " path=" + historicalIdentity);
+            }
 
             Path resultPath = packet.runRoot().resolve("result.json");
             var raw = QualificationJson.readTree(resultPath);
@@ -212,7 +246,7 @@ class ModelQualificationMainTest {
         for (int protocol = 1; protocol <= 5; protocol++) {
             for (String command : List.of(
                     "assert-writable-campaign",
-                    "requirements", "approvals", "provider-evidence", "score",
+                    "requirements", "approvals", "provider-evidence", "trace-evidence", "score",
                     "complete-campaign", "reconcile-run-publication")) {
                 QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocol);
                 QualificationTestPacket packet = QualificationTestPacket.create(
@@ -243,6 +277,11 @@ class ModelQualificationMainTest {
                             "--scenario", scenario,
                             "--run", packet.runRoot().toString(),
                             "--server-port", "18161");
+                    case "trace-evidence" -> run(
+                            command,
+                            "--root", packet.root().toString(),
+                            "--scenario", scenario,
+                            "--run", packet.runRoot().toString());
                     case "score" -> run(
                             command,
                             "--root", packet.root().toString(),
@@ -276,7 +315,7 @@ class ModelQualificationMainTest {
 
         for (String command : List.of(
                 "assert-writable-campaign",
-                "requirements", "approvals", "provider-evidence", "score",
+                "requirements", "approvals", "provider-evidence", "trace-evidence", "score",
                 "complete-campaign", "reconcile-run-publication")) {
             Capture capture = switch (command) {
                 case "assert-writable-campaign" -> run(
@@ -293,6 +332,11 @@ class ModelQualificationMainTest {
                         "--scenario", "A01-missing-campaign",
                         "--run", root.resolve("runs/trial-01").toString(),
                         "--server-port", "18161");
+                case "trace-evidence" -> run(
+                        command,
+                        "--root", root.toString(),
+                        "--scenario", "A01-missing-campaign",
+                        "--run", root.resolve("runs/trial-01").toString());
                 case "score" -> run(
                         command,
                         "--root", root.toString(),
@@ -372,15 +416,22 @@ class ModelQualificationMainTest {
                 "work-cycle-docs/templates/finalize-model-qualification-result-v6.ps1"),
                 StandardCharsets.UTF_8);
         int guard = script.indexOf("assertWritableModelQualificationCampaign");
+        int trace = script.indexOf("finalizeModelQualificationTraceEvidence");
         int reconcile = script.indexOf("reconcileModelQualificationRunPublication");
         int finalize = script.indexOf("finalizeModelQualificationResult");
 
         assertTrue(guard >= 0, "tracked finalizer template has no canonical writable guard");
-        assertTrue(reconcile > guard, "tracked finalizer does not reconcile after its guard");
+        assertTrue(trace > guard, "tracked finalizer does not publish trace after its guard");
+        assertTrue(reconcile > trace, "tracked finalizer does not reconcile after trace publication");
         assertTrue(finalize > reconcile, "tracked finalizer publishes before reconciliation");
         assertEquals(reconcile,
                 script.lastIndexOf("reconcileModelQualificationRunPublication"));
+        assertEquals(trace, script.lastIndexOf("finalizeModelQualificationTraceEvidence"));
+        assertFalse(script.contains("qualificationTraceSource"));
+        assertFalse(script.contains("QualificationTraceSource"));
         assertTrue(script.contains("-PqualificationServerPort="));
+        assertTrue(script.contains(
+                "Qualification trace evidence publication failed with exit code"));
         assertTrue(script.contains(
                 "Qualification publication reconciliation failed with exit code"));
     }
@@ -642,6 +693,39 @@ class ModelQualificationMainTest {
         assertEquals(0, second.exit(), second.err());
         assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(output)));
         assertEquals(modified, Files.getLastModifiedTime(output));
+    }
+
+    @Test
+    void traceEvidenceCommandPublishesOnlyThroughTheJavaTransactionOwner() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationProtocol.Scenario selected =
+                catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.createProcessBound(
+                temp.resolve("trace-evidence"), catalog, selected);
+        String scenario = selected.id();
+        Path target = packet.runRoot().resolve("trace.json");
+        byte[] expected = Files.readAllBytes(target);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.TRACE_EVIDENCE,
+                List.of(target));
+        Path source = packet.root().resolve(
+                "home/.talos/sessions/traces/session-one/000001-trace-1.json");
+        Files.createDirectories(source.getParent());
+        Files.write(source, expected);
+        assertFalse(Files.exists(target));
+
+        Capture capture = run(
+                "trace-evidence",
+                "--root", packet.root().toString(),
+                "--scenario", scenario,
+                "--run", packet.runRoot().toString());
+
+        assertEquals(0, capture.exit(), capture.err());
+        assertTrue(capture.out().contains("traceId=trace-1"), capture.out());
+        assertTrue(capture.out().contains("created=true"), capture.out());
+        assertTrue(java.util.Arrays.equals(expected, Files.readAllBytes(target)));
+        assertTrue(QualificationTraceEvidencePublication.requireCommittedForSchema(
+                packet.root(), packet.runRoot(), 5, expected).isPresent());
     }
 
     @Test

@@ -29,6 +29,7 @@ public interface ProviderTransportAttempt {
         RESPONSE_BODY_COMPLETED,
         CANCELLATION_REQUESTED,
         CANCELLATION_ACKNOWLEDGED,
+        PROCESS_BINDING_INVALIDATED,
         SETTLED
     }
 
@@ -76,7 +77,9 @@ public interface ProviderTransportAttempt {
 
     /** T1188 owns the future exact managed-process receipt. */
     enum ProcessBinding {
-        UNAVAILABLE
+        UNAVAILABLE,
+        MANAGED_QUALIFICATION_EXACT,
+        MANAGED_QUALIFICATION_INVALIDATED
     }
 
     /** Closed cancellation reasons mapped from the generation owner. */
@@ -120,6 +123,13 @@ public interface ProviderTransportAttempt {
 
     /** Records deterministic local closure of a body before raw EOF. */
     void responseBodyClosed();
+
+    /**
+     * Permanently invalidates a previously admitted managed-process binding.
+     * The transport still settles normally so the trace records the failed
+     * ownership checkpoint instead of losing the attempt lifecycle.
+     */
+    default void processBindingInvalidated() {}
 
     /** True only for the no-evidence compatibility handle. */
     default boolean unobserved() {

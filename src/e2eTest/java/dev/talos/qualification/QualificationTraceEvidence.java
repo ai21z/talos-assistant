@@ -430,15 +430,17 @@ final class QualificationTraceEvidence {
         if (!root.isObject() || (traceSchemaVersion != 2
                 && traceSchemaVersion
                         != QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION
-                && traceSchemaVersion != QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION)) {
+                && traceSchemaVersion != QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION
+                && traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION)) {
             throw new IllegalArgumentException(
-                    "trace must be a Talos schemaVersion 2, 3, or 4 object");
+                    "trace must be a Talos schemaVersion 2, 3, 4, or 5 object");
         }
         rejectIncompleteTerminalProjection(root.path("events"));
         boolean exactToolLineage = traceSchemaVersion
                 >= QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION;
         boolean exactExecutionAuthority = traceSchemaVersion
-                == QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION;
+                >= QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION;
         String traceId = required(QualificationJson.requiredText(
                 root.path("traceId"), "traceId"), "traceId");
         String modelId = required(QualificationJson.requiredText(

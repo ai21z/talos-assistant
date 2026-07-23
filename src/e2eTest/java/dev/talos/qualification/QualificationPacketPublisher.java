@@ -86,6 +86,7 @@ final class QualificationPacketPublisher {
         APPROVAL_EVIDENCE,
         MECHANICAL_REQUIREMENTS,
         PROVIDER_EVIDENCE,
+        TRACE_EVIDENCE,
         RUN_FINALIZATION,
         CAMPAIGN_COMPLETION,
         SCORECARD
@@ -2595,6 +2596,7 @@ final class QualificationPacketPublisher {
             case MECHANICAL_REQUIREMENTS ->
                     List.of(QualificationRequirementFinalizer.OUTPUT_FILE);
             case PROVIDER_EVIDENCE -> List.of("llama.log", "prompt-debug.txt");
+            case TRACE_EVIDENCE -> List.of(QualificationTraceEvidencePublication.OUTPUT_FILE);
             case RUN_FINALIZATION -> List.of(
                     QualificationCausalFinalizer.OUTPUT_FILE,
                     QualificationRunFinalizer.CANARY_FILE,

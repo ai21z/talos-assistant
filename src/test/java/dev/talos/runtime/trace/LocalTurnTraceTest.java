@@ -114,7 +114,7 @@ class LocalTurnTraceTest {
 
         String json = MAPPER.writeValueAsString(trace);
 
-        assertTrue(json.contains("\"schemaVersion\":4"));
+        assertTrue(json.contains("\"schemaVersion\":5"));
         assertTrue(json.contains("\"traceId\":\"trc-fixed\""));
         assertTrue(json.contains("\"promptAudit\""));
         assertTrue(json.contains("\"contentHash\""));
@@ -126,7 +126,7 @@ class LocalTurnTraceTest {
         assertFalse(json.contains("<h1>Hello</h1>"), "default trace must not store raw file content");
 
         LocalTurnTrace roundTrip = MAPPER.readValue(json, LocalTurnTrace.class);
-        assertEquals(4, roundTrip.schemaVersion());
+        assertEquals(5, roundTrip.schemaVersion());
         assertEquals("trc-fixed", roundTrip.traceId());
         assertEquals("FILE_CREATE", roundTrip.taskContract().type());
         assertEquals("MUTATING_TOOL_REQUIRED", roundTrip.promptAudit().actionObligation());

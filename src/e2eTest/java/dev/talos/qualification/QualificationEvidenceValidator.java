@@ -987,6 +987,8 @@ final class QualificationEvidenceValidator {
                         scenario, trace, answer, trace.missingEvidenceContained(), transcript),
                 transcript != null && transcript.contains(trace.terminalState()),
                 mandatoryEvidencePresent
+                        && (!trace.providerAttempts().activeProcessBindingRequired()
+                            || trace.providerAttempts().activeProcessBindingComplete())
                         && expectedRuntimeModel(calibration).equals(trace.modelId()),
                 mandatoryEvidencePresent);
     }
@@ -1323,6 +1325,9 @@ final class QualificationEvidenceValidator {
             QualificationRecords.CampaignManifest campaign,
             List<String> findings) {
         validateSchema(engine.schemaName(), engine.schemaVersion(), QualificationRecords.ENGINE_SCHEMA,
+                campaign.protocolVersion() == QualificationProtocol.VERSION
+                        ? QualificationRecords.ENGINE_SCHEMA_VERSION
+                        : QualificationRecords.SCHEMA_VERSION,
                 "engine", findings);
         if (!equal(engine.laneId(), campaign.engineLaneId())) findings.add("Engine lane id mismatch");
         requireHash(engine.sha256(), 64, "engine SHA-256", findings);
@@ -1334,6 +1339,19 @@ final class QualificationEvidenceValidator {
         if (engine.launchArguments().isEmpty()) findings.add("Engine launch arguments must not be empty");
         if (engine.verificationLaunchArguments().isEmpty()) {
             findings.add("Engine verification launch arguments must not be empty");
+        }
+        if (campaign.protocolVersion() == QualificationProtocol.VERSION) {
+            requireHash(engine.launchEnvironmentSha256(), 64,
+                    "engine launch environment SHA-256", findings);
+            if (!dev.talos.spi.types.ProviderProcessLaunchReceipt.EnvironmentContract
+                    .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name()
+                    .equals(engine.launchEnvironmentContract())) {
+                findings.add("Engine launch environment contract is unsupported");
+            }
+            requireEndpointObserverKind(
+                    engine.endpointObserverKind(), "engine endpoint observer kind", findings);
+            requireCanonicalHash(engine.endpointObserverIdentitySha256(),
+                    "engine endpoint observer identity SHA-256", findings);
         }
     }
 
@@ -1422,6 +1440,9 @@ final class QualificationEvidenceValidator {
             QualificationRecords.EngineFacts engine,
             List<String> findings) {
         validateSchema(rules.schemaName(), rules.schemaVersion(), QualificationRecords.CALIBRATION_SCHEMA,
+                campaign.protocolVersion() == QualificationProtocol.VERSION
+                        ? QualificationRecords.CALIBRATION_SCHEMA_VERSION
+                        : QualificationRecords.SCHEMA_VERSION,
                 "calibration rules", findings);
         if (!equal(rules.configurationId(), campaign.configId())) findings.add("Calibration configurationId mismatch");
         if (!equal(rules.candidateAlias(), campaign.candidateAlias())) findings.add("Calibration candidateAlias mismatch");
@@ -1452,6 +1473,26 @@ final class QualificationEvidenceValidator {
             if (!rules.verificationLaunchArguments().equals(engine.verificationLaunchArguments())) {
                 findings.add("Calibration verification launch arguments mismatch");
             }
+            if (rules.protocolVersion() == QualificationProtocol.VERSION
+                    && !equalHash(rules.launchEnvironmentSha256(),
+                            engine.launchEnvironmentSha256())) {
+                findings.add("Calibration launch environment mismatch");
+            }
+            if (rules.protocolVersion() == QualificationProtocol.VERSION
+                    && !equal(rules.launchEnvironmentContract(),
+                            engine.launchEnvironmentContract())) {
+                findings.add("Calibration launch environment contract mismatch");
+            }
+            if (rules.protocolVersion() == QualificationProtocol.VERSION
+                    && !equal(rules.endpointObserverKind(),
+                            engine.endpointObserverKind())) {
+                findings.add("Calibration endpoint observer kind mismatch");
+            }
+            if (rules.protocolVersion() == QualificationProtocol.VERSION
+                    && !equal(rules.endpointObserverIdentitySha256(),
+                            engine.endpointObserverIdentitySha256())) {
+                findings.add("Calibration endpoint observer identity mismatch");
+            }
             if (rules.timeoutSeconds() != (int) engine.configuredTimeoutSeconds()) {
                 findings.add("Calibration timeout mismatch");
             }
@@ -1459,6 +1500,21 @@ final class QualificationEvidenceValidator {
         if (rules.contextTokens() <= 0 || rules.outputCaps() == null || rules.sampling() == null
                 || rules.hardware() == null) {
             findings.add("Calibration runtime policy is incomplete");
+        }
+        if (rules.protocolVersion() == QualificationProtocol.VERSION) {
+            requireHash(rules.launchEnvironmentSha256(), 64,
+                    "calibration launch environment SHA-256", findings);
+            if (!dev.talos.spi.types.ProviderProcessLaunchReceipt.EnvironmentContract
+                    .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name()
+                    .equals(rules.launchEnvironmentContract())) {
+                findings.add("Calibration launch environment contract is unsupported");
+            }
+            requireEndpointObserverKind(
+                    rules.endpointObserverKind(),
+                    "calibration endpoint observer kind",
+                    findings);
+            requireCanonicalHash(rules.endpointObserverIdentitySha256(),
+                    "calibration endpoint observer identity SHA-256", findings);
         }
         if (!REQUEST_LAYOUTS.contains(rules.requestLayout())) {
             findings.add("Calibration request layout is unsupported");
@@ -1660,8 +1716,19 @@ final class QualificationEvidenceValidator {
             String expectedName,
             String label,
             List<String> findings) {
+        validateSchema(actualName, actualVersion, expectedName,
+                QualificationRecords.SCHEMA_VERSION, label, findings);
+    }
+
+    private static void validateSchema(
+            String actualName,
+            int actualVersion,
+            String expectedName,
+            int expectedVersion,
+            String label,
+            List<String> findings) {
         if (!equal(actualName, expectedName)
-                || actualVersion != QualificationRecords.SCHEMA_VERSION) {
+                || actualVersion != expectedVersion) {
             findings.add("Schema mismatch for " + label);
         }
     }
@@ -1687,6 +1754,23 @@ final class QualificationEvidenceValidator {
 
     private static void requireHash(String value, int length, String label, List<String> findings) {
         if (value == null || !value.matches("(?i)[0-9a-f]{" + length + "}")) {
+            findings.add("Invalid " + label);
+        }
+    }
+
+    private static void requireCanonicalHash(
+            String value, String label, List<String> findings) {
+        if (value == null || !value.matches("[0-9a-f]{64}")) {
+            findings.add("Invalid " + label);
+        }
+    }
+
+    private static void requireEndpointObserverKind(
+            String value, String label, List<String> findings) {
+        try {
+            dev.talos.spi.types.ProviderProcessLaunchReceipt.EndpointObserverKind
+                    .valueOf(value);
+        } catch (RuntimeException unsupported) {
             findings.add("Invalid " + label);
         }
     }

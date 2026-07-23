@@ -12,7 +12,8 @@ import java.util.Set;
 
 /** Strict, fail-closed reader for independent provider transport operations. */
 final class QualificationProviderTransportLedger {
-    static final int LEDGER_VERSION = 1;
+    static final int LEGACY_LEDGER_VERSION = 1;
+    static final int LEDGER_VERSION = 2;
     static final String EVENT_TYPE = "PROVIDER_TRANSPORT_LIFECYCLE";
 
     private static final Set<String> EVENT_KEYS = Set.of(
@@ -21,6 +22,8 @@ final class QualificationProviderTransportLedger {
             "observationMode", "settlement", "transportFailure", "cancellationState",
             "cancellationReason", "wireDisposition", "quarantineRequired",
             "lateAfterGenerationTerminal", "processBinding");
+    private static final Set<String> PROCESS_BOUND_EVENT_KEYS = union(
+            EVENT_KEYS, Set.of("processReceiptId"));
 
     private QualificationProviderTransportLedger() {}
 
@@ -36,6 +39,7 @@ final class QualificationProviderTransportLedger {
             ProviderTransportAttempt.CancellationReason cancellationReason,
             ProviderTransportAttempt.WireDisposition wireDisposition,
             ProviderTransportAttempt.ProcessBinding processBinding,
+            String processReceiptId,
             boolean providerTerminalObserved,
             boolean bodyCompleted,
             boolean quarantineRequired,
@@ -46,13 +50,19 @@ final class QualificationProviderTransportLedger {
             int cancellationRequestEventIndex,
             int settlementEventIndex) {
 
+        Operation {
+            processReceiptId = processReceiptId == null ? "" : processReceiptId;
+        }
+
         boolean observedLifecycle() {
             return observationMode == ProviderTransportAttempt.ObservationMode.OBSERVED
                     && settlement != ProviderTransportAttempt.Settlement.LIFECYCLE_UNOBSERVED;
         }
 
         boolean processBound() {
-            return processBinding != ProviderTransportAttempt.ProcessBinding.UNAVAILABLE;
+            return processBinding
+                            == ProviderTransportAttempt.ProcessBinding.MANAGED_QUALIFICATION_EXACT
+                    && processReceiptId.matches("pr-[0-9a-f]{64}");
         }
     }
 
@@ -99,12 +109,21 @@ final class QualificationProviderTransportLedger {
         }
 
         boolean activeProcessBindingComplete() {
-            return present() && operations.values().stream().allMatch(Operation::processBound);
+            return present()
+                    && operations.values().stream().allMatch(Operation::processBound)
+                    && operations.values().stream()
+                            .map(Operation::processReceiptId)
+                            .distinct().count() == 1;
         }
     }
 
     static Ledger parse(JsonNode traceRoot) {
-        JsonNode events = traceRoot == null ? null : traceRoot.path("events");
+        if (traceRoot == null || !traceRoot.isObject()) {
+            throw new IllegalArgumentException("trace must be an object");
+        }
+        int traceSchemaVersion = QualificationJson.requiredInt(
+                traceRoot.path("schemaVersion"), "trace schemaVersion");
+        JsonNode events = traceRoot.path("events");
         if (events == null || !events.isArray()) {
             throw new IllegalArgumentException("trace events must be an array");
         }
@@ -116,8 +135,12 @@ final class QualificationProviderTransportLedger {
                 continue;
             }
             JsonNode data = event.path("data");
-            requireExactKeys(data, EVENT_KEYS, EVENT_TYPE);
-            EventFields fields = fields(data);
+            Set<String> expectedKeys = traceSchemaVersion
+                            == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                    ? (data.has("processReceiptId") ? PROCESS_BOUND_EVENT_KEYS : EVENT_KEYS)
+                    : EVENT_KEYS;
+            requireExactKeys(data, expectedKeys, EVENT_TYPE);
+            EventFields fields = fields(data, traceSchemaVersion);
             int exactEventIndex = eventIndex;
             MutableOperation operation = mutable.computeIfAbsent(
                     fields.transportOperationId(),
@@ -345,6 +368,9 @@ final class QualificationProviderTransportLedger {
             QualificationProviderAttemptLedger.Response response) {
         boolean providerTerminalProof = operation.observationMode()
                         == ProviderTransportAttempt.ObservationMode.OBSERVED
+                && operation.processBinding()
+                        != ProviderTransportAttempt.ProcessBinding
+                                .MANAGED_QUALIFICATION_INVALIDATED
                 && operation.settlement()
                         == ProviderTransportAttempt.Settlement.COMPLETED_PROVIDER_TERMINAL
                 && operation.providerTerminalObserved();
@@ -384,13 +410,19 @@ final class QualificationProviderTransportLedger {
             ProviderTransportAttempt.WireDisposition wireDisposition,
             boolean quarantineRequired,
             boolean late,
-            ProviderTransportAttempt.ProcessBinding processBinding) {}
+            ProviderTransportAttempt.ProcessBinding processBinding,
+            String processReceiptId) {}
 
-    private static EventFields fields(JsonNode data) {
+    private static EventFields fields(JsonNode data, int traceSchemaVersion) {
         int version = QualificationJson.requiredInt(
                 data.path("transportLedgerVersion"), "transport ledger version");
-        if (version != LEDGER_VERSION) {
-            throw new IllegalArgumentException("transport ledger version is not 1");
+        int expectedVersion = traceSchemaVersion
+                        == QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                ? LEDGER_VERSION
+                : LEGACY_LEDGER_VERSION;
+        if (version != expectedVersion) {
+            throw new IllegalArgumentException(
+                    "transport ledger version does not match the trace schema");
         }
         long sequence = QualificationJson.requiredLong(
                 data.path("transportSequence"), "transport sequence");
@@ -404,6 +436,22 @@ final class QualificationProviderTransportLedger {
                 || !attemptId.equals(generationId + "-attempt-" + attemptOrdinal)
                 || !operationId.equals(attemptId + "-transport-1")) {
             throw new IllegalArgumentException("transport identity correlation is invalid");
+        }
+        ProviderTransportAttempt.ProcessBinding processBinding = requiredEnum(
+                data, "processBinding", ProviderTransportAttempt.ProcessBinding.class);
+        String processReceiptId = data.has("processReceiptId")
+                ? processReceiptId(data)
+                : "";
+        if ((processBinding == ProviderTransportAttempt.ProcessBinding.UNAVAILABLE)
+                != processReceiptId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "transport process binding and receipt ID disagree");
+        }
+        if (traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                && processBinding != ProviderTransportAttempt.ProcessBinding.UNAVAILABLE) {
+            throw new IllegalArgumentException(
+                    "historical transport evidence cannot claim active-process binding");
         }
         return new EventFields(
                 version,
@@ -424,7 +472,8 @@ final class QualificationProviderTransportLedger {
                 QualificationJson.requiredBoolean(
                         data.path("lateAfterGenerationTerminal"),
                         "late-after-generation-terminal"),
-                requiredEnum(data, "processBinding", ProviderTransportAttempt.ProcessBinding.class));
+                processBinding,
+                processReceiptId);
     }
 
     private static final class MutableOperation {
@@ -433,7 +482,9 @@ final class QualificationProviderTransportLedger {
         private final int attemptOrdinal;
         private final String operationId;
         private final ProviderTransportAttempt.ObservationMode observationMode;
-        private final ProviderTransportAttempt.ProcessBinding processBinding;
+        private ProviderTransportAttempt.ProcessBinding processBinding;
+        private boolean processBindingInvalidated;
+        private final String processReceiptId;
         private final int firstEventIndex;
         private long expectedSequence = 1;
         private boolean sendEntered;
@@ -469,6 +520,13 @@ final class QualificationProviderTransportLedger {
             operationId = first.transportOperationId();
             observationMode = first.observationMode();
             processBinding = first.processBinding();
+            if (processBinding
+                    == ProviderTransportAttempt.ProcessBinding
+                            .MANAGED_QUALIFICATION_INVALIDATED) {
+                throw new IllegalArgumentException(
+                        "transport handoff cannot begin with an invalidated process binding");
+            }
+            processReceiptId = first.processReceiptId();
             this.firstEventIndex = firstEventIndex;
             wireDisposition = observationMode == ProviderTransportAttempt.ObservationMode.OBSERVED
                     ? ProviderTransportAttempt.WireDisposition.SEND_API_NOT_ENTERED
@@ -560,6 +618,14 @@ final class QualificationProviderTransportLedger {
                     cancellationAcknowledged = true;
                     observedCancellationState = event.cancellationState();
                 }
+                case PROCESS_BINDING_INVALIDATED -> {
+                    require(processBinding
+                                    == ProviderTransportAttempt.ProcessBinding
+                                            .MANAGED_QUALIFICATION_INVALIDATED
+                                    && !processBindingInvalidated,
+                            "transport process binding invalidation was not retained");
+                    processBindingInvalidated = true;
+                }
                 case SETTLED -> {
                     require(event.settlement() != ProviderTransportAttempt.Settlement.NONE,
                             "transport settlement is NONE");
@@ -577,15 +643,24 @@ final class QualificationProviderTransportLedger {
         }
 
         private void requireIdentity(EventFields event) {
+            boolean exactInvalidation = event.transition()
+                            == ProviderTransportAttempt.Transition.PROCESS_BINDING_INVALIDATED
+                    && processBinding
+                            == ProviderTransportAttempt.ProcessBinding.MANAGED_QUALIFICATION_EXACT
+                    && event.processBinding()
+                            == ProviderTransportAttempt.ProcessBinding
+                                    .MANAGED_QUALIFICATION_INVALIDATED;
             if (!generationId.equals(event.generationId())
                     || !attemptId.equals(event.attemptId())
                     || attemptOrdinal != event.attemptOrdinal()
                     || !operationId.equals(event.transportOperationId())
                     || observationMode != event.observationMode()
-                    || processBinding != event.processBinding()) {
+                    || (processBinding != event.processBinding() && !exactInvalidation)
+                    || !processReceiptId.equals(event.processReceiptId())) {
                 throw new IllegalArgumentException(
                         "transport operation identity changes across events");
             }
+            if (exactInvalidation) processBinding = event.processBinding();
         }
 
         private void validateSnapshot(EventFields event) {
@@ -798,6 +873,7 @@ final class QualificationProviderTransportLedger {
                     generationId, attemptId, attemptOrdinal, operationId,
                     observationMode, settlement, failure, cancellationState,
                     cancellationReason, wireDisposition, processBinding,
+                    processReceiptId,
                     providerTerminalObserved, bodyCompleted, quarantineRequired, late,
                     firstEventIndex, firstLateEventIndex, lastNonLateEventIndex,
                     cancellationRequestEventIndex,
@@ -811,6 +887,21 @@ final class QualificationProviderTransportLedger {
             throw new IllegalArgumentException("transport " + key + " is invalid");
         }
         return value;
+    }
+
+    private static String processReceiptId(JsonNode data) {
+        String value = QualificationJson.requiredText(
+                data.path("processReceiptId"), "transport process receipt ID");
+        if (!value.matches("pr-[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("transport process receipt ID is invalid");
+        }
+        return value;
+    }
+
+    private static Set<String> union(Set<String> first, Set<String> second) {
+        LinkedHashSet<String> values = new LinkedHashSet<>(first);
+        values.addAll(second);
+        return Set.copyOf(values);
     }
 
     private static <E extends Enum<E>> E requiredEnum(

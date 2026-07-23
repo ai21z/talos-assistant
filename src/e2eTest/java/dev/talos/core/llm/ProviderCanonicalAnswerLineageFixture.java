@@ -14,6 +14,8 @@ import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 
@@ -80,12 +82,30 @@ public final class ProviderCanonicalAnswerLineageFixture {
             LocalTurnTrace trace) {}
 
     private static final class FixedProviderResolver implements LlmEngineResolver {
+        private final ProviderProcessLaunchReceipt receipt = providerProcessReceipt();
+
         @Override
         public void select(String backend, String model) {}
 
         @Override
         public Capabilities capabilities() {
             return Capabilities.of(true, true, false, 32_768);
+        }
+
+        @Override
+        public ModelIdentitySnapshot modelIdentity() {
+            return ModelIdentitySnapshot.builder()
+                    .backend("fixture")
+                    .configuredModel("provider-lineage-model")
+                    .resolvedProfile(receipt.resolvedProfile())
+                    .artifactState("EXACT")
+                    .engineExecutableIdentity(receipt.engineExecutableSha256())
+                    .servedIdentityState("MATCHED")
+                    .resolution("QUALIFIED")
+                    .propsState("AVAILABLE")
+                    .propsResponseSha256(receipt.propsResponseSha256())
+                    .chatAvailable(true)
+                    .build();
         }
 
         @Override
@@ -97,14 +117,51 @@ public final class ProviderCanonicalAnswerLineageFixture {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff processBound =
+                    ProviderTransportHandoff.bindProcessReceipt(
+                            handoff, () -> receipt);
             return ObservedProviderTransportFixture.dispatchCompletedTerminal(
                     "canonical-answer-lineage-provider-body",
                     request.tools,
-                    handoff,
+                    processBound,
                     () -> chatStream(request));
         }
 
         @Override
         public void close() {}
+    }
+
+    private static ProviderProcessLaunchReceipt providerProcessReceipt() {
+        return new ProviderProcessLaunchReceipt(
+                42,
+                1_000,
+                1_001,
+                1_002,
+                "0123456789abcdef0123456789abcdef",
+                "1".repeat(64),
+                "2".repeat(64),
+                "3".repeat(64),
+                "4".repeat(64),
+                ProviderProcessLaunchReceipt.LaunchArgumentSet.STANDARD,
+                "5".repeat(64),
+                ProviderProcessLaunchReceipt.EnvironmentContract
+                        .QUALIFICATION_RELEVANT_ALLOWLIST_V1,
+                "127.0.0.1",
+                8080,
+                true,
+                "6".repeat(64),
+                "provider-lineage",
+                ProviderProcessLaunchReceipt.ServedIdentity.MATCHED,
+                ProviderProcessLaunchReceipt.EndpointObserverKind
+                        .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                "7".repeat(64),
+                ProviderProcessLaunchReceipt.EndpointOwnershipBoundary
+                        .WINDOWS_NETSTAT_LISTENER_OWNER_PID_START_AT_READINESS_BIND_AND_TRANSPORT,
+                ProviderProcessLaunchReceipt.StableEndpointAssumption
+                        .WINDOWS_TRUSTED_HELPER_AND_STABLE_LISTENER_OWNER_BETWEEN_OBSERVATION_AND_NETWORK_TRANSITION,
+                ProviderProcessLaunchReceipt.ContentVerificationBoundary
+                        .IMMEDIATE_PRELAUNCH_NOFOLLOW_SHA256,
+                ProviderProcessLaunchReceipt.StableFilesystemAssumption
+                        .STABLE_LOCAL_FILES_DURING_PROCESS_LOAD);
     }
 }

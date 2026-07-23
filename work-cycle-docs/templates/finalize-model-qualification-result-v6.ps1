@@ -28,6 +28,14 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Qualification campaign writable guard failed with exit code $LASTEXITCODE"
     }
+    & $Gradle 'finalizeModelQualificationTraceEvidence' `
+        "-PqualificationRoot=$ResolvedQualificationRoot" `
+        "-PqualificationRunRoot=$ResolvedQualificationRunRoot" `
+        "-PqualificationScenario=$QualificationScenario" `
+        '--no-daemon'
+    if ($LASTEXITCODE -ne 0) {
+        throw "Qualification trace evidence publication failed with exit code $LASTEXITCODE"
+    }
     $ReconcileArguments = @(
         'reconcileModelQualificationRunPublication',
         "-PqualificationRoot=$ResolvedQualificationRoot",

@@ -1569,6 +1569,9 @@ public final class LlmClient implements AutoCloseable {
         if (!transportDispatched) {
             return ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH;
         }
+        if (failure instanceof ProviderTransportHandoff.ProcessBindingInvalidated) {
+            return ProviderResponseCapture.Failure.RUNTIME_EXCEPTION;
+        }
         if (failure instanceof EngineException.Transient) {
             return ProviderResponseCapture.Failure.PROVIDER_TRANSIENT;
         }

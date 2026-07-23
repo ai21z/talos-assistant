@@ -745,9 +745,10 @@ final class QualificationExecutionIdentityWriter {
         if (!QualificationRecords.CANDIDATE_SCHEMA.equals(candidate.schemaName())
                 || candidate.schemaVersion() != QualificationRecords.SCHEMA_VERSION
                 || !QualificationRecords.CALIBRATION_SCHEMA.equals(calibration.schemaName())
-                || calibration.schemaVersion() != QualificationRecords.SCHEMA_VERSION
+                || calibration.schemaVersion()
+                        != QualificationRecords.CALIBRATION_SCHEMA_VERSION
                 || !QualificationRecords.ENGINE_SCHEMA.equals(engine.schemaName())
-                || engine.schemaVersion() != QualificationRecords.SCHEMA_VERSION
+                || engine.schemaVersion() != QualificationRecords.ENGINE_SCHEMA_VERSION
                 || !QualificationRecords.MACHINE_SCHEMA.equals(machine.schemaName())
                 || machine.schemaVersion() != QualificationRecords.SCHEMA_VERSION) {
             throw invalid("packet identity record schema mismatch");
@@ -808,6 +809,29 @@ final class QualificationExecutionIdentityWriter {
                 || !engine.verificationLaunchArguments().equals(
                 calibration.verificationLaunchArguments())) {
             throw invalid("engine and calibration launch arguments differ");
+        }
+        if (calibration.protocolVersion() == QualificationProtocol.VERSION) {
+            equalHash(
+                    engine.launchEnvironmentSha256(),
+                    calibration.launchEnvironmentSha256(),
+                    "engine and calibration launch environments differ");
+            equalText(
+                    engine.launchEnvironmentContract(),
+                    calibration.launchEnvironmentContract(),
+                    "engine and calibration launch environment contracts differ");
+            equalText(
+                    engine.launchEnvironmentContract(),
+                    dev.talos.spi.types.ProviderProcessLaunchReceipt.EnvironmentContract
+                            .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name(),
+                    "launch environment contract is unsupported");
+            equalText(
+                    engine.endpointObserverKind(),
+                    calibration.endpointObserverKind(),
+                    "engine and calibration endpoint observer kinds differ");
+            equalHash(
+                    engine.endpointObserverIdentitySha256(),
+                    calibration.endpointObserverIdentitySha256(),
+                    "engine and calibration endpoint observer identities differ");
         }
     }
 

@@ -3,6 +3,7 @@ package dev.talos.engine.llamacpp;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.RequestMessageLayout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -350,7 +351,11 @@ class LlamaCppResolvedProfileServiceTest {
                         candidate.runtime().compatibleEngineLanes().getFirst(),
                         "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
                 (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
-                        candidate, "b".repeat(64), artifact, "engine-hash")));
+                        candidate, "b".repeat(64), artifact, "engine-hash",
+                        "e".repeat(64),
+                        ProviderProcessLaunchReceipt.EndpointObserverKind
+                                .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                        "f".repeat(64), 6)));
 
         var snapshot = service.resolveAvailable(true);
 
@@ -380,7 +385,11 @@ class LlamaCppResolvedProfileServiceTest {
                         candidate.runtime().compatibleEngineLanes().getFirst(),
                         "changed-engine", LlamaCppProfileResolver.MatchState.MATCHED),
                 (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
-                        candidate, "b".repeat(64), artifact, "expected-engine")));
+                        candidate, "b".repeat(64), artifact, "expected-engine",
+                        "e".repeat(64),
+                        ProviderProcessLaunchReceipt.EndpointObserverKind
+                                .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                        "f".repeat(64), 6)));
 
         var snapshot = service.resolveAvailable(true);
 
@@ -407,7 +416,11 @@ class LlamaCppResolvedProfileServiceTest {
                         candidate.runtime().compatibleEngineLanes().getFirst(),
                         "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
                 (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
-                        candidate, "b".repeat(64), changedArtifact, "engine-hash")));
+                        candidate, "b".repeat(64), changedArtifact, "engine-hash",
+                        "e".repeat(64),
+                        ProviderProcessLaunchReceipt.EndpointObserverKind
+                                .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                        "f".repeat(64), 6)));
 
         var snapshot = service.resolveAvailable(true);
 
@@ -427,12 +440,54 @@ class LlamaCppResolvedProfileServiceTest {
                 (path, alias, expected, home, verify) -> exactArtifact(profile),
                 base -> availableProps(modelPath(), true),
                 (cfg, declared, observed, verify) -> matchedEngine(profile),
-                (cfg, home) -> { throw new AssertionError("catalog profile must win"); });
+                (cfg, home) -> Optional.of(
+                        new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                                profile, "b".repeat(64))));
 
         var snapshot = service.resolveAvailable(true);
 
         assertEquals("qwen3-8b", snapshot.identity().resolvedProfile());
-        assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+        assertTrue(snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+        assertEquals(profile.disposition(), snapshot.profile().disposition());
+    }
+
+    @Test
+    void qualificationCandidateCannotShadowCatalogManagedServerArguments() {
+        LlamaCppConfig config = config("qwen3-8b", "managed", modelPath(), serverPath(), true,
+                List.of("--reasoning", "off"));
+        var catalog = LlamaCppModelCatalog.byAlias("qwen3-8b").orElseThrow();
+        var runtime = catalog.runtime();
+        var changedRuntime = new LlamaCppModelCatalog.RuntimeDefaults(
+                runtime.architecture(),
+                runtime.parameterShape(),
+                runtime.nativeCalling(),
+                runtime.toolMode(),
+                runtime.reasoningMode(),
+                runtime.chatTemplate(),
+                runtime.contextTokens(),
+                runtime.maxContextTokens(),
+                runtime.samplingProfile(),
+                runtime.requestLayout(),
+                List.of("--reasoning", "off", "--unfrozen-execution-flag"),
+                runtime.compatibleEngineLanes(),
+                runtime.hardwareEnvelope(),
+                runtime.requiresLocalModelPath());
+        var candidate = new LlamaCppModelCatalog.Profile(
+                catalog.alias(), catalog.artifact(), changedRuntime, catalog.qualification(),
+                catalog.guidePath(), catalog.ramGuidance());
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> new LlamaCppResolvedProfileService(
+                        config,
+                        temp.resolve("home"),
+                        (path, alias, expected, home, verify) -> exactArtifact(catalog),
+                        base -> availableProps(modelPath(), true),
+                        (cfg, declared, observed, verify) -> matchedEngine(catalog),
+                        (cfg, home) -> Optional.of(
+                                new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                                        candidate, "b".repeat(64)))));
+
+        assertTrue(failure.getMessage().contains("execution facts differ"));
     }
 
     @Test

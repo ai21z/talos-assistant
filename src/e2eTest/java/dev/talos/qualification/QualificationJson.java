@@ -72,6 +72,12 @@ final class QualificationJson {
             adaptLegacyRunResult(tree);
             return bindStrict(tree, type);
         }
+        if (type == QualificationRecords.EngineFacts.class
+                || type == QualificationRecords.CalibrationRules.class) {
+            JsonNode tree = MAPPER.readTree(bytes);
+            adaptLegacyLaunchEnvironment(tree, type);
+            return bindStrict(tree, type);
+        }
         return MAPPER.readValue(bytes, type);
     }
 
@@ -257,6 +263,33 @@ final class QualificationJson {
         if (!object.has("causalLedger")) {
             object.putArray("causalLedger");
         }
+    }
+
+    private static void adaptLegacyLaunchEnvironment(JsonNode tree, Class<?> type) {
+        if (!(tree instanceof ObjectNode object)) return;
+        int schemaVersion = exactIntOrSentinel(object.get("schemaVersion"));
+        if (schemaVersion != QualificationRecords.SCHEMA_VERSION) return;
+        String expectedSchema = type == QualificationRecords.EngineFacts.class
+                ? QualificationRecords.ENGINE_SCHEMA
+                : QualificationRecords.CALIBRATION_SCHEMA;
+        if (!expectedSchema.equals(exactTextOrEmpty(object.get("schemaName")))) return;
+        if (object.has("launchEnvironmentSha256")) {
+            throw new IllegalArgumentException(
+                    "legacy engine/calibration schema must not declare launch environment identity");
+        }
+        object.put("launchEnvironmentSha256", "");
+        if (object.has("launchEnvironmentContract")) {
+            throw new IllegalArgumentException(
+                    "legacy engine/calibration schema must not declare a launch environment contract");
+        }
+        object.put("launchEnvironmentContract", "");
+        if (object.has("endpointObserverKind")
+                || object.has("endpointObserverIdentitySha256")) {
+            throw new IllegalArgumentException(
+                    "legacy engine/calibration schema must not declare endpoint observer authority");
+        }
+        object.put("endpointObserverKind", "");
+        object.put("endpointObserverIdentitySha256", "");
     }
 
     private static void adaptLegacyScenarioOwners(JsonNode tree) {

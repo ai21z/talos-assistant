@@ -3,7 +3,9 @@ package dev.talos.runtime.trace;
 import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.TurnSettlement;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.tools.ToolAliasPolicy;
@@ -25,6 +27,8 @@ final class SafeTerminalTraceProjector {
     private static final Set<String> ATTEMPT = union(GENERATION, Set.of(
             "attemptId", "attemptOrdinal", "attemptKind", "retryReason",
             "requestDispatched"));
+    private static final Set<String> PROCESS_RECEIPT =
+            ProviderProcessLaunchReceipt.TRACE_FIELDS;
     private static final Set<String> TRACE_STARTED = Set.of(
             "turnNumber", "redactionMode", "runtimeArtifactKind",
             "runtimeArtifactSha256", "runtimeArtifactSizeBytes",
@@ -54,6 +58,8 @@ final class SafeTerminalTraceProjector {
             "observationMode", "settlement", "transportFailure", "cancellationState",
             "cancellationReason", "wireDisposition", "quarantineRequired",
             "lateAfterGenerationTerminal", "processBinding");
+    private static final Set<String> PROCESS_BOUND_TRANSPORT =
+            union(TRANSPORT, Set.of("processReceiptId"));
 
     private SafeTerminalTraceProjector() {}
 
@@ -107,6 +113,15 @@ final class SafeTerminalTraceProjector {
             return null;
         }
         if (!validEventData(event.type(), data, traceId)) return null;
+        if ("MODEL_IDENTITY_RESOLVED".equals(event.type())) {
+            try {
+                ModelIdentitySnapshot.fromTraceData(data);
+            } catch (RuntimeException invalid) {
+                return null;
+            }
+            return TurnTraceEvent.simple(
+                    event.type(), safeTimestamp(event.timestamp()), data);
+        }
         Map<String, Object> safeData = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : data.entrySet()) {
             Object safe = safeValue(entry.getKey(), entry.getValue());
@@ -178,6 +193,15 @@ final class SafeTerminalTraceProjector {
                     return false;
                 }
             }
+            String operationId = text(data, "transportOperationId");
+            String processReceiptId = text(data, "processReceiptId");
+            if (!processReceiptId.isEmpty() && operationId.isEmpty()) {
+                return false;
+            }
+            if (!operationId.isEmpty() && data.containsKey("attemptId")
+                    && !operationId.equals(text(data, "attemptId") + "-transport-1")) {
+                return false;
+            }
             if (!"FOREGROUND_PROVIDER".equals(text(data, "source"))
                     && !"NONE".equals(text(data, "toolAuthorityMode"))) {
                 return false;
@@ -228,10 +252,69 @@ final class SafeTerminalTraceProjector {
                     != (settlement != ProviderTransportAttempt.Settlement.NONE)) {
                 return false;
             }
+            long ledgerVersion = number(data, "transportLedgerVersion");
+            String processReceiptId = text(data, "processReceiptId");
+            ProviderTransportAttempt.ProcessBinding processBinding = enumValue(
+                    ProviderTransportAttempt.ProcessBinding.class,
+                    text(data, "processBinding"));
+            if ((ledgerVersion == 1
+                        && (processBinding != ProviderTransportAttempt.ProcessBinding.UNAVAILABLE
+                            || !processReceiptId.isEmpty()))
+                    || (ledgerVersion == 2
+                        && ((processBinding
+                                    == ProviderTransportAttempt.ProcessBinding.UNAVAILABLE)
+                            != processReceiptId.isEmpty()))) {
+                return false;
+            }
+        }
+        if ("PROVIDER_PROCESS_LAUNCH_RECEIPT".equals(type)) {
+            return validProcessReceipt(data);
         }
         if ("TURN_SETTLED".equals(type)) return validSettlement(data);
         if ("TRACE_STARTED".equals(type)) return validTraceStarted(data);
         return true;
+    }
+
+    private static boolean validProcessReceipt(Map<String, Object> data) {
+        try {
+            ProviderProcessLaunchReceipt receipt = new ProviderProcessLaunchReceipt(
+                    number(data, "processId"),
+                    number(data, "processStartEpochMilli"),
+                    number(data, "launchObservedEpochMilli"),
+                    number(data, "readinessObservedEpochMilli"),
+                    text(data, "launchNonce"),
+                    text(data, "candidateDeclarationSha256"),
+                    text(data, "engineExecutableSha256"),
+                    text(data, "modelArtifactSha256"),
+                    text(data, "launchCommandSha256"),
+                    enumValue(ProviderProcessLaunchReceipt.LaunchArgumentSet.class,
+                            text(data, "launchArgumentSet")),
+                    text(data, "effectiveEnvironmentSha256"),
+                    enumValue(ProviderProcessLaunchReceipt.EnvironmentContract.class,
+                            text(data, "environmentContract")),
+                    text(data, "managedHost"),
+                    Math.toIntExact(number(data, "managedPort")),
+                    Boolean.TRUE.equals(data.get("prelaunchNoListener")),
+                    text(data, "propsResponseSha256"),
+                    text(data, "resolvedProfile"),
+                    enumValue(ProviderProcessLaunchReceipt.ServedIdentity.class,
+                            text(data, "servedIdentity")),
+                    enumValue(ProviderProcessLaunchReceipt.EndpointObserverKind.class,
+                            text(data, "endpointObserverKind")),
+                    text(data, "endpointObserverIdentitySha256"),
+                    enumValue(ProviderProcessLaunchReceipt.EndpointOwnershipBoundary.class,
+                            text(data, "endpointOwnershipBoundary")),
+                    enumValue(ProviderProcessLaunchReceipt.StableEndpointAssumption.class,
+                            text(data, "stableEndpointAssumption")),
+                    enumValue(ProviderProcessLaunchReceipt.ContentVerificationBoundary.class,
+                            text(data, "contentVerificationBoundary")),
+                    enumValue(ProviderProcessLaunchReceipt.StableFilesystemAssumption.class,
+                            text(data, "stableFilesystemAssumption")));
+            return PROCESS_RECEIPT.equals(data.keySet())
+                    && receipt.receiptId().equals(text(data, "processReceiptId"));
+        } catch (RuntimeException invalid) {
+            return false;
+        }
     }
 
     private static boolean validTraceStarted(Map<String, Object> data) {
@@ -319,17 +402,21 @@ final class SafeTerminalTraceProjector {
                 "textualToolCallPresent",
                 "nativeToolProposalsTruncated", "argumentNameHashesTruncated",
                 "providerTerminalEligible", "providerToolCallEligible", "bound",
-                "quarantineRequired", "lateAfterGenerationTerminal")
+                "quarantineRequired", "lateAfterGenerationTerminal",
+                "prelaunchNoListener")
                 .contains(key) && !"dispatchedNativeTools".equals(key);
     }
 
     private static boolean validNumber(String key, long value) {
         if (value < 0) return false;
         return switch (key) {
-            case "schemaVersion", "providerLedgerVersion", "transportLedgerVersion" ->
-                    value == 1;
+            case "schemaVersion" -> value == 1;
+            case "providerLedgerVersion", "transportLedgerVersion" ->
+                    value == 1 || value == 2;
             case "turnNumber", "ledgerSequence", "attemptOrdinal",
-                    "selectedAttemptOrdinal", "proposalOrdinal", "transportSequence" ->
+                    "selectedAttemptOrdinal", "proposalOrdinal", "transportSequence",
+                    "processId", "processStartEpochMilli", "launchObservedEpochMilli",
+                    "readinessObservedEpochMilli", "managedPort" ->
                     value > 0;
             case "errorCode" -> value <= 599;
             case "runtimeArtifactSizeBytes", "runtimeClasspathSizeBytes",
@@ -345,7 +432,33 @@ final class SafeTerminalTraceProjector {
         return switch (key) {
             case "generationId", "attemptId", "selectedAttemptId",
                     "transportOperationId" -> safeToken(value, 256);
+            case "processReceiptId" -> value.matches("pr-[0-9a-f]{64}");
             case "runtimeArtifactSha256", "runtimeClasspathSha256" -> bareHashOrBlank(value);
+            case "candidateDeclarationSha256", "engineExecutableSha256",
+                    "modelArtifactSha256", "launchCommandSha256",
+                    "effectiveEnvironmentSha256",
+                    "propsResponseSha256", "endpointObserverIdentitySha256" ->
+                    bareHash(value);
+            case "schemaName" -> ProviderProcessLaunchReceipt.SCHEMA_NAME.equals(value);
+            case "launchNonce" -> value.matches("[0-9a-f]{32}");
+            case "managedHost" -> "127.0.0.1".equals(value);
+            case "endpointObserverKind" -> enumValue(
+                    ProviderProcessLaunchReceipt.EndpointObserverKind.class, value) != null;
+            case "endpointOwnershipBoundary" -> enumValue(
+                    ProviderProcessLaunchReceipt.EndpointOwnershipBoundary.class, value) != null;
+            case "stableEndpointAssumption" -> enumValue(
+                    ProviderProcessLaunchReceipt.StableEndpointAssumption.class, value) != null;
+            case "resolvedProfile" -> value.matches("[a-z0-9][a-z0-9._-]{0,127}");
+            case "environmentContract" -> enumValue(
+                    ProviderProcessLaunchReceipt.EnvironmentContract.class, value) != null;
+            case "launchArgumentSet" -> enumValue(
+                    ProviderProcessLaunchReceipt.LaunchArgumentSet.class, value) != null;
+            case "servedIdentity" -> enumValue(
+                    ProviderProcessLaunchReceipt.ServedIdentity.class, value) != null;
+            case "contentVerificationBoundary" -> enumValue(
+                    ProviderProcessLaunchReceipt.ContentVerificationBoundary.class, value) != null;
+            case "stableFilesystemAssumption" -> enumValue(
+                    ProviderProcessLaunchReceipt.StableFilesystemAssumption.class, value) != null;
             case "assistantHash", "providerBodyHash", "providerCallIdHash",
                     "toolNameHash", "argumentsHash", "namedToolNameHash" -> providerHash(value);
             case "source" -> enumValue(ProviderResponseCapture.Source.class, value) != null;
@@ -415,6 +528,10 @@ final class SafeTerminalTraceProjector {
         return value != null && (value.isEmpty() || value.matches("[0-9a-f]{64}"));
     }
 
+    private static boolean bareHash(String value) {
+        return value != null && value.matches("[0-9a-f]{64}");
+    }
+
     private static boolean providerHash(String value) {
         return value != null
                 && value.matches("sha256:(?:[0-9a-f]{64}|unavailable)");
@@ -451,6 +568,9 @@ final class SafeTerminalTraceProjector {
         return switch (type) {
             case "TRACE_STARTED" -> new EventSpec(
                     Set.of("turnNumber", "redactionMode"), TRACE_STARTED);
+            case "MODEL_IDENTITY_RESOLVED" -> new EventSpec(
+                    ModelIdentitySnapshot.PROCESS_BINDING_TRACE_FIELDS,
+                    ModelIdentitySnapshot.TRACE_FIELDS);
             case "TRACE_COMPLETED" -> new EventSpec(Set.of(), Set.of());
             case "TURN_SETTLED" -> new EventSpec(SETTLEMENT, SETTLEMENT);
             case "TURN_TERMINALIZATION_RECOVERED" ->
@@ -462,22 +582,27 @@ final class SafeTerminalTraceProjector {
                     union(ATTEMPT, Set.of("toolAuthoritySurface")),
                     union(ATTEMPT, Set.of(
                             "providerBodyHash", "dispatchedNativeTools",
-                            "toolAuthoritySurface")));
+                            "toolAuthoritySurface", "transportOperationId",
+                            "processReceiptId")));
             case "GENERATION_RESPONSE_CAPTURED" -> new EventSpec(
                     RESPONSE,
-                    union(RESPONSE, Set.of("transportOperationId")));
+                    union(RESPONSE, Set.of("transportOperationId", "processReceiptId")));
             case "GENERATION_ATTEMPT_FAILED" -> new EventSpec(
                     union(ATTEMPT, Set.of("failure")),
-                    union(ATTEMPT, Set.of("failure")));
+                    union(ATTEMPT, Set.of(
+                            "failure", "transportOperationId", "processReceiptId")));
             case "GENERATION_ATTEMPT_ABANDONED" -> new EventSpec(
                     union(ATTEMPT, Set.of("abandonment")),
-                    union(ATTEMPT, Set.of("abandonment")));
+                    union(ATTEMPT, Set.of(
+                            "abandonment", "transportOperationId", "processReceiptId")));
             case "GENERATION_FAILED" -> new EventSpec(
                     union(GENERATION, Set.of("failure")),
-                    union(GENERATION, Set.of("failure")));
+                    union(GENERATION, Set.of(
+                            "failure", "transportOperationId", "processReceiptId")));
             case "GENERATION_ABANDONED" -> new EventSpec(
                     union(GENERATION, Set.of("abandonment")),
-                    union(GENERATION, Set.of("abandonment")));
+                    union(GENERATION, Set.of(
+                            "abandonment", "transportOperationId", "processReceiptId")));
             case "GENERATION_COMPLETED" -> new EventSpec(
                     union(GENERATION, Set.of(
                             "selectedAttemptId", "selectedAttemptOrdinal", "completion",
@@ -486,11 +611,16 @@ final class SafeTerminalTraceProjector {
                     union(GENERATION, Set.of(
                             "selectedAttemptId", "selectedAttemptOrdinal", "completion",
                             "assistantHash", "providerTerminalEligible",
-                            "providerToolCallEligible", "transportOperationId")));
+                            "providerToolCallEligible", "transportOperationId",
+                            "processReceiptId")));
             case "PROVIDER_TOOL_PROPOSAL_CAPTURED" ->
-                    new EventSpec(PROPOSAL, PROPOSAL);
+                    new EventSpec(PROPOSAL,
+                            union(PROPOSAL, Set.of(
+                                    "transportOperationId", "processReceiptId")));
             case "PROVIDER_TRANSPORT_LIFECYCLE" ->
-                    new EventSpec(TRANSPORT, TRANSPORT);
+                    new EventSpec(TRANSPORT, PROCESS_BOUND_TRANSPORT);
+            case "PROVIDER_PROCESS_LAUNCH_RECEIPT" ->
+                    new EventSpec(PROCESS_RECEIPT, PROCESS_RECEIPT);
             default -> null;
         };
     }

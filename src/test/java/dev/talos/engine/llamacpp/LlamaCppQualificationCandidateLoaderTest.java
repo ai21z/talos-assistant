@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.RequestMessageLayout;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -16,6 +19,8 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,6 +66,91 @@ class LlamaCppQualificationCandidateLoaderTest {
                 loaded.profile().disposition());
         assertFalse(loaded.profile().selectable());
         assertFalse(loaded.profile().wizardDownload());
+        assertEquals(
+                ProviderProcessLaunchReceipt.digestEffectiveEnvironment(System.getenv()),
+                loaded.effectiveEnvironmentSha256());
+    }
+
+    @Test
+    void legacyProtocolV5DeclarationCannotCreateAProcessLaunchExpectation() throws Exception {
+        Fixture fixture = fixture();
+        var loaded = loader().load(
+                fixture.settings(), fixture.config(), fixture.talosHome()).orElseThrow();
+        LlamaCppConfig detachedConfig = config(
+                fixture.model(), fixture.engine(), false, "detached-v5-candidate");
+        var service = new LlamaCppResolvedProfileService(
+                detachedConfig,
+                fixture.talosHome(),
+                (path, alias, expected, home, verify) -> {
+                    throw new AssertionError("launch expectation must not resolve artifacts");
+                },
+                base -> {
+                    throw new AssertionError("launch expectation must not query /props");
+                },
+                (config, declared, observed, verify) -> {
+                    throw new AssertionError("launch expectation must not resolve engine facts");
+                },
+                (config, home) -> Optional.of(loaded));
+
+        assertEquals(5, loaded.protocolVersion());
+        assertEquals("", loaded.effectiveEnvironmentSha256());
+        assertEquals(null, loaded.endpointObserverKind());
+        assertEquals("", loaded.endpointObserverIdentitySha256());
+        assertTrue(service.qualificationLaunchExpectation().isEmpty());
+    }
+
+    @Test
+    void protocolV6EnvironmentIdentityIsExactAndMandatory() throws Exception {
+        record Mutation(String name, Consumer<ObjectNode> apply) {}
+        List<Mutation> mutations = List.of(
+                new Mutation("missing-hash", node -> node.remove("launchEnvironmentSha256")),
+                new Mutation("null-hash", node -> node.putNull("launchEnvironmentSha256")),
+                new Mutation("numeric-hash", node -> node.put("launchEnvironmentSha256", 7)),
+                new Mutation("uppercase-hash",
+                        node -> node.put("launchEnvironmentSha256", "A".repeat(64))),
+                new Mutation("missing-contract",
+                        node -> node.remove("launchEnvironmentContract")),
+                new Mutation("null-contract",
+                        node -> node.putNull("launchEnvironmentContract")),
+                new Mutation("numeric-contract",
+                        node -> node.put("launchEnvironmentContract", 7)),
+                new Mutation("unknown-contract",
+                        node -> node.put("launchEnvironmentContract", "UNDECLARED")),
+                new Mutation("missing-observer-kind",
+                        node -> node.remove("endpointObserverKind")),
+                new Mutation("null-observer-kind",
+                        node -> node.putNull("endpointObserverKind")),
+                new Mutation("numeric-observer-kind",
+                        node -> node.put("endpointObserverKind", 7)),
+                new Mutation("object-observer-kind",
+                        node -> node.putObject("endpointObserverKind")),
+                new Mutation("unknown-observer-kind",
+                        node -> node.put("endpointObserverKind", "UNDECLARED")),
+                new Mutation("missing-observer-hash",
+                        node -> node.remove("endpointObserverIdentitySha256")),
+                new Mutation("null-observer-hash",
+                        node -> node.putNull("endpointObserverIdentitySha256")),
+                new Mutation("numeric-observer-hash",
+                        node -> node.put("endpointObserverIdentitySha256", 7)),
+                new Mutation("object-observer-hash",
+                        node -> node.putObject("endpointObserverIdentitySha256")),
+                new Mutation("uppercase-observer-hash",
+                        node -> node.put(
+                                "endpointObserverIdentitySha256", "A".repeat(64))));
+
+        for (Mutation mutation : mutations) {
+            Fixture fixture = fixture(Map.of("protocolVersion", 6));
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode rules = (ObjectNode) mapper.readTree(fixture.rules().toFile());
+            mutation.apply().accept(rules);
+            mapper.writerWithDefaultPrettyPrinter().writeValue(fixture.rules().toFile(), rules);
+            var settings = new LlamaCppQualificationCandidateLoader.Settings(
+                    fixture.root(), fixture.rules(), sha256(fixture.rules()));
+
+            assertThrows(IllegalStateException.class,
+                    () -> loader().load(settings, fixture.config(), fixture.talosHome()),
+                    mutation.name());
+        }
     }
 
     @Test
@@ -133,6 +223,63 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     @Test
+    void linkedCampaignRootIsRefusedBeforeQualificationInputReads() throws Exception {
+        Fixture fixture = fixture();
+        Path linkedRoot = temp.resolve("linked-campaign-root");
+        createSymbolicLinkOrAbort(linkedRoot, fixture.root());
+        var settings = new LlamaCppQualificationCandidateLoader.Settings(
+                linkedRoot, fixture.rules(), fixture.rulesSha256());
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(settings, fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
+    void calibrationBelowLinkedAncestorIsRefusedBeforeReadOrHash() throws Exception {
+        Fixture fixture = fixture();
+        replaceDirectoryWithLink(
+                fixture.root().resolve("candidates"),
+                temp.resolve("external-candidates-" + System.nanoTime()));
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
+    void isolatedHomeBelowLinkedAncestorIsRefused() throws Exception {
+        Fixture fixture = fixture();
+        replaceDirectoryWithLink(
+                fixture.root().resolve("home"),
+                temp.resolve("external-home-" + System.nanoTime()));
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
+    void modelBelowLinkedAncestorIsRefusedBeforeReadOrHash() throws Exception {
+        Fixture fixture = fixture();
+        replaceDirectoryWithLink(
+                fixture.model().getParent(),
+                temp.resolve("external-models-" + System.nanoTime()));
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
+    void engineBelowLinkedAncestorIsRefusedBeforeReadOrHash() throws Exception {
+        Fixture fixture = fixture();
+        Path engineLane = fixture.engine().getParent();
+        replaceDirectoryWithLink(
+                engineLane,
+                temp.resolve("external-engine-lane-" + System.nanoTime()));
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
     void wrongCalibrationHashIsRefused() throws Exception {
         Fixture fixture = fixture();
         var settings = new LlamaCppQualificationCandidateLoader.Settings(
@@ -193,6 +340,138 @@ class LlamaCppQualificationCandidateLoaderTest {
 
         assertThrows(IllegalStateException.class,
                 () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
+    }
+
+    @Test
+    void protocolV6CannotResolveIdentityBeforeNativeCapabilityPreparation() throws Exception {
+        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        LlamaCppConfig nativeDisabled = config(
+                fixture.model(), fixture.engine(), false, "granite-4.1-3b", false);
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(
+                        fixture.settings(), nativeDisabled, fixture.talosHome()));
+    }
+
+    @Test
+    void protocolV6RejectsRelativeOrNonnormalizedExecutableInputs() throws Exception {
+        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        LlamaCppConfig base = fixture.config();
+        List<LlamaCppConfig> invalid = List.of(
+                withV6LaunchInputs(
+                        base,
+                        fixture.engine().getFileName().toString(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of()),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        fixture.model().getFileName().toString(),
+                        "",
+                        "",
+                        List.of()),
+                withV6LaunchInputs(
+                        base,
+                        fixture.engine().getParent().resolve("..")
+                                .resolve(fixture.engine().getParent().getFileName())
+                                .resolve(fixture.engine().getFileName()).toString(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of()),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        fixture.model().getParent().resolve("..")
+                                .resolve(fixture.model().getParent().getFileName())
+                                .resolve(fixture.model().getFileName()).toString(),
+                        "",
+                        "",
+                        List.of()));
+
+        for (LlamaCppConfig config : invalid) {
+            assertThrows(IllegalStateException.class,
+                    () -> loader().load(
+                            fixture.settings(), config, fixture.talosHome()));
+        }
+    }
+
+    @Test
+    void protocolV6RejectsUnboundTemplatesAndOpenEndedServerArguments() throws Exception {
+        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        LlamaCppConfig base = fixture.config();
+        List<LlamaCppConfig> invalid = List.of(
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "{{ messages }}",
+                        "",
+                        List.of()),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        temp.resolve("outside-template.jinja").toString(),
+                        List.of()),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--model", temp.resolve("other.gguf").toString())),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--host", "0.0.0.0")),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--port", "18162")),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--alias", "other-model")),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--chat-template-file", "other-template.jinja")),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--lora", temp.resolve("adapter.gguf").toString())),
+                withV6LaunchInputs(
+                        base,
+                        base.serverPath(),
+                        base.modelPath(),
+                        "",
+                        "",
+                        List.of("--reasoning=off")));
+
+        for (LlamaCppConfig config : invalid) {
+            assertThrows(IllegalStateException.class,
+                    () -> loader().load(
+                            fixture.settings(), config, fixture.talosHome()));
+        }
     }
 
     @Test
@@ -300,11 +579,26 @@ class LlamaCppQualificationCandidateLoaderTest {
         rules.put("backend", "cuda-13.3");
         rules.put("launchArguments", launch);
         rules.put("verificationLaunchArguments", verificationLaunch);
+        rules.put("launchEnvironmentSha256",
+                ProviderProcessLaunchReceipt.digestEffectiveEnvironment(System.getenv()));
         rules.put("toolMode", "native");
         rules.put("chatTemplate", "embedded Granite role template");
         rules.put("reasoningBehavior", "thinking disabled");
         rules.put("contextTokens", 8192);
         rules.putAll(overrides);
+        int protocolVersion = ((Number) rules.get("protocolVersion")).intValue();
+        if (protocolVersion == 6) {
+            rules.put("schemaVersion", 2);
+            rules.put("launchEnvironmentContract",
+                    ProviderProcessLaunchReceipt.EnvironmentContract
+                            .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name());
+            rules.put("endpointObserverKind",
+                    ProviderProcessLaunchReceipt.EndpointObserverKind
+                            .WINDOWS_NETSTAT_NOFOLLOW_SHA256.name());
+            rules.put("endpointObserverIdentitySha256", "f".repeat(64));
+        } else {
+            rules.remove("launchEnvironmentSha256");
+        }
         Path calibration = candidateRoot.resolve("calibration-rules.json");
         new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(calibration.toFile(), rules);
         String hash = sha256(calibration);
@@ -317,27 +611,85 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     private LlamaCppConfig config(Path model, Path engine, boolean verification) {
+        return config(model, engine, verification, "granite-4.1-3b");
+    }
+
+    private LlamaCppConfig config(
+            Path model,
+            Path engine,
+            boolean verification,
+            String alias) {
+        return config(model, engine, verification, alias, true);
+    }
+
+    private LlamaCppConfig config(
+            Path model,
+            Path engine,
+            boolean verification,
+            String alias,
+            boolean nativeCalling) {
         Config cfg = new Config();
-        cfg.data.put("llm", Map.of("default_backend", "llama_cpp", "model", "granite-4.1-3b"));
+        cfg.data.put("llm", Map.of("default_backend", "llama_cpp", "model", alias));
         cfg.data.put("engines", Map.of("llama_cpp", Map.ofEntries(
                 Map.entry("mode", "managed"),
                 Map.entry("server_path", engine.toString()),
                 Map.entry("model_path", model.toString()),
-                Map.entry("model", "granite-4.1-3b"),
+                Map.entry("model", alias),
                 Map.entry("host", "http://127.0.0.1"),
                 Map.entry("port", 18161),
                 Map.entry("context", 8192),
                 Map.entry("jinja", true),
                 Map.entry("server_args", List.of()))));
-        cfg.data.put("tools", Map.of("native_calling", true));
+        cfg.data.put("tools", Map.of("native_calling", nativeCalling));
         if (verification) LlamaCppVerificationLaunch.mark(cfg);
         return LlamaCppConfig.from(cfg);
+    }
+
+    private static LlamaCppConfig withV6LaunchInputs(
+            LlamaCppConfig base,
+            String serverPath,
+            String modelPath,
+            String chatTemplate,
+            String chatTemplateFile,
+            List<String> serverArgs) {
+        return new LlamaCppConfig(
+                base.mode(),
+                serverPath,
+                modelPath,
+                base.hfRepo(),
+                base.hfFile(),
+                base.hfCacheDir(),
+                base.model(),
+                base.host(),
+                base.port(),
+                base.context(),
+                base.allowRemote(),
+                base.jinja(),
+                chatTemplate,
+                chatTemplateFile,
+                serverArgs,
+                base.verificationLogging(),
+                base.nativeCallingRequested());
     }
 
     private static String sha256(Path path) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update(Files.readAllBytes(path));
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private void replaceDirectoryWithLink(Path directory, Path external) throws IOException {
+        Files.move(directory, external);
+        createSymbolicLinkOrAbort(directory, external);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false,
+                    "symbolic-link fixture unavailable: " + unavailable.getMessage());
+        }
     }
 
     private record Fixture(

@@ -53,7 +53,18 @@ verified prompt-debug response. For a provider turn, it requires one saved
 prompt render and the campaign llama.cpp log. Mixed, partial, missing, or
 pre-existing noncanonical evidence fails closed.
 
-After `answer.txt`, `trace.json`, `before-files/`, and `final-files/` are fixed,
+Publish the exact Talos session trace through Java from its packet-contained,
+no-follow-validated source. PowerShell must not copy or write `run/trace.json`.
+
+```powershell
+.\gradlew.bat finalizeModelQualificationTraceEvidence `
+  -PqualificationRoot=<campaign-root> `
+  -PqualificationScenario=<scenario-id> `
+  -PqualificationRunRoot=<run-root> `
+  --no-daemon
+```
+
+After `answer.txt`, the committed `trace.json`, `before-files/`, and `final-files/` are fixed,
 generate requirement results through the tracked canonical evaluator:
 
 ```powershell

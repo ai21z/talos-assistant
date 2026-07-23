@@ -143,10 +143,42 @@ public final class LlamaCppResolvedProfileService {
         this.engines = Objects.requireNonNull(engines, "engines");
         CandidateSource candidateSource = Objects.requireNonNull(candidates, "candidates");
         this.catalogProfile = LlamaCppModelCatalog.byAlias(config.model());
-        this.qualificationCandidate = catalogProfile.isPresent()
-                ? Optional.empty()
-                : Objects.requireNonNullElseGet(
-                        candidateSource.resolve(config, this.talosHome), Optional::empty);
+        this.qualificationCandidate = Objects.requireNonNullElseGet(
+                candidateSource.resolve(config, this.talosHome), Optional::empty);
+        if (catalogProfile.isPresent() && qualificationCandidate.isPresent()) {
+            requireCatalogCandidateCompatibility(
+                    catalogProfile.get(), qualificationCandidate.get().profile());
+        }
+    }
+
+    private static void requireCatalogCandidateCompatibility(
+            LlamaCppModelCatalog.Profile catalog,
+            LlamaCppModelCatalog.Profile candidate) {
+        LlamaCppModelCatalog.ModelArtifact catalogArtifact = catalog.artifact();
+        LlamaCppModelCatalog.ModelArtifact candidateArtifact = candidate.artifact();
+        LlamaCppModelCatalog.RuntimeDefaults catalogRuntime = catalog.runtime();
+        LlamaCppModelCatalog.RuntimeDefaults candidateRuntime = candidate.runtime();
+        boolean compatible = Objects.equals(catalog.alias(), candidate.alias())
+                && Objects.equals(catalogArtifact, candidateArtifact)
+                && catalogRuntime.nativeCalling() == candidateRuntime.nativeCalling()
+                && Objects.equals(catalogRuntime.toolMode(), candidateRuntime.toolMode())
+                && Objects.equals(catalogRuntime.reasoningMode(), candidateRuntime.reasoningMode())
+                && Objects.equals(catalogRuntime.chatTemplate(), candidateRuntime.chatTemplate())
+                && catalogRuntime.requestLayout() == candidateRuntime.requestLayout()
+                && Objects.equals(
+                        catalogRuntime.managedServerArgs(),
+                        candidateRuntime.managedServerArgs())
+                && catalogRuntime.requiresLocalModelPath()
+                        == candidateRuntime.requiresLocalModelPath()
+                && candidateRuntime.contextTokens() > 0
+                && candidateRuntime.contextTokens() <= catalogRuntime.maxContextTokens()
+                && candidateRuntime.compatibleEngineLanes().size() == 1
+                && catalogRuntime.compatibleEngineLanes().contains(
+                        candidateRuntime.compatibleEngineLanes().getFirst());
+        if (!compatible) {
+            throw new IllegalStateException(
+                    "qualification candidate execution facts differ from the durable catalog profile");
+        }
     }
 
     /** Resolves cached and live facts without hashing the model artifact. */
@@ -158,6 +190,13 @@ public final class LlamaCppResolvedProfileService {
     public Snapshot resolveAvailable(boolean verifyArtifact) {
         LlamaCppPropsClient.Result result = props.fetch(URI.create(config.baseUrl()));
         return resolve(result, verifyArtifact, true);
+    }
+
+    Snapshot resolveAvailable(
+            LlamaCppPropsClient.Result result,
+            boolean verifyArtifact) {
+        return resolve(Objects.requireNonNull(result, "llama.cpp props result"),
+                verifyArtifact, true);
     }
 
     /** Validates facts available before a managed process starts. It never calls the server. */
@@ -172,6 +211,31 @@ public final class LlamaCppResolvedProfileService {
     /** Resolves only local cached facts. It never calls the server or hashes the model. */
     public Snapshot inspectLocal() {
         return resolve(LlamaCppPropsClient.Result.unavailable("server facts not requested"), false, false);
+    }
+
+    /** Exact content identities frozen by the qualification loader for one managed launch. */
+    Optional<LlamaCppQualificationLaunchExpectation> qualificationLaunchExpectation() {
+        if (!config.managed() || qualificationCandidate.isEmpty()) return Optional.empty();
+        LlamaCppQualificationCandidateLoader.LoadedCandidate candidate =
+                qualificationCandidate.get();
+        if (candidate.protocolVersion() != 6) return Optional.empty();
+        LlamaCppProfileResolver.ArtifactIdentity artifact = candidate.artifactIdentity();
+        if (artifact == null) {
+            throw new IllegalStateException(
+                    "qualification candidate lacks an artifact verification identity");
+        }
+        return Optional.of(new LlamaCppQualificationLaunchExpectation(
+                candidate.declarationSha256(),
+                candidate.engineExecutableSha256(),
+                artifact.actualSha256(),
+                candidate.effectiveEnvironmentSha256(),
+                candidate.endpointObserverKind(),
+                candidate.endpointObserverIdentitySha256(),
+                config.verificationLogging()
+                        ? dev.talos.spi.types.ProviderProcessLaunchReceipt.LaunchArgumentSet
+                                .VERIFICATION
+                        : dev.talos.spi.types.ProviderProcessLaunchReceipt.LaunchArgumentSet
+                                .STANDARD));
     }
 
     private Snapshot resolve(

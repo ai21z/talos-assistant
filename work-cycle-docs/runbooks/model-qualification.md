@@ -19,8 +19,17 @@ Machine-readable JSON is authoritative. Markdown guides and reports help reviewe
 
 Do not start a model trial while any identity fact is unknown.
 
+The complete qualification packet is local-sensitive evidence, not a
+shareable or export-safe artifact. It intentionally preserves exact provider
+requests, provider logs, and absolute execution-input paths so later review
+can explain what ran. Keep it in ignored local storage and do not publish or
+export it. The typed provider-process receipt and every trace, causal, result,
+scorecard, and terminal projection derived from that receipt remain path-free:
+they contain hashes and closed identity facts, never raw launch arguments,
+environment values, provider-log lines, or model content.
+
 The architecture-program freeze remains active while T1151 through T1157,
-T1170, or T1187 through T1193 are open. These are minimum causal-evidence
+T1170, or T1187 through T1195 are open. These are minimum causal-evidence
 dependencies; fresh campaigns still wait for Phase 6 release closure.
 Deterministic synthetic development
 fixtures are allowed and are never comparative evidence. Do not run a
@@ -62,12 +71,34 @@ Record and verify:
 8. protocol-v6 `execution-input-ledger.json` (schema v1), `harness-manifest.json`
    (schema v2), `runtime-identity.json` (schema v5), and any evidence-gated
    `preflight-manifest.json` (schema v2), including every manifest-to-manifest byte-hash edge
+9. the protocol-v6 provider launch-environment contract and digest plus endpoint-observer
+   kind and identity digest produced in the exact campaign shell before calibration is sealed
 
 Stop if any value differs from the planned packet.
 
 ## Gate 1, freeze calibration
 
 Complete the calibration JSON and reviewer guide before trial one. Hash both into `campaign.json`.
+
+For protocol v6, run the maintained identity producer from the same shell and environment that
+will invoke the installed PTY capture. Copy its exact four output fields into both schema-v2
+`engine.json` and schema-v2 `calibration-rules.json` as `launchEnvironmentContract`,
+`launchEnvironmentSha256`, `endpointObserverKind`, and
+`endpointObserverIdentitySha256`. Rerun the command immediately before the first capture and
+stop if any value differs. Do not calculate or normalize these identities in PowerShell.
+
+Freezing the observer digest prevents a later environment or helper substitution from gaining
+authority; it does not establish platform provenance by itself. Before sealing a Windows lane,
+record the actual Windows system directory, `netstat.exe` SHA-256, valid Authenticode signer,
+and OS build in ignored installed evidence and stop if they differ from the declared lane.
+Before sealing a Linux lane, record the procfs observer contract and the explicit assumption
+that the managed provider does not delegate its listener descriptor outside its live process
+tree. No schema field may replace that platform evidence with an operator-written `VALID`
+assertion.
+
+```powershell
+.\gradlew.bat printModelQualificationLaunchEnvironmentIdentity --no-daemon
+```
 
 The calibration records model, engine, machine, launch arguments, context, tool mode, reasoning, template, sampling, output caps, timeout, seed policy, permitted deviations, stop rules, and evidence requirements.
 
@@ -191,17 +222,42 @@ candidate/engine manifests and checks only the declared stable-metadata continui
 This proves a capture-time stream observation plus later metadata continuity under a stable
 filesystem. It does **not** prove that a subsequently launched process opened or consumed those
 same bytes, and it is not resistant to hostile same-size replacement with restored metadata.
-Exact active-process attribution therefore remains unavailable until the maintained launcher
-emits a mechanically bound process-launch receipt. A protocol-v6 campaign without that receipt
-is incomplete/`UNKNOWN` for causal attribution and comparative scoring; do not manufacture a
-synthetic receipt from operator prose or repeated manifest values.
+Protocol v6 requires the maintained launcher to emit a mechanically bound process-launch
+receipt. A run without that receipt is incomplete/`UNKNOWN` for causal attribution and
+comparative scoring; do not manufacture a synthetic receipt from operator prose or repeated
+manifest values. The receipt proves the named process/endpoint observations only under its
+declared stable-filesystem and stable-listener assumptions. T1188 remains open until the
+installed Windows and Ubuntu/WSL real-process matrices establish those bounded claims.
+
+The endpoint observer is itself part of the receipt identity. On Windows, the receipt digest
+binds the no-follow `System32\\netstat.exe` bytes, normalized `System32` location, fixed
+`-a -n -o` arguments, an explicit hash-bound `SYSTEMROOT`-only helper environment, and
+authenticated `System32` working
+directory. Preflight treats either an exact-loopback or wildcard listener as occupied, while
+readiness, receipt binding, and transport require an exact managed-loopback listener and reject
+all wildcard exposure. That digest identifies the observed helper bytes and invocation; it does not by
+itself prove Microsoft provenance. Installed Windows evidence must separately record the
+helper SHA-256, valid Authenticode signer, and OS build, and must stop if any of them differs
+from the frozen lane declaration. On Linux, the observer digest identifies
+Talos's versioned procfs managed-process-tree contract, not kernel provenance.
+It rejects separate listener inodes and listener sharing by a live managed descendant, but
+assumes the managed provider
+does not delegate the same listener descriptor outside its live descendant tree and that the
+owner remains stable between each observation and network transition.
+
+The receipt's `/props` SHA-256 is the runtime hash of the exact response body read through the
+process-specific direct HTTP client and is cross-checked against `MODEL_IDENTITY_RESOLVED`.
+The packet does not retain an independent raw `/props` response, so describe this as a bound
+runtime observation, not a second artifact-level proof. The managed child starts in the
+no-follow parent directory of the frozen engine executable.
+The receipt does not identify every dynamically loaded operating-system or accelerator library.
 
 `GENERATION_REQUEST_DISPATCHED` is only local handoff admission for one exact
 generation attempt. It does not prove that the send API was entered, socket or
 process I/O began, a byte reached the provider, cancellation prevented send, or
-the transport settled before the next trial. The transport-operation receipt
-must remain incomplete until T1191 owns that lifecycle and correlates it with
-the active-process receipt from T1188.
+the transport settled before the next trial. Protocol v6 therefore requires
+T1191's exact transport-operation lifecycle and correlates every eligible
+operation with T1188's active-process receipt.
 
 A turn that throws during preparation, provider launch/readiness,
 pre-dispatch, or generation must still have one replay-safe terminal trace. The
@@ -287,15 +343,22 @@ Review evidence as it is captured. A late discovery that invalidates the shared 
 
 ## Gate 6, finalize and score
 
-Run the maintained provider evidence, approval, and requirement finalizers. For protocol v6,
-publish the causal ledger, canary verdict, and schema-v2 result through the tracked Java
-finalizer. Every protocol-v6 evidence set is authoritative only after the qualification
+Run the maintained trace, provider-evidence, approval, and requirement finalizers. For protocol
+v6, publish the exact local trace selected by the committed PTY capture's `/last trace` output
+through Java before publishing the
+causal ledger, canary verdict, and schema-v2 result through the tracked Java finalizer. Every
+protocol-v6 evidence set is authoritative only after the qualification
 publisher has committed its complete hash-bound member inventory. After the final permitted run,
 commit the separate immutable campaign completion. Validate only after completion; score only an
 exact `COMPLETE_GRID` completion whose bank matches the requested scorecard. A mechanically
 committed `HARD_STOP` completion is final evidence but is never scoreable.
 
 ```powershell
+.\gradlew.bat finalizeModelQualificationTraceEvidence `
+  -PqualificationRoot=<absolute-packet-root> `
+  -PqualificationScenario=<scenario-id> `
+  -PqualificationRunRoot=<run-root> `
+  --no-daemon
 .\gradlew.bat finalizeModelQualificationProviderEvidence --no-daemon
 .\gradlew.bat finalizeModelQualificationApprovals --no-daemon
 .\gradlew.bat finalizeModelQualificationRequirements --no-daemon
@@ -310,15 +373,20 @@ committed `HARD_STOP` completion is final evidence but is never scoreable.
 
 Use the task arguments required by the current Gradle help output. Preserve commands and outputs in the packet.
 
-For protocol v6, Java is the sole authority for `causal-finalization.json`, `canary.json`,
-and `result.json`. `result.json` is the last run member, but physical presence is not the
+For protocol v6, Java is the sole publication authority for `trace.json`,
+`causal-finalization.json`, `canary.json`, and `result.json`. The trace is one unphased
+`TRACE_EVIDENCE` transaction copied byte-for-byte from the no-follow-contained
+`home/.talos/sessions/traces/<session>/<turn>-<trace>.json` source. `result.json` is the last run
+member, but physical presence is not the
 publication boundary. The final authority point is the canonical transaction commit under
 `.qualification-publication-v1/commits/`, promoted only after every declared member is flushed,
 hash-verified, and present. Readers must reject missing or conflicting commits, open intents,
 staged bytes, partial member sets, and transaction records from another campaign or scenario
 bank. An exact retry may complete or clean only its own canonical intent; it must not adopt,
-replace, or delete unowned bytes. PowerShell may capture raw evidence and measurement inputs and
-invoke the Java task, but it must not calculate or serialize trust, utility, canary, failure,
+replace, or delete unowned bytes. Java selects the packet-contained session trace solely from
+the exact committed PTY capture's bounded `/last trace` output. PowerShell may capture raw
+evidence and measurement inputs and invoke the Java task, but it must not select, copy, or
+write `run/trace.json`, calculate or serialize trust, utility, canary, failure,
 answer-origin, causal-owner, score-eligibility, ledger, or transaction-commit fields.
 The maintained thin invocation template is
 `work-cycle-docs/templates/finalize-model-qualification-result-v6.ps1`.

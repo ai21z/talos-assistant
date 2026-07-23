@@ -3,10 +3,12 @@ package dev.talos.engine.llamacpp;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.engine.llamacpp.profile.LlamaCppArtifactVerificationStore;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import dev.talos.spi.types.RequestMessageLayout;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -29,7 +31,8 @@ final class LlamaCppQualificationCandidateLoader {
     static final String CALIBRATION_SHA256_PROPERTY = "talos.qualification.calibrationSha256";
 
     private static final String CALIBRATION_SCHEMA = "talos.modelQualification.calibrationRules";
-    private static final int CALIBRATION_SCHEMA_VERSION = 1;
+    private static final int LEGACY_CALIBRATION_SCHEMA_VERSION = 1;
+    private static final int CURRENT_CALIBRATION_SCHEMA_VERSION = 2;
     private static final int LEGACY_QUALIFICATION_PROTOCOL_VERSION = 5;
     private static final int CURRENT_QUALIFICATION_PROTOCOL_VERSION = 6;
     private static final int MAX_CALIBRATION_BYTES = 1024 * 1024;
@@ -66,16 +69,44 @@ final class LlamaCppQualificationCandidateLoader {
             LlamaCppModelCatalog.Profile profile,
             String declarationSha256,
             LlamaCppProfileResolver.ArtifactIdentity artifactIdentity,
-            String engineExecutableSha256) {
+            String engineExecutableSha256,
+            String effectiveEnvironmentSha256,
+            ProviderProcessLaunchReceipt.EndpointObserverKind endpointObserverKind,
+            String endpointObserverIdentitySha256,
+            int protocolVersion) {
 
         LoadedCandidate(LlamaCppModelCatalog.Profile profile, String declarationSha256) {
-            this(profile, declarationSha256, null, "");
+            this(profile, declarationSha256, null, "", "", null, "", 5);
         }
 
         LoadedCandidate {
             Objects.requireNonNull(profile, "profile");
             declarationSha256 = normalizedHash(declarationSha256);
             engineExecutableSha256 = normalizedHash(engineExecutableSha256);
+            effectiveEnvironmentSha256 = normalizedHash(effectiveEnvironmentSha256);
+            endpointObserverIdentitySha256 = normalizedHash(
+                    endpointObserverIdentitySha256);
+            if (protocolVersion != LEGACY_QUALIFICATION_PROTOCOL_VERSION
+                    && protocolVersion != CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                throw new IllegalArgumentException("qualification protocol is unsupported");
+            }
+            if (protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION
+                    && !SHA256.matcher(effectiveEnvironmentSha256).matches()) {
+                throw new IllegalArgumentException(
+                        "protocol-v6 provider environment SHA-256 is invalid");
+            }
+            if (protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                Objects.requireNonNull(endpointObserverKind,
+                        "protocol-v6 endpoint observer kind");
+                if (!SHA256.matcher(endpointObserverIdentitySha256).matches()) {
+                    throw new IllegalArgumentException(
+                            "protocol-v6 endpoint observer identity SHA-256 is invalid");
+                }
+            } else if (endpointObserverKind != null
+                    || !endpointObserverIdentitySha256.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "legacy qualification candidate cannot synthesize endpoint observer authority");
+            }
         }
     }
 
@@ -121,7 +152,19 @@ final class LlamaCppQualificationCandidateLoader {
             }
             JsonNode rules = parseObject(calibrationBytes);
             requireEquals(CALIBRATION_SCHEMA, text(rules, "schemaName"), "calibration schema");
-            requireEquals(CALIBRATION_SCHEMA_VERSION, integer(rules, "schemaVersion"), "schema version");
+            int protocolVersion = integer(rules, "protocolVersion");
+            if (protocolVersion != LEGACY_QUALIFICATION_PROTOCOL_VERSION
+                    && protocolVersion != CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                throw invalid("qualification protocol is unsupported: " + protocolVersion);
+            }
+            int requiredCalibrationSchema =
+                    protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION
+                            ? CURRENT_CALIBRATION_SCHEMA_VERSION
+                            : LEGACY_CALIBRATION_SCHEMA_VERSION;
+            requireEquals(
+                    requiredCalibrationSchema,
+                    integer(rules, "schemaVersion"),
+                    "schema version");
             requireEquals("STANDARD", text(rules, "configurationKind"), "configuration kind");
             text(rules, "configurationId");
             if (!optionalText(rules, "baselineConfigurationId").isBlank()) {
@@ -145,14 +188,12 @@ final class LlamaCppQualificationCandidateLoader {
                     || !talosCommit.startsWith(runningCommit)) {
                 throw invalid("Talos build does not match the frozen commit");
             }
-            int protocolVersion = integer(rules, "protocolVersion");
-            if (protocolVersion != LEGACY_QUALIFICATION_PROTOCOL_VERSION
-                    && protocolVersion != CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
-                throw invalid("qualification protocol is unsupported: " + protocolVersion);
-            }
             requireEquals("native", text(rules, "toolMode").toLowerCase(Locale.ROOT), "tool mode");
             if (!config.managed() || !config.nativeCallingRequested() || config.hasHfSource()) {
                 throw invalid("qualification candidate requires managed native local-file mode");
+            }
+            if (protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                requireClosedV6LaunchInputs(config);
             }
             int context = integer(rules, "contextTokens");
             requireEquals(config.context(), context, "context");
@@ -162,6 +203,27 @@ final class LlamaCppQualificationCandidateLoader {
                     : "launchArguments";
             List<String> launchArguments = textList(rules, launchField);
             requireLaunchShape(launchArguments, LlamaCppServerManager.buildArguments(config));
+            String environmentSha256 = protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION
+                    ? requireCanonicalHash(text(rules, "launchEnvironmentSha256"),
+                            "launch environment SHA-256")
+                    : "";
+            ProviderProcessLaunchReceipt.EndpointObserverKind endpointObserverKind =
+                    protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION
+                            ? endpointObserverKind(rules)
+                            : null;
+            String endpointObserverIdentitySha256 =
+                    protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION
+                            ? requireCanonicalHash(
+                                    text(rules, "endpointObserverIdentitySha256"),
+                                    "endpoint observer identity SHA-256")
+                            : "";
+            if (protocolVersion == CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                requireEquals(
+                        ProviderProcessLaunchReceipt.EnvironmentContract
+                                .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name(),
+                        text(rules, "launchEnvironmentContract"),
+                        "launch environment contract");
+            }
             Path modelPath = existingFile(path(config.modelPath(), "configured model path"), "model artifact");
             Path launchModelPath = existingFile(
                     path(argumentValue(launchArguments, "-m"), "launch model path"), "launch model artifact");
@@ -169,7 +231,7 @@ final class LlamaCppQualificationCandidateLoader {
             requireEquals(modelPath.getFileName().toString(), text(rules, "artifact"), "artifact file");
 
             long artifactSize = positiveLong(rules, "artifactSizeBytes");
-            requireEquals(Files.size(modelPath), artifactSize, "artifact size");
+            requireEquals(fileSizeNoFollow(modelPath), artifactSize, "artifact size");
             String artifactSha256 = requireHash(text(rules, "artifactSha256"), "artifact SHA-256");
 
             Path enginePath = existingFile(path(config.serverPath(), "configured server path"), "engine executable");
@@ -233,7 +295,9 @@ final class LlamaCppQualificationCandidateLoader {
                 throw invalid("artifact verification record is not exact");
             }
             return Optional.of(new LoadedCandidate(
-                    profile, actualRulesHash, artifactIdentity, engineSha256));
+                    profile, actualRulesHash, artifactIdentity, engineSha256,
+                    environmentSha256, endpointObserverKind,
+                    endpointObserverIdentitySha256, protocolVersion));
         } catch (IllegalStateException error) {
             throw error;
         } catch (Exception error) {
@@ -264,11 +328,11 @@ final class LlamaCppQualificationCandidateLoader {
     }
 
     private static byte[] boundedRead(Path path) throws Exception {
-        long size = Files.size(path);
+        long size = fileSizeNoFollow(path);
         if (size <= 0 || size > MAX_CALIBRATION_BYTES) {
             throw invalid("calibration rules size is outside the allowed range");
         }
-        try (InputStream input = Files.newInputStream(path)) {
+        try (InputStream input = NoFollowPathPolicy.openUnlinkedRegularFile(path)) {
             byte[] bytes = input.readNBytes(MAX_CALIBRATION_BYTES + 1);
             if (bytes.length > MAX_CALIBRATION_BYTES) {
                 throw invalid("calibration rules exceed the allowed size");
@@ -364,13 +428,56 @@ final class LlamaCppQualificationCandidateLoader {
     }
 
     private static Path existingDirectory(Path value, String label) throws Exception {
-        if (value == null || !Files.isDirectory(value)) throw invalid(label + " is missing");
-        return value.toRealPath();
+        if (value == null) throw invalid(label + " is missing");
+        try {
+            return NoFollowPathPolicy.requireUnlinkedDirectory(value);
+        } catch (Exception rejected) {
+            throw invalid(label + " is missing or linked", rejected);
+        }
+    }
+
+    private static void requireClosedV6LaunchInputs(LlamaCppConfig config) {
+        requireAbsoluteNormalizedPath(config.serverPath(), "configured server path");
+        requireAbsoluteNormalizedPath(config.modelPath(), "configured model path");
+        if (!clean(config.chatTemplate()).isBlank()
+                || !clean(config.chatTemplateFile()).isBlank()) {
+            throw invalid(
+                    "protocol-v6 qualification requires the model's embedded chat template");
+        }
+        List<String> serverArgs = config.serverArgs() == null
+                ? List.of()
+                : List.copyOf(config.serverArgs());
+        if (!serverArgs.isEmpty()
+                && !serverArgs.equals(List.of("--reasoning", "off"))) {
+            throw invalid(
+                    "protocol-v6 qualification server arguments are outside the closed execution contract");
+        }
+    }
+
+    private static void requireAbsoluteNormalizedPath(String raw, String label) {
+        Path value = path(raw, label);
+        if (!value.isAbsolute() || !value.equals(value.normalize())) {
+            throw invalid(label + " must be absolute and normalized for protocol-v6 qualification");
+        }
+    }
+
+    private static ProviderProcessLaunchReceipt.EndpointObserverKind endpointObserverKind(
+            JsonNode rules) {
+        String value = text(rules, "endpointObserverKind");
+        try {
+            return ProviderProcessLaunchReceipt.EndpointObserverKind.valueOf(value);
+        } catch (IllegalArgumentException unsupported) {
+            throw invalid("endpoint observer kind is unsupported", unsupported);
+        }
     }
 
     private static Path existingFile(Path value, String label) throws Exception {
-        if (value == null || !Files.isRegularFile(value)) throw invalid(label + " is missing");
-        return value.toRealPath();
+        if (value == null) throw invalid(label + " is missing");
+        try {
+            return NoFollowPathPolicy.requireUnlinkedRegularFile(value);
+        } catch (Exception rejected) {
+            throw invalid(label + " is missing or linked", rejected);
+        }
     }
 
     private static String requireRevision(String value, String label) {
@@ -385,19 +492,32 @@ final class LlamaCppQualificationCandidateLoader {
         return normalized;
     }
 
+    private static String requireCanonicalHash(String value, String label) {
+        String exact = clean(value);
+        if (!SHA256.matcher(exact).matches()) throw invalid(label + " is not a canonical SHA-256");
+        return exact;
+    }
+
     private static void requireEquals(Object expected, Object actual, String label) {
         if (!Objects.equals(expected, actual)) throw invalid(label + " does not match");
     }
 
     private static String sha256File(Path path) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream input = Files.newInputStream(path)) {
+        try (InputStream input = NoFollowPathPolicy.openUnlinkedRegularFile(path)) {
             byte[] buffer = new byte[1024 * 1024];
             for (int read; (read = input.read(buffer)) >= 0;) {
                 if (read > 0) digest.update(buffer, 0, read);
             }
         }
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static long fileSizeNoFollow(Path path) throws Exception {
+        return Files.readAttributes(
+                NoFollowPathPolicy.requireUnlinkedRegularFile(path),
+                java.nio.file.attribute.BasicFileAttributes.class,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS).size();
     }
 
     private static String sha256(byte[] bytes) throws Exception {

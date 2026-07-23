@@ -17,6 +17,10 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Bounded read-only client for the pinned llama.cpp {@code GET /props} contract. */
 public final class LlamaCppPropsClient {
@@ -94,7 +98,8 @@ public final class LlamaCppPropsClient {
 
     LlamaCppPropsClient(HttpClient http, ObjectMapper json, Duration timeout, int bodyLimit) {
         this.http = http == null ? HttpClient.newHttpClient() : http;
-        this.json = json == null ? new ObjectMapper() : json;
+        this.json = (json == null ? new ObjectMapper() : json.copy())
+                .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
         this.timeout = normalizeTimeout(timeout);
         this.bodyLimit = Math.max(256, bodyLimit);
     }
@@ -131,7 +136,7 @@ public final class LlamaCppPropsClient {
             }
             byte[] body;
             try (InputStream in = response.body()) {
-                body = readBounded(in, bodyLimit);
+                body = readBodyBounded(in);
             }
             if (body == null) {
                 return Result.refused("llama.cpp /props response exceeded the size limit");
@@ -146,6 +151,28 @@ public final class LlamaCppPropsClient {
                 throw ControlFlowFailure.propagate(error);
             }
             return Result.unavailable("llama.cpp /props could not be read");
+        }
+    }
+
+    private byte[] readBodyBounded(InputStream in) throws Exception {
+        FutureTask<byte[]> read = new FutureTask<>(() -> readBounded(in, bodyLimit));
+        Thread.ofVirtual().name("llama-cpp-props-body-read").start(read);
+        try {
+            return read.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException error) {
+            read.cancel(true);
+            closeQuietly(in);
+            throw new java.net.http.HttpTimeoutException(
+                    "llama.cpp /props response body timed out");
+        } catch (InterruptedException error) {
+            read.cancel(true);
+            closeQuietly(in);
+            throw error;
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception exception) throw exception;
+            if (cause instanceof Error fatal) throw fatal;
+            throw new IllegalStateException(cause);
         }
     }
 
@@ -226,12 +253,21 @@ public final class LlamaCppPropsClient {
 
     private static boolean optionalBoolean(JsonNode parent, String name, boolean fallback) {
         JsonNode value = parent.get(name);
-        return value != null && value.isBoolean() ? value.booleanValue() : fallback;
+        if (value == null) return fallback;
+        if (!value.isBoolean()) throw missing(name);
+        return value.booleanValue();
+    }
+
+    LlamaCppPropsClient(HttpClient http) {
+        this(http, new ObjectMapper(), DEFAULT_TIMEOUT, DEFAULT_BODY_LIMIT);
     }
 
     private static int requiredPositiveInt(JsonNode parent, String name) {
         JsonNode value = parent.get(name);
-        if (value == null || !value.canConvertToInt() || value.intValue() <= 0) throw missing(name);
+        if (value == null || !value.isIntegralNumber()
+                || !value.canConvertToInt() || value.intValue() <= 0) {
+            throw missing(name);
+        }
         return value.intValue();
     }
 

@@ -145,6 +145,89 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void protocolV6RejectsLegacyEngineAndCalibrationSchemaShapes() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+
+        QualificationTestPacket enginePacket = QualificationTestPacket.create(
+                temp.resolve("legacy-engine-shape"), catalog);
+        mutateJson(
+                enginePacket.root().resolve("engines/cuda.json"),
+                json -> json.put("schemaVersion", QualificationRecords.SCHEMA_VERSION));
+        QualificationEvidenceValidator.Validation engineValidation =
+                QualificationEvidenceValidator.validate(enginePacket.root(), catalog);
+        assertFalse(engineValidation.valid());
+        assertTrue(engineValidation.findings().stream().anyMatch(finding ->
+                        finding.contains("Invalid engine facts")
+                                && finding.contains(
+                                        "legacy engine/calibration schema must not declare")),
+                () -> String.join("\n", engineValidation.findings()));
+
+        QualificationTestPacket calibrationPacket = QualificationTestPacket.create(
+                temp.resolve("legacy-calibration-shape"), catalog);
+        mutateJson(
+                calibrationPacket.root().resolve(
+                        "candidates/qwen14/calibration-rules.json"),
+                json -> json.put("schemaVersion", QualificationRecords.SCHEMA_VERSION));
+        QualificationTestPacket.refreshCalibrationIdentity(calibrationPacket);
+        QualificationEvidenceValidator.Validation calibrationValidation =
+                QualificationEvidenceValidator.validate(calibrationPacket.root(), catalog);
+        assertFalse(calibrationValidation.valid());
+        assertTrue(calibrationValidation.findings().stream().anyMatch(finding ->
+                        finding.contains("Invalid calibration-rules.json")
+                                && finding.contains(
+                                        "legacy engine/calibration schema must not declare")),
+                () -> String.join("\n", calibrationValidation.findings()));
+    }
+
+    @Test
+    void protocolV6RejectsCalibrationAndEngineLaunchEnvironmentDisagreement()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        record EnvironmentMismatch(
+                String id,
+                PtyJsonMutation mutation,
+                String expectedFinding) {}
+        List<EnvironmentMismatch> cases = List.of(
+                new EnvironmentMismatch(
+                        "hash",
+                        json -> json.put("launchEnvironmentSha256", "f".repeat(64)),
+                        "Calibration launch environment mismatch"),
+                new EnvironmentMismatch(
+                        "contract",
+                        json -> json.put(
+                                "launchEnvironmentContract", "DIFFERENT_CONTRACT"),
+                        "Calibration launch environment contract mismatch"),
+                new EnvironmentMismatch(
+                        "observer-kind",
+                        json -> json.put(
+                                "endpointObserverKind",
+                                "LINUX_PROCFS_MANAGED_PROCESS_TREE_V1"),
+                        "Calibration endpoint observer kind mismatch"),
+                new EnvironmentMismatch(
+                        "observer-identity",
+                        json -> json.put(
+                                "endpointObserverIdentitySha256", "f".repeat(64)),
+                        "Calibration endpoint observer identity mismatch"));
+
+        for (EnvironmentMismatch testCase : cases) {
+            QualificationTestPacket packet = QualificationTestPacket.create(
+                    temp.resolve("launch-environment-mismatch-" + testCase.id()), catalog);
+            mutateJson(
+                    packet.root().resolve("candidates/qwen14/calibration-rules.json"),
+                    testCase.mutation());
+            QualificationTestPacket.refreshCalibrationIdentity(packet);
+
+            QualificationEvidenceValidator.Validation validation =
+                    QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+            assertFalse(validation.valid(), testCase.id());
+            assertTrue(validation.findings().contains(testCase.expectedFinding()),
+                    () -> testCase.id() + ":\n"
+                            + String.join("\n", validation.findings()));
+        }
+    }
+
+    @Test
     void legacyScenarioSnapshotWithoutProtocolSixOwnerFieldRemainsReadable() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(5);
         QualificationTestPacket packet = QualificationTestPacket.create(
@@ -1057,7 +1140,9 @@ class QualificationEvidenceValidatorTest {
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertRunInvalidReasonContains(result, "PTY");
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("Qualification PTY capture is missing or invalid")),
+                () -> String.join("\n", result.findings()));
     }
 
     @Test
@@ -1065,10 +1150,9 @@ class QualificationEvidenceValidatorTest {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path capture = packet.runRoot().resolve("transcript.raw.json");
-        String content = Files.readString(capture, StandardCharsets.UTF_8)
-                .replace("\"rawOutput\" : \"Outcome: READ_ONLY_ANSWERED\"",
-                        "\"rawOutput\" : \"fabricated output\"");
-        Files.writeString(capture, content, StandardCharsets.UTF_8);
+        ObjectNode captureJson = (ObjectNode) QualificationJson.readTree(capture);
+        captureJson.put("rawOutput", "fabricated output");
+        QualificationJson.write(capture, captureJson);
         refreshPtyPublication(packet);
         refinalizeCausality(packet, catalog);
 
@@ -1249,6 +1333,7 @@ class QualificationEvidenceValidatorTest {
                 .put("type", "input").put("data", "approval-unexpected-deny-2");
         events.addObject().put("timestamp", "2026-07-10T00:00:02Z")
                 .put("type", "input").put("data", "last-trace");
+        synchronizeRawOutput(capture);
         QualificationJson.write(capturePath, capture);
         refreshPtyPublication(packet);
         QualificationJson.write(packet.runRoot().resolve("approvals.json"), java.util.Map.of(
@@ -1402,7 +1487,7 @@ class QualificationEvidenceValidatorTest {
             String changed = output.path("data").asText() + "\n"
                     + QualificationProviderEvidence.NO_PROVIDER_PROMPT;
             output.put("data", changed);
-            capture.put("rawOutput", changed);
+            synchronizeRawOutput(capture);
             QualificationJson.write(capturePath, capture);
             packet.refreshPublicationForTest(
                     QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
@@ -1432,6 +1517,16 @@ class QualificationEvidenceValidatorTest {
         json.put("toolEligibleGenerations", 0);
         json.put("measurementSource", "deterministic runtime-policy turn; no provider request");
         QualificationJson.write(path, json);
+    }
+
+    private static void synchronizeRawOutput(ObjectNode capture) {
+        StringBuilder raw = new StringBuilder();
+        for (JsonNode event : capture.withArray("events")) {
+            if ("output".equals(event.path("type").textValue())) {
+                raw.append(event.path("data").textValue());
+            }
+        }
+        capture.put("rawOutput", raw.toString());
     }
 
     private static void refinalizeCausality(

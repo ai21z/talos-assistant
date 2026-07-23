@@ -13,11 +13,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Strict reader for the trace-v3/v4 physical provider-attempt ledger. */
+/** Strict reader for the trace-v3/v4/v5 physical provider-attempt ledger. */
 final class QualificationProviderAttemptLedger {
     static final int PRE_AUTHORITY_TRACE_SCHEMA_VERSION = 3;
     static final int TRACE_SCHEMA_VERSION = 4;
-    static final int LEDGER_VERSION = 1;
+    static final int PROCESS_TRACE_SCHEMA_VERSION = 5;
+    static final int LEGACY_LEDGER_VERSION = 1;
+    static final int LEDGER_VERSION = 2;
 
     private static final Set<String> GENERATION_KEYS = Set.of(
             "providerLedgerVersion", "ledgerSequence", "generationId", "source", "purpose");
@@ -35,6 +37,8 @@ final class QualificationProviderAttemptLedger {
             "completedNormally", "normalized", "truncated"));
     private static final Set<String> TRANSPORT_BOUND_RESPONSE_KEYS =
             union(RESPONSE_KEYS, Set.of("transportOperationId"));
+    private static final Set<String> PROCESS_BOUND_RESPONSE_KEYS =
+            union(TRANSPORT_BOUND_RESPONSE_KEYS, Set.of("processReceiptId"));
     private static final Set<String> ATTEMPT_FAILURE_KEYS = union(ATTEMPT_KEYS, Set.of("failure"));
     private static final Set<String> ATTEMPT_ABANDONMENT_KEYS =
             union(ATTEMPT_KEYS, Set.of("abandonment"));
@@ -46,6 +50,8 @@ final class QualificationProviderAttemptLedger {
             "providerTerminalEligible", "providerToolCallEligible"));
     private static final Set<String> TRANSPORT_BOUND_GENERATION_COMPLETION_KEYS =
             union(GENERATION_COMPLETION_KEYS, Set.of("transportOperationId"));
+    private static final Set<String> PROCESS_BOUND_GENERATION_COMPLETION_KEYS =
+            union(TRANSPORT_BOUND_GENERATION_COMPLETION_KEYS, Set.of("processReceiptId"));
     private static final Set<String> TOOL_PROPOSAL_KEYS = union(ATTEMPT_KEYS, Set.of(
             "proposalOrdinal", "providerCallIdHash", "toolNameClassification",
             "toolNameHash", "toolNameChars", "argumentNameHashes",
@@ -344,21 +350,40 @@ final class QualificationProviderAttemptLedger {
 
     record Ledger(
             List<Generation> generations,
-            QualificationProviderTransportLedger.Ledger transports) {
+            QualificationProviderTransportLedger.Ledger transports,
+            QualificationProviderProcessReceiptLedger.Ledger processReceipts,
+            int traceSchemaVersion) {
         Ledger {
             generations = List.copyOf(generations);
             transports = transports == null
                     ? QualificationProviderTransportLedger.Ledger.empty()
                     : transports;
+            processReceipts = processReceipts == null
+                    ? QualificationProviderProcessReceiptLedger.Ledger.empty()
+                    : processReceipts;
+            if (traceSchemaVersion < 2 || traceSchemaVersion > PROCESS_TRACE_SCHEMA_VERSION) {
+                throw new IllegalArgumentException("provider ledger trace schema is unsupported");
+            }
             requireSerializedNonBackgroundGenerations(generations);
         }
 
         Ledger(List<Generation> generations) {
-            this(generations, QualificationProviderTransportLedger.Ledger.empty());
+            this(generations, QualificationProviderTransportLedger.Ledger.empty(),
+                    QualificationProviderProcessReceiptLedger.Ledger.empty(),
+                    TRACE_SCHEMA_VERSION);
+        }
+
+        Ledger(
+                List<Generation> generations,
+                QualificationProviderTransportLedger.Ledger transports) {
+            this(generations, transports,
+                    QualificationProviderProcessReceiptLedger.Ledger.empty(),
+                    TRACE_SCHEMA_VERSION);
         }
 
         static Ledger empty() {
-            return new Ledger(List.of(), QualificationProviderTransportLedger.Ledger.empty());
+            return new Ledger(List.of(), QualificationProviderTransportLedger.Ledger.empty(),
+                    QualificationProviderProcessReceiptLedger.Ledger.empty(), 2);
         }
 
         boolean present() {
@@ -386,7 +411,12 @@ final class QualificationProviderAttemptLedger {
         }
 
         boolean activeProcessBindingComplete() {
-            return transports.activeProcessBindingComplete();
+            return transports.activeProcessBindingComplete()
+                    && processReceipts.completeFor(generations, transports);
+        }
+
+        boolean activeProcessBindingRequired() {
+            return traceSchemaVersion == PROCESS_TRACE_SCHEMA_VERSION;
         }
 
         Response selectedResponse(String generationId, String attemptId) {
@@ -605,9 +635,10 @@ final class QualificationProviderAttemptLedger {
         int schemaVersion = requiredInt(traceRoot, "schemaVersion");
         if (schemaVersion == 2) return Ledger.empty();
         if (schemaVersion != PRE_AUTHORITY_TRACE_SCHEMA_VERSION
-                && schemaVersion != TRACE_SCHEMA_VERSION) {
+                && schemaVersion != TRACE_SCHEMA_VERSION
+                && schemaVersion != PROCESS_TRACE_SCHEMA_VERSION) {
             throw new IllegalArgumentException(
-                    "physical attempt ledger requires trace schema v3 or v4");
+                    "physical attempt ledger requires trace schema v3, v4, or v5");
         }
         JsonNode events = traceRoot.path("events");
         if (!events.isArray()) {
@@ -623,7 +654,7 @@ final class QualificationProviderAttemptLedger {
             if ("MODEL_RESPONSE_RECEIVED".equals(type)
                     || "PROVIDER_GENERATION_RECEIVED".equals(type)) {
                 throw new IllegalArgumentException(
-                        "trace schema v3/v4 contains obsolete response provenance event " + type);
+                        "trace schema v3/v4/v5 contains obsolete response provenance event " + type);
             }
             if ("PROVIDER_TOOL_PROPOSAL_CAPTURED".equals(type)) {
                 parseProposal(event.path("data"), generations, index, schemaVersion);
@@ -638,22 +669,35 @@ final class QualificationProviderAttemptLedger {
                 // body receipt. They remain readable but cannot prove a model
                 // tool opportunity.
                 exactKeys(data, ATTEMPT_KEYS, type);
+            } else if (schemaVersion == PROCESS_TRACE_SCHEMA_VERSION
+                    && "GENERATION_REQUEST_DISPATCHED".equals(type)) {
+                exactKeysAllowed(data, type,
+                        keys(type, schemaVersion),
+                        union(keys(type, schemaVersion), Set.of("processReceiptId")));
             } else if ("GENERATION_RESPONSE_CAPTURED".equals(type)) {
-                exactKeysOneOf(
-                        data,
+                exactKeysAllowed(data, type,
                         keys(RESPONSE_KEYS, schemaVersion),
                         keys(TRANSPORT_BOUND_RESPONSE_KEYS, schemaVersion),
-                        type);
+                        keys(PROCESS_BOUND_RESPONSE_KEYS, schemaVersion));
             } else if ("GENERATION_COMPLETED".equals(type)) {
-                exactKeysOneOf(
-                        data,
+                exactKeysAllowed(data, type,
                         keys(GENERATION_COMPLETION_KEYS, schemaVersion),
                         keys(TRANSPORT_BOUND_GENERATION_COMPLETION_KEYS, schemaVersion),
-                        type);
+                        keys(PROCESS_BOUND_GENERATION_COMPLETION_KEYS, schemaVersion));
+            } else if (schemaVersion == PROCESS_TRACE_SCHEMA_VERSION
+                    && ("GENERATION_ATTEMPT_FAILED".equals(type)
+                        || "GENERATION_ATTEMPT_ABANDONED".equals(type)
+                        || "GENERATION_FAILED".equals(type)
+                        || "GENERATION_ABANDONED".equals(type))) {
+                exactKeysAllowed(data, type,
+                        keys(type, schemaVersion),
+                        union(keys(type, schemaVersion), Set.of("transportOperationId")),
+                        union(keys(type, schemaVersion),
+                                Set.of("transportOperationId", "processReceiptId")));
             } else {
                 exactKeys(data, keys(type, schemaVersion), type);
             }
-            requireLedgerHeader(data, expectedSequence++);
+            requireLedgerHeader(data, expectedSequence++, schemaVersion);
             switch (type) {
                 case "GENERATION_STARTED" -> generationStarted(
                         data, generations, index);
@@ -705,7 +749,9 @@ final class QualificationProviderAttemptLedger {
         QualificationProviderTransportLedger.Ledger transports =
                 QualificationProviderTransportLedger.parse(traceRoot);
         QualificationProviderTransportLedger.validateAgainst(transports, frozen);
-        return new Ledger(frozen, transports);
+        QualificationProviderProcessReceiptLedger.Ledger processReceipts =
+                QualificationProviderProcessReceiptLedger.parse(traceRoot);
+        return new Ledger(frozen, transports, processReceipts, schemaVersion);
     }
 
     private static void generationStarted(
@@ -793,7 +839,7 @@ final class QualificationProviderAttemptLedger {
                     "non-native tool authority dispatch carries native tool names");
             }
             validateAuthoritySurface(mode, dispatch);
-            if (traceSchemaVersion == TRACE_SCHEMA_VERSION) {
+            if (traceSchemaVersion >= TRACE_SCHEMA_VERSION) {
                 AuthoritySurface generationSurface =
                         attempt.generation.authoritySurface;
                 if (generationSurface == null) {
@@ -1186,13 +1232,20 @@ final class QualificationProviderAttemptLedger {
             int eventIndex,
             int traceSchemaVersion) {
         JsonNode data = requiredObject(rawData, "provider tool proposal data");
-        exactKeys(
-                data,
-                keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
-                "PROVIDER_TOOL_PROPOSAL_CAPTURED");
-        if (requiredInt(data, "providerLedgerVersion") != LEDGER_VERSION) {
-            throw new IllegalArgumentException("provider ledger version is not 1");
+        if (traceSchemaVersion == PROCESS_TRACE_SCHEMA_VERSION) {
+            exactKeysAllowed(data, "PROVIDER_TOOL_PROPOSAL_CAPTURED",
+                    keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
+                    union(keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
+                            Set.of("transportOperationId")),
+                    union(keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
+                            Set.of("transportOperationId", "processReceiptId")));
+        } else {
+            exactKeys(
+                    data,
+                    keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
+                    "PROVIDER_TOOL_PROPOSAL_CAPTURED");
         }
+        requireLedgerVersion(data, traceSchemaVersion);
         MutableGeneration generation = openGeneration(data, generations);
         MutableAttempt attempt = existingAttempt(data, generation);
         AttemptFields fields = attemptFields(data, generation);
@@ -1396,15 +1449,26 @@ final class QualificationProviderAttemptLedger {
         }
     }
 
-    private static void requireLedgerHeader(JsonNode data, long expectedSequence) {
-        if (requiredInt(data, "providerLedgerVersion") != LEDGER_VERSION) {
-            throw new IllegalArgumentException("provider ledger version is not 1");
-        }
+    private static void requireLedgerHeader(
+            JsonNode data,
+            long expectedSequence,
+            int traceSchemaVersion) {
+        requireLedgerVersion(data, traceSchemaVersion);
         long sequence = requiredLong(data, "ledgerSequence");
         if (sequence != expectedSequence) {
             throw new IllegalArgumentException(
                     "provider ledger sequence is not contiguous: expected "
                             + expectedSequence + ", found " + sequence);
+        }
+    }
+
+    private static void requireLedgerVersion(JsonNode data, int traceSchemaVersion) {
+        int expected = traceSchemaVersion == PROCESS_TRACE_SCHEMA_VERSION
+                ? LEDGER_VERSION
+                : LEGACY_LEDGER_VERSION;
+        if (requiredInt(data, "providerLedgerVersion") != expected) {
+            throw new IllegalArgumentException(
+                    "provider ledger version does not match the trace schema");
         }
     }
 
@@ -1425,15 +1489,18 @@ final class QualificationProviderAttemptLedger {
 
     private static Set<String> keys(String type, int traceSchemaVersion) {
         Set<String> expected = keys(keys(type), traceSchemaVersion);
-        if (traceSchemaVersion == TRACE_SCHEMA_VERSION
+        if (traceSchemaVersion >= TRACE_SCHEMA_VERSION
                 && "GENERATION_REQUEST_DISPATCHED".equals(type)) {
             expected = union(expected, Set.of("toolAuthoritySurface"));
+            if (traceSchemaVersion == PROCESS_TRACE_SCHEMA_VERSION) {
+                expected = union(expected, Set.of("transportOperationId"));
+            }
         }
         return expected;
     }
 
     private static Set<String> keys(Set<String> base, int traceSchemaVersion) {
-        return traceSchemaVersion == TRACE_SCHEMA_VERSION
+        return traceSchemaVersion >= TRACE_SCHEMA_VERSION
                 ? union(base, Set.of("toolAuthorityMode"))
                 : base;
     }
@@ -1459,6 +1526,19 @@ final class QualificationProviderAttemptLedger {
         }
     }
 
+    @SafeVarargs
+    private static void exactKeysAllowed(
+            JsonNode object,
+            String label,
+            Set<String>... allowed) {
+        Set<String> actual = fields(object);
+        for (Set<String> expected : allowed) {
+            if (actual.equals(expected)) return;
+        }
+        throw new IllegalArgumentException(
+                label + " data keys differ from every allowed trace shape: " + actual);
+    }
+
     private static Set<String> fields(JsonNode object) {
         Set<String> actual = new LinkedHashSet<>();
         object.fieldNames().forEachRemaining(actual::add);
@@ -1467,9 +1547,9 @@ final class QualificationProviderAttemptLedger {
 
     private static DispatchFields dispatchFields(JsonNode data, int traceSchemaVersion) {
         if (!data.has("providerBodyHash") && !data.has("dispatchedNativeTools")) {
-            if (traceSchemaVersion == TRACE_SCHEMA_VERSION) {
+            if (traceSchemaVersion >= TRACE_SCHEMA_VERSION) {
                 throw new IllegalArgumentException(
-                        "trace-v4 request dispatch requires body-bound evidence");
+                        "trace-v4+ request dispatch requires body-bound evidence");
             }
             return new DispatchFields("", List.of(), AuthoritySurface.unbound());
         }
@@ -1489,7 +1569,7 @@ final class QualificationProviderAttemptLedger {
             }
             tools.add(tool);
         }
-        AuthoritySurface authoritySurface = traceSchemaVersion == TRACE_SCHEMA_VERSION
+        AuthoritySurface authoritySurface = traceSchemaVersion >= TRACE_SCHEMA_VERSION
                 ? authoritySurface(data.path("toolAuthoritySurface"))
                 : AuthoritySurface.unbound();
         return new DispatchFields(bodyHash, List.copyOf(tools), authoritySurface);

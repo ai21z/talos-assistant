@@ -879,7 +879,7 @@ final class QualificationCausalFinalizer {
                 campaign == null ? unavailable : nonblank(campaign.configId(), unavailable),
                 evidence.scenario().id(),
                 evidence.repetitionId(),
-                trace == null ? unavailable : nonblank(trace.traceId(), unavailable),
+                nonblank(evidence.traceId(), unavailable),
                 evidence.artifactHashes());
     }
 

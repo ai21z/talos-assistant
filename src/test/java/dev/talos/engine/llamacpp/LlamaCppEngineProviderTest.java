@@ -9,6 +9,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.spi.types.ModelRef;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.testsupport.InterruptingHttpClient;
 import org.junit.jupiter.api.Test;
 
@@ -290,7 +291,11 @@ class LlamaCppEngineProviderTest {
                             "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
                     (config, home) -> java.util.Optional.of(
                             new LlamaCppQualificationCandidateLoader.LoadedCandidate(
-                                    profile, "c".repeat(64), artifact, "engine-hash")));
+                                    profile, "c".repeat(64), artifact, "engine-hash",
+                                    "e".repeat(64),
+                                    ProviderProcessLaunchReceipt.EndpointObserverKind
+                                            .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                                    "f".repeat(64), 6)));
             LlamaCppEngine engine = new LlamaCppEngine(
                     llamaCfg,
                     new LlamaCppServerManager(llamaCfg, (command, logPath) -> {

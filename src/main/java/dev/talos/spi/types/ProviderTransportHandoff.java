@@ -6,6 +6,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Mechanically observed local dispatch commitment for one generation request.
@@ -22,12 +24,16 @@ import java.util.Objects;
 public interface ProviderTransportHandoff {
 
     /** Exact local provider-body identity admitted at the transport handoff. */
-    record DispatchEvidence(String providerBodyHash, List<String> nativeTools) {
+    record DispatchEvidence(
+            String providerBodyHash,
+            List<String> nativeTools,
+            Optional<ProviderProcessLaunchReceipt> processReceipt) {
         public DispatchEvidence {
             providerBodyHash = Objects.toString(providerBodyHash, "").strip();
             nativeTools = nativeTools == null ? List.of() : nativeTools.stream()
                     .map(tool -> Objects.requireNonNull(tool, "native tool name"))
                     .toList();
+            processReceipt = processReceipt == null ? Optional.empty() : processReceipt;
             if (!providerBodyHash.isEmpty()
                     && !providerBodyHash.matches("sha256:[0-9a-f]{64}")) {
                 throw new IllegalArgumentException(
@@ -47,8 +53,23 @@ public interface ProviderTransportHandoff {
             }
         }
 
+        public DispatchEvidence(String providerBodyHash, List<String> nativeTools) {
+            this(providerBodyHash, nativeTools, Optional.empty());
+        }
+
         public static DispatchEvidence unbound() {
             return new DispatchEvidence("", List.of());
+        }
+
+        public DispatchEvidence withProcessReceipt(
+                ProviderProcessLaunchReceipt receipt) {
+            ProviderProcessLaunchReceipt exact = Objects.requireNonNull(
+                    receipt, "provider process receipt");
+            if (processReceipt.isPresent() && !processReceipt.get().equals(exact)) {
+                throw new IllegalArgumentException(
+                        "dispatch evidence already carries a different process receipt");
+            }
+            return new DispatchEvidence(providerBodyHash, nativeTools, Optional.of(exact));
         }
 
         public static DispatchEvidence fromProviderBody(
@@ -82,6 +103,24 @@ public interface ProviderTransportHandoff {
         }
     }
 
+    /**
+     * Typed runtime-owned failure raised when the managed process identity can
+     * no longer authorize the selected transport operation.
+     *
+     * <p>The cause can be a provider connectivity exception, but the failed
+     * invariant is local process/transport authority. Keeping that distinction
+     * prevents a runtime binding failure from being reported as provider-owned.
+     */
+    final class ProcessBindingInvalidated extends IllegalStateException {
+        public ProcessBindingInvalidated(String message) {
+            super(message);
+        }
+
+        public ProcessBindingInvalidated(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     void requestDispatched();
 
     /**
@@ -110,6 +149,162 @@ public interface ProviderTransportHandoff {
 
     static ProviderTransportHandoff none() {
         return () -> { };
+    }
+
+    /**
+     * Revalidates the managed process receipt at each exact transport
+     * admission, after request assembly and immediately before the physical
+     * transport owner can enter its send API.
+     */
+    static ProviderTransportHandoff bindProcessReceipt(
+            ProviderTransportHandoff delegate,
+            Supplier<ProviderProcessLaunchReceipt> receiptSupplier) {
+        ProviderTransportHandoff target = Objects.requireNonNull(
+                delegate, "provider transport handoff");
+        Supplier<ProviderProcessLaunchReceipt> receipts = Objects.requireNonNull(
+                receiptSupplier, "provider process receipt supplier");
+        return new ProviderTransportHandoff() {
+            private DispatchEvidence bind(DispatchEvidence evidence) {
+                try {
+                    ProviderProcessLaunchReceipt exact = Objects.requireNonNull(
+                            receipts.get(), "active provider process receipt");
+                    return (evidence == null ? DispatchEvidence.unbound() : evidence)
+                            .withProcessReceipt(exact);
+                } catch (ProcessBindingInvalidated invalid) {
+                    throw invalid;
+                } catch (RuntimeException invalid) {
+                    throw new ProcessBindingInvalidated(
+                            "active provider process receipt is unavailable", invalid);
+                }
+            }
+
+            @Override
+            public void requestDispatched() {
+                target.requestDispatched(bind(DispatchEvidence.unbound()));
+            }
+
+            @Override
+            public void requestDispatched(DispatchEvidence evidence) {
+                target.requestDispatched(bind(evidence));
+            }
+
+            @Override
+            public ProviderTransportAttempt admitTransport(DispatchEvidence evidence) {
+                DispatchEvidence bound = bind(evidence);
+                ProviderProcessLaunchReceipt admitted = bound.processReceipt().orElseThrow();
+                ProviderTransportAttempt attempt = target.admitTransport(bound);
+                return processValidatedAttempt(attempt, receipts, admitted);
+            }
+
+            @Override
+            public void transportUnobserved() {
+                target.transportUnobserved();
+            }
+        };
+    }
+
+    private static ProviderTransportAttempt processValidatedAttempt(
+            ProviderTransportAttempt delegate,
+            Supplier<ProviderProcessLaunchReceipt> receipts,
+            ProviderProcessLaunchReceipt admitted) {
+        ProviderTransportAttempt target = Objects.requireNonNull(
+                delegate, "provider transport attempt");
+        return new ProviderTransportAttempt() {
+            private void validate() {
+                try {
+                    ProviderProcessLaunchReceipt current = Objects.requireNonNull(
+                            receipts.get(), "active provider process receipt");
+                    if (!admitted.equals(current)) {
+                        throw new ProcessBindingInvalidated(
+                                "provider process receipt changed during transport");
+                    }
+                } catch (ProcessBindingInvalidated invalid) {
+                    target.processBindingInvalidated();
+                    throw invalid;
+                } catch (RuntimeException invalid) {
+                    target.processBindingInvalidated();
+                    throw new ProcessBindingInvalidated(
+                            "active provider process receipt is unavailable", invalid);
+                } catch (Error invalid) {
+                    target.processBindingInvalidated();
+                    throw invalid;
+                }
+            }
+
+            private void validateWithoutMaskingFailure() {
+                try {
+                    validate();
+                } catch (RuntimeException | Error ignored) {
+                    // The exact invalidation is retained by the transport
+                    // ledger; the original body/cancellation failure remains
+                    // the control-flow owner.
+                }
+            }
+
+            @Override
+            public <T> T invokeSend(SendOperation<T> operation) throws Exception {
+                validate();
+                return target.invokeSend(Objects.requireNonNull(
+                        operation, "provider send operation"));
+            }
+
+            @Override
+            public void responseHeadersObserved() {
+                validate();
+                target.responseHeadersObserved();
+            }
+
+            @Override
+            public void responseBodyOpened(AutoCloseable responseBody) {
+                AutoCloseable exactBody = Objects.requireNonNull(
+                        responseBody, "provider response body");
+                try {
+                    validate();
+                    target.responseBodyOpened(exactBody);
+                } catch (RuntimeException | Error rejected) {
+                    try {
+                        exactBody.close();
+                    } catch (Exception closeFailure) {
+                        rejected.addSuppressed(closeFailure);
+                    }
+                    throw rejected;
+                }
+            }
+
+            @Override
+            public void providerTerminalObserved() {
+                validate();
+                target.providerTerminalObserved();
+            }
+
+            @Override
+            public void responseBodyCompleted() {
+                validate();
+                target.responseBodyCompleted();
+            }
+
+            @Override
+            public void responseBodyFailed(Throwable failure) {
+                validateWithoutMaskingFailure();
+                target.responseBodyFailed(failure);
+            }
+
+            @Override
+            public void responseBodyClosed() {
+                validateWithoutMaskingFailure();
+                target.responseBodyClosed();
+            }
+
+            @Override
+            public void processBindingInvalidated() {
+                target.processBindingInvalidated();
+            }
+
+            @Override
+            public boolean unobserved() {
+                return target.unobserved();
+            }
+        };
     }
 
     static void mark(ProviderTransportHandoff handoff) {

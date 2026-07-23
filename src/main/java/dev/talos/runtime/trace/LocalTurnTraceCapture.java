@@ -52,6 +52,7 @@ public final class LocalTurnTraceCapture {
         ProviderResponseCapture.Receipt selectedResponseReceipt;
         ProviderResponseCapture.Response selectedProviderResponse;
         final Map<String, PendingProviderResponse> providerResponses = new LinkedHashMap<>();
+        final Set<String> emittedProcessReceipts = new java.util.LinkedHashSet<>();
         final Set<AnswerCandidateCheckpoint> answerCandidateCheckpoints =
                 Collections.newSetFromMap(new IdentityHashMap<>());
         final Map<ProviderResponseCapture.Receipt, Set<Integer>> consumedNativeProposals =
@@ -661,6 +662,12 @@ public final class LocalTurnTraceCapture {
             ProviderResponseCapture.RequestDispatch event) {
         if (bag == null || event == null) return;
         synchronized (bag) {
+            event.evidence().processReceipt().ifPresent(receipt -> {
+                if (bag.emittedProcessReceipts.add(receipt.receiptId())) {
+                    ProviderResponseTraceRecorder.processReceiptBound(
+                            bag.builder, receipt);
+                }
+            });
             ProviderResponseTraceRecorder.requestDispatched(bag.builder, event);
         }
     }

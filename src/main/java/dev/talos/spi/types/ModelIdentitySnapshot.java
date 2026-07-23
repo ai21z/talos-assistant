@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Bounded, path-free model identity evidence safe for status, debug, and trace surfaces. */
@@ -34,16 +35,31 @@ public record ModelIdentitySnapshot(
         List<String> reasonCodes
 ) {
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
-    private static final Pattern ABSOLUTE_PATH = Pattern.compile(
-            "(?i)(?:^|\\s)(?:[a-z]:[\\\\/]|/|\\\\\\\\|//)\\S*");
+    private static final Pattern WINDOWS_DRIVE_PATH = Pattern.compile(
+            "(?i)(?:^|[^A-Za-z0-9])[a-z]:[\\\\/][^\\s]*");
+    private static final Pattern UNC_PATH = Pattern.compile(
+            "(?:^|[\\s=({\\[,;'\"])(?:\\\\\\\\|//)[^\\s]+");
+    private static final Pattern POSIX_PATH = Pattern.compile(
+            "(?:^|[\\s=:({\\[,;'\"])/(?!/)[^\\s]+");
+    public static final Set<String> TRACE_FIELDS = Set.of(
+            "backend", "configuredModel", "configuredModelFile",
+            "declaredProfile", "resolvedProfile", "observedModelFile",
+            "artifactState", "artifactVerificationIdentity", "engineLane",
+            "engineExecutableIdentity", "servedIdentityState", "resolution",
+            "effectiveToolMode", "effectiveRequestLayout", "effectiveContextTokens",
+            "disposition", "propsState", "propsResponseSha256", "engineBuildInfo",
+            "chatAvailable", "reasonCodes");
+    public static final Set<String> PROCESS_BINDING_TRACE_FIELDS = Set.of(
+            "propsResponseSha256", "engineExecutableIdentity", "resolvedProfile",
+            "artifactState", "servedIdentityState", "resolution", "propsState");
     private static final ModelIdentitySnapshot EMPTY = builder().build();
 
     public ModelIdentitySnapshot {
-        backend = bounded(backend, 48);
+        backend = pathFreeMetadata(backend, 48);
         configuredModel = pathFreeLabel(configuredModel);
         configuredModelFile = fileNameOnly(configuredModelFile);
-        declaredProfile = bounded(declaredProfile, 160);
-        resolvedProfile = bounded(resolvedProfile, 160);
+        declaredProfile = pathFreeMetadata(declaredProfile, 160);
+        resolvedProfile = pathFreeMetadata(resolvedProfile, 160);
         observedModelFile = fileNameOnly(observedModelFile);
         artifactState = token(artifactState, 64);
         artifactVerificationIdentity = hash(artifactVerificationIdentity);
@@ -54,7 +70,7 @@ public record ModelIdentitySnapshot(
         effectiveToolMode = token(effectiveToolMode, 64);
         effectiveRequestLayout = token(effectiveRequestLayout, 64);
         effectiveContextTokens = Math.max(0, effectiveContextTokens);
-        disposition = bounded(disposition, 120);
+        disposition = pathFreeMetadata(disposition, 120);
         propsState = token(propsState, 64);
         propsResponseSha256 = hash(propsResponseSha256);
         engineBuildInfo = pathFreeMetadata(engineBuildInfo, 200);
@@ -67,6 +83,74 @@ public record ModelIdentitySnapshot(
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /** Reconstructs only an exact value that this type could have emitted to a trace. */
+    public static ModelIdentitySnapshot fromTraceData(Map<String, ?> raw) {
+        if (raw == null || raw.isEmpty() || !TRACE_FIELDS.containsAll(raw.keySet())) {
+            throw new IllegalArgumentException("model identity trace fields are not closed");
+        }
+        Object chat = raw.get("chatAvailable");
+        if (!(chat instanceof Boolean chatAvailable)) {
+            throw new IllegalArgumentException(
+                    "model identity chatAvailable must be an exact boolean");
+        }
+        int contextTokens = 0;
+        if (raw.containsKey("effectiveContextTokens")) {
+            Object value = raw.get("effectiveContextTokens");
+            if (!(value instanceof Integer exact) || exact <= 0) {
+                throw new IllegalArgumentException(
+                        "model identity effectiveContextTokens must be a positive exact integer");
+            }
+            contextTokens = exact;
+        }
+        List<String> reasonCodes = List.of();
+        if (raw.containsKey("reasonCodes")) {
+            Object value = raw.get("reasonCodes");
+            if (!(value instanceof List<?> values)) {
+                throw new IllegalArgumentException(
+                        "model identity reasonCodes must be an exact string list");
+            }
+            ArrayList<String> exact = new ArrayList<>(values.size());
+            for (Object item : values) {
+                if (!(item instanceof String reason)) {
+                    throw new IllegalArgumentException(
+                            "model identity reasonCodes must contain only strings");
+                }
+                exact.add(reason);
+            }
+            reasonCodes = List.copyOf(exact);
+        }
+        ModelIdentitySnapshot snapshot = builder()
+                .backend(optionalString(raw, "backend"))
+                .configuredModel(optionalString(raw, "configuredModel"))
+                .configuredModelFile(optionalString(raw, "configuredModelFile"))
+                .declaredProfile(optionalString(raw, "declaredProfile"))
+                .resolvedProfile(optionalString(raw, "resolvedProfile"))
+                .observedModelFile(optionalString(raw, "observedModelFile"))
+                .artifactState(optionalString(raw, "artifactState"))
+                .artifactVerificationIdentity(optionalString(
+                        raw, "artifactVerificationIdentity"))
+                .engineLane(optionalString(raw, "engineLane"))
+                .engineExecutableIdentity(optionalString(
+                        raw, "engineExecutableIdentity"))
+                .servedIdentityState(optionalString(raw, "servedIdentityState"))
+                .resolution(optionalString(raw, "resolution"))
+                .effectiveToolMode(optionalString(raw, "effectiveToolMode"))
+                .effectiveRequestLayout(optionalString(raw, "effectiveRequestLayout"))
+                .effectiveContextTokens(contextTokens)
+                .disposition(optionalString(raw, "disposition"))
+                .propsState(optionalString(raw, "propsState"))
+                .propsResponseSha256(optionalString(raw, "propsResponseSha256"))
+                .engineBuildInfo(optionalString(raw, "engineBuildInfo"))
+                .chatAvailable(chatAvailable)
+                .reasonCodes(reasonCodes)
+                .build();
+        if (!snapshot.available() || !snapshot.traceData().equals(raw)) {
+            throw new IllegalArgumentException(
+                    "model identity trace data is not an exact canonical snapshot");
+        }
+        return snapshot;
     }
 
     public boolean qualified() {
@@ -157,7 +241,7 @@ public record ModelIdentitySnapshot(
 
     private static String pathFreeLabel(String raw) {
         String clean = bounded(raw, 512);
-        if (clean.matches("(?i)^(?:[a-z]:[\\\\/]|/|\\\\\\\\|//).+")) {
+        if (containsAbsolutePath(clean)) {
             return fileNameOnly(clean);
         }
         return bounded(clean, 160);
@@ -165,7 +249,7 @@ public record ModelIdentitySnapshot(
 
     private static String pathFreeMetadata(String raw, int max) {
         String clean = bounded(raw, max);
-        return ABSOLUTE_PATH.matcher(clean).find() ? "path redacted" : clean;
+        return containsAbsolutePath(clean) ? "path redacted" : clean;
     }
 
     private static String hash(String raw) {
@@ -174,8 +258,24 @@ public record ModelIdentitySnapshot(
     }
 
     private static String token(String raw, int max) {
-        String value = bounded(raw, max);
+        String value = pathFreeMetadata(raw, max);
         return value.matches("[A-Za-z0-9_.:/-]+") ? value : "";
+    }
+
+    private static boolean containsAbsolutePath(String value) {
+        return value != null && (WINDOWS_DRIVE_PATH.matcher(value).find()
+                || UNC_PATH.matcher(value).find()
+                || POSIX_PATH.matcher(value).find());
+    }
+
+    private static String optionalString(Map<String, ?> raw, String key) {
+        if (!raw.containsKey(key)) return "";
+        Object value = raw.get(key);
+        if (!(value instanceof String text)) {
+            throw new IllegalArgumentException(
+                    "model identity " + key + " must be an exact string");
+        }
+        return text;
     }
 
     private static List<String> reasons(List<String> raw) {

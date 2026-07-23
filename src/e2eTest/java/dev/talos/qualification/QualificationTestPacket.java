@@ -1,6 +1,8 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderProcessLaunchReceipt;
 import dev.talos.spi.types.ProviderResponseCapture;
 
 import java.io.IOException;
@@ -9,8 +11,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 final class QualificationTestPacket {
+    static final String LAUNCH_ENVIRONMENT_SHA256 =
+            dev.talos.spi.types.ProviderProcessLaunchReceipt
+                    .digestEffectiveEnvironment(System.getenv());
+    static final String ENDPOINT_OBSERVER_KIND =
+            ProviderProcessLaunchReceipt.EndpointObserverKind
+                    .WINDOWS_NETSTAT_NOFOLLOW_SHA256.name();
+    static final String ENDPOINT_OBSERVER_IDENTITY_SHA256 = "8".repeat(64);
+
     private final Path root;
     private final Path runRoot;
 
@@ -157,12 +169,66 @@ final class QualificationTestPacket {
         return create(root, catalog, scenario, true, true);
     }
 
+    static QualificationTestPacket createProcessBound(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario) throws IOException {
+        return createProcessBound(root, catalog, scenario, UnaryOperator.identity());
+    }
+
+    static QualificationTestPacket createProcessBound(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario,
+            UnaryOperator<ProviderProcessLaunchReceipt> receiptMutation) throws IOException {
+        Objects.requireNonNull(catalog, "qualification catalog");
+        Objects.requireNonNull(scenario, "qualification scenario");
+        if (catalog.protocolVersion() != QualificationProtocol.VERSION) {
+            throw new IllegalArgumentException(
+                    "active-process fixture requires qualification protocol v6");
+        }
+        if (scenario.approvalBehavior()
+                == QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL) {
+            throw new IllegalArgumentException(
+                    "active-process fixture requires a provider-authored terminal answer");
+        }
+        boolean admissionLifecycle = catalog.admission().scenarios().stream()
+                .anyMatch(candidate -> candidate.id().equals(scenario.id()));
+        return create(
+                root,
+                catalog,
+                scenario,
+                admissionLifecycle,
+                false,
+                true,
+                Objects.requireNonNull(receiptMutation, "process receipt mutation"));
+    }
+
     private static QualificationTestPacket create(
             Path root,
             QualificationScenarioBank.Catalog catalog,
             QualificationProtocol.Scenario scenario,
             boolean admissionLifecycle,
             boolean omitMandatoryResourceSamples) throws IOException {
+        return create(
+                root,
+                catalog,
+                scenario,
+                admissionLifecycle,
+                omitMandatoryResourceSamples,
+                false,
+                UnaryOperator.identity());
+    }
+
+    private static QualificationTestPacket create(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario,
+            boolean admissionLifecycle,
+            boolean omitMandatoryResourceSamples,
+            boolean processBound,
+            UnaryOperator<ProviderProcessLaunchReceipt> receiptMutation) throws IOException {
+        String runtimeAlias = processBound ? "qwen14" : "qwen14-runtime";
         Path candidateDir = root.resolve("candidates/qwen14");
         Path machineDir = root.resolve("machines");
         Path engineDir = root.resolve("engines");
@@ -188,7 +254,11 @@ final class QualificationTestPacket {
         Path rules = candidateDir.resolve("calibration-rules.json");
         Path guide = candidateDir.resolve("calibration-guide.md");
         QualificationJson.write(rules, calibrationRules(
-                modelPath, modelSha256, executableSha256, catalog.protocolVersion()));
+                modelPath,
+                modelSha256,
+                executableSha256,
+                catalog.protocolVersion(),
+                runtimeAlias));
         Files.writeString(guide, """
                 # Qwen14 calibration
 
@@ -223,10 +293,23 @@ final class QualificationTestPacket {
                 "gpu", 16L << 30, "driver", "balanced", "cuda", 16,
                 "system-managed", "isolated");
         QualificationRecords.EngineFacts engine = new QualificationRecords.EngineFacts(
-                QualificationRecords.ENGINE_SCHEMA, QualificationRecords.SCHEMA_VERSION,
+                QualificationRecords.ENGINE_SCHEMA,
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? QualificationRecords.ENGINE_SCHEMA_VERSION
+                        : QualificationRecords.SCHEMA_VERSION,
                 "cuda", "b9918", "asset.zip", executablePath.toString(), executableSha256,
-                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161"),
-                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161", "-lv", "4"), "cuda", true,
+                standardLaunchArguments(modelPath, runtimeAlias),
+                verificationLaunchArguments(modelPath, runtimeAlias),
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? LAUNCH_ENVIRONMENT_SHA256 : "",
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? dev.talos.spi.types.ProviderProcessLaunchReceipt
+                        .EnvironmentContract.QUALIFICATION_RELEVANT_ALLOWLIST_V1.name() : "",
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? ENDPOINT_OBSERVER_KIND : "",
+                catalog.protocolVersion() == QualificationProtocol.VERSION
+                        ? ENDPOINT_OBSERVER_IDENTITY_SHA256 : "",
+                "cuda", true,
                 "49/49 layers offloaded", 45.0, 300.0);
         QualificationRecords.RunResult result = runResult(catalog, scenario, 1, true, true);
 
@@ -261,6 +344,17 @@ final class QualificationTestPacket {
         String calibrationHash = QualificationScenarioBank.sha256(Files.readAllBytes(rules));
         String engineJsonHash = QualificationScenarioBank.sha256(Files.readAllBytes(engineJson));
         String machineJsonHash = QualificationScenarioBank.sha256(Files.readAllBytes(machineJson));
+        ProviderProcessLaunchReceipt processReceipt = processBound
+                ? Objects.requireNonNull(
+                        receiptMutation.apply(processReceipt(
+                                executablePath,
+                                modelPath,
+                                calibrationHash,
+                                executableSha256,
+                                modelSha256,
+                                runtimeAlias)),
+                        "mutated process receipt")
+                : null;
         java.util.List<QualificationExecutionIdentityWriter.LedgerClasspathEntry> ledgerClasspath =
                 dev.talos.core.util.RuntimeArtifactIdentity.currentClasspathEntryIdentities().stream()
                         .map(entry -> new QualificationExecutionIdentityWriter.LedgerClasspathEntry(
@@ -407,38 +501,54 @@ final class QualificationTestPacket {
                         runtimeClasspath.sizeBytes(),
                         runtimeClasspath.entryCount(),
                         campaign.talosVersion(),
-                        campaign.talosCommit())
+                        campaign.talosCommit(),
+                        processReceipt)
                 : legacyTraceEvents(scenario, operatorInterruption);
         boolean mutationAuthority = scenario.category() == QualificationProtocol.ScenarioCategory.MUTATION
                 || scenario.category() == QualificationProtocol.ScenarioCategory.REPAIR
                 || scenario.category() == QualificationProtocol.ScenarioCategory.INTERRUPTION;
         String traceTaskType = mutationAuthority ? "WORKSPACE_MUTATION" : "READ_ONLY_QA";
         String traceObligation = mutationAuthority ? "MUTATING_TOOL_REQUIRED" : "DIRECT_ANSWER_ONLY";
-        QualificationJson.write(runDir.resolve("trace.json"), java.util.Map.of(
-                "schemaVersion", protocolV6
-                        ? QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION : 2,
-                "traceId", "trace-1",
-                "model", java.util.Map.of("backend", "llama_cpp", "model", "qwen14-runtime"),
-                "taskContract", java.util.Map.of(
+        java.util.Map<String, Object> traceDocument = java.util.Map.ofEntries(
+                java.util.Map.entry("schemaVersion", processBound
+                        ? QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION
+                        : protocolV6 ? QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION : 2),
+                java.util.Map.entry("traceId", "trace-1"),
+                java.util.Map.entry("sessionId", "session-one"),
+                java.util.Map.entry("turnNumber", 1),
+                java.util.Map.entry("timestamp", "2026-07-10T00:00:00Z"),
+                java.util.Map.entry("model", java.util.Map.of(
+                        "backend", "llama_cpp", "model", runtimeAlias)),
+                java.util.Map.entry("taskContract", java.util.Map.of(
                         "type", traceTaskType, "mutationAllowed", mutationAuthority,
-                        "verificationRequired", false),
-                "toolSurface", java.util.Map.of(
+                        "verificationRequired", false)),
+                java.util.Map.entry("toolSurface", java.util.Map.of(
                         "nativeTools", declaredTools,
                         "promptTools", declaredTools,
-                        "reason", "selected for protocol-v6 causal fixture"),
-                "promptAudit", java.util.Map.of(
+                        "reason", "selected for protocol-v6 causal fixture")),
+                java.util.Map.entry("promptAudit", java.util.Map.of(
                         "taskType", traceTaskType,
                         "mutationAllowed", mutationAuthority,
                         "actionObligation", traceObligation,
                         "nativeTools", declaredTools,
-                        "promptTools", declaredTools),
-                "events", traceEvents,
-                "verification", java.util.Map.of("status", "NOT_RUN", "summary", "Not applicable"),
-                "outcome", java.util.Map.of(
+                        "promptTools", declaredTools)),
+                java.util.Map.entry("events", traceEvents),
+                java.util.Map.entry("verification", java.util.Map.of(
+                        "status", "NOT_RUN", "summary", "Not applicable")),
+                java.util.Map.entry("outcome", java.util.Map.of(
                         "status", operatorInterruption ? "FAILED" : "COMPLETE",
                         "verificationStatus", "NOT_RUN",
                         "approvalStatus", "NONE", "mutationStatus", "NOT_REQUESTED",
                         "classification", scenario.expectedTerminalStates().getFirst())));
+        byte[] traceBytes = QualificationJson.bytes(traceDocument);
+        if (processBound) {
+            Path sourceTrace = root.resolve(
+                    "home/.talos/sessions/traces/session-one/000001-trace-1.json");
+            Files.createDirectories(sourceTrace.getParent());
+            Files.write(sourceTrace, traceBytes);
+        } else {
+            Files.write(runDir.resolve("trace.json"), traceBytes);
+        }
         Path approvalsPath = runDir.resolve("approvals.json");
         byte[] approvalsBytes = QualificationJson.bytes(
                 new QualificationApprovalFinalizer.Document(List.of()));
@@ -462,6 +572,9 @@ final class QualificationTestPacket {
                 "Outcome: " + scenario.expectedTerminalStates().getFirst()));
         captureEvents.add(new QualificationPtyEvidence.Event(
                 "2026-07-10T00:00:02Z", "input", "last-trace"));
+        String lastTraceOutput = "  Local trace: trace-1\r\n";
+        captureEvents.add(new QualificationPtyEvidence.Event(
+                "2026-07-10T00:00:02Z", "output", lastTraceOutput));
         int captureProtocol = catalog.protocolVersion();
         boolean extendedCapture = captureProtocol >= 2;
         boolean cleanupCapture = captureProtocol >= 3;
@@ -494,7 +607,8 @@ final class QualificationTestPacket {
                 extendedCapture ? "" : null,
                 processCleanup,
                 captureEvents,
-                "Outcome: " + scenario.expectedTerminalStates().getFirst());
+                "Outcome: " + scenario.expectedTerminalStates().getFirst()
+                        + lastTraceOutput);
         Path transcriptRawPath = runDir.resolve("transcript.raw.json");
         byte[] transcriptRawBytes = QualificationJson.bytes(capture);
         if (protocolV6) {
@@ -503,6 +617,10 @@ final class QualificationTestPacket {
                     QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
                     List.of(new QualificationPacketPublisher.Member(
                             transcriptRawPath, transcriptRawBytes)));
+            if (processBound) {
+                QualificationTraceEvidencePublication.publish(
+                        root, runDir, scenario.id(), catalog);
+            }
         } else {
             Files.write(transcriptRawPath, transcriptRawBytes);
         }
@@ -786,7 +904,8 @@ final class QualificationTestPacket {
             long runtimeClasspathSizeBytes,
             int runtimeClasspathEntryCount,
             String runtimeVersion,
-            String runtimeCommit) {
+            String runtimeCommit,
+            ProviderProcessLaunchReceipt processReceipt) {
         String answer = operatorInterruption ? "" : "4";
         String answerHash = "sha256:" + QualificationScenarioBank.sha256(
                 answer.getBytes(StandardCharsets.UTF_8));
@@ -805,6 +924,10 @@ final class QualificationTestPacket {
                         "runtimeVersion", runtimeVersion,
                         "runtimeCommit", runtimeCommit));
         if (operatorInterruption) {
+            if (processReceipt != null) {
+                throw new IllegalArgumentException(
+                        "operator interruption cannot claim a score-bearing provider process");
+            }
             return List.of(
                     traceStarted,
                     traceEvent("DETERMINISTIC_ANSWER_SELECTED", java.util.Map.of(
@@ -826,20 +949,33 @@ final class QualificationTestPacket {
 
         String generationId = "trace-1-generation-1";
         String attemptId = generationId + "-attempt-1";
+        int providerLedgerVersion = processReceipt == null
+                ? QualificationProviderAttemptLedger.LEGACY_LEDGER_VERSION
+                : QualificationProviderAttemptLedger.LEDGER_VERSION;
         String toolAuthorityMode = dispatchedNativeTools.isEmpty()
                 ? "NONE" : "PROVIDER_NATIVE";
         java.util.Map<String, Object> generation = new java.util.LinkedHashMap<>(java.util.Map.of(
-                "providerLedgerVersion", 1,
+                "providerLedgerVersion", providerLedgerVersion,
                 "ledgerSequence", 1,
                 "generationId", generationId,
                 "source", "FOREGROUND_PROVIDER",
                 "purpose", "TURN_RESPONSE"));
         generation.put("toolAuthorityMode", toolAuthorityMode);
         java.util.Map<String, Object> attemptStarted = new java.util.LinkedHashMap<>(
-                attemptData(2, generationId, attemptId, false));
+                attemptData(
+                        2,
+                        generationId,
+                        attemptId,
+                        false,
+                        providerLedgerVersion));
         attemptStarted.put("toolAuthorityMode", toolAuthorityMode);
         java.util.Map<String, Object> requestDispatched = new java.util.LinkedHashMap<>(
-                attemptData(3, generationId, attemptId, true));
+                attemptData(
+                        3,
+                        generationId,
+                        attemptId,
+                        true,
+                        providerLedgerVersion));
         requestDispatched.put("toolAuthorityMode", toolAuthorityMode);
         requestDispatched.put("providerBodyHash", "sha256:" + QualificationScenarioBank.sha256(
                 "protocol-v6-fixture-provider-body".getBytes(StandardCharsets.UTF_8)));
@@ -848,29 +984,38 @@ final class QualificationTestPacket {
                 "toolAuthoritySurface",
                 toolAuthoritySurface(toolAuthorityMode, dispatchedNativeTools));
         String transportOperationId = attemptId + "-transport-1";
+        if (processReceipt != null) {
+            requestDispatched.put("transportOperationId", transportOperationId);
+            requestDispatched.put("processReceiptId", processReceipt.receiptId());
+        }
         java.util.Map<String, Object> transportHandoff = transportEvent(
                 1, generationId, attemptId, transportOperationId,
-                "HANDOFF_ADMITTED", "NONE");
+                "HANDOFF_ADMITTED", "NONE", processReceipt);
         java.util.Map<String, Object> transportSend = transportEvent(
                 2, generationId, attemptId, transportOperationId,
-                "SEND_API_ENTERED", "NONE");
+                "SEND_API_ENTERED", "NONE", processReceipt);
         java.util.Map<String, Object> transportHeaders = transportEvent(
                 3, generationId, attemptId, transportOperationId,
-                "RESPONSE_HEADERS_OBSERVED", "NONE");
+                "RESPONSE_HEADERS_OBSERVED", "NONE", processReceipt);
         java.util.Map<String, Object> transportBodyOpened = transportEvent(
                 4, generationId, attemptId, transportOperationId,
-                "RESPONSE_BODY_OPENED", "NONE");
+                "RESPONSE_BODY_OPENED", "NONE", processReceipt);
         java.util.Map<String, Object> transportTerminal = transportEvent(
                 5, generationId, attemptId, transportOperationId,
-                "PROVIDER_TERMINAL_OBSERVED", "NONE");
+                "PROVIDER_TERMINAL_OBSERVED", "NONE", processReceipt);
         java.util.Map<String, Object> transportBodyCompleted = transportEvent(
                 6, generationId, attemptId, transportOperationId,
-                "RESPONSE_BODY_COMPLETED", "NONE");
+                "RESPONSE_BODY_COMPLETED", "NONE", processReceipt);
         java.util.Map<String, Object> transportSettled = transportEvent(
                 7, generationId, attemptId, transportOperationId,
-                "SETTLED", "COMPLETED_PROVIDER_TERMINAL");
+                "SETTLED", "COMPLETED_PROVIDER_TERMINAL", processReceipt);
         java.util.Map<String, Object> response = new java.util.LinkedHashMap<>(
-                attemptData(4, generationId, attemptId, true));
+                attemptData(
+                        4,
+                        generationId,
+                        attemptId,
+                        true,
+                        providerLedgerVersion));
         response.put("toolAuthorityMode", toolAuthorityMode);
         response.put("assistantHash", answerHash);
         response.put("assistantChars", answer.length());
@@ -885,6 +1030,9 @@ final class QualificationTestPacket {
         response.put("normalized", false);
         response.put("truncated", false);
         response.put("transportOperationId", transportOperationId);
+        if (processReceipt != null) {
+            response.put("processReceiptId", processReceipt.receiptId());
+        }
         java.util.Map<String, Object> completed = new java.util.LinkedHashMap<>(generation);
         completed.put("ledgerSequence", 5);
         completed.put("selectedAttemptId", attemptId);
@@ -894,33 +1042,61 @@ final class QualificationTestPacket {
         completed.put("providerTerminalEligible", true);
         completed.put("providerToolCallEligible", false);
         completed.put("transportOperationId", transportOperationId);
-        return List.of(
-                traceStarted,
-                traceEvent("GENERATION_STARTED", generation),
-                traceEvent("GENERATION_ATTEMPT_STARTED", attemptStarted),
-                traceEvent("GENERATION_REQUEST_DISPATCHED", requestDispatched),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHandoff),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSend),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHeaders),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyOpened),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportTerminal),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyCompleted),
-                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSettled),
-                traceEvent("GENERATION_RESPONSE_CAPTURED", response),
-                traceEvent("GENERATION_COMPLETED", completed),
-                traceEvent("TERMINAL_ANSWER_SELECTED", java.util.Map.of(
+        if (processReceipt != null) {
+            completed.put("processReceiptId", processReceipt.receiptId());
+        }
+        List<java.util.Map<String, Object>> events = new java.util.ArrayList<>();
+        events.add(traceStarted);
+        if (processReceipt != null) {
+            events.add(traceEvent("MODEL_IDENTITY_RESOLVED",
+                    processModelIdentity(processReceipt)));
+            events.add(traceEvent(
+                    QualificationProviderProcessReceiptLedger.EVENT_TYPE,
+                    processReceipt.traceData()));
+        }
+        events.add(traceEvent("GENERATION_STARTED", generation));
+        events.add(traceEvent("GENERATION_ATTEMPT_STARTED", attemptStarted));
+        events.add(traceEvent("GENERATION_REQUEST_DISPATCHED", requestDispatched));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHandoff));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSend));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHeaders));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyOpened));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportTerminal));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyCompleted));
+        events.add(traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSettled));
+        events.add(traceEvent("GENERATION_RESPONSE_CAPTURED", response));
+        events.add(traceEvent("GENERATION_COMPLETED", completed));
+        events.add(traceEvent("TERMINAL_ANSWER_SELECTED", java.util.Map.of(
                         "answerHash", answerHash,
                         "answerChars", answer.length(),
                         "origin", "MODEL_PROVIDER",
                         "sourceGenerationId", generationId,
-                        "sourceAttemptId", attemptId)),
-                traceEvent("ROUTED_ANSWER_CAPTURED", java.util.Map.of(
+                        "sourceAttemptId", attemptId)));
+        events.add(traceEvent("ROUTED_ANSWER_CAPTURED", java.util.Map.of(
                         "answerHash", answerHash,
-                        "answerChars", answer.length())),
-                traceEvent("OUTCOME_RENDERED", java.util.Map.of(
+                        "answerChars", answer.length())));
+        events.add(traceEvent("OUTCOME_RENDERED", java.util.Map.of(
                         "status", status,
-                        "classification", classification)),
-                traceEvent("TRACE_COMPLETED", java.util.Map.of()));
+                        "classification", classification)));
+        events.add(traceEvent("TRACE_COMPLETED", java.util.Map.of()));
+        return List.copyOf(events);
+    }
+
+    private static java.util.Map<String, Object> processModelIdentity(
+            ProviderProcessLaunchReceipt receipt) {
+        return ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(receipt.resolvedProfile())
+                .resolvedProfile(receipt.resolvedProfile())
+                .artifactState("EXACT")
+                .engineExecutableIdentity(receipt.engineExecutableSha256())
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .propsState("AVAILABLE")
+                .propsResponseSha256(receipt.propsResponseSha256())
+                .chatAvailable(true)
+                .build()
+                .traceData();
     }
 
     private static java.util.Map<String, Object> transportEvent(
@@ -929,10 +1105,13 @@ final class QualificationTestPacket {
             String attemptId,
             String transportOperationId,
             String transition,
-            String settlement
+            String settlement,
+            ProviderProcessLaunchReceipt processReceipt
     ) {
         java.util.Map<String, Object> event = new java.util.LinkedHashMap<>();
-        event.put("transportLedgerVersion", 1);
+        event.put("transportLedgerVersion", processReceipt == null
+                ? QualificationProviderTransportLedger.LEGACY_LEDGER_VERSION
+                : QualificationProviderTransportLedger.LEDGER_VERSION);
         event.put("transportSequence", sequence);
         event.put("generationId", generationId);
         event.put("attemptId", attemptId);
@@ -948,7 +1127,11 @@ final class QualificationTestPacket {
                 ? "SEND_API_NOT_ENTERED" : "UNKNOWN");
         event.put("quarantineRequired", false);
         event.put("lateAfterGenerationTerminal", false);
-        event.put("processBinding", "UNAVAILABLE");
+        event.put("processBinding", processReceipt == null
+                ? "UNAVAILABLE" : "MANAGED_QUALIFICATION_EXACT");
+        if (processReceipt != null) {
+            event.put("processReceiptId", processReceipt.receiptId());
+        }
         return event;
     }
 
@@ -993,9 +1176,10 @@ final class QualificationTestPacket {
             int sequence,
             String generationId,
             String attemptId,
-            boolean requestDispatched) {
+            boolean requestDispatched,
+            int providerLedgerVersion) {
         return java.util.Map.ofEntries(
-                java.util.Map.entry("providerLedgerVersion", 1),
+                java.util.Map.entry("providerLedgerVersion", providerLedgerVersion),
                 java.util.Map.entry("ledgerSequence", sequence),
                 java.util.Map.entry("generationId", generationId),
                 java.util.Map.entry("source", "FOREGROUND_PROVIDER"),
@@ -1030,17 +1214,32 @@ final class QualificationTestPacket {
             Path modelPath,
             String modelSha256,
             String executableSha256,
-            int protocolVersion) {
+            int protocolVersion,
+            String runtimeAlias) {
         return new QualificationRecords.CalibrationRules(
-                QualificationRecords.CALIBRATION_SCHEMA, QualificationRecords.SCHEMA_VERSION,
+                QualificationRecords.CALIBRATION_SCHEMA,
+                protocolVersion == QualificationProtocol.VERSION
+                        ? QualificationRecords.CALIBRATION_SCHEMA_VERSION
+                        : QualificationRecords.SCHEMA_VERSION,
                 "standard", "STANDARD", "", "qwen14",
                 "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "b".repeat(40), "model.gguf",
                 size(modelPath), modelSha256, "Apache-2.0", "official",
                 "qwen2-dense", 14_700_000_000L, 14_700_000_000L,
                  "a".repeat(40), protocolVersion, "b9918", executableSha256,
-                 "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161"),
-                 List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161", "-lv", "4"),
-                 List.of(), "PRESERVE_AS_WRITTEN", "", "native",
+                 "cuda", standardLaunchArguments(modelPath, runtimeAlias),
+                 verificationLaunchArguments(modelPath, runtimeAlias),
+                 List.of(), protocolVersion == QualificationProtocol.VERSION
+                        ? LAUNCH_ENVIRONMENT_SHA256 : "",
+                 protocolVersion == QualificationProtocol.VERSION
+                        ? dev.talos.spi.types.ProviderProcessLaunchReceipt
+                                .EnvironmentContract
+                                .QUALIFICATION_RELEVANT_ALLOWLIST_V1.name()
+                         : "",
+                 protocolVersion == QualificationProtocol.VERSION
+                         ? ENDPOINT_OBSERVER_KIND : "",
+                 protocolVersion == QualificationProtocol.VERSION
+                         ? ENDPOINT_OBSERVER_IDENTITY_SHA256 : "",
+                 "PRESERVE_AS_WRITTEN", "", "native",
                  "embedded-jinja", "standard-instruct", 16384,
                 new QualificationRecords.SamplingPolicy(
                         "Talos near-greedy controls", 0.2, 0.8, 20,
@@ -1060,6 +1259,74 @@ final class QualificationTestPacket {
                 List.of(new QualificationRecords.PermittedDeviation("repetition", "seed",
                         List.of("uncontrolled-r1", "uncontrolled-r2", "uncontrolled-r3"),
                         "results compare by declared repetition, not identical sampling")));
+    }
+
+    private static ProviderProcessLaunchReceipt processReceipt(
+            Path executablePath,
+            Path modelPath,
+            String calibrationSha256,
+            String executableSha256,
+            String modelSha256,
+            String runtimeAlias) {
+        List<String> command = new java.util.ArrayList<>();
+        command.add(executablePath.toString());
+        command.addAll(standardLaunchArguments(modelPath, runtimeAlias));
+        long processStart = Instant.parse("2026-07-10T00:00:00Z").toEpochMilli();
+        return new ProviderProcessLaunchReceipt(
+                4_242,
+                processStart,
+                processStart + 100,
+                processStart + 200,
+                "0123456789abcdef0123456789abcdef",
+                calibrationSha256,
+                executableSha256,
+                modelSha256,
+                ProviderProcessLaunchReceipt.digestOrderedValues(command),
+                ProviderProcessLaunchReceipt.LaunchArgumentSet.STANDARD,
+                LAUNCH_ENVIRONMENT_SHA256,
+                ProviderProcessLaunchReceipt.EnvironmentContract
+                        .QUALIFICATION_RELEVANT_ALLOWLIST_V1,
+                "127.0.0.1",
+                18_161,
+                true,
+                "7".repeat(64),
+                runtimeAlias,
+                ProviderProcessLaunchReceipt.ServedIdentity.MATCHED,
+                ProviderProcessLaunchReceipt.EndpointObserverKind
+                        .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
+                ENDPOINT_OBSERVER_IDENTITY_SHA256,
+                ProviderProcessLaunchReceipt.EndpointOwnershipBoundary
+                        .WINDOWS_NETSTAT_LISTENER_OWNER_PID_START_AT_READINESS_BIND_AND_TRANSPORT,
+                ProviderProcessLaunchReceipt.StableEndpointAssumption
+                        .WINDOWS_TRUSTED_HELPER_AND_STABLE_LISTENER_OWNER_BETWEEN_OBSERVATION_AND_NETWORK_TRANSITION,
+                ProviderProcessLaunchReceipt.ContentVerificationBoundary
+                        .IMMEDIATE_PRELAUNCH_NOFOLLOW_SHA256,
+                ProviderProcessLaunchReceipt.StableFilesystemAssumption
+                        .STABLE_LOCAL_FILES_DURING_PROCESS_LOAD);
+    }
+
+    private static List<String> standardLaunchArguments(
+            Path modelPath,
+            String runtimeAlias) {
+        return List.of(
+                "-m", modelPath.toString(),
+                "-c", "16384",
+                "--host", "127.0.0.1",
+                "--port", "18161",
+                "--jinja",
+                "--alias", runtimeAlias,
+                "--parallel", "1",
+                "--predict", "2048");
+    }
+
+    private static List<String> verificationLaunchArguments(
+            Path modelPath,
+            String runtimeAlias) {
+        java.util.ArrayList<String> arguments = new java.util.ArrayList<>(
+                standardLaunchArguments(modelPath, runtimeAlias));
+        arguments.add("-lv");
+        arguments.add("4");
+        return List.copyOf(arguments);
     }
 
     private static long size(Path path) {
