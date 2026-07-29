@@ -78,6 +78,11 @@ final class QualificationJson {
             adaptLegacyLaunchEnvironment(tree, type);
             return bindStrict(tree, type);
         }
+        if (type == QualificationRequirementFinalizer.Document.class) {
+            JsonNode tree = MAPPER.readTree(bytes);
+            adaptLegacyMechanicalRequirements(tree);
+            return bindStrict(tree, type);
+        }
         return MAPPER.readValue(bytes, type);
     }
 
@@ -192,10 +197,59 @@ final class QualificationJson {
 
     static String write(Object value) {
         try {
-            return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(value) + "\n";
+            return MAPPER.writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(legacyCompatibleWireValue(value))
+                    + "\n";
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Unable to serialize qualification JSON", e);
         }
+    }
+
+    private static Object legacyCompatibleWireValue(Object value) {
+        if (value instanceof QualificationProtocol.ScenarioBank bank
+                && bank.schemaVersion() >= FIRST_LEGACY_PROTOCOL_VERSION
+                && bank.schemaVersion() <= LAST_LEGACY_SCENARIO_SCHEMA_VERSION) {
+            if (!bank.expectedRequestObligations().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "legacy scenario schema must not serialize "
+                                + "expectedRequestObligations");
+            }
+            for (QualificationProtocol.Scenario scenario : bank.scenarios()) {
+                QualificationRecords.ResponseOwnerContract expectedOwner =
+                        scenario.approvalBehavior()
+                                == QualificationProtocol.ApprovalBehavior
+                                        .INTERRUPT_BEFORE_APPROVAL
+                                ? QualificationRecords.ResponseOwnerContract
+                                        .OPERATOR_OWNED
+                                : QualificationRecords.ResponseOwnerContract
+                                        .MODEL_SYNTHESIS_REQUIRED;
+                if (scenario.responseOwnerContract() != expectedOwner) {
+                    throw new IllegalArgumentException(
+                            "legacy scenario response owner differs from "
+                                    + "the compatibility projection: "
+                                    + scenario.id());
+                }
+            }
+            ObjectNode legacy = MAPPER.valueToTree(bank);
+            legacy.remove("expectedRequestObligations");
+            JsonNode scenarios = legacy.get("scenarios");
+            if (scenarios instanceof ArrayNode array) {
+                for (JsonNode scenario : array) {
+                    if (scenario instanceof ObjectNode object) {
+                        object.remove("responseOwnerContract");
+                    }
+                }
+            }
+            return legacy;
+        }
+        if (value instanceof QualificationRequirementFinalizer.Document document
+                && document.schemaVersion() == 1) {
+            ObjectNode legacy = MAPPER.valueToTree(document);
+            legacy.remove("requestObligationSha256");
+            legacy.remove("requestObligation");
+            return legacy;
+        }
+        return value;
     }
 
     static void write(Path path, Object value) throws IOException {
@@ -300,6 +354,11 @@ final class QualificationJson {
         if (version < 1 || version > LAST_LEGACY_SCENARIO_SCHEMA_VERSION) {
             return;
         }
+        if (object.has("expectedRequestObligations")) {
+            throw new IllegalArgumentException(
+                    "legacy scenario schema must not declare expectedRequestObligations");
+        }
+        object.putObject("expectedRequestObligations");
         JsonNode scenarios = object.path("scenarios");
         if (!scenarios.isArray()) {
             return;
@@ -310,6 +369,26 @@ final class QualificationJson {
             }
             adaptLegacyScenarioOwner(scenarioObject);
         }
+    }
+
+    private static void adaptLegacyMechanicalRequirements(JsonNode tree) {
+        if (!(tree instanceof ObjectNode object)) return;
+        int protocolVersion = exactIntOrSentinel(object.get("protocolVersion"));
+        int schemaVersion = exactIntOrSentinel(object.get("schemaVersion"));
+        boolean legacyProtocol = protocolVersion >= 1
+                && protocolVersion <= LAST_LEGACY_SCENARIO_SCHEMA_VERSION;
+        boolean legacyUnboundV6 = protocolVersion == QualificationProtocol.VERSION
+                && schemaVersion == 1;
+        if (schemaVersion != 1 || (!legacyProtocol && !legacyUnboundV6)) {
+            return;
+        }
+        if (object.has("requestObligationSha256")
+                || object.has("requestObligation")) {
+            throw new IllegalArgumentException(
+                    "legacy mechanical requirements must not declare a request obligation");
+        }
+        object.put("requestObligationSha256", "");
+        object.putObject("requestObligation");
     }
 
     private static void adaptLegacyScenarioOwner(ObjectNode scenarioObject) {

@@ -1,5 +1,16 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.runtime.expectation.AppendStatementExpectation;
+import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.verification.RequestObligationFinalStateVerifier;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -7,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 final class QualificationRequirementEvaluator {
@@ -27,6 +39,7 @@ final class QualificationRequirementEvaluator {
         FILE_CONTAINS,
         FILE_EQUALS,
         FILE_UNCHANGED,
+        REQUEST_OBLIGATION,
         TRACE_CONTAINS
     }
 
@@ -51,10 +64,34 @@ final class QualificationRequirementEvaluator {
             afterFiles = deepCopy(afterFiles);
         }
 
+        @Override
+        public Map<String, byte[]> beforeFiles() {
+            return deepCopy(beforeFiles);
+        }
+
+        @Override
+        public Map<String, byte[]> afterFiles() {
+            return deepCopy(afterFiles);
+        }
+
         private static Map<String, byte[]> deepCopy(Map<String, byte[]> source) {
             if (source == null || source.isEmpty()) return Map.of();
             LinkedHashMap<String, byte[]> copy = new LinkedHashMap<>();
-            source.forEach((path, bytes) -> copy.put(path, bytes == null ? new byte[0] : bytes.clone()));
+            source.forEach((path, bytes) -> {
+                String canonical = RequestObligation.canonicalTarget(path);
+                if (!canonical.equals(path)) {
+                    throw new IllegalArgumentException(
+                            "Qualification evidence target must already be canonical: " + path);
+                }
+                if (bytes == null) {
+                    throw new IllegalArgumentException(
+                            "Qualification evidence bytes are unavailable for: " + path);
+                }
+                if (copy.putIfAbsent(canonical, bytes.clone()) != null) {
+                    throw new IllegalArgumentException(
+                            "Qualification evidence target is duplicated: " + path);
+                }
+            });
             return Map.copyOf(copy);
         }
     }
@@ -67,12 +104,13 @@ final class QualificationRequirementEvaluator {
         List<QualificationRecords.RequirementResult> results = new ArrayList<>();
         for (QualificationProtocol.AtomicRequirement requirement : scenario.atomicRequirements()) {
             results.add(new QualificationRecords.RequirementResult(
-                    requirement.id(), evaluate(requirement, evidence)));
+                    requirement.id(), evaluate(scenario, requirement, evidence)));
         }
         return List.copyOf(results);
     }
 
     private static boolean evaluate(
+            QualificationProtocol.Scenario scenario,
             QualificationProtocol.AtomicRequirement requirement,
             Evidence evidence) {
         Type type;
@@ -96,8 +134,147 @@ final class QualificationRequirementEvaluator {
             case FILE_EQUALS -> fileText(evidence.afterFiles(), requirement.target())
                     .map(text -> text.equals(requirement.expected())).orElse(false);
             case FILE_UNCHANGED -> unchanged(evidence, requirement.target());
+            case REQUEST_OBLIGATION -> requestObligationPassed(
+                    scenario,
+                    requirement,
+                    evidence);
             case TRACE_CONTAINS -> evidence.trace().contains(requirement.expected());
         };
+    }
+
+    private static boolean requestObligationPassed(
+            QualificationProtocol.Scenario scenario,
+            QualificationProtocol.AtomicRequirement requirement,
+            Evidence evidence
+    ) {
+        if (!"request".equals(requirement.target())
+                || !"true".equals(requirement.expected())) {
+            return false;
+        }
+        TaskContract contract = TaskContractResolver.fromUserRequest(scenario.prompt());
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        if (obligation.derivationStatus() != RequestObligation.DerivationStatus.COMPLETE) {
+            return false;
+        }
+        Set<String> structuredTargets = structuredMutationTargets(
+                evidence.trace(),
+                obligation,
+                evidence.afterFiles());
+        try {
+            return RequestObligationFinalStateVerifier.verify(
+                    obligation,
+                    new RequestObligationFinalStateVerifier.Evidence(
+                            evidence.beforeFiles(),
+                            evidence.afterFiles(),
+                            structuredTargets))
+                    .passed();
+        } catch (IllegalArgumentException invalidEvidence) {
+            return false;
+        }
+    }
+
+    private static Set<String> structuredMutationTargets(
+            String traceJson,
+            RequestObligation obligation,
+            Map<String, byte[]> afterFiles
+    ) {
+        if (traceJson == null || traceJson.isBlank() || obligation == null) return Set.of();
+        try {
+            ObjectNode root = QualificationJson.requiredObject(
+                    QualificationJson.readTree(
+                            traceJson.getBytes(StandardCharsets.UTF_8)),
+                    "trace root");
+            ArrayNode events = QualificationJson.requiredArray(
+                    root.get("events"),
+                    "trace events");
+            JsonNode expectedObligation = QualificationJson.tree(
+                    obligation.redactedProjection());
+            JsonNode expectedExpectation = expectedExpectationData(obligation, afterFiles);
+            JsonNode expectedVerification = QualificationJson.tree(Map.of(
+                    "status", "PASSED",
+                    "problemCount", 0,
+                    "requiredClaimCount", 0,
+                    "unsatisfiedRequiredClaimCount", 0,
+                    "authoritativeProofKinds", List.of()));
+
+            int obligationIndex = -1;
+            int expectationIndex = -1;
+            int verificationIndex = -1;
+            for (int index = 0; index < events.size(); index++) {
+                ObjectNode event = QualificationJson.requiredObject(
+                        events.get(index),
+                        "trace event");
+                String type = QualificationJson.requiredText(
+                        event.get("type"),
+                        "trace event type");
+                if ("REQUEST_OBLIGATION_COMPILED".equals(type)) {
+                    if (obligationIndex >= 0
+                            || !QualificationJson.requiredObject(
+                                    event.get("data"),
+                                    "request-obligation trace data")
+                            .equals(expectedObligation)) {
+                        return Set.of();
+                    }
+                    obligationIndex = index;
+                } else if ("EXPECTATION_VERIFIED".equals(type)) {
+                    if (expectationIndex >= 0
+                            || !QualificationJson.requiredObject(
+                                    event.get("data"),
+                                    "expectation trace data")
+                            .equals(expectedExpectation)) {
+                        return Set.of();
+                    }
+                    expectationIndex = index;
+                } else if ("VERIFICATION_COMPLETED".equals(type)) {
+                    if (verificationIndex >= 0
+                            || !QualificationJson.requiredObject(
+                                    event.get("data"),
+                                    "verification trace data")
+                            .equals(expectedVerification)) {
+                        return Set.of();
+                    }
+                    verificationIndex = index;
+                }
+            }
+            return obligationIndex >= 0
+                    && obligationIndex < expectationIndex
+                    && expectationIndex < verificationIndex
+                    ? Set.of(obligation.outputShape().target())
+                    : Set.of();
+        } catch (Exception invalidTrace) {
+            return Set.of();
+        }
+    }
+
+    private static JsonNode expectedExpectationData(
+            RequestObligation obligation,
+            Map<String, byte[]> afterFiles
+    ) {
+        RequestObligation.OutputShape output = obligation.outputShape();
+        AppendStatementExpectation expectation = new AppendStatementExpectation(
+                output.target(),
+                output.label(),
+                output.statement(),
+                "request-obligation-v" + obligation.schemaVersion());
+        String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(
+                afterFiles.get(output.target()));
+        if (finalLine == null) {
+            throw new IllegalArgumentException(
+                    "Request-obligation target is not strict UTF-8 evidence");
+        }
+        return QualificationJson.tree(Map.ofEntries(
+                Map.entry("kind", expectation.kind()),
+                Map.entry("status", "PASSED"),
+                Map.entry("pathHint", RequestObligation.diagnosticPath(output.target())),
+                Map.entry("sourcePattern", expectation.sourcePattern()),
+                Map.entry("expectedHash", expectation.expectedHash()),
+                Map.entry("expectedBytes", expectation.expectedBytes()),
+                Map.entry("expectedChars", expectation.expectedChars()),
+                Map.entry("expectedLines", 1),
+                Map.entry("observedHash", LiteralContentExpectation.hash(finalLine)),
+                Map.entry("observedBytes", LiteralContentExpectation.byteCount(finalLine)),
+                Map.entry("observedChars", LiteralContentExpectation.charCount(finalLine)),
+                Map.entry("observedLines", finalLine.isBlank() ? 0 : 1)));
     }
 
     private static java.util.Optional<String> fileText(Map<String, byte[]> files, String target) {

@@ -1480,6 +1480,16 @@ class AssistantTurnExecutorTest {
                     "The current workspace is still " + workspace.toAbsolutePath().normalize()
                             + ". Confirm if you want this change applied in the current workspace."));
             confirmMessages.add(ChatMessage.user("Yes, create it in the current workspace."));
+            LocalTurnTraceCapture.begin(
+                    "assistant-turn-workspace-confirmation",
+                    "assistant-turn-tests",
+                    3,
+                    "2026-07-20T00:00:02Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "test-model",
+                    "Yes, create it in the current workspace.");
             AssistantTurnExecutor.TurnOutput confirmOut = AssistantTurnExecutor.execute(
                     confirmMessages, workspace, ctx, new AssistantTurnExecutor.Options());
 

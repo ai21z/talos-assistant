@@ -149,6 +149,19 @@ public final class PromptDebugInspector {
         if (providerRequestLayout != null && !providerRequestLayout.isBlank()) {
             out.append("- Provider request layout: ").append(providerRequestLayout).append('\n');
         }
+        String requestObligation =
+                diagnostics.get("requestObligation.redactedProjectionJson");
+        String requestObligationHash =
+                diagnostics.get("requestObligation.fullCanonicalSha256");
+        if (requestObligation != null && !requestObligation.isBlank()) {
+            out.append("\n## Request Obligation (redacted projection)\n\n");
+            out.append("```json\n").append(requestObligation.strip()).append("\n```\n");
+            if (requestObligationHash != null && !requestObligationHash.isBlank()) {
+                out.append("- Full canonical obligation SHA-256: ")
+                        .append(requestObligationHash.strip()).append('\n');
+            }
+            out.append('\n');
+        }
     }
 
     private static void appendModelIdentity(StringBuilder out, Map<String, String> diagnostics) {

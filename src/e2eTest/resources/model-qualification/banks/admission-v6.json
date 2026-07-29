@@ -3,6 +3,7 @@
   "schemaVersion": 6,
   "id": "talos-admission-v6",
   "kind": "ADMISSION",
+  "expectedRequestObligations": {},
   "scenarios": [
     {
       "id": "A01-simple-arithmetic-abstention",

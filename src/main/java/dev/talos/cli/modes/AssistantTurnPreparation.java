@@ -250,6 +250,15 @@ final class AssistantTurnPreparation {
     }
 
     private static void recordPolicyTrace(CurrentTurnPlan plan, Context ctx) {
+        if (plan != null && plan.requestObligation() != null) {
+            PromptDebugCapture.putTurnDiagnostic(
+                    "requestObligation.redactedProjectionJson",
+                    plan.requestObligation().redactedProjectionJson());
+            PromptDebugCapture.putTurnDiagnostic(
+                    "requestObligation.fullCanonicalSha256",
+                    plan.requestObligation().canonicalSha256());
+            LocalTurnTraceCapture.recordRequestObligation(plan.requestObligation());
+        }
         if (ctx == null || !TurnAuditCapture.isActive()) return;
         TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
                 plan.taskContract(),

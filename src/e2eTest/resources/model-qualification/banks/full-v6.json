@@ -3,6 +3,46 @@
   "schemaVersion": 6,
   "id": "talos-full-v6",
   "kind": "FULL",
+  "expectedRequestObligations": {
+    "F21-context-multi-requirement-edit": {
+      "schemaVersion": 1,
+      "derivationStatus": "COMPLETE",
+      "responseOwner": "DETERMINISTIC_RUNTIME_ALLOWED",
+      "actionKind": "APPEND_STATEMENT",
+      "mutationScope": "ONLY_REQUIRED_TARGETS",
+      "requiredMutationTargets": [
+        "docs/decisions.md"
+      ],
+      "requiredSourceTargets": [],
+      "forbiddenTargets": [],
+      "preservationConstraints": [
+        {
+          "kind": "NORMALIZED_PRIOR_CONTENT",
+          "target": "docs/decisions.md"
+        }
+      ],
+      "outputShape": {
+        "kind": "APPEND_LABELED_STATEMENT",
+        "target": "docs/decisions.md",
+        "label": "Decision 004",
+        "statement": "health checks remain read-only"
+      },
+      "verificationPostconditions": [
+        {
+          "kind": "MATCHING_STATEMENT_FINAL_LOGICAL_LINE",
+          "target": "docs/decisions.md"
+        },
+        {
+          "kind": "MATCHING_STATEMENT_PRESENT_ONCE",
+          "target": "docs/decisions.md"
+        },
+        {
+          "kind": "STRUCTURED_MUTATION_EVIDENCE",
+          "target": "docs/decisions.md"
+        }
+      ]
+    }
+  },
   "scenarios": [
     {
       "id": "F01-simple-read-project",
@@ -884,6 +924,12 @@
         }
       ],
       "atomicRequirements": [
+        {
+          "id": "request-obligation",
+          "type": "REQUEST_OBLIGATION",
+          "target": "request",
+          "expected": "true"
+        },
         {
           "id": "decision-004",
           "type": "FILE_CONTAINS",

@@ -2,7 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskContract;
@@ -158,11 +158,7 @@ class ExactWriteContextFallbackTest {
                 ExecutionPhase.APPLY,
                 ExecutionPhase.APPLY,
                 ActionObligation.MUTATING_TOOL_REQUIRED,
-                List.of(new LiteralContentExpectation(
-                        "index.html",
-                        "AFTER",
-                        LiteralContentExpectation.MatchMode.EXACT,
-                        "with exactly")),
+                TaskExpectationResolver.resolve(contract),
                 List.of("talos.write_file"),
                 List.of("talos.write_file"),
                 List.of(),

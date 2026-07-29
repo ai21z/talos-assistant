@@ -10,8 +10,11 @@ import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -29,6 +32,34 @@ final class TaskExpectationStaticVerifier {
             List<ToolCallLoop.ToolOutcome> successfulMutations,
             boolean recordExpectationTrace
     ) {
+        return verify(
+                contract,
+                RequestObligationCompiler.compile(contract),
+                root,
+                successfulMutations,
+                recordExpectationTrace);
+    }
+
+    static Result verify(
+            TaskContract contract,
+            RequestObligation requestObligation,
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            boolean recordExpectationTrace
+    ) {
+        RequestObligation compiled = RequestObligationCompiler.compile(contract);
+        if (requestObligation == null || !requestObligation.equals(compiled)) {
+            return failedObligationResult(
+                    "Supplied request obligation differs from production compilation.");
+        }
+        if (compiled.derivationStatus() == RequestObligation.DerivationStatus.COMPLETE) {
+            return verifyCompleteRequestObligation(
+                    compiled,
+                    root,
+                    successfulMutations,
+                    recordExpectationTrace);
+        }
+
         List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
         if (expectations.isEmpty()) return Result.empty();
 
@@ -109,6 +140,129 @@ final class TaskExpectationStaticVerifier {
                 coversAllSuccessfulMutations(verifiedTargets, successfulMutations),
                 facts,
                 problems);
+    }
+
+    private static Result verifyCompleteRequestObligation(
+            RequestObligation obligation,
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            boolean recordExpectationTrace
+    ) {
+        RequestObligation.OutputShape output = obligation.outputShape();
+        AppendStatementExpectation expectation = new AppendStatementExpectation(
+                output.target(),
+                output.label(),
+                output.statement(),
+                "request-obligation-v" + obligation.schemaVersion());
+        List<String> facts = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                output.target(),
+                "request-obligation verification could not resolve target path.",
+                "request-obligation target is not a readable file.",
+                "request-obligation verification could not read target");
+        if (target.hasProblem()) {
+            problems.add(target.problem());
+            if (recordExpectationTrace) {
+                TaskExpectationTraceRecorder.recordAppendStatementExpectation(
+                        expectation,
+                        ExpectationVerificationStatus.FAILED,
+                        "");
+            }
+            return completeAppendResult(
+                    false,
+                    Set.of(output.target()),
+                    successfulMutations,
+                    facts,
+                    problems);
+        }
+
+        TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence mutationEvidence =
+                TaskExpectationMutationEvidenceVerifier.collectAppendStatementMutationEvidence(
+                        target.pathHint(),
+                        output.label(),
+                        output.statement(),
+                        target.content(),
+                        successfulMutations,
+                        facts,
+                        problems);
+        byte[] before = mutationEvidence.beforeContent().getBytes(StandardCharsets.UTF_8);
+        byte[] after = target.content().getBytes(StandardCharsets.UTF_8);
+        RequestObligationFinalStateVerifier.Result finalState =
+                mutationEvidence.passed()
+                        ? RequestObligationFinalStateVerifier.verify(
+                                obligation,
+                                new RequestObligationFinalStateVerifier.Evidence(
+                                        java.util.Map.of(output.target(), before),
+                                        java.util.Map.of(output.target(), after),
+                                        Set.of(output.target())))
+                        : new RequestObligationFinalStateVerifier.Result(
+                                false,
+                                List.of("STRUCTURED_MUTATION_EVIDENCE_UNAVAILABLE"));
+        boolean passed = mutationEvidence.passed() && finalState.passed();
+        String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(after);
+        if (recordExpectationTrace) {
+            TaskExpectationTraceRecorder.recordAppendStatementExpectation(
+                    expectation,
+                    passed
+                            ? ExpectationVerificationStatus.PASSED
+                            : ExpectationVerificationStatus.FAILED,
+                    finalLine == null ? "" : finalLine);
+        }
+        if (passed) {
+            facts.add(target.pathHint()
+                    + ": appended statement matched requested final line.");
+        } else {
+            finalState.failedPostconditions().forEach(failure ->
+                    problems.add(target.pathHint()
+                            + ": request-obligation postcondition failed: " + failure + "."));
+        }
+        return completeAppendResult(
+                passed,
+                Set.of(output.target()),
+                successfulMutations,
+                facts,
+                problems);
+    }
+
+    private static Result completeAppendResult(
+            boolean passed,
+            Set<String> verifiedTargets,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        boolean coversAllMutations = coversAllSuccessfulMutations(
+                verifiedTargets,
+                successfulMutations);
+        if (passed && !coversAllMutations) {
+            problems.add(
+                    "Request-obligation evidence did not cover every successful mutation.");
+        }
+        return new Result(
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+                passed && coversAllMutations,
+                facts,
+                problems);
+    }
+
+    private static Result failedObligationResult(String problem) {
+        return new Result(
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                List.of(),
+                List.of(problem));
     }
 
     private static void addExpectationTarget(Set<String> verifiedTargets, TaskExpectation expectation) {

@@ -9,6 +9,7 @@ import dev.talos.runtime.TurnSettlement;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
+import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
@@ -47,6 +48,7 @@ public final class LocalTurnTraceCapture {
         boolean outcomeRendered;
         boolean routedAnswerRecorded;
         boolean verificationRecorded;
+        String requestObligationSha256 = "";
         AnswerCandidate answerCandidate;
         OutcomeCandidate outcomeCandidate;
         ProviderResponseCapture.Receipt selectedResponseReceipt;
@@ -456,6 +458,26 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null || trace == null || !trace.hasPolicyData()) return;
         PolicyTraceRecorder.record(bag.builder, trace);
+    }
+
+    /** Records one redacted projection of the exact runtime-compiled request obligation. */
+    public static void recordRequestObligation(RequestObligation obligation) {
+        Bag bag = HOLDER.get();
+        if (bag == null || obligation == null) return;
+        String identity = obligation.canonicalSha256();
+        if (!bag.requestObligationSha256.isBlank()) {
+            if (!bag.requestObligationSha256.equals(identity)) {
+                throw new IllegalStateException(
+                        "Turn attempted to record two different request obligations");
+            }
+            return;
+        }
+        bag.requestObligationSha256 = identity;
+        Map<String, Object> data = new LinkedHashMap<>(obligation.redactedProjection());
+        bag.builder.event(TurnTraceEvent.simple(
+                "REQUEST_OBLIGATION_COMPILED",
+                now(),
+                data));
     }
 
     /** Records the typed request decision without persisting matched prompt text. */

@@ -132,7 +132,7 @@ class QualificationScenarioBankTest {
     }
 
     @Test
-    void v6AddsExplicitResponseOwnershipAndVersionedFixtureIdentityWithoutOtherScenarioDrift() {
+    void v6AddsResponseOwnershipF21ObligationAndVersionedFixtureIdentityWithoutOtherDrift() {
         QualificationScenarioBank.Catalog v5 = QualificationScenarioBank.load(5);
         QualificationScenarioBank.Catalog v6 = QualificationScenarioBank.load(6);
 
@@ -149,12 +149,21 @@ class QualificationScenarioBankTest {
             assertEquals(before.allowedTargets(), after.allowedTargets(), before.id());
             assertEquals(before.forbiddenTargets(), after.forbiddenTargets(), before.id());
             assertEquals(before.expectedDecisions(), after.expectedDecisions(), before.id());
-            assertEquals(before.atomicRequirements(), after.atomicRequirements(), before.id());
+            List<QualificationProtocol.AtomicRequirement> normalizedAtomics =
+                    after.atomicRequirements().stream()
+                            .filter(requirement -> !before.id().equals(
+                                            "F21-context-multi-requirement-edit")
+                                    || !requirement.type().equals("REQUEST_OBLIGATION"))
+                            .toList();
+            assertEquals(before.atomicRequirements(), normalizedAtomics, before.id());
             assertEquals(v5.fixtures().get(before.fixture()).manifest().files(),
                     v6.fixtures().get(after.fixture()).manifest().files(), before.id());
             assertEquals(before.fixture().replace("-v5.json", "-v6.json"), after.fixture(), before.id());
             assertNotEquals(before.fixtureSha256(), after.fixtureSha256(), before.id());
         }
+        assertTrue(v6.admission().expectedRequestObligations().isEmpty());
+        assertEquals(Set.of("F21-context-multi-requirement-edit"),
+                v6.full().expectedRequestObligations().keySet());
     }
 
     @Test

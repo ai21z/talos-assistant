@@ -1,14 +1,22 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
+import dev.talos.runtime.task.TaskContractResolver;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Writes immutable finalizer results using the same requirement evaluator as packet validation. */
 final class QualificationRequirementFinalizer {
@@ -25,9 +33,70 @@ final class QualificationRequirementFinalizer {
             int protocolVersion,
             String scenarioBankSha256,
             String scenarioId,
+            String requestObligationSha256,
+            JsonNode requestObligation,
             List<Requirement> requirements) {
         Document {
+            if (!SCHEMA.equals(schemaName)) {
+                throw new IllegalArgumentException(
+                        "mechanical requirements schema name is invalid");
+            }
+            if (requestObligationSha256 == null) {
+                throw new IllegalArgumentException(
+                        "request-obligation identity is required");
+            }
+            if (!requestObligationSha256.isEmpty()
+                    && !requestObligationSha256.matches("[0-9a-f]{64}")) {
+                throw new IllegalArgumentException(
+                        "request-obligation identity must be lowercase SHA-256");
+            }
+            if (requestObligation == null || !requestObligation.isObject()) {
+                throw new IllegalArgumentException(
+                        "request-obligation result evidence must be a JSON object");
+            }
+            requestObligation = requestObligation.deepCopy();
+            if (protocolVersion >= 1 && protocolVersion <= 5) {
+                if (schemaVersion != 1
+                        || !requestObligationSha256.isEmpty()
+                        || !requestObligation.isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "legacy mechanical requirements cannot claim a request obligation");
+                }
+            } else if (protocolVersion == 6) {
+                if (schemaVersion == 1) {
+                    if (!requestObligationSha256.isEmpty()
+                            || !requestObligation.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "legacy protocol-v6 mechanical requirements "
+                                        + "cannot claim a request obligation");
+                    }
+                } else {
+                    if (schemaVersion != 2) {
+                        throw new IllegalArgumentException(
+                                "protocol-v6 mechanical requirements must use schema version 2");
+                    }
+                    boolean f21 = "F21-context-multi-requirement-edit".equals(scenarioId);
+                    if (f21 != !requestObligationSha256.isEmpty()
+                            || f21 != !requestObligation.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "protocol-v6 F21 alone requires its request-obligation identity");
+                    }
+                    if (f21) {
+                        validateRequestObligationProjection(
+                                requestObligation,
+                                requestObligationSha256);
+                    }
+                }
+            } else {
+                throw new IllegalArgumentException(
+                        "unsupported mechanical requirements protocol version");
+            }
             requirements = List.copyOf(requirements);
+        }
+
+        @Override
+        public JsonNode requestObligation() {
+            return requestObligation.deepCopy();
         }
 
         List<QualificationRecords.RequirementResult> results() {
@@ -36,6 +105,172 @@ final class QualificationRequirementFinalizer {
                             requirement.id(), requirement.passed()))
                     .toList();
         }
+    }
+
+    private static final Set<String> REQUEST_OBLIGATION_PROJECTION_FIELDS = Set.of(
+            "schemaVersion",
+            "derivationStatus",
+            "responseOwner",
+            "actionKind",
+            "mutationScope",
+            "requiredMutationTargets",
+            "requiredSourceTargets",
+            "forbiddenTargets",
+            "preservationConstraints",
+            "outputShape",
+            "verificationPostconditions",
+            "canonicalSha256");
+    private static final Set<String> TARGET_CONDITION_FIELDS = Set.of("kind", "target");
+    private static final Set<String> OUTPUT_SHAPE_FIELDS = Set.of(
+            "kind",
+            "target",
+            "labelSha256",
+            "labelChars",
+            "statementSha256",
+            "statementChars");
+
+    private static void validateRequestObligationProjection(
+            JsonNode rawProjection,
+            String declaredIdentity
+    ) {
+        ObjectNode projection = exactObject(
+                rawProjection,
+                REQUEST_OBLIGATION_PROJECTION_FIELDS,
+                "request-obligation result projection");
+        if (QualificationJson.requiredInt(
+                projection.get("schemaVersion"),
+                "request-obligation result schemaVersion")
+                != RequestObligation.SCHEMA_VERSION) {
+            throw new IllegalArgumentException(
+                    "request-obligation result schema version is unsupported");
+        }
+        if (QualificationJson.requiredEnum(
+                projection.get("derivationStatus"),
+                RequestObligation.DerivationStatus.class,
+                "request-obligation result derivationStatus")
+                != RequestObligation.DerivationStatus.COMPLETE) {
+            throw new IllegalArgumentException(
+                    "request-obligation result must be completely derived");
+        }
+        QualificationJson.requiredEnum(
+                projection.get("responseOwner"),
+                RequestObligation.ResponseOwner.class,
+                "request-obligation result responseOwner");
+        QualificationJson.requiredEnum(
+                projection.get("actionKind"),
+                RequestObligation.ActionKind.class,
+                "request-obligation result actionKind");
+        QualificationJson.requiredEnum(
+                projection.get("mutationScope"),
+                RequestObligation.MutationScope.class,
+                "request-obligation result mutationScope");
+        exactTextArray(
+                projection.get("requiredMutationTargets"),
+                "request-obligation result requiredMutationTargets");
+        exactTextArray(
+                projection.get("requiredSourceTargets"),
+                "request-obligation result requiredSourceTargets");
+        exactTextArray(
+                projection.get("forbiddenTargets"),
+                "request-obligation result forbiddenTargets");
+        exactConditionArray(
+                projection.get("preservationConstraints"),
+                RequestObligation.PreservationKind.class,
+                "request-obligation result preservationConstraints");
+        validateOutputShape(projection.get("outputShape"));
+        exactConditionArray(
+                projection.get("verificationPostconditions"),
+                RequestObligation.VerificationKind.class,
+                "request-obligation result verificationPostconditions");
+        String projectionIdentity = exactSha256(
+                projection.get("canonicalSha256"),
+                "request-obligation result canonicalSha256");
+        if (!declaredIdentity.equals(projectionIdentity)) {
+            throw new IllegalArgumentException(
+                    "request-obligation result projection and identity disagree");
+        }
+    }
+
+    private static ObjectNode exactObject(
+            JsonNode value,
+            Set<String> expectedFields,
+            String label
+    ) {
+        ObjectNode object = QualificationJson.requiredObject(value, label);
+        Set<String> actual = new HashSet<>();
+        object.fieldNames().forEachRemaining(actual::add);
+        if (!actual.equals(expectedFields)) {
+            throw new IllegalArgumentException(label + " has an invalid field set");
+        }
+        return object;
+    }
+
+    private static void exactTextArray(JsonNode value, String label) {
+        ArrayNode array = QualificationJson.requiredArray(value, label);
+        for (int index = 0; index < array.size(); index++) {
+            QualificationJson.requiredText(
+                    array.get(index),
+                    label + "[" + index + "]");
+        }
+    }
+
+    private static <E extends Enum<E>> void exactConditionArray(
+            JsonNode value,
+            Class<E> kind,
+            String label
+    ) {
+        ArrayNode array = QualificationJson.requiredArray(value, label);
+        for (int index = 0; index < array.size(); index++) {
+            ObjectNode condition = exactObject(
+                    array.get(index),
+                    TARGET_CONDITION_FIELDS,
+                    label + "[" + index + "]");
+            QualificationJson.requiredEnum(
+                    condition.get("kind"),
+                    kind,
+                    label + "[" + index + "].kind");
+            QualificationJson.requiredText(
+                    condition.get("target"),
+                    label + "[" + index + "].target");
+        }
+    }
+
+    private static void validateOutputShape(JsonNode value) {
+        ObjectNode output = exactObject(
+                value,
+                OUTPUT_SHAPE_FIELDS,
+                "request-obligation result outputShape");
+        QualificationJson.requiredEnum(
+                output.get("kind"),
+                RequestObligation.OutputKind.class,
+                "request-obligation result outputShape.kind");
+        QualificationJson.requiredText(
+                output.get("target"),
+                "request-obligation result outputShape.target");
+        exactSha256(
+                output.get("labelSha256"),
+                "request-obligation result outputShape.labelSha256");
+        QualificationJson.requiredInt(
+                output.get("labelChars"),
+                0,
+                Integer.MAX_VALUE,
+                "request-obligation result outputShape.labelChars");
+        exactSha256(
+                output.get("statementSha256"),
+                "request-obligation result outputShape.statementSha256");
+        QualificationJson.requiredInt(
+                output.get("statementChars"),
+                0,
+                Integer.MAX_VALUE,
+                "request-obligation result outputShape.statementChars");
+    }
+
+    private static String exactSha256(JsonNode value, String label) {
+        String hash = QualificationJson.requiredText(value, label);
+        if (!hash.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException(label + " must be lowercase SHA-256");
+        }
+        return hash;
     }
 
     static Path evaluateAndWrite(
@@ -122,7 +357,48 @@ final class QualificationRequirementFinalizer {
                 })
                 .toList();
         return new Document(
-                SCHEMA, 1, protocolVersion, scenarioBankSha256, scenario.id(), requirements);
+                SCHEMA,
+                protocolVersion >= 6 ? 2 : 1,
+                protocolVersion,
+                scenarioBankSha256,
+                scenario.id(),
+                requestObligationIdentity(scenario),
+                requestObligationProjection(scenario),
+                requirements);
+    }
+
+    private static String requestObligationIdentity(
+            QualificationProtocol.Scenario scenario
+    ) {
+        boolean required = scenario.atomicRequirements().stream()
+                .anyMatch(requirement ->
+                        "REQUEST_OBLIGATION".equals(requirement.type()));
+        if (!required) return "";
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(scenario.prompt()));
+        if (obligation.derivationStatus()
+                != RequestObligation.DerivationStatus.COMPLETE) {
+            throw new IllegalStateException(
+                    "migrated scenario did not compile a complete request obligation");
+        }
+        return obligation.canonicalSha256();
+    }
+
+    private static JsonNode requestObligationProjection(
+            QualificationProtocol.Scenario scenario
+    ) {
+        boolean required = scenario.atomicRequirements().stream()
+                .anyMatch(requirement ->
+                        "REQUEST_OBLIGATION".equals(requirement.type()));
+        if (!required) return QualificationJson.tree(Map.of());
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(scenario.prompt()));
+        if (obligation.derivationStatus()
+                != RequestObligation.DerivationStatus.COMPLETE) {
+            throw new IllegalStateException(
+                    "migrated scenario did not compile a complete request obligation");
+        }
+        return QualificationJson.tree(obligation.redactedProjection());
     }
 
     static Path containedRunRoot(

@@ -4,8 +4,11 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -92,6 +95,24 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                StaticWebRenderVerifier.unavailableRunner());
+    }
+
+    public static TaskVerificationEvidence verifyWithEvidence(
+            Path workspace,
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                requestObligation,
                 loopResult,
                 extraMutationSuccesses,
                 true,
@@ -108,6 +129,7 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
                 loopResult,
                 extraMutationSuccesses,
                 true,
@@ -123,6 +145,7 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
                 loopResult,
                 extraMutationSuccesses,
                 false,
@@ -132,6 +155,7 @@ public final class StaticTaskVerifier {
     private static TaskVerificationEvidence verifyInternal(
             Path workspace,
             TaskContract contract,
+            RequestObligation requestObligation,
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses,
             boolean recordExpectationTrace,
@@ -141,6 +165,11 @@ public final class StaticTaskVerifier {
             return TaskVerificationEvidence.postApply(
                     TaskVerificationResult.notRun("No tool-loop result was available."),
                     VerificationReport.empty());
+        }
+        RequestObligation compiledObligation =
+                RequestObligationCompiler.compile(contract);
+        if (recordExpectationTrace) {
+            LocalTurnTraceCapture.recordRequestObligation(compiledObligation);
         }
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -152,6 +181,19 @@ public final class StaticTaskVerifier {
         if (totalMutationSuccesses <= 0) {
             return TaskVerificationEvidence.postApply(
                     TaskVerificationResult.notRun("No successful mutation was available to verify."),
+                    VerificationReport.empty());
+        }
+        if (compiledObligation.derivationStatus()
+                == RequestObligation.DerivationStatus.COMPLETE
+                && extraMutationSuccesses > 0) {
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.unavailable(
+                            "A complete request obligation could not account for "
+                                    + "a successful mutation outside structured evidence.",
+                            List.of(),
+                            List.of(
+                                    "request obligation does not cover every "
+                                            + "successful mutation")),
                     VerificationReport.empty());
         }
         if (workspace == null) {
@@ -202,6 +244,7 @@ public final class StaticTaskVerifier {
         problems.addAll(targetScopeVerification.problems());
         TaskExpectationStaticVerifier.Result expectationVerification = TaskExpectationStaticVerifier.verify(
                 contract,
+                requestObligation,
                 root,
                 successfulMutations,
                 recordExpectationTrace);

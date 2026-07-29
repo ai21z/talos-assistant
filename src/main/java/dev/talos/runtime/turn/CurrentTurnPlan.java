@@ -5,6 +5,8 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.VerifierProfile;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -30,7 +32,8 @@ public record CurrentTurnPlan(
         String outputObligation,
         String activeTaskContext,
         String artifactGoal,
-        String verifierProfile
+        String verifierProfile,
+        RequestObligation requestObligation
 ) {
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
     public static final String NOT_DERIVED = "NOT_DERIVED";
@@ -47,15 +50,70 @@ public record CurrentTurnPlan(
         actionObligation = actionObligation == null
                 ? ActionObligationPolicy.derive(taskContract, phaseInitial)
                 : actionObligation;
-        taskExpectations = taskExpectations == null ? List.of() : List.copyOf(taskExpectations);
+        List<TaskExpectation> suppliedTaskExpectations =
+                taskExpectations == null ? List.of() : List.copyOf(taskExpectations);
+        List<TaskExpectation> compiledTaskExpectations =
+                TaskExpectationResolver.resolve(taskContract);
+        if (!suppliedTaskExpectations.isEmpty()
+                && !suppliedTaskExpectations.equals(compiledTaskExpectations)) {
+            throw new IllegalArgumentException(
+                    "Supplied task expectations differ from runtime compilation");
+        }
+        taskExpectations = compiledTaskExpectations;
         nativeTools = nativeTools == null ? List.of() : List.copyOf(nativeTools);
         promptTools = promptTools == null ? List.of() : List.copyOf(promptTools);
         blockedTools = blockedTools == null ? List.of() : List.copyOf(blockedTools);
+        RequestObligation compiledRequestObligation =
+                RequestObligationCompiler.compile(taskContract);
+        if (requestObligation != null
+                && !requestObligation.equals(compiledRequestObligation)) {
+            throw new IllegalArgumentException(
+                    "Supplied request obligation differs from the runtime-compiled obligation");
+        }
+        requestObligation = compiledRequestObligation;
         evidenceObligation = evidenceObligation == null ? NONE_OR_NOT_DERIVED : evidenceObligation;
         outputObligation = outputObligation == null ? NOT_DERIVED : outputObligation;
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
         artifactGoal = artifactGoal == null ? NONE_OR_NOT_DERIVED : artifactGoal;
         verifierProfile = verifierProfile == null ? NONE_OR_NOT_DERIVED : verifierProfile;
+    }
+
+    /**
+     * Compatibility constructor retained while callers migrate to the shared
+     * request-obligation component.
+     */
+    public CurrentTurnPlan(
+            TaskContract taskContract,
+            String originalUserRequest,
+            ExecutionPhase phaseInitial,
+            ExecutionPhase phaseFinal,
+            ActionObligation actionObligation,
+            List<TaskExpectation> taskExpectations,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String evidenceObligation,
+            String outputObligation,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile
+    ) {
+        this(
+                taskContract,
+                originalUserRequest,
+                phaseInitial,
+                phaseFinal,
+                actionObligation,
+                taskExpectations,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                evidenceObligation,
+                outputObligation,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                null);
     }
 
     public static CurrentTurnPlan create(
@@ -145,7 +203,8 @@ public record CurrentTurnPlan(
                 NOT_DERIVED,
                 activeTaskContext,
                 artifactGoal,
-                verifierProfile);
+                verifierProfile,
+                null);
     }
 
     public static CurrentTurnPlan compatibility(
@@ -171,6 +230,10 @@ public record CurrentTurnPlan(
             return NONE_OR_NOT_DERIVED;
         }
         return profile.verifierProfile().name();
+    }
+
+    public String canonicalRequestObligationHash() {
+        return requestObligation.canonicalSha256();
     }
 
     private static ExecutionPhase defaultPhase(TaskContract contract) {

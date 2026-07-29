@@ -1,6 +1,10 @@
 package dev.talos.qualification;
 
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -33,6 +37,8 @@ final class QualificationScenarioBank {
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
     private static final String FULL_V5_PATH = "model-qualification/banks/full-v5.json";
+    private static final String F21_REQUEST_OBLIGATION_SCENARIO =
+            "F21-context-multi-requirement-edit";
     // The published v5 full bank contains these LF separators inside its otherwise CRLF body.
     // They are part of frozen packet identity, not a preferred formatting convention.
     private static final Set<Integer> FULL_V5_PUBLISHED_LF_SEPARATOR_ORDINALS = Set.of(
@@ -72,8 +78,8 @@ final class QualificationScenarioBank {
             Map.entry("model-qualification/fixtures/context-workspace-v5.json", new ResourceIdentity("5ea35fd54391f7f07ff5bd7c398320b14fb078d1ae6f0c9d695fd3f34afd480c", "2c27b3584fd4275517415fbc33074bd5bb93d81d0e7821a03fc98cc6eefe5e1e")),
             Map.entry("model-qualification/fixtures/privacy-workspace-v5.json", new ResourceIdentity("73440a10a20519b56c58440cdfb78ab7e1fb73c4d81d260230719db472e9b2ef", "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672")),
             Map.entry("model-qualification/fixtures/web-workspace-v5.json", new ResourceIdentity("e73f177ca821dc8aeb15a818f5549b90a34461b6193bb5fddc10778aa1cd901c", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10")),
-            Map.entry("model-qualification/banks/admission-v6.json", new ResourceIdentity("64fb693757fc3d427f4aa9609ff0673eef4118d2c7645b01b8cefb37980de37c", "64fb693757fc3d427f4aa9609ff0673eef4118d2c7645b01b8cefb37980de37c")),
-            Map.entry("model-qualification/banks/full-v6.json", new ResourceIdentity("ad94fd242fbe38c9809a267c112964ae0c8cdd816dd225260aaf2faeae814c7a", "ad94fd242fbe38c9809a267c112964ae0c8cdd816dd225260aaf2faeae814c7a")),
+            Map.entry("model-qualification/banks/admission-v6.json", new ResourceIdentity("848e6bcf951218abc597e0f1f504424b80737f018c6377543759c963e34829f9", "848e6bcf951218abc597e0f1f504424b80737f018c6377543759c963e34829f9")),
+            Map.entry("model-qualification/banks/full-v6.json", new ResourceIdentity("5d722f310efeb725e89e43e6553868083ada5560cc1c84b99bfdf09418f87735", "5d722f310efeb725e89e43e6553868083ada5560cc1c84b99bfdf09418f87735")),
             Map.entry("model-qualification/fixtures/basic-workspace-v6.json", new ResourceIdentity("6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473")),
             Map.entry("model-qualification/fixtures/context-workspace-v6.json", new ResourceIdentity("565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da")),
             Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", new ResourceIdentity("6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5")),
@@ -129,6 +135,12 @@ final class QualificationScenarioBank {
                     .filter(candidate -> candidate.id().equals(id))
                     .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Unknown qualification scenario: " + id));
+        }
+
+        RequestObligation expectedRequestObligation(String scenarioId) {
+            RequestObligation admissionValue = admission.expectedRequestObligations().get(scenarioId);
+            if (admissionValue != null) return admissionValue;
+            return full.expectedRequestObligations().get(scenarioId);
         }
     }
 
@@ -454,6 +466,84 @@ final class QualificationScenarioBank {
                 throw new IllegalArgumentException("Duplicate scenario id: " + scenario.id());
             }
             validateScenario(scenario, fixtures);
+        }
+        validateExpectedRequestObligations(bank, protocolVersion);
+    }
+
+    static void validateExpectedRequestObligations(
+            QualificationProtocol.ScenarioBank bank,
+            int protocolVersion
+    ) {
+        if (bank == null) {
+            throw new IllegalArgumentException("scenario bank is required");
+        }
+        Set<String> expectedKeys = protocolVersion == 6
+                && bank.kind() == QualificationProtocol.BankKind.FULL
+                ? Set.of(F21_REQUEST_OBLIGATION_SCENARIO)
+                : Set.of();
+        if (!bank.expectedRequestObligations().keySet().equals(expectedKeys)) {
+            throw new IllegalArgumentException(
+                    "Unexpected request-obligation scenarios in " + bank.id()
+                            + ": expected " + expectedKeys
+                            + ", found " + bank.expectedRequestObligations().keySet());
+        }
+
+        Map<String, QualificationProtocol.Scenario> scenariosById = bank.scenarios().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        QualificationProtocol.Scenario::id,
+                        scenario -> scenario));
+        for (Map.Entry<String, RequestObligation> entry
+                : bank.expectedRequestObligations().entrySet()) {
+            QualificationProtocol.Scenario scenario = scenariosById.get(entry.getKey());
+            if (scenario == null) {
+                throw new IllegalArgumentException(
+                        "Request obligation names an unknown scenario in "
+                                + bank.id() + ": " + entry.getKey());
+            }
+            TaskContract contract = TaskContractResolver.fromUserRequest(scenario.prompt());
+            RequestObligation compiled = RequestObligationCompiler.compile(contract);
+            if (compiled.derivationStatus() != RequestObligation.DerivationStatus.COMPLETE) {
+                throw new IllegalArgumentException(
+                        "Request obligation is not production-compilable for " + scenario.id());
+            }
+            if (!compiled.equals(entry.getValue())) {
+                throw new IllegalArgumentException(
+                        "Declared request obligation differs from production compilation for "
+                                + scenario.id());
+            }
+            if (!compiled.responseOwner().name().equals(
+                    scenario.responseOwnerContract().name())) {
+                throw new IllegalArgumentException(
+                        "Request obligation response owner disagrees with scenario for "
+                                + scenario.id());
+            }
+            if (!Set.copyOf(compiled.requiredMutationTargets())
+                    .equals(Set.copyOf(scenario.allowedTargets()))) {
+                throw new IllegalArgumentException(
+                        "Request obligation mutation targets disagree with scenario for "
+                                + scenario.id());
+            }
+        }
+
+        for (QualificationProtocol.Scenario scenario : bank.scenarios()) {
+            List<QualificationProtocol.AtomicRequirement> obligationRequirements =
+                    scenario.atomicRequirements().stream()
+                            .filter(requirement -> "REQUEST_OBLIGATION".equals(requirement.type()))
+                            .toList();
+            boolean migrated = expectedKeys.contains(scenario.id());
+            if (!migrated && !obligationRequirements.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Unmigrated scenario declares a request-obligation atomic: "
+                                + scenario.id());
+            }
+            if (migrated && (obligationRequirements.size() != 1
+                    || !"request-obligation".equals(obligationRequirements.getFirst().id())
+                    || !"request".equals(obligationRequirements.getFirst().target())
+                    || !"true".equals(obligationRequirements.getFirst().expected()))) {
+                throw new IllegalArgumentException(
+                        "Migrated scenario lacks its exact request-obligation atomic: "
+                                + scenario.id());
+            }
         }
     }
 

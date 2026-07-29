@@ -2,6 +2,7 @@ package dev.talos.runtime.turn;
 
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.VerifierProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
@@ -219,12 +220,8 @@ class CurrentTurnPlanTest {
     void directConstructorDefensivelyCopiesTaskExpectations() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
-        List<TaskExpectation> expectations = new ArrayList<>();
-        expectations.add(new LiteralContentExpectation(
-                "index.html",
-                "AFTER",
-                LiteralContentExpectation.MatchMode.EXACT,
-                "test"));
+        List<TaskExpectation> expectations = new ArrayList<>(
+                TaskExpectationResolver.resolve(contract));
 
         CurrentTurnPlan plan = new CurrentTurnPlan(
                 contract,

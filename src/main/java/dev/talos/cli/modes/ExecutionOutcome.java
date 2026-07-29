@@ -390,6 +390,7 @@ record ExecutionOutcome(
                 ? StaticTaskVerifier.verifyWithEvidence(
                         workspace,
                         contract,
+                        safePlan.requestObligation(),
                         loopResult,
                         extraMutationSuccesses)
                 : usingDocumentExtractionVerification

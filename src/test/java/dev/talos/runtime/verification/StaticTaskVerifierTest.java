@@ -504,6 +504,54 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void appendStatementVerifierRejectsAConflictingSuppliedObligationAuthority()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.";
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        var exact = dev.talos.runtime.obligation.RequestObligationCompiler.compile(contract);
+        var forged = new dev.talos.runtime.obligation.RequestObligation(
+                exact.schemaVersion(),
+                exact.derivationStatus(),
+                exact.responseOwner(),
+                exact.actionKind(),
+                exact.mutationScope(),
+                exact.requiredMutationTargets(),
+                exact.requiredSourceTargets(),
+                exact.forbiddenTargets(),
+                exact.preservationConstraints(),
+                new dev.talos.runtime.obligation.RequestObligation.OutputShape(
+                        exact.outputShape().kind(),
+                        "docs/decisions.md",
+                        "Decision 999",
+                        "mutations remain unrestricted"),
+                exact.verificationPostconditions());
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                forged,
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md",
+                        before,
+                        after,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(
+                TaskVerificationStatus.FAILED,
+                evidence.compatibilityResult().status());
+        assertTrue(evidence.compatibilityResult().problems().stream()
+                .anyMatch(problem ->
+                        problem.contains("differs from production compilation")));
+    }
+
+    @Test
     void appendStatementAllowsCaseAndOneFinalTerminatorOnly() throws Exception {
         String before = "# Decisions\n\nDecision 001 remains.\n";
         String after = before + "\nDecision 004 says Health checks remain read-only!\n";
@@ -542,6 +590,50 @@ class StaticTaskVerifierTest {
 
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
         assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementExactEditUsesSharedLineEndingMatchingForPriorState()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.";
+        String beforeLf = "# Decisions\n\nDecision 001 remains.\n";
+        String afterLf =
+                beforeLf + "\nDecision 004: health checks remain read-only.\n";
+        String beforeCrlf = beforeLf.replace("\n", "\r\n");
+        String afterCrlf = afterLf.replace("\n", "\r\n");
+        Files.createDirectories(workspace.resolve("docs"));
+
+        Files.writeString(workspace.resolve("docs/decisions.md"), afterCrlf);
+        TaskVerificationResult lfEvidenceForCrlfFile = StaticTaskVerifier.verify(
+                workspace,
+                request,
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        beforeLf,
+                        afterLf,
+                        VerificationStatus.PASS))),
+                0);
+        assertEquals(
+                TaskVerificationStatus.PASSED,
+                lfEvidenceForCrlfFile.status(),
+                lfEvidenceForCrlfFile.toString());
+
+        Files.writeString(workspace.resolve("docs/decisions.md"), afterLf);
+        TaskVerificationResult crlfEvidenceForLfFile = StaticTaskVerifier.verify(
+                workspace,
+                request,
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        beforeCrlf,
+                        afterCrlf,
+                        VerificationStatus.PASS))),
+                0);
+        assertEquals(
+                TaskVerificationStatus.PASSED,
+                crlfEvidenceForLfFile.status(),
+                crlfEvidenceForLfFile.toString());
     }
 
     @Test
@@ -649,6 +741,84 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void verificationCommandCannotUpgradeAnUncoveredCompleteObligation()
+            throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after =
+                before + "\nDecision 004: health checks remain read-only.\n";
+        String gateway = "final class Gateway {}\n";
+        String changedGateway = "final class Gateway { int temporary; }\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.createDirectories(workspace.resolve("src"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        Files.writeString(workspace.resolve("src/Gateway.java"), gateway);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(
+                        successfulFullWrite(
+                                "docs/decisions.md",
+                                before,
+                                after,
+                                VerificationStatus.PASS),
+                        successfulFullWrite(
+                                "src/Gateway.java",
+                                gateway,
+                                changedGateway,
+                                VerificationStatus.PASS),
+                        successfulFullWrite(
+                                "src/Gateway.java",
+                                changedGateway,
+                                gateway,
+                                VerificationStatus.PASS),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.run_command",
+                                "",
+                                true,
+                                false,
+                                false,
+                                "Command succeeded: gradle_check exited with code 0 after 1234ms.",
+                                ""))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(problem -> problem.contains(
+                        "did not cover every successful mutation")));
+    }
+
+    @Test
+    void completeObligationCannotPassWithAnUnstructuredMutationSuccess()
+            throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after =
+                before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md",
+                        before,
+                        after,
+                        VerificationStatus.PASS))),
+                1);
+
+        assertEquals(
+                TaskVerificationStatus.UNAVAILABLE,
+                result.status(),
+                result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(problem -> problem.contains(
+                        "does not cover every successful mutation")));
+    }
+
+    @Test
     void appendStatementExpectationTraceIsRedacted() throws Exception {
         String before = "# Decisions\n\nDecision 001 remains.\n";
         String after = before + "\nDecision 004: Health checks remain read-only.\n";
@@ -677,6 +847,51 @@ class StaticTaskVerifierTest {
             assertEquals("PASSED", event.data().get("status"));
             assertFalse(event.data().containsValue("Decision 004"));
             assertFalse(event.data().containsValue("health checks remain read-only"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void provisionalVerificationDoesNotReplaceTheTurnOwnedRequestObligation()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.";
+        var turnObligation =
+                dev.talos.runtime.obligation.RequestObligationCompiler.compile(
+                        TaskContractResolver.fromUserRequest(request));
+        Files.writeString(workspace.resolve("notes.txt"), "updated");
+        LocalTurnTraceCapture.begin(
+                "trc-request-obligation-provisional-verification",
+                "session-test",
+                1,
+                "2026-07-28T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                request);
+        try {
+            LocalTurnTraceCapture.recordRequestObligation(turnObligation);
+            StaticTaskVerifier.verifyWithoutTraceEvents(
+                    workspace,
+                    TaskContractResolver.fromUserRequest("Update notes.txt."),
+                    loopResult(List.of(successfulWrite(
+                            "notes.txt",
+                            VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            List<dev.talos.runtime.trace.TurnTraceEvent> obligations =
+                    trace.events().stream()
+                            .filter(event -> event.type().equals(
+                                    "REQUEST_OBLIGATION_COMPILED"))
+                            .toList();
+            assertEquals(1, obligations.size());
+            assertEquals(
+                    turnObligation.canonicalSha256(),
+                    obligations.getFirst().data().get("canonicalSha256"));
         } finally {
             LocalTurnTraceCapture.clear();
         }

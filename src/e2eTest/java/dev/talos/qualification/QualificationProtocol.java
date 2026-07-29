@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.runtime.obligation.RequestObligation;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -112,12 +114,26 @@ final class QualificationProtocol {
             int schemaVersion,
             String id,
             BankKind kind,
+            Map<String, RequestObligation> expectedRequestObligations,
             List<Scenario> scenarios) {
         ScenarioBank {
             schemaName = required(schemaName, "bank schema name");
             id = required(id, "bank id");
             kind = Objects.requireNonNull(kind, "bank kind");
+            expectedRequestObligations = expectedRequestObligations == null
+                    ? Map.of()
+                    : Map.copyOf(expectedRequestObligations);
             scenarios = immutableRequired(scenarios, "bank scenarios");
+        }
+
+        ScenarioBank(
+                String schemaName,
+                int schemaVersion,
+                String id,
+                BankKind kind,
+                List<Scenario> scenarios
+        ) {
+            this(schemaName, schemaVersion, id, kind, Map.of(), scenarios);
         }
     }
 
