@@ -61,6 +61,54 @@ class ProtectedWorkspacePathsTest {
     }
 
     @Test
+    void providerRootSyntaxEscapesBeforeHostNativePathParsing() {
+        for (String rawPath : List.of(
+                "\\.env",
+                "\\Windows\\system32\\drivers\\etc\\hosts",
+                "\\..\\secret",
+                "\\\\server\\share\\secret",
+                "C:\\Windows\\system32\\drivers\\etc\\hosts",
+                "D:/outside/secret")) {
+            ProtectedWorkspacePaths.Decision direct =
+                    ProtectedWorkspacePaths.classify(workspace, rawPath);
+            ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, rawPath);
+
+            assertTrue(direct.hasPath(), rawPath);
+            assertFalse(direct.insideWorkspace(), rawPath);
+            assertTrue(direct.workspaceEscape(), rawPath);
+            assertFalse(direct.protectedPath(), rawPath);
+            assertEquals(runtime.rawPath(), direct.rawPath(), rawPath);
+            assertEquals(runtime.insideWorkspace(), direct.insideWorkspace(), rawPath);
+            assertEquals(runtime.workspaceEscape(), direct.workspaceEscape(), rawPath);
+            assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
+        }
+    }
+
+    @Test
+    void nativeAbsolutePathInsideWorkspaceStillUsesContainmentClassification() {
+        Path absoluteInside = workspace.resolve("docs").resolve("notes.md").toAbsolutePath();
+
+        ProtectedWorkspacePaths.Decision decision =
+                ProtectedWorkspacePaths.classify(workspace, absoluteInside.toString());
+
+        assertTrue(decision.insideWorkspace());
+        assertFalse(decision.workspaceEscape());
+        assertFalse(decision.protectedPath());
+        assertEquals("docs/notes.md", decision.relativePath());
+    }
+
+    @Test
+    void internalWindowsSeparatorsRemainWorkspaceRelativeAndProtected() {
+        ProtectedWorkspacePaths.Decision decision =
+                ProtectedWorkspacePaths.classify(workspace, "Secrets\\TOKEN.txt");
+
+        assertTrue(decision.insideWorkspace());
+        assertFalse(decision.workspaceEscape());
+        assertTrue(decision.protectedPath());
+        assertEquals("SECRET", decision.protectedKind());
+    }
+
+    @Test
     void windowsAliasPathsClassifyAsProtectedThroughRuntimePolicy() throws Exception {
         Files.writeString(workspace.resolve("id_rsa"), "PRIVATE KEY\n");
         Files.createDirectories(workspace.resolve(".ssh"));
