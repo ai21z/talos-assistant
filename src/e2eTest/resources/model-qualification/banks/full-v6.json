@@ -4,6 +4,86 @@
   "id": "talos-full-v6",
   "kind": "FULL",
   "expectedRequestObligations": {
+    "F16-recovery-append-section": {
+      "schemaVersion": 1,
+      "derivationStatus": "COMPLETE",
+      "responseOwner": "DETERMINISTIC_RUNTIME_ALLOWED",
+      "actionKind": "APPEND_SECTION",
+      "mutationScope": "ONLY_REQUIRED_TARGETS",
+      "requiredMutationTargets": [
+        "README.md"
+      ],
+      "requiredSourceTargets": [],
+      "forbiddenTargets": [],
+      "preservationConstraints": [
+        {
+          "kind": "NORMALIZED_PRIOR_CONTENT",
+          "target": "README.md"
+        }
+      ],
+      "outputShape": {
+        "kind": "APPEND_MARKDOWN_SECTION",
+        "target": "README.md",
+        "label": "Contributing",
+        "statement": "Run tests before review."
+      },
+      "verificationPostconditions": [
+        {
+          "kind": "MATCHING_SECTION_FINAL_DOCUMENT_SECTION",
+          "target": "README.md"
+        },
+        {
+          "kind": "MATCHING_SECTION_PRESENT_ONCE",
+          "target": "README.md"
+        },
+        {
+          "kind": "STRUCTURED_MUTATION_EVIDENCE",
+          "target": "README.md"
+        }
+      ]
+    },
+    "F17-recovery-full-file-preservation": {
+      "schemaVersion": 1,
+      "derivationStatus": "COMPLETE",
+      "responseOwner": "DETERMINISTIC_RUNTIME_ALLOWED",
+      "actionKind": "REPLACE_TEXT_PRESERVE_REST",
+      "mutationScope": "ONLY_REQUIRED_TARGETS",
+      "requiredMutationTargets": [
+        "notes.md"
+      ],
+      "requiredSourceTargets": [],
+      "forbiddenTargets": [],
+      "preservationConstraints": [
+        {
+          "kind": "UNCHANGED_CONTENT_AROUND_REPLACEMENT",
+          "target": "notes.md"
+        }
+      ],
+      "outputShape": {
+        "kind": "REPLACE_TEXT",
+        "target": "notes.md",
+        "label": "draft",
+        "statement": "final"
+      },
+      "verificationPostconditions": [
+        {
+          "kind": "NEW_TEXT_PRESENT",
+          "target": "notes.md"
+        },
+        {
+          "kind": "OLD_TEXT_ABSENT",
+          "target": "notes.md"
+        },
+        {
+          "kind": "REQUESTED_REPLACEMENT_EXACTLY_ONCE",
+          "target": "notes.md"
+        },
+        {
+          "kind": "STRUCTURED_MUTATION_EVIDENCE",
+          "target": "notes.md"
+        }
+      ]
+    },
     "F21-context-multi-requirement-edit": {
       "schemaVersion": 1,
       "derivationStatus": "COMPLETE",
@@ -686,6 +766,12 @@
       ],
       "atomicRequirements": [
         {
+          "id": "request-obligation",
+          "type": "REQUEST_OBLIGATION",
+          "target": "request",
+          "expected": "true"
+        },
+        {
           "id": "heading",
           "type": "FILE_CONTAINS",
           "target": "README.md",
@@ -728,6 +814,12 @@
         }
       ],
       "atomicRequirements": [
+        {
+          "id": "request-obligation",
+          "type": "REQUEST_OBLIGATION",
+          "target": "request",
+          "expected": "true"
+        },
         {
           "id": "final",
           "type": "FILE_CONTAINS",

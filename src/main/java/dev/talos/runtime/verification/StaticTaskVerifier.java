@@ -279,7 +279,10 @@ public final class StaticTaskVerifier {
                 sourceDerivedVerification,
                 claimReport);
         compatibilityResult = withCommandVerificationUpgrade(compatibilityResult, outcomes);
-        return TaskVerificationEvidence.postApply(compatibilityResult, claimReport);
+        return TaskVerificationEvidence.postApply(
+                compatibilityResult,
+                claimReport,
+                expectationVerification.requestObligationReceipt());
     }
 
     /**

@@ -246,6 +246,41 @@ class MutationFailureAnswerRendererTest {
         assertFalse(out.contains("I updated index.html."));
     }
 
+    @Test
+    void mixedOutcomeScopesNoChangeDiagnosticToTheFailedCall() {
+        var loopResult = loopResult(List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file",
+                        "README.md",
+                        false,
+                        true,
+                        false,
+                        "",
+                        "Invalid arguments. No approval was requested and no file was changed.",
+                        null,
+                        ToolError.INVALID_PARAMS)
+                        .withFailureReason(ToolFailureReason.EDIT_EMPTY_ARGUMENTS),
+                new ToolCallLoop.ToolOutcome(
+                        "talos.write_file",
+                        "README.md",
+                        true,
+                        true,
+                        false,
+                        "Updated README.md",
+                        "")));
+
+        String out = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
+                "Updated README.md.",
+                loopResult,
+                0);
+
+        assertTrue(out.contains("Succeeded:"));
+        assertTrue(out.contains("Failed:"));
+        assertTrue(out.contains("That failed call requested no approval and changed no file."));
+        assertFalse(out.contains("No approval was requested"));
+        assertFalse(out.contains("no file was changed"));
+    }
+
     private static CurrentTurnPlan plan(String request) {
         var contract = TaskContractResolver.fromUserRequest(request);
         return CurrentTurnPlan.create(

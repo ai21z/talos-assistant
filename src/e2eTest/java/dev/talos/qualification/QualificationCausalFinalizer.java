@@ -43,13 +43,31 @@ final class QualificationCausalFinalizer {
             List<DecisionObservation> observations,
             boolean ambiguousToolOutcome,
             boolean runtimeToolTransformationPresent,
-            boolean runtimeAnswerTransformationPresent) {
+            boolean runtimeAnswerTransformationPresent,
+            List<QualificationTraceEvidence.MutationRecoveryFact>
+                    provenMutationRecoveries) {
         DecisionEvidence {
             observations = observations == null ? List.of() : List.copyOf(observations);
+            provenMutationRecoveries = provenMutationRecoveries == null
+                    ? List.of()
+                    : List.copyOf(provenMutationRecoveries);
             if (observations.stream().map(DecisionObservation::id).distinct().count()
                     != observations.size()) {
                 throw new IllegalArgumentException("score-bearing decision ids must be unique");
             }
+            if (provenMutationRecoveries.stream().anyMatch(recovery -> !recovery.proven())) {
+                throw new IllegalArgumentException(
+                        "decision evidence cannot claim an unproven mutation recovery");
+            }
+        }
+
+        DecisionEvidence(
+                List<DecisionObservation> observations,
+                boolean ambiguousToolOutcome,
+                boolean runtimeToolTransformationPresent,
+                boolean runtimeAnswerTransformationPresent) {
+            this(observations, ambiguousToolOutcome, runtimeToolTransformationPresent,
+                    runtimeAnswerTransformationPresent, List.of());
         }
 
         DecisionEvidence(
@@ -66,7 +84,7 @@ final class QualificationCausalFinalizer {
         }
 
         static DecisionEvidence none() {
-            return new DecisionEvidence(List.of(), false, false, false);
+            return new DecisionEvidence(List.of(), false, false, false, List.of());
         }
 
         boolean complete() {
@@ -831,10 +849,22 @@ final class QualificationCausalFinalizer {
                     expected.id(), correct, owner, reference));
         }
 
+        List<QualificationTraceEvidence.MutationRecoveryFact> provenMutationRecoveries =
+                trace == null
+                        ? List.of()
+                        : trace.mutationRecoveries().stream()
+                                .filter(QualificationTraceEvidence.MutationRecoveryFact::proven)
+                                .toList();
+        Set<String> mechanicallyResolvedFailureCalls = provenMutationRecoveries.stream()
+                .map(QualificationTraceEvidence.MutationRecoveryFact::failureToolCallId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         boolean ambiguousToolOutcome = trace != null && !operatorInterrupted
                 && trace.calls().stream().anyMatch(call -> {
                     if (call.settlement()
                             == QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS) {
+                        return false;
+                    }
+                    if (mechanicallyResolvedFailureCalls.contains(call.toolCallId())) {
                         return false;
                     }
                     return !(scenario.approvalBehavior()
@@ -851,7 +881,8 @@ final class QualificationCausalFinalizer {
                 observations,
                 ambiguousToolOutcome,
                 runtimeToolTransformationPresent,
-                trace != null && trace.runtimeAnswerTransformed());
+                trace != null && trace.runtimeAnswerTransformed(),
+                provenMutationRecoveries);
     }
 
     private static EvidenceIdentity evidenceIdentity(
@@ -1136,6 +1167,20 @@ final class QualificationCausalFinalizer {
                     QualificationRecords.CausalReason
                             .TOOL_OUTCOME_CAUSE_NOT_MECHANICALLY_PROVEN,
                     "trace.json#tool-call-settlement"));
+        }
+        for (QualificationTraceEvidence.MutationRecoveryFact recovery
+                : facts.decisionEvidence().provenMutationRecoveries()) {
+            // The closed result schema has no recovery-specific fact code yet.
+            // A proven recovery is therefore recorded as the mechanically
+            // satisfied canonical request obligation, with its exact typed
+            // runtime event as the evidence reference. It is deliberately an
+            // observation, never a first cause or a tool transformation.
+            observations.add(new Cause(
+                    QualificationRecords.CausalOwner.RUNTIME_POLICY,
+                    QualificationRecords.CausalStage.TOOL_EXECUTION,
+                    QualificationRecords.CausalFact.CANONICAL_REQUIREMENTS_PASSED,
+                    QualificationRecords.CausalReason.OUTCOME_SATISFIED,
+                    recovery.evidenceReference()));
         }
         if (facts.decisionEvidence().runtimeToolTransformationPresent()) {
             observations.add(new Cause(

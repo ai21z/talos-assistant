@@ -8,6 +8,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -107,6 +108,11 @@ class EditRecoveryFullRewriteTest {
                 "the safe stop must be replaced by the bounded recovery: " + out.text());
         assertFalse(out.text().contains("no file was changed"),
                 "the turn must not end with the invalid-edit truth stop: " + out.text());
+        assertTrue(
+                out.text().contains(
+                        MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                "the bounded rewrite must not erase its earlier unverified failures: "
+                        + out.text());
     }
 
     @Test
@@ -232,6 +238,11 @@ class EditRecoveryFullRewriteTest {
                 "a post-recovery failure must not deny the approved change: " + out.text());
         assertFalse(out.text().contains("No approval was requested"),
                 "approval was requested and granted: " + out.text());
+        assertTrue(
+                out.text().contains(
+                        MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                "the successful write and later failed attempt must remain partial: "
+                        + out.text());
     }
 
     @Test

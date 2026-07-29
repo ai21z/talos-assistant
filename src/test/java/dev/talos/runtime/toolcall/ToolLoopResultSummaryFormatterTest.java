@@ -65,7 +65,7 @@ class ToolLoopResultSummaryFormatterTest {
     }
 
     @Test
-    void suppressesRecoveredEditFailuresByNormalizedPath() {
+    void retainsRawFailureCountUntilPostVerificationRecoveryIsKnown() {
         var failedEdit = new ToolCallLoop.ToolOutcome(
                 "talos.edit_file",
                 "./src/App.java",
@@ -105,7 +105,8 @@ class ToolLoopResultSummaryFormatterTest {
                 List.of(failedEdit, laterWrite));
 
         assertEquals(
-                "[Used 2 tool(s): talos.edit_file, talos.write_file | 2 iteration(s)]",
+                "[Used 2 tool(s): talos.edit_file, talos.write_file | 2 iteration(s)] "
+                        + "[1 failed]",
                 ToolLoopResultSummaryFormatter.format(result));
     }
 
@@ -153,8 +154,12 @@ class ToolLoopResultSummaryFormatterTest {
 
         assertEquals(1, count(loopSource, "ToolLoopResultSummaryFormatter.format(this)"), loopSource);
         assertEquals(0, count(loopSource, "displayFailedCalls("), loopSource);
-        assertTrue(formatterSource.contains("private static int displayFailedCalls"), formatterSource);
-        assertTrue(formatterSource.contains("private static String normalizeSummaryPath"), formatterSource);
+        assertEquals(0, count(formatterSource, "private static int displayFailedCalls"), formatterSource);
+        assertEquals(0, count(formatterSource, "private static String normalizeSummaryPath"), formatterSource);
+        assertTrue(
+                formatterSource.contains(
+                        "int displayFailedCalls = Math.max(0, result.failedCalls())"),
+                formatterSource);
     }
 
     private static int count(String source, String needle) {

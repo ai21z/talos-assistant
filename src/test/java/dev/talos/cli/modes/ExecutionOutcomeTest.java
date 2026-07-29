@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
@@ -1722,7 +1723,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void recoveredEmptyEditArgumentFailureDoesNotPoisonCompletion() throws Exception {
+    void untypedSamePathSuccessCannotEraseAnEarlierEmptyEditFailure() throws Exception {
         Path ws = Files.createTempDirectory("talos-recovered-empty-edit-outcome-");
         try {
             Files.writeString(ws.resolve("index.html"), "<html><body><a class=\"cta-button\">Listen</a></body></html>\n");
@@ -1750,14 +1751,16 @@ class ExecutionOutcomeTest {
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                     "Edited index.html.", messages, loopResult, ws, 0);
 
-            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-            assertFalse(outcome.partialMutation());
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertTrue(outcome.partialMutation());
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."));
-            assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
-            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
-            assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
-            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+            assertTrue(outcome.finalAnswer().startsWith(
+                    MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                    outcome.finalAnswer());
+            assertEquals(MutationOutcomeStatus.PARTIAL, outcome.taskOutcome().mutationOutcome().status());
+            assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
+            assertEquals(1, outcome.taskOutcome().mutationOutcome().failed().size());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -2829,15 +2832,43 @@ class ExecutionOutcomeTest {
                     "Append a Contributing section to README.md with one sentence saying "
                             + "Run tests before review. Preserve all current text."));
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Updated README.md.", 1, 1,
-                    List.of("talos.write_file"), List.of(),
-                    0, 0, false, 1, List.of(),
+                    "Updated README.md.", 2, 2,
+                    List.of("talos.edit_file", "talos.write_file"), List.of(),
+                    1, 0, false, 1, List.of(),
                     0, 0, 0, 0,
-                    List.of(new ToolCallLoop.ToolOutcome(
-                            "talos.write_file", "README.md", true, true, false,
-                            "wrote README.md", "", dev.talos.tools.VerificationStatus.PASS, "",
-                            null,
-                            ToolMutationEvidence.fullWriteReplacement(before, after))));
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file",
+                                    "README.md",
+                                    false,
+                                    true,
+                                    false,
+                                    "",
+                                    "old_string not found",
+                                    null,
+                                    ToolError.INVALID_PARAMS,
+                                    null,
+                                    ToolMutationEvidence.exactEdit(
+                                            "missing anchor",
+                                            "## Contributing\nRun tests before review."),
+                                    ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                                    List.of(),
+                                    "call-1-1"),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "README.md",
+                                    true,
+                                    true,
+                                    false,
+                                    "wrote README.md",
+                                    "",
+                                    dev.talos.tools.VerificationStatus.PASS,
+                                    "",
+                                    null,
+                                    ToolMutationEvidence.fullWriteReplacement(before, after),
+                                    ToolFailureReason.NONE,
+                                    List.of(),
+                                    "call-1-2")));
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                     loopResult.finalAnswer(), messages, loopResult, ws, 0);
@@ -2846,7 +2877,104 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
             assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+            assertFalse(outcome.partialMutation());
+            assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
             assertTrue(outcome.finalAnswer().contains("Append section verification passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void preserveRestReplacementRecoveryCompletesOnlyAfterExactVerification() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-preserve-rest-recovery-");
+        try {
+            String before = "Status: draft\nKeep this final line unchanged.\n";
+            String after = "Status: final\nKeep this final line unchanged.\n";
+            Files.writeString(ws.resolve("notes.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "In notes.md, change draft to final. If an exact edit fails, "
+                            + "recover without deleting any other line."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated notes.md.",
+                    2,
+                    2,
+                    List.of("talos.edit_file", "talos.write_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    1,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file",
+                                    "notes.md",
+                                    false,
+                                    true,
+                                    false,
+                                    "",
+                                    "old_string not found",
+                                    null,
+                                    ToolError.INVALID_PARAMS,
+                                    null,
+                                    ToolMutationEvidence.exactEdit(
+                                            "Status: pending",
+                                            "Status: final"),
+                                    ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                                    List.of(),
+                                    "call-1-1"),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "notes.md",
+                                    true,
+                                    true,
+                                    false,
+                                    "wrote notes.md",
+                                    "",
+                                    dev.talos.tools.VerificationStatus.PASS,
+                                    "",
+                                    null,
+                                    ToolMutationEvidence.fullWriteReplacement(before, after),
+                                    ToolFailureReason.NONE,
+                                    List.of(),
+                                    "call-1-2")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
+
+            assertEquals(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    outcome.completionStatus());
+            assertEquals(
+                    ExecutionOutcome.VerificationStatus.PASSED,
+                    outcome.verificationStatus());
+            assertEquals(
+                    TaskCompletionStatus.COMPLETED_VERIFIED,
+                    outcome.taskOutcome().completionStatus());
+            assertEquals(
+                    MutationOutcomeStatus.SUCCEEDED,
+                    outcome.taskOutcome().mutationOutcome().status());
+            assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
+            assertFalse(outcome.partialMutation());
+            assertTrue(
+                    outcome.finalAnswer().contains("Replacement verification passed"),
                     outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {

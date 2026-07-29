@@ -173,6 +173,14 @@ class ProviderToolExecutionAuthorityTest {
             TurnTaskContractCapture.clear();
         }
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        var blockedEvent = trace.events().stream()
+                .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        var classifiedEvent = trace.events().stream()
+                .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
 
         assertAll(
                 () -> assertEquals(0, outcome.successesThisIteration()),
@@ -190,6 +198,16 @@ class ProviderToolExecutionAuthorityTest {
                 () -> assertEquals(1,
                         countEvents(trace, "TOOL_CALL_AUTHORITY_REJECTED")),
                 () -> assertEquals(1, countEvents(trace, "TOOL_CALL_BLOCKED")),
+                () -> assertEquals(1, countEvents(trace, "TOOL_OUTCOME_CLASSIFIED")),
+                () -> assertEquals(
+                        blockedEvent.data().get("toolCallId"),
+                        classifiedEvent.data().get("toolCallId")),
+                () -> assertEquals(
+                        ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID.name(),
+                        classifiedEvent.data().get("failureReason")),
+                () -> assertTrue(
+                        trace.events().indexOf(classifiedEvent)
+                                > trace.events().indexOf(blockedEvent)),
                 () -> assertEquals(0, countEvents(trace, "APPROVAL_REQUIRED")),
                 () -> assertEquals(0, countEvents(trace, "CHECKPOINT_CAPTURED")),
                 () -> assertEquals(0, countEvents(trace, "TOOL_EXECUTED")));

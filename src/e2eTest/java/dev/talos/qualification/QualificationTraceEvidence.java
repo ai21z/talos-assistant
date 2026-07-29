@@ -3,9 +3,15 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.FileLookupAnswerGuard;
+import dev.talos.runtime.outcome.MutationRecoveryAssessment;
+import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.verification.TaskVerificationEvidenceSource;
+import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
+import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +57,69 @@ final class QualificationTraceEvidence {
             "SPECULATIVE_RETRY_REJECTED",
             "SPECULATIVE_RETRY_FAILED",
             "SPECULATIVE_RETRY_EMPTY");
+    private static final Set<ToolFailureReason> MATCHED_RECOVERY_FAILURE_REASONS = Set.of(
+            ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+            ToolFailureReason.EDIT_EMPTY_ARGUMENTS,
+            ToolFailureReason.EDIT_FULL_REWRITE_REQUIRED);
+    private static final Set<String> MUTATION_EVIDENCE_KINDS = Set.of(
+            "NONE",
+            "EXACT_EDIT_REPLACEMENT",
+            "FULL_WRITE_REPLACEMENT");
+    private static final Set<String> STRUCTURED_MUTATION_EVIDENCE_KINDS = Set.of(
+            "EXACT_EDIT_REPLACEMENT",
+            "FULL_WRITE_REPLACEMENT");
+    private static final Set<String> TOOL_OUTCOME_CLASSIFIED_DATA_KEYS_V1 = Set.of(
+            "schemaVersion",
+            "outcomeOrdinal",
+            "toolCallId",
+            "success",
+            "mutating",
+            "denied",
+            "failureReason",
+            "mutationEvidenceKind");
+    private static final Set<String> TOOL_OUTCOME_CLASSIFIED_DATA_KEYS_V2 = Set.of(
+            "schemaVersion",
+            "outcomeOrdinal",
+            "toolCallId",
+            "success",
+            "mutating",
+            "denied",
+            "errorCode",
+            "failureReason",
+            "mutationEvidenceKind");
+    private static final Set<String> MUTATION_RECOVERY_DATA_KEYS_V1 = Set.of(
+            "schemaVersion",
+            "failureOrdinal",
+            "repairOrdinal",
+            "failureToolCallId",
+            "repairToolCallId",
+            "decision",
+            "resolved",
+            "recovered",
+            "failureReason",
+            "targetHint",
+            "targetSha256",
+            "requestObligationSha256",
+            "verifiedRequestObligationSha256",
+            "verificationSource",
+            "verificationStatus");
+    private static final Set<String> MUTATION_RECOVERY_DATA_KEYS_V2 = Set.of(
+            "schemaVersion",
+            "failureOrdinal",
+            "repairOrdinal",
+            "failureToolCallId",
+            "repairToolCallId",
+            "decision",
+            "resolved",
+            "recovered",
+            "failureReason",
+            "targetHint",
+            "targetSha256",
+            "requestObligationSha256",
+            "verifiedRequestObligationSha256",
+            "verificationSource",
+            "verificationStatus",
+            "coveredSuccessfulMutationToolCallIds");
 
     private QualificationTraceEvidence() {}
 
@@ -99,7 +168,8 @@ final class QualificationTraceEvidence {
             boolean nativeProviderDecisionBound,
             CallSettlement settlement,
             String decisionToolName,
-            boolean runtimeTransformed) {
+            boolean runtimeTransformed,
+            String toolCallId) {
         Call {
             sourcePaths = normalizedSourcePaths(sourcePaths, executed ? pathHint : "");
             approvalDisposition = approvalDisposition == null
@@ -115,6 +185,12 @@ final class QualificationTraceEvidence {
             decisionToolName = decisionToolName == null || decisionToolName.isBlank()
                     ? toolName
                     : decisionToolName;
+            toolCallId = toolCallId == null ? "" : toolCallId.strip();
+            if (!toolCallId.isEmpty()
+                    && !toolCallId.matches("call-[1-9][0-9]*-[1-9][0-9]*")) {
+                throw new IllegalArgumentException(
+                        "tool call id is not canonical: " + toolCallId);
+            }
             if (nativeProviderDecisionBound
                     && (providerGenerationId.isBlank() || providerAttemptId.isBlank())) {
                 throw new IllegalArgumentException(
@@ -124,6 +200,25 @@ final class QualificationTraceEvidence {
                 throw new IllegalArgumentException(
                         "tool execution success and settlement evidence disagree");
             }
+        }
+
+        Call(
+                String toolName,
+                String pathHint,
+                boolean executed,
+                boolean allowed,
+                List<String> sourcePaths,
+                ApprovalDisposition approvalDisposition,
+                String providerGenerationId,
+                String providerAttemptId,
+                boolean nativeProviderDecisionBound,
+                CallSettlement settlement,
+                String decisionToolName,
+                boolean runtimeTransformed) {
+            this(toolName, pathHint, executed, allowed, sourcePaths,
+                    approvalDisposition, providerGenerationId, providerAttemptId,
+                    nativeProviderDecisionBound, settlement, decisionToolName,
+                    runtimeTransformed, "");
         }
 
         Call(
@@ -190,6 +285,33 @@ final class QualificationTraceEvidence {
         }
     }
 
+    record MutationRecoveryFact(
+            String failureToolCallId,
+            String repairToolCallId,
+            String decision,
+            boolean proven,
+            String evidenceReference) {
+        MutationRecoveryFact {
+            failureToolCallId = required(
+                    failureToolCallId, "mutation recovery failure tool-call id");
+            repairToolCallId = required(
+                    repairToolCallId, "mutation recovery repair tool-call id");
+            decision = required(decision, "mutation recovery decision");
+            evidenceReference = required(
+                    evidenceReference, "mutation recovery evidence reference");
+            if (failureToolCallId.equals(repairToolCallId)) {
+                throw new IllegalArgumentException(
+                        "mutation recovery requires distinct failure and repair calls");
+            }
+            if (proven
+                    && !MutationRecoveryAssessment.Decision.RECOVERED_MATCHED_OBLIGATION
+                            .name().equals(decision)) {
+                throw new IllegalArgumentException(
+                        "only matched-obligation recovery can be mechanically proven");
+            }
+        }
+    }
+
     record Facts(
             String traceId,
             String modelId,
@@ -209,7 +331,8 @@ final class QualificationTraceEvidence {
             boolean generationAbortPartialOutput,
             QualificationProviderAttemptLedger.Ledger providerAttempts,
             boolean runtimeAnswerTransformed,
-            Set<String> providerToolSurface) {
+            Set<String> providerToolSurface,
+            List<MutationRecoveryFact> mutationRecoveries) {
         Facts {
             calls = List.copyOf(calls);
             decisions = List.copyOf(decisions);
@@ -222,6 +345,37 @@ final class QualificationTraceEvidence {
             providerToolSurface = providerToolSurface == null
                     ? Set.of()
                     : Set.copyOf(providerToolSurface);
+            mutationRecoveries = mutationRecoveries == null
+                    ? List.of()
+                    : List.copyOf(mutationRecoveries);
+        }
+
+        Facts(
+                String traceId,
+                String modelId,
+                String taskType,
+                boolean mutationAllowed,
+                String actionObligation,
+                String terminalState,
+                String outcomeStatus,
+                String verificationStatus,
+                List<Call> calls,
+                List<QualificationRecords.DecisionResult> decisions,
+                boolean approvalGranted,
+                boolean approvalDenied,
+                boolean boundedFileLookupNegative,
+                boolean missingEvidenceContained,
+                String generationAbortReasonCode,
+                boolean generationAbortPartialOutput,
+                QualificationProviderAttemptLedger.Ledger providerAttempts,
+                boolean runtimeAnswerTransformed,
+                Set<String> providerToolSurface) {
+            this(traceId, modelId, taskType, mutationAllowed, actionObligation,
+                    terminalState, outcomeStatus, verificationStatus, calls, decisions,
+                    approvalGranted, approvalDenied, boundedFileLookupNegative,
+                    missingEvidenceContained, generationAbortReasonCode,
+                    generationAbortPartialOutput, providerAttempts,
+                    runtimeAnswerTransformed, providerToolSurface, List.of());
         }
 
         Facts(
@@ -248,7 +402,7 @@ final class QualificationTraceEvidence {
                     approvalGranted, approvalDenied, boundedFileLookupNegative,
                     missingEvidenceContained, generationAbortReasonCode,
                     generationAbortPartialOutput, providerAttempts,
-                    runtimeAnswerTransformed, Set.of());
+                    runtimeAnswerTransformed, Set.of(), List.of());
         }
 
         Facts(
@@ -521,6 +675,12 @@ final class QualificationTraceEvidence {
         boolean answerRestorationObserved = false;
         Set<String> suppressedProviderResponses = new HashSet<>();
         Set<String> consumedExecutionAuthorities = new HashSet<>();
+        List<IndexedTraceEvent> requestObligationEvents = new ArrayList<>();
+        List<IndexedTraceEvent> verificationCompletedEvents = new ArrayList<>();
+        List<IndexedTraceEvent> outcomeEvaluatedEvents = new ArrayList<>();
+        List<ToolOutcomeClassificationFact> toolOutcomeClassifications =
+                new ArrayList<>();
+        List<MutationRecoveryClaim> mutationRecoveryClaims = new ArrayList<>();
         for (int eventIndex = 0; eventIndex < events.size(); eventIndex++) {
             JsonNode event = events.get(eventIndex);
             String type = QualificationJson.requiredText(
@@ -539,7 +699,35 @@ final class QualificationTraceEvidence {
             String tool = canonicalTool(persistedToolName);
             String pathHint = normalizedPathHint(QualificationJson.optionalText(
                     event.path("data").path("pathHint"), "trace event pathHint"));
-            if (type.equals("TOOL_CALL_PARSED")) {
+            if (type.equals("REQUEST_OBLIGATION_COMPILED")) {
+                requestObligationEvents.add(new IndexedTraceEvent(event, eventIndex));
+            } else if (type.equals("VERIFICATION_COMPLETED")) {
+                verificationCompletedEvents.add(new IndexedTraceEvent(event, eventIndex));
+            } else if (type.equals("OUTCOME_EVALUATED")) {
+                outcomeEvaluatedEvents.add(new IndexedTraceEvent(event, eventIndex));
+            } else if (type.equals("TOOL_OUTCOME_CLASSIFIED")) {
+                if (traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION) {
+                    throw new IllegalArgumentException(
+                            "typed tool outcome evidence requires trace schemaVersion 5");
+                }
+                ToolOutcomeClassificationFact classification =
+                        toolOutcomeClassificationFact(event, eventIndex);
+                if (toolOutcomeClassifications.stream().anyMatch(existing ->
+                        existing.toolCallId().equals(classification.toolCallId()))) {
+                    throw new IllegalArgumentException(
+                            "trace classifies one tool outcome more than once: "
+                                    + classification.toolCallId());
+                }
+                toolOutcomeClassifications.add(classification);
+            } else if (type.equals("MUTATION_FAILURE_RECOVERY_EVALUATED")) {
+                if (traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PROCESS_TRACE_SCHEMA_VERSION) {
+                    throw new IllegalArgumentException(
+                            "mutation recovery evidence requires trace schemaVersion 5");
+                }
+                mutationRecoveryClaims.add(mutationRecoveryClaim(event, eventIndex));
+            } else if (type.equals("TOOL_CALL_PARSED")) {
                 if (tool.isBlank()) throw new IllegalArgumentException("parsed tool event lacks toolName");
                 ProviderLink providerLink = providerLink(
                         event.path("data"), providerAttempts, eventIndex);
@@ -583,7 +771,8 @@ final class QualificationTraceEvidence {
                                         "parsed tool arguments hash")
                                 : "",
                         executionAuthority.kind(),
-                        executionAuthority.runtimeReason()));
+                        executionAuthority.runtimeReason(),
+                        eventIndex));
             } else if (type.equals("TOOL_CALL_TRANSFORMED")) {
                 if (!exactToolLineage) {
                     throw new IllegalArgumentException(
@@ -639,6 +828,7 @@ final class QualificationTraceEvidence {
                         match, providerAttempts, eventIndex, "blocked tool call");
                 match.settled = true;
                 match.settlement = CallSettlement.BLOCKED;
+                match.settlementEventIndex = eventIndex;
             } else if (type.equals("TOOL_EXECUTED")) {
                 MutableCall match = exactToolLineage
                         ? exactPending(calls, event.path("data"), tool, pathHint,
@@ -661,6 +851,7 @@ final class QualificationTraceEvidence {
                 match.settlement = match.executed
                         ? CallSettlement.EXECUTED_SUCCESS
                         : CallSettlement.EXECUTED_FAILURE;
+                match.settlementEventIndex = eventIndex;
                 if (match.executed) {
                     match.sourcePaths.addAll(sourcePaths(event.path("data"), pathHint));
                 }
@@ -712,6 +903,7 @@ final class QualificationTraceEvidence {
                         data.path("partialOutput"), "model generation abort partialOutput");
             }
         }
+        validateToolOutcomeClassifications(toolOutcomeClassifications, calls);
 
         boolean missingEvidenceWarning = false;
         JsonNode warnings = root.path("warnings");
@@ -737,8 +929,21 @@ final class QualificationTraceEvidence {
                         List.copyOf(call.sourcePaths), call.approvalDisposition,
                         call.providerGenerationId, call.providerAttemptId,
                         call.nativeProviderDecisionBound, call.settlement,
-                        call.decisionToolName, call.runtimeTransformed))
+                        call.decisionToolName, call.runtimeTransformed,
+                        call.toolCallId))
                 .toList();
+        List<MutationRecoveryFact> mutationRecoveries = bindMutationRecoveries(
+                mutationRecoveryClaims,
+                requestObligationEvents,
+                verificationCompletedEvents,
+                outcomeEvaluatedEvents,
+                toolOutcomeClassifications,
+                calls,
+                terminalState,
+                outcomeStatus,
+                verificationStatus,
+                root.path("outcome").path("mutationStatus"),
+                root.path("turnNumber"));
         boolean runtimeAnswerTransformed = answerRestorationObserved
                 || (!answerLineageSourceHash.isBlank()
                         && (!answerLineageSourceHash.equals(answerLineageCurrentHash)
@@ -758,7 +963,8 @@ final class QualificationTraceEvidence {
                 generationAbortPartialOutput,
                 providerAttempts,
                 runtimeAnswerTransformed,
-                providerToolSurface);
+                providerToolSurface,
+                mutationRecoveries);
     }
 
     private static void rejectIncompleteTerminalProjection(JsonNode events) {
@@ -772,6 +978,1236 @@ final class QualificationTraceEvidence {
                         "trace carries an explicitly incomplete terminal evidence projection");
             }
         }
+    }
+
+    private record RequestObligationTraceFact(
+            String canonicalSha256,
+            String derivationStatus,
+            List<String> requiredMutationTargets,
+            int eventIndex) {}
+
+    private record VerificationTraceFact(String status, int eventIndex) {}
+
+    private record IndexedTraceEvent(JsonNode event, int eventIndex) {}
+
+    private record ToolOutcomeClassificationFact(
+            int schemaVersion,
+            int outcomeOrdinal,
+            String toolCallId,
+            boolean success,
+            boolean mutating,
+            boolean denied,
+            String errorCode,
+            ToolFailureReason failureReason,
+            String mutationEvidenceKind,
+            int eventIndex) {}
+
+    private record MutationRecoveryClaim(
+            int schemaVersion,
+            int failureOrdinal,
+            int repairOrdinal,
+            String failureToolCallId,
+            String repairToolCallId,
+            MutationRecoveryAssessment.Decision decision,
+            boolean resolved,
+            boolean recovered,
+            ToolFailureReason failureReason,
+            String targetHint,
+            String targetSha256,
+            String requestObligationSha256,
+            String verifiedRequestObligationSha256,
+            TaskVerificationEvidenceSource verificationSource,
+            TaskVerificationStatus verificationStatus,
+            List<String> coveredSuccessfulMutationToolCallIds,
+            int eventIndex) {}
+
+    private static RequestObligationTraceFact requestObligationTraceFact(
+            JsonNode event,
+            int eventIndex) {
+        JsonNode data = requiredObject(
+                event.path("data"), "request obligation trace data");
+        String canonicalSha256 = requiredRawSha256(
+                data.path("canonicalSha256"),
+                "request obligation canonical SHA-256",
+                false);
+        String derivationStatus = required(QualificationJson.requiredText(
+                data.path("derivationStatus"),
+                "request obligation derivation status"),
+                "request obligation derivation status");
+        if (!derivationStatus.equals("COMPLETE")
+                && !derivationStatus.equals("NOT_MIGRATED")) {
+            throw new IllegalArgumentException(
+                    "request obligation derivation status is not canonical: "
+                            + derivationStatus);
+        }
+        List<String> requiredMutationTargets = obligationTargets(
+                data.path("requiredMutationTargets"),
+                "request obligation required mutation targets");
+        return new RequestObligationTraceFact(
+                canonicalSha256,
+                derivationStatus,
+                requiredMutationTargets,
+                eventIndex);
+    }
+
+    private static VerificationTraceFact verificationTraceFact(
+            JsonNode event,
+            int eventIndex) {
+        JsonNode data = requiredObject(
+                event.path("data"), "verification completed data");
+        TaskVerificationStatus status = QualificationJson.requiredEnum(
+                data.path("status"),
+                TaskVerificationStatus.class,
+                "verification completed status");
+        return new VerificationTraceFact(status.name(), eventIndex);
+    }
+
+    private static ToolOutcomeClassificationFact toolOutcomeClassificationFact(
+            JsonNode event,
+            int eventIndex) {
+        JsonNode data = requiredObject(
+                event.path("data"), "typed tool outcome data");
+        int schemaVersion = QualificationJson.requiredInt(
+                data.path("schemaVersion"),
+                "typed tool outcome schemaVersion");
+        if (schemaVersion == 1) {
+            requireExactKeys(
+                    data,
+                    TOOL_OUTCOME_CLASSIFIED_DATA_KEYS_V1,
+                    "typed tool outcome data");
+        } else if (schemaVersion == 2) {
+            requireExactKeys(
+                    data,
+                    TOOL_OUTCOME_CLASSIFIED_DATA_KEYS_V2,
+                    "typed tool outcome data");
+        } else {
+            throw new IllegalArgumentException(
+                    "typed tool outcome schemaVersion must be 1 or 2");
+        }
+        int outcomeOrdinal = QualificationJson.requiredInt(
+                data.path("outcomeOrdinal"),
+                "typed tool outcome ordinal");
+        if (outcomeOrdinal <= 0) {
+            throw new IllegalArgumentException(
+                    "typed tool outcome ordinal must be positive");
+        }
+        String toolCallId = exactText(
+                data.path("toolCallId"), "typed tool outcome tool-call id");
+        requireCanonicalToolCallId(
+                toolCallId, "typed tool outcome tool-call id");
+        boolean success = requiredBoolean(
+                data.path("success"), "typed tool outcome success");
+        boolean mutating = requiredBoolean(
+                data.path("mutating"), "typed tool outcome mutating");
+        boolean denied = requiredBoolean(
+                data.path("denied"), "typed tool outcome denied");
+        String errorCode = schemaVersion == 2
+                ? exactText(
+                        data.path("errorCode"),
+                        "typed tool outcome error code")
+                : "";
+        ToolFailureReason failureReason = QualificationJson.requiredEnum(
+                data.path("failureReason"),
+                ToolFailureReason.class,
+                "typed tool outcome failure reason");
+        String mutationEvidenceKind = exactText(
+                data.path("mutationEvidenceKind"),
+                "typed tool outcome mutation evidence kind");
+        if (!MUTATION_EVIDENCE_KINDS.contains(mutationEvidenceKind)) {
+            throw new IllegalArgumentException(
+                    "typed tool outcome mutation evidence kind is not canonical: "
+                            + mutationEvidenceKind);
+        }
+        if (success
+                && (denied
+                    || !errorCode.isBlank()
+                    || failureReason != ToolFailureReason.NONE)) {
+            throw new IllegalArgumentException(
+                    "successful typed tool outcome carries contradictory failure state");
+        }
+        if (!mutating && !"NONE".equals(mutationEvidenceKind)) {
+            throw new IllegalArgumentException(
+                    "non-mutating typed tool outcome carries mutation evidence");
+        }
+        return new ToolOutcomeClassificationFact(
+                schemaVersion,
+                outcomeOrdinal,
+                toolCallId,
+                success,
+                mutating,
+                denied,
+                errorCode,
+                failureReason,
+                mutationEvidenceKind,
+                eventIndex);
+    }
+
+    private static MutationRecoveryClaim mutationRecoveryClaim(
+            JsonNode event,
+            int eventIndex) {
+        JsonNode data = requiredObject(
+                event.path("data"), "mutation recovery data");
+        int schemaVersion = QualificationJson.requiredInt(
+                data.path("schemaVersion"), "mutation recovery schemaVersion");
+        if (schemaVersion == 1) {
+            requireExactKeys(
+                    data,
+                    MUTATION_RECOVERY_DATA_KEYS_V1,
+                    "mutation recovery data");
+        } else if (schemaVersion == 2) {
+            requireExactKeys(
+                    data,
+                    MUTATION_RECOVERY_DATA_KEYS_V2,
+                    "mutation recovery data");
+        } else {
+            throw new IllegalArgumentException(
+                    "mutation recovery schemaVersion must be 1 or 2");
+        }
+        int failureOrdinal = QualificationJson.requiredInt(
+                data.path("failureOrdinal"), "mutation recovery failure ordinal");
+        int repairOrdinal = QualificationJson.requiredInt(
+                data.path("repairOrdinal"), "mutation recovery repair ordinal");
+        if (failureOrdinal <= 0 || repairOrdinal < 0) {
+            throw new IllegalArgumentException(
+                    "mutation recovery ordinals are invalid");
+        }
+        String failureToolCallId = exactText(
+                data.path("failureToolCallId"),
+                "mutation recovery failure tool-call id");
+        String repairToolCallId = exactText(
+                data.path("repairToolCallId"),
+                "mutation recovery repair tool-call id");
+        if (!failureToolCallId.isEmpty()) {
+            requireCanonicalToolCallId(
+                    failureToolCallId, "mutation recovery failure tool-call id");
+        }
+        if (!repairToolCallId.isEmpty()) {
+            requireCanonicalToolCallId(
+                    repairToolCallId, "mutation recovery repair tool-call id");
+        }
+        MutationRecoveryAssessment.Decision decision =
+                QualificationJson.requiredEnum(
+                        data.path("decision"),
+                        MutationRecoveryAssessment.Decision.class,
+                        "mutation recovery decision");
+        boolean resolved = requiredBoolean(
+                data.path("resolved"), "mutation recovery resolved");
+        boolean recovered = requiredBoolean(
+                data.path("recovered"), "mutation recovery recovered");
+        ToolFailureReason failureReason = QualificationJson.requiredEnum(
+                data.path("failureReason"),
+                ToolFailureReason.class,
+                "mutation recovery failure reason");
+        String targetHint = exactText(
+                data.path("targetHint"), "mutation recovery target hint");
+        if (!targetHint.equals(normalizedPathHint(targetHint))) {
+            throw new IllegalArgumentException(
+                    "mutation recovery target hint is not canonical");
+        }
+        String targetSha256 = requiredHash(
+                data.path("targetSha256"), "mutation recovery target SHA-256");
+        if (!"<protected-path>".equals(targetHint)
+                && !sha256(targetHint).equals(targetSha256)) {
+            throw new IllegalArgumentException(
+                    "mutation recovery target identity does not match its hint");
+        }
+        String requestObligationSha256 = requiredRawSha256(
+                data.path("requestObligationSha256"),
+                "mutation recovery request-obligation SHA-256",
+                true);
+        String verifiedRequestObligationSha256 = requiredRawSha256(
+                data.path("verifiedRequestObligationSha256"),
+                "mutation recovery verified request-obligation SHA-256",
+                true);
+        TaskVerificationEvidenceSource verificationSource =
+                QualificationJson.requiredEnum(
+                        data.path("verificationSource"),
+                        TaskVerificationEvidenceSource.class,
+                        "mutation recovery verification source");
+        TaskVerificationStatus verificationStatus =
+                QualificationJson.requiredEnum(
+                        data.path("verificationStatus"),
+                        TaskVerificationStatus.class,
+                        "mutation recovery verification status");
+        List<String> coveredSuccessfulMutationToolCallIds = schemaVersion == 2
+                ? orderedUniqueToolCallIds(
+                        data.path("coveredSuccessfulMutationToolCallIds"),
+                        "mutation recovery covered successful mutation call ids")
+                : List.of();
+
+        boolean matched = decision
+                == MutationRecoveryAssessment.Decision.RECOVERED_MATCHED_OBLIGATION;
+        boolean redundant = decision
+                == MutationRecoveryAssessment.Decision
+                        .REDUNDANT_ALREADY_APPLIED_OPERATION;
+        boolean typedRepairSequence = decision
+                == MutationRecoveryAssessment.Decision
+                        .RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN;
+        if (matched) {
+            if (!resolved
+                    || !recovered
+                    || repairOrdinal <= failureOrdinal
+                    || failureToolCallId.isBlank()
+                    || repairToolCallId.isBlank()
+                    || failureToolCallId.equals(repairToolCallId)) {
+                throw new IllegalArgumentException(
+                        "matched-obligation recovery has inconsistent resolution fields");
+            }
+            if (schemaVersion == 2
+                    && !coveredSuccessfulMutationToolCallIds.contains(
+                            repairToolCallId)) {
+                throw new IllegalArgumentException(
+                        "matched-obligation recovery receipt does not cover its repair");
+            }
+        } else if (redundant) {
+            if (!resolved
+                    || recovered
+                    || repairOrdinal <= 0
+                    || repairOrdinal >= failureOrdinal
+                    || failureToolCallId.isBlank()
+                    || repairToolCallId.isBlank()
+                    || failureToolCallId.equals(repairToolCallId)) {
+                throw new IllegalArgumentException(
+                    "redundant-operation recovery has inconsistent resolution fields");
+            }
+        } else if (typedRepairSequence) {
+            if (!resolved
+                    || recovered
+                    || repairOrdinal <= failureOrdinal
+                    || failureToolCallId.isBlank()
+                    || repairToolCallId.isBlank()
+                    || failureToolCallId.equals(repairToolCallId)
+                    || !coveredSuccessfulMutationToolCallIds.isEmpty()
+                    || !verifiedRequestObligationSha256.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "typed repair sequence has inconsistent unproven resolution fields");
+            }
+        } else if (resolved
+                || recovered
+                || repairOrdinal != 0
+                || !repairToolCallId.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "unresolved mutation recovery claims a repair");
+        }
+        return new MutationRecoveryClaim(
+                schemaVersion,
+                failureOrdinal,
+                repairOrdinal,
+                failureToolCallId,
+                repairToolCallId,
+                decision,
+                resolved,
+                recovered,
+                failureReason,
+                targetHint,
+                targetSha256,
+                requestObligationSha256,
+                verifiedRequestObligationSha256,
+                verificationSource,
+                verificationStatus,
+                coveredSuccessfulMutationToolCallIds,
+                eventIndex);
+    }
+
+    private static List<MutationRecoveryFact> bindMutationRecoveries(
+            List<MutationRecoveryClaim> claims,
+            List<IndexedTraceEvent> requestObligationEvents,
+            List<IndexedTraceEvent> verificationCompletedEvents,
+            List<IndexedTraceEvent> outcomeEvaluatedEvents,
+            List<ToolOutcomeClassificationFact> toolOutcomeClassifications,
+            List<MutableCall> calls,
+            String terminalState,
+            String outcomeStatus,
+            String rootVerificationStatus,
+            JsonNode rootMutationStatus,
+            JsonNode rootTurnNumber) {
+        if (claims.isEmpty()) return List.of();
+        int turnNumber = QualificationJson.requiredInt(
+                rootTurnNumber, "trace turnNumber");
+        if (turnNumber < 1) {
+            throw new IllegalArgumentException(
+                    "trace turnNumber must be positive");
+        }
+        validateExactCallSequence(calls, turnNumber);
+        validateToolOutcomeClassifications(toolOutcomeClassifications, calls);
+        List<MutationRecoveryFact> facts = new ArrayList<>();
+        Set<String> evaluatedFailureCalls = new HashSet<>();
+        for (MutationRecoveryClaim claim : claims) {
+            int recoveryVerificationEventIndex = -1;
+            if (claim.schemaVersion() == 2) {
+                if (verificationCompletedEvents.size() != 1
+                        || verificationCompletedEvents.getFirst().eventIndex()
+                                >= claim.eventIndex()) {
+                    throw new IllegalArgumentException(
+                            "schema-v2 mutation recovery must follow one "
+                                    + "verification event");
+                }
+                if (outcomeEvaluatedEvents.size() != 1
+                        || claim.eventIndex()
+                                >= outcomeEvaluatedEvents.getFirst().eventIndex()) {
+                    throw new IllegalArgumentException(
+                            "schema-v2 mutation recovery must precede one "
+                                    + "terminal outcome event");
+                }
+                recoveryVerificationEventIndex =
+                        verificationCompletedEvents.getFirst().eventIndex();
+            }
+            if (!claim.failureToolCallId().isBlank()
+                    && !evaluatedFailureCalls.add(claim.failureToolCallId())) {
+                throw new IllegalArgumentException(
+                        "trace evaluates one mutation failure more than once: "
+                                + claim.failureToolCallId());
+            }
+            MutableCall failure = claim.failureToolCallId().isBlank()
+                    ? null
+                    : settledCallById(
+                            calls,
+                            claim.failureToolCallId(),
+                            "mutation recovery failure");
+            if (failure != null) {
+                if (claim.decision()
+                        == MutationRecoveryAssessment.Decision.DENIED_OR_POLICY) {
+                    requireDeniedMutationCall(failure, claim);
+                } else {
+                    requireFailedMutationCall(failure, claim);
+                }
+                bindUnresolvedFailureClassification(
+                        claim,
+                        failure,
+                        toolOutcomeClassifications,
+                        recoveryVerificationEventIndex);
+            }
+            if (claim.decision()
+                    == MutationRecoveryAssessment.Decision
+                            .RECOVERED_MATCHED_OBLIGATION) {
+                facts.add(bindMatchedRecovery(
+                        claim,
+                        failure,
+                        calls,
+                        requestObligationEvents,
+                        verificationCompletedEvents,
+                        outcomeEvaluatedEvents,
+                        toolOutcomeClassifications,
+                        terminalState,
+                        outcomeStatus,
+                        rootVerificationStatus,
+                        rootMutationStatus));
+            } else if (claim.decision()
+                    == MutationRecoveryAssessment.Decision
+                            .REDUNDANT_ALREADY_APPLIED_OPERATION) {
+                facts.add(bindRedundantOperation(
+                        claim,
+                        failure,
+                        calls,
+                        toolOutcomeClassifications));
+            } else if (claim.decision()
+                    == MutationRecoveryAssessment.Decision
+                            .RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN) {
+                facts.add(bindTypedRepairSequence(
+                        claim,
+                        failure,
+                        calls,
+                        requestObligationEvents,
+                        verificationCompletedEvents,
+                        toolOutcomeClassifications,
+                        terminalState,
+                        outcomeStatus,
+                        rootVerificationStatus,
+                        rootMutationStatus));
+            }
+        }
+        return List.copyOf(facts);
+    }
+
+    private static MutationRecoveryFact bindTypedRepairSequence(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            List<MutableCall> calls,
+            List<IndexedTraceEvent> requestObligationEvents,
+            List<IndexedTraceEvent> verificationCompletedEvents,
+            List<ToolOutcomeClassificationFact> toolOutcomeClassifications,
+            String terminalState,
+            String outcomeStatus,
+            String rootVerificationStatus,
+            JsonNode rootMutationStatus
+    ) {
+        if (claim.schemaVersion() != 2
+                || failure == null
+                || !"talos.edit_file".equals(failure.toolName)
+                || (claim.failureReason() != ToolFailureReason.EDIT_EMPTY_ARGUMENTS
+                    && claim.failureReason()
+                            != ToolFailureReason.EDIT_FULL_REWRITE_REQUIRED)) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence lacks one eligible exact edit failure");
+        }
+        MutableCall repair = settledCallById(
+                calls,
+                claim.repairToolCallId(),
+                "typed repair sequence repair");
+        if (repair.settlement != CallSettlement.EXECUTED_SUCCESS
+                || repair.settlementEventIndex <= failure.settlementEventIndex
+                || claim.eventIndex() <= repair.settlementEventIndex) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence lacks one later successful mutation");
+        }
+        requireExactRecoveryTarget(claim, failure, repair);
+        requireExactTypedRepairProtocol(
+                claim,
+                failure,
+                repair,
+                calls,
+                toolOutcomeClassifications);
+
+        if (requestObligationEvents.size() != 1) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence requires one request obligation");
+        }
+        IndexedTraceEvent rawObligation = requestObligationEvents.getFirst();
+        RequestObligationTraceFact obligation = requestObligationTraceFact(
+                rawObligation.event(), rawObligation.eventIndex());
+        if (!"NOT_MIGRATED".equals(obligation.derivationStatus())
+                || obligation.eventIndex() >= failure.parsedEventIndex
+                || claim.requestObligationSha256().isBlank()
+                || !claim.requestObligationSha256().equals(
+                        obligation.canonicalSha256())
+                || !obligation.requiredMutationTargets().contains(
+                        claim.targetHint())) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence lacks expected-target authority");
+        }
+
+        if (verificationCompletedEvents.size() != 1) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence requires one verification event");
+        }
+        IndexedTraceEvent rawVerification = verificationCompletedEvents.getFirst();
+        VerificationTraceFact verification = verificationTraceFact(
+                rawVerification.event(), rawVerification.eventIndex());
+        if (claim.verificationSource()
+                    != TaskVerificationEvidenceSource.POST_APPLY_STATIC
+                || claim.verificationStatus() != TaskVerificationStatus.PASSED
+                || !"PASSED".equals(rootVerificationStatus)
+                || !"PASSED".equals(verification.status())
+                || verification.eventIndex() <= repair.settlementEventIndex
+                || verification.eventIndex() >= claim.eventIndex()) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence verification is not authoritative");
+        }
+        String mutationStatus = exactText(
+                rootMutationStatus,
+                "trace outcome mutation status");
+        if (!validMatchedRecoveryOutcome(
+                terminalState,
+                outcomeStatus,
+                mutationStatus)) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence disagrees with the trace outcome");
+        }
+
+        ToolOutcomeClassificationFact failureClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.failureToolCallId());
+        ToolOutcomeClassificationFact repairClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.repairToolCallId());
+        if (failureClassification == null || repairClassification == null) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence lacks exact outcome classifications");
+        }
+        requireOutcomeOrdinal(
+                toolOutcomeClassifications,
+                failureClassification,
+                claim.failureOrdinal(),
+                "typed repair sequence failure");
+        requireOutcomeOrdinal(
+                toolOutcomeClassifications,
+                repairClassification,
+                claim.repairOrdinal(),
+                "typed repair sequence repair");
+        if (failureClassification.schemaVersion() != 2
+                || failureClassification.success()
+                || !failureClassification.mutating()
+                || failureClassification.denied()
+                || !ToolError.INVALID_PARAMS.equals(
+                        failureClassification.errorCode())
+                || failureClassification.failureReason()
+                        != claim.failureReason()
+                || !"NONE".equals(
+                        failureClassification.mutationEvidenceKind())
+                || failureClassification.eventIndex()
+                        >= repair.parsedEventIndex
+                || failureClassification.eventIndex()
+                        >= verification.eventIndex()) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence contradicts its failed outcome");
+        }
+        if (!typedRepairSuccess(
+                claim.failureReason(),
+                repair,
+                repairClassification)
+                || repairClassification.eventIndex()
+                        <= repair.settlementEventIndex
+                || repairClassification.eventIndex()
+                        >= verification.eventIndex()) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence contradicts its repair outcome");
+        }
+
+        long eligibleFailures = toolOutcomeClassifications.stream()
+                .filter(classification ->
+                        !classification.success()
+                                && classification.mutating()
+                                && !classification.denied()
+                                && (classification.failureReason()
+                                            == ToolFailureReason.EDIT_EMPTY_ARGUMENTS
+                                    || classification.failureReason()
+                                            == ToolFailureReason
+                                                    .EDIT_FULL_REWRITE_REQUIRED))
+                .count();
+        if (eligibleFailures != 1) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence does not contain exactly one eligible failure");
+        }
+
+        List<MutableCall> sameTargetSuccesses = calls.stream()
+                .filter(call ->
+                        call.settlement == CallSettlement.EXECUTED_SUCCESS
+                                && ToolAliasPolicy.isMutating(call.toolName)
+                                && claim.targetHint().equals(call.pathHint))
+                .toList();
+        if (sameTargetSuccesses.size() != 1
+                || sameTargetSuccesses.getFirst() != repair) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence does not contain one same-target success");
+        }
+
+        for (ToolOutcomeClassificationFact classification
+                : toolOutcomeClassifications) {
+            if (!classification.success() || !classification.mutating()) continue;
+            MutableCall successfulCall = settledCallById(
+                    calls,
+                    classification.toolCallId(),
+                    "typed repair sequence successful mutation");
+            if (classification.schemaVersion() != 2
+                    || classification.denied()
+                    || !classification.errorCode().isBlank()
+                    || classification.eventIndex() >= verification.eventIndex()
+                    || successfulCall.pathHint.isBlank()
+                    || "<protected-path>".equals(successfulCall.pathHint)
+                    || !obligation.requiredMutationTargets().contains(
+                            successfulCall.pathHint)
+                    || !typedRepairOperation(
+                            successfulCall,
+                            classification)) {
+                throw new IllegalArgumentException(
+                        "typed repair sequence contains an unbound successful mutation");
+            }
+        }
+        return new MutationRecoveryFact(
+                claim.failureToolCallId(),
+                claim.repairToolCallId(),
+                claim.decision().name(),
+                false,
+                recoveryEvidenceReference(claim));
+    }
+
+    private static boolean typedRepairSuccess(
+            ToolFailureReason failureReason,
+            MutableCall repair,
+            ToolOutcomeClassificationFact classification
+    ) {
+        if (classification == null
+                || classification.schemaVersion() != 2
+                || !classification.success()
+                || !classification.mutating()
+                || classification.denied()
+                || !classification.errorCode().isBlank()
+                || classification.failureReason() != ToolFailureReason.NONE) {
+            return false;
+        }
+        if (failureReason == ToolFailureReason.EDIT_FULL_REWRITE_REQUIRED) {
+            return "talos.write_file".equals(repair.toolName)
+                    && typedRepairOperation(repair, classification);
+        }
+        return ("talos.edit_file".equals(repair.toolName)
+                        && "EXACT_EDIT_REPLACEMENT".equals(
+                                classification.mutationEvidenceKind()))
+                || ("talos.write_file".equals(repair.toolName)
+                        && "FULL_WRITE_REPLACEMENT".equals(
+                                classification.mutationEvidenceKind()));
+    }
+
+    private static boolean typedRepairOperation(
+            MutableCall call,
+            ToolOutcomeClassificationFact classification
+    ) {
+        if (call == null || classification == null) return false;
+        return ("talos.edit_file".equals(call.toolName)
+                        && "EXACT_EDIT_REPLACEMENT".equals(
+                                classification.mutationEvidenceKind()))
+                || ("talos.write_file".equals(call.toolName)
+                        && ("FULL_WRITE_REPLACEMENT".equals(
+                                    classification.mutationEvidenceKind())
+                            || "NONE".equals(
+                                    classification.mutationEvidenceKind())));
+    }
+
+    private static void requireExactTypedRepairProtocol(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            MutableCall repair,
+            List<MutableCall> calls,
+            List<ToolOutcomeClassificationFact> classifications
+    ) {
+        int failureIndex = calls.indexOf(failure);
+        int repairIndex = calls.indexOf(repair);
+        if (failureIndex < 0 || repairIndex < 0) {
+            throw new IllegalArgumentException(
+                    "typed repair sequence lacks exact call ordering");
+        }
+        if (claim.failureReason()
+                == ToolFailureReason.EDIT_FULL_REWRITE_REQUIRED) {
+            if (repairIndex != failureIndex + 1) {
+                throw new IllegalArgumentException(
+                        "full-rewrite repair is not the direct redirected call");
+            }
+            return;
+        }
+        if (claim.failureReason() != ToolFailureReason.EDIT_EMPTY_ARGUMENTS
+                || repairIndex != failureIndex + 2) {
+            throw new IllegalArgumentException(
+                    "empty-edit repair lacks one exact intervening read");
+        }
+        MutableCall read = calls.get(failureIndex + 1);
+        ToolOutcomeClassificationFact readClassification =
+                toolOutcomeClassificationById(
+                        classifications,
+                        read.toolCallId);
+        if (!"talos.read_file".equals(read.toolName)
+                || !claim.targetHint().equals(read.pathHint)
+                || read.settlement != CallSettlement.EXECUTED_SUCCESS
+                || read.settlementEventIndex <= failure.settlementEventIndex
+                || read.settlementEventIndex >= repair.parsedEventIndex
+                || readClassification == null
+                || readClassification.schemaVersion() != 2
+                || !readClassification.success()
+                || readClassification.mutating()
+                || readClassification.denied()
+                || !readClassification.errorCode().isBlank()
+                || readClassification.failureReason()
+                        != ToolFailureReason.NONE
+                || !"NONE".equals(
+                        readClassification.mutationEvidenceKind())
+                || readClassification.eventIndex()
+                        <= read.settlementEventIndex
+                || readClassification.eventIndex()
+                        >= repair.parsedEventIndex) {
+            throw new IllegalArgumentException(
+                    "empty-edit repair lacks one exact successful same-target read");
+        }
+    }
+
+    private static MutationRecoveryFact bindMatchedRecovery(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            List<MutableCall> calls,
+            List<IndexedTraceEvent> requestObligationEvents,
+            List<IndexedTraceEvent> verificationCompletedEvents,
+            List<IndexedTraceEvent> outcomeEvaluatedEvents,
+            List<ToolOutcomeClassificationFact> toolOutcomeClassifications,
+            String terminalState,
+            String outcomeStatus,
+            String rootVerificationStatus,
+            JsonNode rootMutationStatus) {
+        if (failure == null
+                || !MATCHED_RECOVERY_FAILURE_REASONS.contains(
+                        claim.failureReason())) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery lacks an eligible typed failure");
+        }
+        MutableCall repair = settledCallById(
+                calls,
+                claim.repairToolCallId(),
+                "mutation recovery repair");
+        if (repair.settlement != CallSettlement.EXECUTED_SUCCESS
+                || !ToolAliasPolicy.isMutating(repair.toolName)
+                || repair.settlementEventIndex <= failure.settlementEventIndex
+                || claim.eventIndex() <= repair.settlementEventIndex) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery lacks one later successful mutation");
+        }
+        requireExactRecoveryTarget(claim, failure, repair);
+        if (requestObligationEvents.size() != 1) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery requires one request obligation");
+        }
+        IndexedTraceEvent rawObligation = requestObligationEvents.getFirst();
+        RequestObligationTraceFact obligation = requestObligationTraceFact(
+                rawObligation.event(), rawObligation.eventIndex());
+        if (!"COMPLETE".equals(obligation.derivationStatus())
+                || obligation.eventIndex() >= failure.parsedEventIndex
+                || claim.requestObligationSha256().isBlank()
+                || claim.verifiedRequestObligationSha256().isBlank()
+                || !claim.requestObligationSha256().equals(
+                        claim.verifiedRequestObligationSha256())
+                || !claim.requestObligationSha256().equals(
+                        obligation.canonicalSha256())) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery request identity is not proven");
+        }
+        if (verificationCompletedEvents.size() != 1) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery requires one verification event");
+        }
+        IndexedTraceEvent rawVerification = verificationCompletedEvents.getFirst();
+        VerificationTraceFact verification = verificationTraceFact(
+                rawVerification.event(), rawVerification.eventIndex());
+        if (claim.verificationSource()
+                    != TaskVerificationEvidenceSource.POST_APPLY_STATIC
+                || claim.verificationStatus() != TaskVerificationStatus.PASSED
+                || !"PASSED".equals(rootVerificationStatus)
+                || !"PASSED".equals(verification.status())
+                || verification.eventIndex() <= repair.settlementEventIndex
+                || verification.eventIndex() >= claim.eventIndex()) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery verification is not authoritative");
+        }
+        String mutationStatus = exactText(
+                rootMutationStatus,
+                "trace outcome mutation status");
+        if (!validMatchedRecoveryOutcome(
+                terminalState,
+                outcomeStatus,
+                mutationStatus)) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery disagrees with the trace outcome");
+        }
+        boolean laterSameTargetSuccess = calls.stream().anyMatch(call ->
+                call != repair
+                        && call.settlement == CallSettlement.EXECUTED_SUCCESS
+                        && ToolAliasPolicy.isMutating(call.toolName)
+                        && claim.targetHint().equals(call.pathHint)
+                        && call.settlementEventIndex > repair.settlementEventIndex);
+        if (laterSameTargetSuccess) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery is invalidated by a later mutation");
+        }
+        ToolOutcomeClassificationFact failureClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.failureToolCallId());
+        ToolOutcomeClassificationFact repairClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.repairToolCallId());
+        if (failureClassification != null) {
+            requireOutcomeOrdinal(
+                    toolOutcomeClassifications,
+                    failureClassification,
+                    claim.failureOrdinal(),
+                    "mutation recovery failure");
+        }
+        if (repairClassification != null) {
+            requireOutcomeOrdinal(
+                    toolOutcomeClassifications,
+                    repairClassification,
+                    claim.repairOrdinal(),
+                    "mutation recovery repair");
+        }
+        if (failureClassification != null
+                && (failureClassification.success()
+                    || !failureClassification.mutating()
+                    || failureClassification.denied()
+                    || failureClassification.failureReason()
+                            != claim.failureReason()
+                    || failureClassification.eventIndex()
+                            >= verification.eventIndex())) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery contradicts its typed failed outcome");
+        }
+        if (repairClassification != null
+                && (!repairClassification.success()
+                    || !repairClassification.mutating()
+                    || repairClassification.denied()
+                    || repairClassification.failureReason()
+                            != ToolFailureReason.NONE
+                    || !STRUCTURED_MUTATION_EVIDENCE_KINDS.contains(
+                            repairClassification.mutationEvidenceKind())
+                    || repairClassification.eventIndex()
+                            >= verification.eventIndex())) {
+            throw new IllegalArgumentException(
+                    "matched-obligation recovery contradicts its typed repair outcome");
+        }
+        boolean proven = false;
+        if (claim.schemaVersion() == 2
+                && failureClassification != null
+                && repairClassification != null) {
+            if (toolOutcomeClassifications.stream().anyMatch(classification ->
+                    classification.success()
+                            && classification.mutating()
+                            && classification.eventIndex()
+                                    > verification.eventIndex())) {
+                throw new IllegalArgumentException(
+                        "matched-obligation recovery has a successful mutation "
+                                + "after verification");
+            }
+            List<String> successfulMutationsBeforeVerification =
+                    toolOutcomeClassifications.stream()
+                            .filter(classification ->
+                                    classification.success()
+                                            && classification.mutating()
+                                            && classification.eventIndex()
+                                                    < verification.eventIndex())
+                            .map(ToolOutcomeClassificationFact::toolCallId)
+                            .toList();
+            if (!claim.coveredSuccessfulMutationToolCallIds().equals(
+                    successfulMutationsBeforeVerification)) {
+                throw new IllegalArgumentException(
+                        "matched-obligation recovery receipt coverage disagrees "
+                                + "with classified successful mutations");
+            }
+            proven = true;
+        }
+        return new MutationRecoveryFact(
+                claim.failureToolCallId(),
+                claim.repairToolCallId(),
+                claim.decision().name(),
+                proven,
+                recoveryEvidenceReference(claim));
+    }
+
+    private static MutationRecoveryFact bindRedundantOperation(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            List<MutableCall> calls,
+            List<ToolOutcomeClassificationFact> toolOutcomeClassifications) {
+        if (failure == null) {
+            throw new IllegalArgumentException(
+                    "redundant-operation observation lacks its failed call");
+        }
+        MutableCall priorSuccess = settledCallById(
+                calls,
+                claim.repairToolCallId(),
+                "redundant-operation prior success");
+        if (priorSuccess.settlement != CallSettlement.EXECUTED_SUCCESS
+                || !ToolAliasPolicy.isMutating(priorSuccess.toolName)
+                || priorSuccess.settlementEventIndex >= failure.settlementEventIndex
+                || claim.eventIndex() <= failure.settlementEventIndex) {
+            throw new IllegalArgumentException(
+                    "redundant-operation observation lacks one prior successful mutation");
+        }
+        ToolOutcomeClassificationFact failedClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.failureToolCallId());
+        ToolOutcomeClassificationFact priorClassification =
+                toolOutcomeClassificationById(
+                        toolOutcomeClassifications,
+                        claim.repairToolCallId());
+        if (failedClassification != null) {
+            requireOutcomeOrdinal(
+                    toolOutcomeClassifications,
+                    failedClassification,
+                    claim.failureOrdinal(),
+                    "redundant-operation failure");
+        }
+        if (priorClassification != null) {
+            requireOutcomeOrdinal(
+                    toolOutcomeClassifications,
+                    priorClassification,
+                    claim.repairOrdinal(),
+                    "redundant-operation prior success");
+        }
+        requireExactRecoveryTarget(claim, failure, priorSuccess);
+        return new MutationRecoveryFact(
+                claim.failureToolCallId(),
+                claim.repairToolCallId(),
+                claim.decision().name(),
+                false,
+                recoveryEvidenceReference(claim));
+    }
+
+    private static void requireFailedMutationCall(
+            MutableCall failure,
+            MutationRecoveryClaim claim) {
+        if (!ToolAliasPolicy.isMutating(failure.toolName)
+                || failure.approvalDisposition == ApprovalDisposition.DENIED
+                || (failure.settlement != CallSettlement.BLOCKED
+                    && failure.settlement != CallSettlement.EXECUTED_FAILURE)
+                || failure.settlementEventIndex < 0
+                || claim.eventIndex() <= failure.settlementEventIndex) {
+            throw new IllegalArgumentException(
+                    "mutation recovery does not bind one non-denied failed mutation");
+        }
+        if (!claim.targetHint().isBlank()
+                && !"<protected-path>".equals(claim.targetHint())
+                && !claim.targetHint().equals(failure.pathHint)) {
+            throw new IllegalArgumentException(
+                    "mutation recovery failure target disagrees with its event");
+        }
+    }
+
+    private static void requireDeniedMutationCall(
+            MutableCall failure,
+            MutationRecoveryClaim claim) {
+        if (!ToolAliasPolicy.isMutating(failure.toolName)
+                || (failure.settlement != CallSettlement.BLOCKED
+                    && failure.settlement != CallSettlement.EXECUTED_FAILURE)
+                || failure.settlementEventIndex < 0
+                || claim.eventIndex() <= failure.settlementEventIndex) {
+            throw new IllegalArgumentException(
+                    "denied mutation recovery claim does not bind one denied mutation");
+        }
+    }
+
+    private static boolean validMatchedRecoveryOutcome(
+            String terminalState,
+            String outcomeStatus,
+            String mutationStatus) {
+        if ("SUCCEEDED".equals(mutationStatus)) {
+            return "COMPLETED_VERIFIED".equals(terminalState)
+                    && "COMPLETE".equals(outcomeStatus);
+        }
+        if (!"PARTIAL".equals(mutationStatus)) return false;
+        return ("PARTIAL".equals(terminalState)
+                        && "PARTIAL".equals(outcomeStatus))
+                || (("BLOCKED_BY_APPROVAL".equals(terminalState)
+                                || "BLOCKED_BY_POLICY".equals(terminalState))
+                        && "BLOCKED".equals(outcomeStatus));
+    }
+
+    private static void bindUnresolvedFailureClassification(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            List<ToolOutcomeClassificationFact> classifications,
+            int verificationEventIndex) {
+        ToolOutcomeClassificationFact classification =
+                toolOutcomeClassificationById(
+                        classifications,
+                        claim.failureToolCallId());
+        if (classification == null) return;
+        requireOutcomeOrdinal(
+                classifications,
+                classification,
+                claim.failureOrdinal(),
+                "mutation recovery failure");
+        boolean denied = claim.decision()
+                == MutationRecoveryAssessment.Decision.DENIED_OR_POLICY;
+        if (classification.success()
+                || !classification.mutating()
+                || classification.denied() != denied
+                || classification.failureReason() != claim.failureReason()
+                || (verificationEventIndex >= 0
+                    && classification.eventIndex() >= verificationEventIndex)
+                || classification.eventIndex() >= claim.eventIndex()) {
+            throw new IllegalArgumentException(
+                    "mutation recovery claim contradicts its typed failed outcome");
+        }
+    }
+
+    private static void requireExactRecoveryTarget(
+            MutationRecoveryClaim claim,
+            MutableCall failure,
+            MutableCall repair) {
+        if (claim.targetHint().isBlank()
+                || "<protected-path>".equals(claim.targetHint())
+                || !sha256(claim.targetHint()).equals(claim.targetSha256())
+                || !claim.targetHint().equals(failure.pathHint)
+                || !claim.targetHint().equals(repair.pathHint)) {
+            throw new IllegalArgumentException(
+                    "mutation recovery exact same-target identity is not proven");
+        }
+    }
+
+    private static MutableCall settledCallById(
+            List<MutableCall> calls,
+            String toolCallId,
+            String label) {
+        List<MutableCall> matches = calls.stream()
+                .filter(call -> call.toolCallId.equals(toolCallId))
+                .toList();
+        if (matches.size() != 1
+                || !matches.getFirst().settled
+                || matches.getFirst().settlement == CallSettlement.UNSETTLED) {
+            throw new IllegalArgumentException(
+                    label + " lacks one settled parsed call id: " + toolCallId);
+        }
+        return matches.getFirst();
+    }
+
+    private static void validateExactCallSequence(
+            List<MutableCall> calls,
+            int turnNumber) {
+        for (int index = 0; index < calls.size(); index++) {
+            String expected = "call-" + turnNumber + "-" + (index + 1);
+            if (!expected.equals(calls.get(index).toolCallId)) {
+                throw new IllegalArgumentException(
+                        "trace tool-call lineage is not monotonic for turn "
+                                + turnNumber + ": expected " + expected);
+            }
+        }
+    }
+
+    private static void validateToolOutcomeClassifications(
+            List<ToolOutcomeClassificationFact> classifications,
+            List<MutableCall> calls) {
+        int previousOutcomeOrdinal = 0;
+        Set<String> classifiedCallIds = new HashSet<>();
+        for (ToolOutcomeClassificationFact classification : classifications) {
+            if (classification.outcomeOrdinal() <= previousOutcomeOrdinal) {
+                throw new IllegalArgumentException(
+                        "typed tool outcome ordinals are not strictly increasing");
+            }
+            previousOutcomeOrdinal = classification.outcomeOrdinal();
+            if (!classifiedCallIds.add(classification.toolCallId())) {
+                throw new IllegalArgumentException(
+                        "settled parsed call has more than one typed outcome: "
+                                + classification.toolCallId());
+            }
+            MutableCall call = settledCallById(
+                    calls,
+                    classification.toolCallId(),
+                    "typed tool outcome");
+            boolean executedSuccess =
+                    call.settlement == CallSettlement.EXECUTED_SUCCESS;
+            if (classification.eventIndex() <= call.settlementEventIndex
+                    || classification.success() != executedSuccess
+                    || classification.mutating()
+                            != ToolAliasPolicy.isMutating(call.toolName)) {
+                throw new IllegalArgumentException(
+                        "typed tool outcome disagrees with its settled call: "
+                                + classification.toolCallId());
+            }
+        }
+        if (!classifications.isEmpty()) {
+            for (MutableCall call : calls) {
+                if (call.settlement == CallSettlement.UNSETTLED
+                        || (call.settlement == CallSettlement.BLOCKED
+                            && !ToolAliasPolicy.isMutating(call.toolName))) {
+                    continue;
+                }
+                if (toolOutcomeClassificationById(
+                                classifications, call.toolCallId)
+                        == null) {
+                    throw new IllegalArgumentException(
+                            "settled parsed call lacks one typed outcome: "
+                                    + call.toolCallId);
+                }
+            }
+        }
+    }
+
+    private static ToolOutcomeClassificationFact toolOutcomeClassificationById(
+            List<ToolOutcomeClassificationFact> classifications,
+            String toolCallId) {
+        return classifications.stream()
+                .filter(classification ->
+                        classification.toolCallId().equals(toolCallId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static void requireOutcomeOrdinal(
+            List<ToolOutcomeClassificationFact> classifications,
+            ToolOutcomeClassificationFact classification,
+            int claimedOrdinal,
+            String label) {
+        if (!classifications.contains(classification)
+                || classification.outcomeOrdinal() != claimedOrdinal) {
+            throw new IllegalArgumentException(
+                    label + " ordinal disagrees with typed outcome order");
+        }
+    }
+
+    private static String recoveryEvidenceReference(MutationRecoveryClaim claim) {
+        return "trace.json#MUTATION_FAILURE_RECOVERY_EVALUATED[failureToolCallId="
+                + claim.failureToolCallId() + "]";
+    }
+
+    private static String exactText(JsonNode value, String label) {
+        if (value == null || !value.isTextual()) {
+            throw new IllegalArgumentException(label + " is missing or invalid");
+        }
+        String text = value.textValue();
+        if (!text.equals(text.strip())) {
+            throw new IllegalArgumentException(label + " is not canonical");
+        }
+        return text;
+    }
+
+    private static String requiredRawSha256(
+            JsonNode value,
+            String label,
+            boolean allowEmpty) {
+        String hash = exactText(value, label);
+        if ((!allowEmpty || !hash.isEmpty())
+                && !hash.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException(label + " is invalid");
+        }
+        return hash;
+    }
+
+    private static void requireCanonicalToolCallId(
+            String toolCallId,
+            String label) {
+        if (!toolCallId.matches("call-[1-9][0-9]*-[1-9][0-9]*")) {
+            throw new IllegalArgumentException(
+                    label + " is not canonical: " + toolCallId);
+        }
+    }
+
+    private static List<String> orderedUniqueToolCallIds(
+            JsonNode values,
+            String label) {
+        if (values == null || !values.isArray()) {
+            throw new IllegalArgumentException(label + " is missing or invalid");
+        }
+        List<String> ordered = new ArrayList<>();
+        Set<String> unique = new HashSet<>();
+        for (JsonNode value : values) {
+            String toolCallId = exactText(value, label + "[]");
+            requireCanonicalToolCallId(toolCallId, label + "[]");
+            if (!unique.add(toolCallId)) {
+                throw new IllegalArgumentException(
+                        label + " contains a duplicate: " + toolCallId);
+            }
+            ordered.add(toolCallId);
+        }
+        return List.copyOf(ordered);
+    }
+
+    private static List<String> obligationTargets(
+            JsonNode values,
+            String label
+    ) {
+        if (values == null || !values.isArray()) {
+            throw new IllegalArgumentException(label + " is missing or invalid");
+        }
+        List<String> targets = new ArrayList<>();
+        Set<String> visibleTargets = new HashSet<>();
+        for (JsonNode value : values) {
+            String target = exactText(value, label + "[]");
+            if ("<protected-path>".equals(target)) {
+                targets.add(target);
+                continue;
+            }
+            String canonical;
+            try {
+                canonical = RequestObligation.canonicalTarget(target);
+            } catch (IllegalArgumentException unsafe) {
+                throw new IllegalArgumentException(
+                        label + " contains an unsafe target", unsafe);
+            }
+            if (!canonical.equals(target) || !visibleTargets.add(target)) {
+                throw new IllegalArgumentException(
+                        label + " contains a noncanonical or duplicate target: "
+                                + target);
+            }
+            targets.add(target);
+        }
+        return List.copyOf(targets);
     }
 
     private static void validateAuthoritySurfacesWithinPlan(
@@ -1909,6 +3345,8 @@ final class QualificationTraceEvidence {
         private boolean approvalRequiredObserved;
         private CallSettlement settlement = CallSettlement.UNSETTLED;
         private ApprovalDisposition approvalDisposition = ApprovalDisposition.NONE;
+        private final int parsedEventIndex;
+        private int settlementEventIndex = -1;
 
         private MutableCall(
                 String toolName,
@@ -1920,7 +3358,8 @@ final class QualificationTraceEvidence {
                 String toolNameHash,
                 String argumentsHash,
                 ExecutionAuthorityKind executionAuthorityKind,
-                LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeAuthorityReason) {
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeAuthorityReason,
+                int parsedEventIndex) {
             this.toolName = toolName;
             this.pathHint = pathHint;
             this.decisionToolName = toolName;
@@ -1940,6 +3379,7 @@ final class QualificationTraceEvidence {
             this.runtimeAuthorityReason = runtimeAuthorityReason == null
                     ? LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE
                     : runtimeAuthorityReason;
+            this.parsedEventIndex = parsedEventIndex;
         }
     }
 }

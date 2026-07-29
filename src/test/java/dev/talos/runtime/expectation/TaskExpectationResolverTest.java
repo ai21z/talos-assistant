@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskExpectationResolverTest {
@@ -297,6 +298,48 @@ class TaskExpectationResolverTest {
         assertTrue(replacement.preserveRest(),
                 "the explicit scope restriction must reach the preserve-rest verifier");
         assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsExactRecoveryPreserveLinesReplacementFromF17Wording() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, change draft to final. If an exact edit fails, "
+                        + "recover without deleting any other line.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        ReplacementExpectation replacement =
+                (ReplacementExpectation) expectations.getFirst();
+        assertEquals("notes.md", replacement.targetPath());
+        assertEquals("draft", replacement.oldText());
+        assertEquals("final", replacement.newText());
+        assertEquals(
+                "replacement-scoped-prefix-change-to",
+                replacement.sourcePattern());
+        assertTrue(replacement.preserveRest());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void scopedChangeToWithoutPreservationResolvesButDoesNotClaimPreserveRest() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, change draft to final. If an exact edit fails, recover.");
+
+        ReplacementExpectation replacement = (ReplacementExpectation)
+                TaskExpectationResolver.resolve(contract).getFirst();
+
+        assertFalse(replacement.preserveRest());
+    }
+
+    @Test
+    void repeatedScopedChangeToClausesAreRejectedAsAmbiguous() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, change draft to final. "
+                        + "In notes.md, change beta to BETA. Preserve the rest.");
+
+        assertTrue(TaskExpectationResolver.resolve(contract).stream()
+                .noneMatch(ReplacementExpectation.class::isInstance));
     }
 
     @Test

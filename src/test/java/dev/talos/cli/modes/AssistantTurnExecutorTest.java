@@ -11,6 +11,7 @@ import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -2010,7 +2011,13 @@ class AssistantTurnExecutorTest {
                             || Files.readString(workspace.resolve("test_dijkstra.py")).contains("== 5"),
                     Files.readString(workspace.resolve("test_dijkstra.py")));
             assertFalse(Files.readString(workspace.resolve("dijkstra.py")).contains("placeholder before source read"));
-            assertFalse(out.text().contains("Source-derived artifact write blocked before approval"), out.text());
+            assertTrue(
+                    out.text().contains(
+                            MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                    out.text());
+            assertTrue(
+                    out.text().contains("Source-derived artifact write blocked before approval"),
+                    out.text());
         }
 
         @Test

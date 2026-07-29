@@ -1,6 +1,10 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -8,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,6 +34,7 @@ class LocalTurnTraceParsedToolPermitTest {
         ToolCall call = readCall("README.md");
         LocalTurnTraceCapture.ParsedToolCallPermit permit =
                 runtimePermit(call);
+        assertEquals("call-1-1", permit.toolCallId());
 
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call));
         assertFalse(LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call));
@@ -166,6 +172,118 @@ class LocalTurnTraceParsedToolPermitTest {
         assertEquals(failedId, failed.data().get("toolCallId"));
     }
 
+    @Test
+    void settledCallsReceiveClosedTypedOutcomeClassifications() {
+        beginTrace("trc-permit-outcome-classification", 7);
+        ToolCall failedCall = new ToolCall(
+                "talos.edit_file",
+                Map.of(
+                        "path", "README.md",
+                        "old_string", "missing",
+                        "new_string", "replacement"));
+        LocalTurnTraceCapture.ParsedToolCallPermit failedPermit =
+                runtimePermit(failedCall);
+        assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(
+                failedPermit, failedCall));
+        LocalTurnTraceCapture.recordToolExecuted(
+                "tool_loop", failedCall, false, "old_string not found");
+        LocalTurnTraceCapture.recordToolOutcomeClassified(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file",
+                        "README.md",
+                        false,
+                        true,
+                        false,
+                        "",
+                        "old_string not found",
+                        null,
+                        ToolError.INVALID_PARAMS,
+                        null,
+                        ToolMutationEvidence.exactEdit("missing", "replacement"),
+                        ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                        List.of(),
+                        failedPermit.toolCallId()),
+                1);
+
+        ToolCall repairCall = new ToolCall(
+                "talos.write_file",
+                Map.of("path", "README.md", "content", "replacement"));
+        LocalTurnTraceCapture.ParsedToolCallPermit repairPermit =
+                runtimePermit(repairCall);
+        assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(
+                repairPermit, repairCall));
+        LocalTurnTraceCapture.recordToolExecuted(
+                "tool_loop", repairCall, true, "");
+        LocalTurnTraceCapture.recordToolOutcomeClassified(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.write_file",
+                        "README.md",
+                        true,
+                        true,
+                        false,
+                        "wrote README.md",
+                        "",
+                        null,
+                        "",
+                        null,
+                        ToolMutationEvidence.fullWriteReplacement(
+                                "before",
+                                "replacement"),
+                        ToolFailureReason.NONE,
+                        List.of(),
+                        repairPermit.toolCallId()),
+                2);
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        List<TurnTraceEvent> classified = events(
+                trace,
+                ToolOutcomeClassificationTraceEventFactory.EVENT_TYPE);
+        assertEquals(2, classified.size());
+        assertEquals(
+                Set.of(
+                        "schemaVersion",
+                        "outcomeOrdinal",
+                        "toolCallId",
+                        "success",
+                        "mutating",
+                        "denied",
+                        "errorCode",
+                        "failureReason",
+                        "mutationEvidenceKind"),
+                classified.getFirst().data().keySet());
+        assertEquals(2, classified.getFirst().data().get("schemaVersion"));
+        assertEquals(1, classified.getFirst().data().get("outcomeOrdinal"));
+        assertEquals("call-7-1", classified.getFirst().data().get("toolCallId"));
+        assertEquals(false, classified.getFirst().data().get("success"));
+        assertEquals(
+                "EDIT_OLD_STRING_NOT_FOUND",
+                classified.getFirst().data().get("failureReason"));
+        assertEquals(
+                ToolError.INVALID_PARAMS,
+                classified.getFirst().data().get("errorCode"));
+        assertEquals(
+                "EXACT_EDIT_REPLACEMENT",
+                classified.getFirst().data().get("mutationEvidenceKind"));
+        assertEquals("call-7-2", classified.getLast().data().get("toolCallId"));
+        assertEquals(2, classified.getLast().data().get("outcomeOrdinal"));
+        assertEquals(true, classified.getLast().data().get("success"));
+        assertEquals("", classified.getLast().data().get("errorCode"));
+        assertEquals("NONE", classified.getLast().data().get("failureReason"));
+        assertEquals(
+                "FULL_WRITE_REPLACEMENT",
+                classified.getLast().data().get("mutationEvidenceKind"));
+        assertTrue(eventIndex(trace, "TOOL_EXECUTED", 0)
+                < eventIndex(
+                        trace,
+                        ToolOutcomeClassificationTraceEventFactory.EVENT_TYPE,
+                        0));
+        assertTrue(eventIndex(trace, "TOOL_EXECUTED", 1)
+                < eventIndex(
+                        trace,
+                        ToolOutcomeClassificationTraceEventFactory.EVENT_TYPE,
+                        1));
+    }
+
     private static void beginTrace(String traceId, int turnNumber) {
         LocalTurnTraceCapture.begin(
                 traceId,
@@ -213,6 +331,15 @@ class LocalTurnTraceParsedToolPermitTest {
         return trace.events().stream()
                 .filter(candidate -> type.equals(candidate.type()))
                 .toList();
+    }
+
+    private static int eventIndex(LocalTurnTrace trace, String type, int occurrence) {
+        int seen = 0;
+        for (int index = 0; index < trace.events().size(); index++) {
+            if (!type.equals(trace.events().get(index).type())) continue;
+            if (seen++ == occurrence) return index;
+        }
+        return -1;
     }
 
     private static Map<String, String> reconstructSettlements(LocalTurnTrace trace) {

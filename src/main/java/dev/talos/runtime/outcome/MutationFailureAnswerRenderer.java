@@ -163,27 +163,27 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        boolean actionObligationAnswer = answer != null && answer.startsWith("[Action obligation failed:");
+        return summarizePartialMutationOutcomesIfNeeded(
+                answer,
+                MutationRecoveryAssessment.provisional(
+                        null,
+                        null,
+                        loopResult,
+                        extraMutationSuccesses));
+    }
 
-        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
-        if (outcomes == null || outcomes.isEmpty()) return answer;
+    public static String summarizePartialMutationOutcomesIfNeeded(
+            String answer,
+            MutationRecoveryAssessment assessment
+    ) {
+        if (assessment == null || !assessment.partial()) return answer;
+        MutationOutcome mutationOutcome = assessment.mutationOutcome();
+        if (mutationOutcome.extraSuccesses() > 0) return answer;
+        boolean actionObligationAnswer = answer != null
+                && answer.contains("[Action obligation failed:");
 
-        List<ToolCallLoop.ToolOutcome> mutating = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .toList();
-        if (mutating.isEmpty()) return answer;
-
-        List<ToolCallLoop.ToolOutcome> successes = mutating.stream()
-                .filter(ToolCallLoop.ToolOutcome::success)
-                .toList();
-        List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
-                .filter(outcome -> !outcome.success())
-                .filter(outcome -> !isRecoveredInvalidEditFailure(outcome, mutating))
-                .filter(outcome -> !MutationFailureRecovery.isRecoveredDuplicateWorkspaceOperationFailure(
-                        outcome, mutating))
-                .toList();
+        List<ToolCallLoop.ToolOutcome> successes = mutationOutcome.successful();
+        List<ToolCallLoop.ToolOutcome> failures = assessment.unresolvedOutcomesInOrder();
         if (successes.isEmpty() || failures.isEmpty()) return answer;
 
         String partialSummary = partialMutationOutcomeSummary(successes, failures, !actionObligationAnswer);
@@ -212,7 +212,7 @@ public final class MutationFailureAnswerRenderer {
             out.append("- ")
                     .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
                     .append(": ")
-                    .append(trimFailureMessage(outcome.errorMessage()))
+                    .append(trimMixedOutcomeFailureMessage(outcome.errorMessage()))
                     .append('\n');
         }
         if (includeReplacementNote) {
@@ -398,34 +398,6 @@ public final class MutationFailureAnswerRenderer {
         return out.toString().stripTrailing();
     }
 
-    private static boolean isRecoveredInvalidEditFailure(
-            ToolCallLoop.ToolOutcome failure,
-            List<ToolCallLoop.ToolOutcome> orderedMutatingOutcomes
-    ) {
-        if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
-        if (!failure.invalidEmptyEditArguments()
-                && !failure.fullRewriteRepairRedirect()
-                && !failure.oldStringNotFoundEditFailure()) {
-            return false;
-        }
-        String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
-        if (failedPath.isBlank()) return false;
-        boolean sawFailure = false;
-        for (ToolCallLoop.ToolOutcome outcome : orderedMutatingOutcomes) {
-            if (outcome == failure) {
-                sawFailure = true;
-                continue;
-            }
-            if (!sawFailure) continue;
-            if (outcome.mutating()
-                    && outcome.success()
-                    && failedPath.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static String trimFailureMessage(String errorMessage) {
         if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
         String msg = errorMessage.strip();
@@ -433,6 +405,24 @@ public final class MutationFailureAnswerRenderer {
         if (newline > 0) msg = msg.substring(0, newline).strip();
         if (msg.length() > 180) msg = msg.substring(0, 177) + "…";
         return msg;
+    }
+
+    private static String trimMixedOutcomeFailureMessage(String errorMessage) {
+        if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
+        String callScoped = errorMessage
+                .replace(
+                        "No approval was requested and no additional file was changed.",
+                        "That failed call requested no approval and changed no additional file.")
+                .replace(
+                        "No approval was requested and no file was changed.",
+                        "That failed call requested no approval and changed no file.")
+                .replace(
+                        "no approval was requested and no additional file was changed.",
+                        "that failed call requested no approval and changed no additional file.")
+                .replace(
+                        "no approval was requested and no file was changed.",
+                        "that failed call requested no approval and changed no file.");
+        return trimFailureMessage(callScoped);
     }
 
     private static List<String> successfulMutatingTargets(ToolCallLoop.LoopResult loopResult) {

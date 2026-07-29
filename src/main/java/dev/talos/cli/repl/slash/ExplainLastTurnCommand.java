@@ -679,12 +679,26 @@ public final class ExplainLastTurnCommand implements Command {
                 case FAILED -> "TURN_FAILED";
                 case CANCELLED -> "TURN_CANCELLED";
                 case NO_RESULT -> "NO_RESULT";
-                case COMPLETED -> inferOutcomeFromTurn(turn);
+                case COMPLETED -> tracedOutcomeOrTurn(turn, localTrace);
             };
         }
         if (settlement.present()) {
             return inferOutcomeFromTurn(turn);
         }
+        if (localTrace != null
+                && localTrace.outcome() != null
+                && !localTrace.outcome().classification().isBlank()) {
+            return localTrace.outcome().classification();
+        }
+        if (localTrace != null
+                && localTrace.outcome() != null
+                && !localTrace.outcome().status().isBlank()) {
+            return localTrace.outcome().status();
+        }
+        return inferOutcomeFromTurn(turn);
+    }
+
+    private static String tracedOutcomeOrTurn(TurnRecord turn, LocalTurnTrace localTrace) {
         if (localTrace != null
                 && localTrace.outcome() != null
                 && !localTrace.outcome().classification().isBlank()) {

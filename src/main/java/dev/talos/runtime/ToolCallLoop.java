@@ -180,7 +180,8 @@ public final class ToolCallLoop {
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolMutationEvidence mutationEvidence,
             dev.talos.tools.ToolFailureReason failureReason,
-            List<String> sourcePaths
+            List<String> sourcePaths,
+            String toolCallId
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -191,6 +192,28 @@ public final class ToolCallLoop {
             mutationEvidence = mutationEvidence == null ? ToolMutationEvidence.none() : mutationEvidence;
             failureReason = failureReason == null ? dev.talos.tools.ToolFailureReason.NONE : failureReason;
             sourcePaths = normalizeSourcePaths(sourcePaths);
+            toolCallId = toolCallId == null ? "" : toolCallId.strip();
+        }
+
+        /** Pre-T1154 canonical shape: exact parsed-call identity was not retained. */
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus,
+                String errorCode,
+                WorkspaceOperationPlan workspaceOperationPlan,
+                ToolMutationEvidence mutationEvidence,
+                dev.talos.tools.ToolFailureReason failureReason,
+                List<String> sourcePaths
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, sourcePaths, "");
         }
 
         /** Pre-T1065 canonical shape: source paths default to empty. */
@@ -303,7 +326,7 @@ public final class ToolCallLoop {
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, reason, sourcePaths);
+                    mutationEvidence, reason, sourcePaths, toolCallId);
         }
 
         private static List<String> normalizeSourcePaths(List<String> values) {

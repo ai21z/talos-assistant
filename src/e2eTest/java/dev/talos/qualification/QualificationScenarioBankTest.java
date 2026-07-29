@@ -132,9 +132,13 @@ class QualificationScenarioBankTest {
     }
 
     @Test
-    void v6AddsResponseOwnershipF21ObligationAndVersionedFixtureIdentityWithoutOtherDrift() {
+    void v6AddsResponseOwnershipTypedObligationsAndVersionedFixtureIdentityWithoutOtherDrift() {
         QualificationScenarioBank.Catalog v5 = QualificationScenarioBank.load(5);
         QualificationScenarioBank.Catalog v6 = QualificationScenarioBank.load(6);
+        Set<String> migratedObligations = Set.of(
+                "F16-recovery-append-section",
+                "F17-recovery-full-file-preservation",
+                "F21-context-multi-requirement-edit");
 
         for (QualificationProtocol.Scenario before : Stream.concat(
                 v5.admission().scenarios().stream(), v5.full().scenarios().stream()).toList()) {
@@ -151,8 +155,8 @@ class QualificationScenarioBankTest {
             assertEquals(before.expectedDecisions(), after.expectedDecisions(), before.id());
             List<QualificationProtocol.AtomicRequirement> normalizedAtomics =
                     after.atomicRequirements().stream()
-                            .filter(requirement -> !before.id().equals(
-                                            "F21-context-multi-requirement-edit")
+                            .filter(requirement -> !migratedObligations.contains(
+                                            before.id())
                                     || !requirement.type().equals("REQUEST_OBLIGATION"))
                             .toList();
             assertEquals(before.atomicRequirements(), normalizedAtomics, before.id());
@@ -162,7 +166,7 @@ class QualificationScenarioBankTest {
             assertNotEquals(before.fixtureSha256(), after.fixtureSha256(), before.id());
         }
         assertTrue(v6.admission().expectedRequestObligations().isEmpty());
-        assertEquals(Set.of("F21-context-multi-requirement-edit"),
+        assertEquals(migratedObligations,
                 v6.full().expectedRequestObligations().keySet());
     }
 

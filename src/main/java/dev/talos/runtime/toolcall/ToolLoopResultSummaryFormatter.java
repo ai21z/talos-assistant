@@ -6,7 +6,6 @@ import dev.talos.runtime.ToolCallLoop;
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /** Formats the public tool-loop telemetry summary exposed by {@code LoopResult.summary()}. */
 public final class ToolLoopResultSummaryFormatter {
@@ -37,7 +36,7 @@ public final class ToolLoopResultSummaryFormatter {
                 + readSetSuffix(result)
                 + workspaceCandidateSuffix(disclosure)
                 + "]";
-        int displayFailedCalls = displayFailedCalls(result.failedCalls(), result.toolOutcomes());
+        int displayFailedCalls = Math.max(0, result.failedCalls());
         if (displayFailedCalls > 0) {
             base += " [" + displayFailedCalls + " failed]";
         }
@@ -95,37 +94,6 @@ public final class ToolLoopResultSummaryFormatter {
         return joined;
     }
 
-    private static int displayFailedCalls(int failedCalls, List<ToolCallLoop.ToolOutcome> toolOutcomes) {
-        if (failedCalls <= 0 || toolOutcomes == null || toolOutcomes.isEmpty()) {
-            return Math.max(0, failedCalls);
-        }
-        int recovered = 0;
-        for (int i = 0; i < toolOutcomes.size(); i++) {
-            ToolCallLoop.ToolOutcome failure = toolOutcomes.get(i);
-            if (!isRecoveredEditFailureShape(failure)) continue;
-            String failedPath = normalizeSummaryPath(failure.pathHint());
-            if (failedPath.isBlank()) continue;
-            for (int j = i + 1; j < toolOutcomes.size(); j++) {
-                ToolCallLoop.ToolOutcome later = toolOutcomes.get(j);
-                if (later != null
-                        && later.mutating()
-                        && later.success()
-                        && failedPath.equals(normalizeSummaryPath(later.pathHint()))) {
-                    recovered++;
-                    break;
-                }
-            }
-        }
-        return Math.max(0, failedCalls - recovered);
-    }
-
-    private static boolean isRecoveredEditFailureShape(ToolCallLoop.ToolOutcome outcome) {
-        return outcome != null
-                && (outcome.invalidEmptyEditArguments()
-                || outcome.fullRewriteRepairRedirect()
-                || outcome.oldStringNotFoundEditFailure());
-    }
-
     private static String normalizeDisplayPath(String path) {
         if (path == null || path.isBlank()) return "";
         String normalized = path.strip().replace('\\', '/');
@@ -135,8 +103,4 @@ public final class ToolLoopResultSummaryFormatter {
         return normalized;
     }
 
-    private static String normalizeSummaryPath(String path) {
-        if (path == null || path.isBlank()) return "";
-        return path.replace('\\', '/').replaceFirst("^\\./+", "").toLowerCase(Locale.ROOT);
-    }
 }

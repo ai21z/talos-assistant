@@ -23,7 +23,7 @@ class QualificationScenarioResourceIdentityTest {
             3, "da2c4558e43c1359025a408b4e12b30f4e1b08b9236ad1bee1940c86b3d40fa3",
             4, "d3df5675d1b764d846202012acc250caeb0324fe5ce81ec176928cc986a067ad",
             5, "28e3df731502dcbf3dbcdd4bd69131f93a71766aa6c42ebcebd5825619de7d6b",
-            6, "27b7c918669f4fac3b9e91ac42ab655a53f55cff2a6ba6e37b3bcf0e689f910f");
+            6, "b402721da36bf215366f119ae38412b10d085a3fa759bd311f9d2664f540dbad");
 
     private static final Map<String, String> EXPECTED_RESOURCE_SHA256 = Map.ofEntries(
             Map.entry("model-qualification/banks/admission-v1.json", "54cd902f28399c09d9d52560db82d7dab7f5c6db7f3ebb30c43244ef99923a76"),
@@ -57,7 +57,7 @@ class QualificationScenarioResourceIdentityTest {
             Map.entry("model-qualification/fixtures/privacy-workspace-v5.json", "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672"),
             Map.entry("model-qualification/fixtures/web-workspace-v5.json", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10"),
             Map.entry("model-qualification/banks/admission-v6.json", "848e6bcf951218abc597e0f1f504424b80737f018c6377543759c963e34829f9"),
-            Map.entry("model-qualification/banks/full-v6.json", "5d722f310efeb725e89e43e6553868083ada5560cc1c84b99bfdf09418f87735"),
+            Map.entry("model-qualification/banks/full-v6.json", "9e090bffeeb2ab4c84179b4aa3dd99092d21b7ff06d5d1c084404549382386dc"),
             Map.entry("model-qualification/fixtures/basic-workspace-v6.json", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473"),
             Map.entry("model-qualification/fixtures/context-workspace-v6.json", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da"),
             Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5"),

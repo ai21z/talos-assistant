@@ -35,6 +35,12 @@ class RequestObligationCompilerTest {
     private static final String F21_REQUEST =
             "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
                     + "Preserve Decisions 001 through 003 and change no code.";
+    private static final String F16_REQUEST =
+            "Append a Contributing section to README.md with one sentence saying "
+                    + "Run tests before review. Preserve all current text.";
+    private static final String F17_REQUEST =
+            "In notes.md, change draft to final. If an exact edit fails, "
+                    + "recover without deleting any other line.";
 
     @Test
     void f21CompilesTheCompleteDeterministicAppendContract() {
@@ -75,6 +81,155 @@ class RequestObligationCompilerTest {
                                 STRUCTURED_MUTATION_EVIDENCE,
                                 "docs/decisions.md")),
                 obligation.verificationPostconditions());
+    }
+
+    @Test
+    void f21CanonicalJsonRemainsByteIdenticalAfterTheSchemaV1EnumExtension() {
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(F21_REQUEST));
+
+        assertEquals(
+                "{\"actionKind\":\"APPEND_STATEMENT\","
+                        + "\"derivationStatus\":\"COMPLETE\","
+                        + "\"forbiddenTargets\":[],"
+                        + "\"mutationScope\":\"ONLY_REQUIRED_TARGETS\","
+                        + "\"outputShape\":{\"kind\":\"APPEND_LABELED_STATEMENT\","
+                        + "\"label\":\"Decision 004\","
+                        + "\"statement\":\"health checks remain read-only\","
+                        + "\"target\":\"docs/decisions.md\"},"
+                        + "\"preservationConstraints\":[{\"kind\":\"NORMALIZED_PRIOR_CONTENT\","
+                        + "\"target\":\"docs/decisions.md\"}],"
+                        + "\"requiredMutationTargets\":[\"docs/decisions.md\"],"
+                        + "\"requiredSourceTargets\":[],"
+                        + "\"responseOwner\":\"DETERMINISTIC_RUNTIME_ALLOWED\","
+                        + "\"schemaVersion\":1,"
+                        + "\"verificationPostconditions\":["
+                        + "{\"kind\":\"MATCHING_STATEMENT_FINAL_LOGICAL_LINE\","
+                        + "\"target\":\"docs/decisions.md\"},"
+                        + "{\"kind\":\"MATCHING_STATEMENT_PRESENT_ONCE\","
+                        + "\"target\":\"docs/decisions.md\"},"
+                        + "{\"kind\":\"STRUCTURED_MUTATION_EVIDENCE\","
+                        + "\"target\":\"docs/decisions.md\"}]}",
+                obligation.canonicalJson());
+    }
+
+    @Test
+    void f16CompilesOneExactAppendSectionObligation() {
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(F16_REQUEST));
+
+        assertEquals(COMPLETE, obligation.derivationStatus());
+        assertEquals(RequestObligation.ActionKind.APPEND_SECTION, obligation.actionKind());
+        assertEquals(List.of("README.md"), obligation.requiredMutationTargets());
+        assertTrue(obligation.requiredSourceTargets().isEmpty());
+        assertEquals(
+                new RequestObligation.OutputShape(
+                        RequestObligation.OutputKind.APPEND_MARKDOWN_SECTION,
+                        "README.md",
+                        "Contributing",
+                        "Run tests before review."),
+                obligation.outputShape());
+        assertEquals(
+                List.of(new RequestObligation.PreservationConstraint(
+                        NORMALIZED_PRIOR_CONTENT,
+                        "README.md")),
+                obligation.preservationConstraints());
+        assertEquals(
+                List.of(
+                        new RequestObligation.VerificationPostcondition(
+                                RequestObligation.VerificationKind
+                                        .MATCHING_SECTION_FINAL_DOCUMENT_SECTION,
+                                "README.md"),
+                        new RequestObligation.VerificationPostcondition(
+                                RequestObligation.VerificationKind
+                                        .MATCHING_SECTION_PRESENT_ONCE,
+                                "README.md"),
+                        new RequestObligation.VerificationPostcondition(
+                                STRUCTURED_MUTATION_EVIDENCE,
+                                "README.md")),
+                obligation.verificationPostconditions());
+    }
+
+    @Test
+    void f17CompilesOneExactPreserveRestReplacementObligation() {
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(F17_REQUEST));
+
+        assertEquals(COMPLETE, obligation.derivationStatus());
+        assertEquals(
+                RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST,
+                obligation.actionKind());
+        assertEquals(List.of("notes.md"), obligation.requiredMutationTargets());
+        assertTrue(obligation.requiredSourceTargets().isEmpty());
+        assertEquals(
+                new RequestObligation.OutputShape(
+                        RequestObligation.OutputKind.REPLACE_TEXT,
+                        "notes.md",
+                        "draft",
+                        "final"),
+                obligation.outputShape());
+        assertEquals(
+                List.of(new RequestObligation.PreservationConstraint(
+                        RequestObligation.PreservationKind
+                                .UNCHANGED_CONTENT_AROUND_REPLACEMENT,
+                        "notes.md")),
+                obligation.preservationConstraints());
+        assertEquals(
+                List.of(
+                        new RequestObligation.VerificationPostcondition(
+                                RequestObligation.VerificationKind.NEW_TEXT_PRESENT,
+                                "notes.md"),
+                        new RequestObligation.VerificationPostcondition(
+                                RequestObligation.VerificationKind.OLD_TEXT_ABSENT,
+                                "notes.md"),
+                        new RequestObligation.VerificationPostcondition(
+                                RequestObligation.VerificationKind
+                                        .REQUESTED_REPLACEMENT_EXACTLY_ONCE,
+                                "notes.md"),
+                        new RequestObligation.VerificationPostcondition(
+                                STRUCTURED_MUTATION_EVIDENCE,
+                                "notes.md")),
+                obligation.verificationPostconditions());
+    }
+
+    @Test
+    void replacementWithoutExplicitPreservationRemainsNotMigrated() {
+        RequestObligation obligation = RequestObligationCompiler.compile(
+                TaskContractResolver.fromUserRequest(
+                        "In notes.md, replace draft with final."));
+
+        assertEquals(NOT_MIGRATED, obligation.derivationStatus());
+    }
+
+    @Test
+    void newCompleteShapesRejectMultipleMutationTargetsAndSourceTargets() {
+        TaskContract multipleTargets = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("README.md", "other.md"),
+                Set.of(),
+                Set.of(),
+                F16_REQUEST,
+                "test");
+        TaskContract sourceBearing = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("notes.md"),
+                Set.of("source.md"),
+                Set.of(),
+                F17_REQUEST,
+                "test");
+
+        assertEquals(
+                NOT_MIGRATED,
+                RequestObligationCompiler.compile(multipleTargets).derivationStatus());
+        assertEquals(
+                NOT_MIGRATED,
+                RequestObligationCompiler.compile(sourceBearing).derivationStatus());
     }
 
     @Test

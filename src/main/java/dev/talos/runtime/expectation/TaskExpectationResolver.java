@@ -37,7 +37,8 @@ public final class TaskExpectationResolver {
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
                     + "|\\b(?:change|edit|modify|touch)\\s+nothing\\s+else\\b"
                     + "|\\bwithout\\s+changing\\s+"
-                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b");
+                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
+                    + "|\\bwithout\\s+deleting\\s+any\\s+other\\s+lines?\\b");
     private static final Pattern EXACT_CONTENT_TRAILING_SCOPE = Pattern.compile(
             "(?is)\\s+(?:"
                     + "(?:do\\s+not|don'?t)\\s+(?:change|edit|modify|touch)\\s+"
@@ -504,6 +505,24 @@ public final class TaskExpectationResolver {
         }
         String quoted = Pattern.quote(normalizedTarget);
         boolean preserveRest = preserveRestRequested(request);
+        Pattern scopedPrefixChangeTo = Pattern.compile(
+                "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                        + "`?\\s*[,:]\\s*(?:please\\s+)?change\\s+"
+                        + EXACT_REPLACEMENT_DESCRIPTOR + "(" + REPLACEMENT_OPERAND
+                        + ")\\s+to\\s+(" + REPLACEMENT_OPERAND
+                        + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
+        Matcher matcher = scopedPrefixChangeTo.matcher(request);
+        if (matcher.find()) {
+            String oldText = matcher.group(1);
+            String newText = matcher.group(2);
+            if (matcher.find()) return null;
+            return replacementExpectation(
+                    normalizedTarget,
+                    oldText,
+                    newText,
+                    "replacement-scoped-prefix-change-to",
+                    preserveRest);
+        }
         // Scoped-prefix form (T1014): "In FILE, replace X with Y." carries
         // the same deterministic expectation as the trailing form, so the
         // preserve-rest verifier and exact guards engage for both.
@@ -513,7 +532,7 @@ public final class TaskExpectationResolver {
                         + EXACT_REPLACEMENT_DESCRIPTOR + "(" + REPLACEMENT_OPERAND
                         + ")\\s+with\\s+(" + REPLACEMENT_OPERAND
                         + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
-        Matcher matcher = scopedPrefixReplaceWith.matcher(request);
+        matcher = scopedPrefixReplaceWith.matcher(request);
         if (matcher.find()) {
             return replacementExpectation(
                     normalizedTarget,

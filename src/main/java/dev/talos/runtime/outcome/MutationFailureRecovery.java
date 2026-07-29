@@ -42,7 +42,7 @@ public final class MutationFailureRecovery {
                 || message.contains("already exists");
     }
 
-    private static boolean sameWorkspaceOperationPlan(
+    static boolean sameWorkspaceOperationPlan(
             WorkspaceOperationPlan left,
             WorkspaceOperationPlan right
     ) {

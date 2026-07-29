@@ -1,6 +1,8 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -9,6 +11,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -464,15 +467,21 @@ class StaticTaskVerifierTest {
         String after = before + "\n### Contributing\nRun tests before review.\n";
         Files.writeString(workspace.resolve("README.md"), after);
 
-        TaskVerificationResult result = StaticTaskVerifier.verify(
-                workspace,
+        TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Append a Contributing section to README.md with one sentence saying "
-                        + "Run tests before review. Preserve all current text.",
+                        + "Run tests before review. Preserve all current text.");
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                obligation,
                 loopResult(List.of(successfulFullWrite(
                         "README.md", before, after, VerificationStatus.PASS))),
                 0);
+        TaskVerificationResult result = evidence.compatibilityResult();
 
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(evidence.requestObligationReceipt().proves(obligation));
         assertTrue(result.summary().contains("Append section verification passed"), result.summary());
         assertTrue(result.facts().stream()
                 .anyMatch(f -> f.contains("README.md: requested appended section matched")),
@@ -4323,6 +4332,64 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void f17ScopedChangeUsesTheCompiledPreserveRestObligation() throws Exception {
+        String previous = "Status: draft\nKeep this final line unchanged.\n";
+        String updated = "Status: final\nKeep this final line unchanged.\n";
+        Files.writeString(workspace.resolve("notes.md"), updated);
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, change draft to final. If an exact edit fails, "
+                        + "recover without deleting any other line.");
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                obligation,
+                loopResult(List.of(successfulExactEdit(
+                        "notes.md",
+                        "Status: draft",
+                        "Status: final",
+                        VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(evidence.requestObligationReceipt().proves(obligation));
+        assertTrue(result.summary().contains("Replacement verification passed"),
+                result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains(
+                        "notes.md: replacement text observed and old text absent.")),
+                result.facts().toString());
+    }
+
+    @Test
+    void f17CompiledObligationRejectsDeletionOfAnUnrelatedLine() throws Exception {
+        String previous = "Status: draft\nKeep this final line unchanged.\n";
+        String updated = "Status: final\n";
+        Files.writeString(workspace.resolve("notes.md"), updated);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "In notes.md, change draft to final. If an exact edit fails, "
+                        + "recover without deleting any other line.",
+                loopResult(List.of(successfulFullWrite(
+                        "notes.md",
+                        previous,
+                        updated,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Replacement verification failed"),
+                result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains(
+                                "replacement preservation changed content beyond the requested text")),
+                result.problems().toString());
+    }
+
+    @Test
     void replacementPreserveRestToleratesSingleTerminalNewlineDifferenceFromReadEvidence() throws Exception {
         String previous = """
                 <html>
@@ -5144,7 +5211,10 @@ class StaticTaskVerifierTest {
                 toolName, path, true, true, false,
                 "edited " + path, "", verificationStatus, "",
                 null,
-                ToolMutationEvidence.exactEdit(oldString, newString));
+                ToolMutationEvidence.exactEdit(oldString, newString),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
     }
 
     private static ToolCallLoop.ToolOutcome successfulFullWrite(
@@ -5156,7 +5226,10 @@ class StaticTaskVerifierTest {
                 "talos.write_file", path, true, true, false,
                 "wrote " + path, "", verificationStatus, "",
                 null,
-                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent));
+                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {

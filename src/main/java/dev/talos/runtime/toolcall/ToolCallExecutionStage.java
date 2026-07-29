@@ -122,7 +122,7 @@ public final class ToolCallExecutionStage {
                 ToolResult blocked = ToolResult.fail(ToolError.invalidAuthority(
                         ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                         diagnostic));
-                state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(call, diagnostic));
+                state.addToolOutcome(ToolOutcomeFactory.failedAuthority(call, diagnostic));
                 ToolFailureStateAccounting.recordFailure(state, call, "");
                 failuresThisIter++;
                 appendResultMessage(
@@ -261,13 +261,14 @@ public final class ToolCallExecutionStage {
             if (failureSignals.approvalDenied()) {
                 approvalDeniedThisIter = true;
             }
-            state.toolOutcomes.add(ToolOutcomeFactory.executed(
+            state.addClassifiedToolOutcome(ToolOutcomeFactory.executed(
                     effective,
                     pathHint,
                     result,
                     failureClassification,
                     workspaceOperationPlan,
-                    mutationEvidence));
+                    mutationEvidence,
+                    parsedPermit));
 
             if (!result.success()) {
                 if (ToolFailureStateAccounting.recordFailure(

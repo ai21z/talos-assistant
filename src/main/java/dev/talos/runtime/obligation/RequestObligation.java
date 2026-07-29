@@ -198,44 +198,141 @@ public record RequestObligation(
             throw new IllegalArgumentException(
                     "The current complete request-obligation schema requires deterministic runtime ownership");
         }
-        if (actionKind != ActionKind.APPEND_STATEMENT) {
-            throw new IllegalArgumentException(
-                    "The current complete request-obligation schema supports append statements only");
-        }
         if (mutationScope != MutationScope.ONLY_REQUIRED_TARGETS
                 || requiredMutationTargets.size() != 1) {
             throw new IllegalArgumentException(
-                    "A complete append obligation requires exactly one mutation target");
+                    "A complete request obligation requires exactly one mutation target");
         }
         if (!requiredSourceTargets.isEmpty()) {
             throw new IllegalArgumentException(
                     "Source-bearing obligations remain not migrated until source coverage is verified");
         }
         String target = requiredMutationTargets.getFirst();
-        if (outputShape.kind() != OutputKind.APPEND_LABELED_STATEMENT
-                || !target.equals(outputShape.target())) {
+        if (outputShape.kind() == OutputKind.NONE || !target.equals(outputShape.target())) {
             throw new IllegalArgumentException(
-                    "A complete append obligation requires one same-target output shape");
+                    "A complete request obligation requires one same-target output shape");
         }
-        if (!preservationConstraints.equals(List.of(
-                new PreservationConstraint(PreservationKind.NORMALIZED_PRIOR_CONTENT, target)))) {
+        switch (actionKind) {
+            case APPEND_STATEMENT -> validateCompleteAppendStatement(
+                    target,
+                    preservationConstraints,
+                    outputShape,
+                    verificationPostconditions);
+            case APPEND_SECTION -> validateCompleteAppendSection(
+                    target,
+                    preservationConstraints,
+                    outputShape,
+                    verificationPostconditions);
+            case REPLACE_TEXT_PRESERVE_REST -> validateCompletePreserveRestReplacement(
+                    target,
+                    preservationConstraints,
+                    outputShape,
+                    verificationPostconditions);
+            case NONE -> throw new IllegalArgumentException(
+                    "A complete request obligation requires a supported action");
+        }
+    }
+
+    private static void validateCompleteAppendStatement(
+            String target,
+            List<PreservationConstraint> preservationConstraints,
+            OutputShape outputShape,
+            List<VerificationPostcondition> verificationPostconditions
+    ) {
+        requireExactPreservation(
+                preservationConstraints,
+                PreservationKind.NORMALIZED_PRIOR_CONTENT,
+                target,
+                "A complete append-statement obligation requires exact same-target preservation");
+        if (outputShape.kind() != OutputKind.APPEND_LABELED_STATEMENT) {
             throw new IllegalArgumentException(
-                    "A complete append obligation requires exact same-target preservation");
+                    "A complete append-statement obligation requires its labeled-statement output");
         }
-        List<VerificationPostcondition> exactPostconditions = canonicalVerificationPostconditions(
+        requireExactPostconditions(
+                verificationPostconditions,
+                target,
                 List.of(
-                        new VerificationPostcondition(
-                                VerificationKind.MATCHING_STATEMENT_PRESENT_ONCE,
-                                target),
-                        new VerificationPostcondition(
-                                VerificationKind.MATCHING_STATEMENT_FINAL_LOGICAL_LINE,
-                                target),
-                        new VerificationPostcondition(
-                                VerificationKind.STRUCTURED_MUTATION_EVIDENCE,
-                                target)));
-        if (!verificationPostconditions.equals(exactPostconditions)) {
+                        VerificationKind.MATCHING_STATEMENT_PRESENT_ONCE,
+                        VerificationKind.MATCHING_STATEMENT_FINAL_LOGICAL_LINE,
+                        VerificationKind.STRUCTURED_MUTATION_EVIDENCE),
+                "A complete append-statement obligation requires its exact three same-target postconditions");
+    }
+
+    private static void validateCompleteAppendSection(
+            String target,
+            List<PreservationConstraint> preservationConstraints,
+            OutputShape outputShape,
+            List<VerificationPostcondition> verificationPostconditions
+    ) {
+        requireExactPreservation(
+                preservationConstraints,
+                PreservationKind.NORMALIZED_PRIOR_CONTENT,
+                target,
+                "A complete append-section obligation requires exact same-target preservation");
+        if (outputShape.kind() != OutputKind.APPEND_MARKDOWN_SECTION) {
             throw new IllegalArgumentException(
-                    "A complete append obligation requires its exact three same-target postconditions");
+                    "A complete append-section obligation requires its Markdown-section output");
+        }
+        requireExactPostconditions(
+                verificationPostconditions,
+                target,
+                List.of(
+                        VerificationKind.MATCHING_SECTION_PRESENT_ONCE,
+                        VerificationKind.MATCHING_SECTION_FINAL_DOCUMENT_SECTION,
+                        VerificationKind.STRUCTURED_MUTATION_EVIDENCE),
+                "A complete append-section obligation requires its exact three same-target postconditions");
+    }
+
+    private static void validateCompletePreserveRestReplacement(
+            String target,
+            List<PreservationConstraint> preservationConstraints,
+            OutputShape outputShape,
+            List<VerificationPostcondition> verificationPostconditions
+    ) {
+        requireExactPreservation(
+                preservationConstraints,
+                PreservationKind.UNCHANGED_CONTENT_AROUND_REPLACEMENT,
+                target,
+                "A complete preserve-rest replacement requires exact same-target preservation");
+        if (outputShape.kind() != OutputKind.REPLACE_TEXT) {
+            throw new IllegalArgumentException(
+                    "A complete preserve-rest replacement requires its text-replacement output");
+        }
+        requireExactPostconditions(
+                verificationPostconditions,
+                target,
+                List.of(
+                        VerificationKind.REQUESTED_REPLACEMENT_EXACTLY_ONCE,
+                        VerificationKind.OLD_TEXT_ABSENT,
+                        VerificationKind.NEW_TEXT_PRESENT,
+                        VerificationKind.STRUCTURED_MUTATION_EVIDENCE),
+                "A complete preserve-rest replacement requires its exact four same-target postconditions");
+    }
+
+    private static void requireExactPreservation(
+            List<PreservationConstraint> preservationConstraints,
+            PreservationKind kind,
+            String target,
+            String message
+    ) {
+        if (!preservationConstraints.equals(List.of(
+                new PreservationConstraint(kind, target)))) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+
+    private static void requireExactPostconditions(
+            List<VerificationPostcondition> actual,
+            String target,
+            List<VerificationKind> expectedKinds,
+            String message
+    ) {
+        List<VerificationPostcondition> expected = canonicalVerificationPostconditions(
+                expectedKinds.stream()
+                        .map(kind -> new VerificationPostcondition(kind, target))
+                        .toList());
+        if (!actual.equals(expected)) {
+            throw new IllegalArgumentException(message);
         }
     }
 
@@ -367,6 +464,8 @@ public record RequestObligation(
 
     public enum ActionKind {
         APPEND_STATEMENT,
+        APPEND_SECTION,
+        REPLACE_TEXT_PRESERVE_REST,
         NONE
     }
 
@@ -376,17 +475,25 @@ public record RequestObligation(
     }
 
     public enum PreservationKind {
-        NORMALIZED_PRIOR_CONTENT
+        NORMALIZED_PRIOR_CONTENT,
+        UNCHANGED_CONTENT_AROUND_REPLACEMENT
     }
 
     public enum OutputKind {
         APPEND_LABELED_STATEMENT,
+        APPEND_MARKDOWN_SECTION,
+        REPLACE_TEXT,
         NONE
     }
 
     public enum VerificationKind {
         MATCHING_STATEMENT_PRESENT_ONCE,
         MATCHING_STATEMENT_FINAL_LOGICAL_LINE,
+        MATCHING_SECTION_PRESENT_ONCE,
+        MATCHING_SECTION_FINAL_DOCUMENT_SECTION,
+        REQUESTED_REPLACEMENT_EXACTLY_ONCE,
+        OLD_TEXT_ABSENT,
+        NEW_TEXT_PRESENT,
         STRUCTURED_MUTATION_EVIDENCE
     }
 
@@ -414,7 +521,7 @@ public record RequestObligation(
                 }
             } else if (target.isBlank() || label.isBlank() || statement.isBlank()) {
                 throw new IllegalArgumentException(
-                        "An append-statement output shape requires target, label, and statement");
+                        "A typed output shape requires target and two non-blank content operands");
             }
         }
 

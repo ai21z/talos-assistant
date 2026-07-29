@@ -37,8 +37,6 @@ final class QualificationScenarioBank {
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
     private static final String FULL_V5_PATH = "model-qualification/banks/full-v5.json";
-    private static final String F21_REQUEST_OBLIGATION_SCENARIO =
-            "F21-context-multi-requirement-edit";
     // The published v5 full bank contains these LF separators inside its otherwise CRLF body.
     // They are part of frozen packet identity, not a preferred formatting convention.
     private static final Set<Integer> FULL_V5_PUBLISHED_LF_SEPARATOR_ORDINALS = Set.of(
@@ -79,7 +77,7 @@ final class QualificationScenarioBank {
             Map.entry("model-qualification/fixtures/privacy-workspace-v5.json", new ResourceIdentity("73440a10a20519b56c58440cdfb78ab7e1fb73c4d81d260230719db472e9b2ef", "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672")),
             Map.entry("model-qualification/fixtures/web-workspace-v5.json", new ResourceIdentity("e73f177ca821dc8aeb15a818f5549b90a34461b6193bb5fddc10778aa1cd901c", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10")),
             Map.entry("model-qualification/banks/admission-v6.json", new ResourceIdentity("848e6bcf951218abc597e0f1f504424b80737f018c6377543759c963e34829f9", "848e6bcf951218abc597e0f1f504424b80737f018c6377543759c963e34829f9")),
-            Map.entry("model-qualification/banks/full-v6.json", new ResourceIdentity("5d722f310efeb725e89e43e6553868083ada5560cc1c84b99bfdf09418f87735", "5d722f310efeb725e89e43e6553868083ada5560cc1c84b99bfdf09418f87735")),
+            Map.entry("model-qualification/banks/full-v6.json", new ResourceIdentity("9e090bffeeb2ab4c84179b4aa3dd99092d21b7ff06d5d1c084404549382386dc", "9e090bffeeb2ab4c84179b4aa3dd99092d21b7ff06d5d1c084404549382386dc")),
             Map.entry("model-qualification/fixtures/basic-workspace-v6.json", new ResourceIdentity("6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473")),
             Map.entry("model-qualification/fixtures/context-workspace-v6.json", new ResourceIdentity("565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da")),
             Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", new ResourceIdentity("6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5")),
@@ -478,8 +476,12 @@ final class QualificationScenarioBank {
             throw new IllegalArgumentException("scenario bank is required");
         }
         Set<String> expectedKeys = protocolVersion == 6
-                && bank.kind() == QualificationProtocol.BankKind.FULL
-                ? Set.of(F21_REQUEST_OBLIGATION_SCENARIO)
+                ? bank.scenarios().stream()
+                        .filter(scenario -> scenario.atomicRequirements().stream()
+                                .anyMatch(requirement ->
+                                        "REQUEST_OBLIGATION".equals(requirement.type())))
+                        .map(QualificationProtocol.Scenario::id)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet())
                 : Set.of();
         if (!bank.expectedRequestObligations().keySet().equals(expectedKeys)) {
             throw new IllegalArgumentException(

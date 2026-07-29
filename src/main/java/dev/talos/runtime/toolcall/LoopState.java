@@ -129,6 +129,21 @@ public final class LoopState {
         this.pendingActionObligation = null;
     }
 
+    public void addToolOutcome(dev.talos.runtime.ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null) return;
+        toolOutcomes.add(outcome);
+    }
+
+    public void addClassifiedToolOutcome(
+            dev.talos.runtime.ToolCallLoop.ToolOutcome outcome
+    ) {
+        if (outcome == null) return;
+        toolOutcomes.add(outcome);
+        LocalTurnTraceCapture.recordToolOutcomeClassified(
+                outcome,
+                toolOutcomes.size());
+    }
+
     public boolean hasPendingActionObligation() {
         return pendingActionObligation != null;
     }

@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
@@ -21,6 +22,16 @@ final class ToolOutcomeFactory {
             String diagnosticError,
             EditFilePreApprovalGuard.Decision decision
     ) {
+        return failedEditPreApproval(call, pathHint, diagnosticError, decision, null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedEditPreApproval(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            EditFilePreApprovalGuard.Decision decision,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
+    ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
                 pathHint,
@@ -33,7 +44,9 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_PARAMS,
                 null,
                 null,
-                editPreApprovalReason(decision));
+                editPreApprovalReason(decision),
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionMutation(
@@ -42,6 +55,23 @@ final class ToolOutcomeFactory {
             String diagnosticError,
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolFailureReason failureReason
+    ) {
+        return failedPreExecutionMutation(
+                call,
+                pathHint,
+                diagnosticError,
+                workspaceOperationPlan,
+                failureReason,
+                null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedPreExecutionMutation(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolFailureReason failureReason,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -55,13 +85,24 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_PARAMS,
                 workspaceOperationPlan,
                 null,
-                failureReason);
+                failureReason,
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionRead(
             ToolCall call,
             String pathHint,
             String diagnosticError
+    ) {
+        return failedPreExecutionRead(call, pathHint, diagnosticError, null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedPreExecutionRead(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -72,12 +113,25 @@ final class ToolOutcomeFactory {
                 "",
                 diagnosticError,
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS,
+                null,
+                null,
+                ToolFailureReason.NONE,
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome failedAuthority(
             ToolCall call,
             String diagnosticError
+    ) {
+        return failedAuthority(call, diagnosticError, null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedAuthority(
+            ToolCall call,
+            String diagnosticError,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -91,7 +145,9 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_AUTHORITY,
                 null,
                 null,
-                ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID);
+                ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome executed(
@@ -101,6 +157,25 @@ final class ToolOutcomeFactory {
             ToolExecutionFailureClassifier.Classification classification,
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolMutationEvidence mutationEvidence
+    ) {
+        return executed(
+                call,
+                pathHint,
+                result,
+                classification,
+                workspaceOperationPlan,
+                mutationEvidence,
+                null);
+    }
+
+    static ToolCallLoop.ToolOutcome executed(
+            ToolCall call,
+            String pathHint,
+            ToolResult result,
+            ToolExecutionFailureClassifier.Classification classification,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolMutationEvidence mutationEvidence,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         boolean success = result != null && result.success();
         return new ToolCallLoop.ToolOutcome(
@@ -118,7 +193,12 @@ final class ToolOutcomeFactory {
                 result == null || result.error() == null
                         ? ToolFailureReason.NONE
                         : result.error().reason(),
-                evidenceSourcePaths(call, pathHint, result));
+                evidenceSourcePaths(call, pathHint, result),
+                toolCallId(permit));
+    }
+
+    private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {
+        return permit == null ? "" : permit.toolCallId();
     }
 
     private static List<String> evidenceSourcePaths(ToolCall call, String pathHint, ToolResult result) {

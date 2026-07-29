@@ -3,8 +3,11 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.util.TextReplacement;
+import dev.talos.runtime.expectation.AppendSectionExpectation;
 import dev.talos.runtime.expectation.AppendStatementExpectation;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
@@ -251,30 +254,117 @@ final class QualificationRequirementEvaluator {
             Map<String, byte[]> afterFiles
     ) {
         RequestObligation.OutputShape output = obligation.outputShape();
-        AppendStatementExpectation expectation = new AppendStatementExpectation(
-                output.target(),
-                output.label(),
-                output.statement(),
-                "request-obligation-v" + obligation.schemaVersion());
-        String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(
-                afterFiles.get(output.target()));
-        if (finalLine == null) {
-            throw new IllegalArgumentException(
-                    "Request-obligation target is not strict UTF-8 evidence");
-        }
+        String sourcePattern = "request-obligation-v" + obligation.schemaVersion();
+        return switch (obligation.actionKind()) {
+            case APPEND_STATEMENT -> {
+                AppendStatementExpectation expectation = new AppendStatementExpectation(
+                        output.target(),
+                        output.label(),
+                        output.statement(),
+                        sourcePattern);
+                String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(
+                        afterFiles.get(output.target()));
+                if (finalLine == null) {
+                    throw new IllegalArgumentException(
+                            "Request-obligation target is not strict UTF-8 evidence");
+                }
+                yield expectedExpectationData(
+                        expectation.kind(),
+                        output.target(),
+                        sourcePattern,
+                        expectation.expectedHash(),
+                        expectation.expectedBytes(),
+                        expectation.expectedChars(),
+                        1,
+                        finalLine,
+                        LiteralContentExpectation.byteCount(finalLine),
+                        LiteralContentExpectation.charCount(finalLine),
+                        finalLine.isBlank() ? 0 : 1);
+            }
+            case APPEND_SECTION -> {
+                AppendSectionExpectation expectation = new AppendSectionExpectation(
+                        output.target(),
+                        output.label(),
+                        output.statement(),
+                        sourcePattern);
+                String observed = expectation.expectedContent();
+                yield expectedExpectationData(
+                        expectation.kind(),
+                        output.target(),
+                        sourcePattern,
+                        expectation.expectedHash(),
+                        expectation.expectedBytes(),
+                        expectation.expectedChars(),
+                        2,
+                        observed,
+                        LiteralContentExpectation.byteCount(observed),
+                        LiteralContentExpectation.charCount(observed),
+                        2);
+            }
+            case REPLACE_TEXT_PRESERVE_REST -> {
+                ReplacementExpectation expectation = new ReplacementExpectation(
+                        output.target(),
+                        output.label(),
+                        output.statement(),
+                        sourcePattern,
+                        true);
+                String content = fileText(afterFiles, output.target())
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Request-obligation target is not UTF-8 evidence"));
+                boolean oldPresent = TextReplacement.oldTextRemainsOutsideReplacement(
+                        content,
+                        expectation.oldText(),
+                        expectation.newText());
+                boolean newPresent = TextReplacement.containsNormalized(
+                        content,
+                        expectation.newText());
+                String observed = "oldPresent:" + oldPresent
+                        + ";newPresent:" + newPresent;
+                yield expectedExpectationData(
+                        expectation.kind(),
+                        output.target(),
+                        sourcePattern,
+                        "old:" + expectation.oldHash()
+                                + ";new:" + expectation.newHash(),
+                        expectation.newBytes(),
+                        expectation.newChars(),
+                        0,
+                        observed,
+                        0,
+                        0,
+                        0);
+            }
+            case NONE -> throw new IllegalArgumentException(
+                    "Complete request obligation cannot name no action");
+        };
+    }
+
+    private static JsonNode expectedExpectationData(
+            String kind,
+            String target,
+            String sourcePattern,
+            String expectedHash,
+            int expectedBytes,
+            int expectedChars,
+            int expectedLines,
+            String observed,
+            int observedBytes,
+            int observedChars,
+            int observedLines
+    ) {
         return QualificationJson.tree(Map.ofEntries(
-                Map.entry("kind", expectation.kind()),
+                Map.entry("kind", kind),
                 Map.entry("status", "PASSED"),
-                Map.entry("pathHint", RequestObligation.diagnosticPath(output.target())),
-                Map.entry("sourcePattern", expectation.sourcePattern()),
-                Map.entry("expectedHash", expectation.expectedHash()),
-                Map.entry("expectedBytes", expectation.expectedBytes()),
-                Map.entry("expectedChars", expectation.expectedChars()),
-                Map.entry("expectedLines", 1),
-                Map.entry("observedHash", LiteralContentExpectation.hash(finalLine)),
-                Map.entry("observedBytes", LiteralContentExpectation.byteCount(finalLine)),
-                Map.entry("observedChars", LiteralContentExpectation.charCount(finalLine)),
-                Map.entry("observedLines", finalLine.isBlank() ? 0 : 1)));
+                Map.entry("pathHint", RequestObligation.diagnosticPath(target)),
+                Map.entry("sourcePattern", sourcePattern),
+                Map.entry("expectedHash", expectedHash),
+                Map.entry("expectedBytes", expectedBytes),
+                Map.entry("expectedChars", expectedChars),
+                Map.entry("expectedLines", expectedLines),
+                Map.entry("observedHash", LiteralContentExpectation.hash(observed)),
+                Map.entry("observedBytes", observedBytes),
+                Map.entry("observedChars", observedChars),
+                Map.entry("observedLines", observedLines)));
     }
 
     private static java.util.Optional<String> fileText(Map<String, byte[]> files, String target) {

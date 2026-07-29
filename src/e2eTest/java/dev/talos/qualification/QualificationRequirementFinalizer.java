@@ -55,6 +55,7 @@ final class QualificationRequirementFinalizer {
                         "request-obligation result evidence must be a JSON object");
             }
             requestObligation = requestObligation.deepCopy();
+            requirements = List.copyOf(requirements);
             if (protocolVersion >= 1 && protocolVersion <= 5) {
                 if (schemaVersion != 1
                         || !requestObligationSha256.isEmpty()
@@ -75,13 +76,16 @@ final class QualificationRequirementFinalizer {
                         throw new IllegalArgumentException(
                                 "protocol-v6 mechanical requirements must use schema version 2");
                     }
-                    boolean f21 = "F21-context-multi-requirement-edit".equals(scenarioId);
-                    if (f21 != !requestObligationSha256.isEmpty()
-                            || f21 != !requestObligation.isEmpty()) {
+                    boolean obligationRequired = requirements.stream()
+                            .anyMatch(requirement ->
+                                    "REQUEST_OBLIGATION".equals(requirement.type()));
+                    if (obligationRequired != !requestObligationSha256.isEmpty()
+                            || obligationRequired != !requestObligation.isEmpty()) {
                         throw new IllegalArgumentException(
-                                "protocol-v6 F21 alone requires its request-obligation identity");
+                                "protocol-v6 migrated scenarios require their "
+                                        + "request-obligation identity");
                     }
-                    if (f21) {
+                    if (obligationRequired) {
                         validateRequestObligationProjection(
                                 requestObligation,
                                 requestObligationSha256);
@@ -91,7 +95,6 @@ final class QualificationRequirementFinalizer {
                 throw new IllegalArgumentException(
                         "unsupported mechanical requirements protocol version");
             }
-            requirements = List.copyOf(requirements);
         }
 
         @Override

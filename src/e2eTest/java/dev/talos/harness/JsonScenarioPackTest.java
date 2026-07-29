@@ -478,6 +478,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("index.html", "class=\"cta-button\"")
                     .assertFileContains("index.html", "Listen now");
+            assertResolvedTypedRepairSequence(result, "EDIT_EMPTY_ARGUMENTS");
         }
     }
 
@@ -1004,6 +1005,9 @@ class JsonScenarioPackTest {
             assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
+            assertResolvedTypedRepairSequence(
+                    result,
+                    "EDIT_FULL_REWRITE_REQUIRED");
         }
     }
 
@@ -1776,7 +1780,35 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("old_string not found")
                     .assertAnswerContains("style.css")
                     .assertAnswerNotContains("The title was changed to Melodic Horror Synthwave");
+            assertEquals("PARTIAL", result.localTrace().outcome().status());
+            assertFalse(result.localTrace().events().stream().anyMatch(event ->
+                    "MUTATION_FAILURE_RECOVERY_EVALUATED".equals(event.type())
+                            && "RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN".equals(
+                                    event.data().get("decision"))),
+                    result.localTrace().events().toString());
         }
+    }
+
+    private static void assertResolvedTypedRepairSequence(
+            ExecutorScenarioResult result,
+            String expectedFailureReason
+    ) {
+        List<dev.talos.runtime.trace.TurnTraceEvent> matches =
+                result.localTrace().events().stream()
+                        .filter(event ->
+                                "MUTATION_FAILURE_RECOVERY_EVALUATED".equals(
+                                        event.type()))
+                        .filter(event ->
+                                "RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN".equals(
+                                        event.data().get("decision")))
+                        .toList();
+        assertEquals(1, matches.size(), result.localTrace().events().toString());
+        var data = matches.getFirst().data();
+        assertEquals(expectedFailureReason, data.get("failureReason"));
+        assertEquals(true, data.get("resolved"));
+        assertEquals(false, data.get("recovered"));
+        assertEquals("", data.get("verifiedRequestObligationSha256"));
+        assertEquals(List.of(), data.get("coveredSuccessfulMutationToolCallIds"));
     }
 
     @Test

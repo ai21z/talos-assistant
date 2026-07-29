@@ -10,6 +10,7 @@ import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.outcome.MutationRecoveryAssessment;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
@@ -229,6 +230,16 @@ public final class LocalTurnTraceCapture {
             this.currentCall = call;
             this.toolNameHash = toolNameHash(call);
             this.argumentsHash = argumentsHash(call);
+        }
+
+        /**
+         * Immutable evidence identity for the already-minted parsed call.
+         *
+         * <p>This value does not confer execution authority; the permit remains
+         * opaque and is still consumed only by the trace-owned authority path.
+         */
+        public String toolCallId() {
+            return toolCallId;
         }
     }
 
@@ -2422,6 +2433,31 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         RepairTraceRecorder.record(bag.builder, status, summary);
+    }
+
+    public static void recordMutationRecoveryAssessment(
+            MutationRecoveryAssessment assessment
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || assessment == null) return;
+        for (TurnTraceEvent event : MutationRecoveryTraceEventFactory.evaluated(assessment)) {
+            bag.builder.event(event);
+        }
+    }
+
+    /**
+     * Records the typed runtime classification that becomes available after
+     * the score-bearing execution event has settled.
+     */
+    public static void recordToolOutcomeClassified(
+            dev.talos.runtime.ToolCallLoop.ToolOutcome outcome,
+            int outcomeOrdinal
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || outcome == null || outcome.toolCallId().isBlank()) return;
+        bag.builder.event(ToolOutcomeClassificationTraceEventFactory.classified(
+                outcome,
+                outcomeOrdinal));
     }
 
     public static void recordVerification(String status, String summary, List<String> problems) {

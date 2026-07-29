@@ -14,6 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationRequestObligationTest {
 
+    private static final java.util.Set<String> V6_MIGRATED_SCENARIOS =
+            java.util.Set.of(
+                    "F16-recovery-append-section",
+                    "F17-recovery-full-file-preservation",
+                    "F21-context-multi-requirement-edit");
+
     @Test
     void protocolV6F21CarriesTheProductionFinalLinePreservationAndForbiddenTargetContract() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
@@ -47,6 +53,46 @@ class QualificationRequestObligationTest {
                         "src/LocalStore.java"),
                 java.util.Set.copyOf(scenario.forbiddenTargets()),
                 "fixture canaries remain additional qualification evidence");
+    }
+
+    @Test
+    void protocolV6F16AndF17CarryTheirExactProductionObligations() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+
+        assertEquals(
+                V6_MIGRATED_SCENARIOS,
+                catalog.full().expectedRequestObligations().keySet());
+        Map<String, dev.talos.runtime.obligation.RequestObligation.ActionKind> actions =
+                Map.of(
+                        "F16-recovery-append-section",
+                        dev.talos.runtime.obligation.RequestObligation.ActionKind
+                                .APPEND_SECTION,
+                        "F17-recovery-full-file-preservation",
+                        dev.talos.runtime.obligation.RequestObligation.ActionKind
+                                .REPLACE_TEXT_PRESERVE_REST);
+        actions.forEach((scenarioId, action) -> {
+            QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
+            var declared = catalog.expectedRequestObligation(scenarioId);
+            var compiled =
+                    dev.talos.runtime.obligation.RequestObligationCompiler.compile(
+                            dev.talos.runtime.task.TaskContractResolver.fromUserRequest(
+                                    scenario.prompt()));
+
+            assertEquals(compiled, declared, scenarioId);
+            assertEquals(action, declared.actionKind(), scenarioId);
+            assertEquals(
+                    java.util.Set.copyOf(scenario.allowedTargets()),
+                    java.util.Set.copyOf(declared.requiredMutationTargets()),
+                    scenarioId);
+            assertTrue(declared.requiredSourceTargets().isEmpty(), scenarioId);
+            assertEquals(
+                    1,
+                    scenario.atomicRequirements().stream()
+                            .filter(requirement ->
+                                    "REQUEST_OBLIGATION".equals(requirement.type()))
+                            .count(),
+                    scenarioId);
+        });
     }
 
     @Test
@@ -339,6 +385,84 @@ class QualificationRequestObligationTest {
     }
 
     @Test
+    void f16SharedObligationRequiresTheExactPreservedUniqueFinalSection()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationProtocol.Scenario scenario =
+                catalog.scenario("F16-recovery-append-section");
+        var obligation = catalog.expectedRequestObligation(scenario.id());
+        Map<String, byte[]> before = fixtureBytes(
+                catalog.fixtures().get(scenario.fixture()).manifest().files());
+        String readme = new String(before.get("README.md"), StandardCharsets.UTF_8);
+        String correct =
+                readme + "\n## Contributing\nRun tests before review.\n";
+        String trace = traceFor(obligation, true);
+
+        assertTrue(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "README.md", correct),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(
+                        before,
+                        "README.md",
+                        correct + "\n## Later\nAdditional text.\n"),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(
+                        before,
+                        "README.md",
+                        readme + "\n## Contributing\nOld.\n"
+                                + "\n## Contributing\nRun tests before review.\n"),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "README.md", correct),
+                traceFor(obligation, false)));
+    }
+
+    @Test
+    void f17SharedObligationRequiresOneReplacementAndPreservesEveryOtherLine()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationProtocol.Scenario scenario =
+                catalog.scenario("F17-recovery-full-file-preservation");
+        var obligation = catalog.expectedRequestObligation(scenario.id());
+        Map<String, byte[]> before = fixtureBytes(
+                catalog.fixtures().get(scenario.fixture()).manifest().files());
+        String notes = new String(before.get("notes.md"), StandardCharsets.UTF_8);
+        String correct = notes.replace("Status: draft", "Status: final");
+        String trace = traceFor(obligation, true);
+
+        assertTrue(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "notes.md", correct),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "notes.md", "Status: final\n"),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "notes.md", notes),
+                trace));
+        assertFalse(requestObligationResult(
+                scenario,
+                before,
+                withFile(before, "notes.md", correct),
+                traceFor(obligation, false)));
+    }
+
+    @Test
     void protocolV6MechanicalResultPersistsTheExactRequestObligationIdentity()
             throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
@@ -383,6 +507,66 @@ class QualificationRequestObligationTest {
         assertThrows(java.io.IOException.class, () -> QualificationJson.read(
                 QualificationJson.bytes(missingIdentity),
                 QualificationRequirementFinalizer.Document.class));
+    }
+
+    @Test
+    void protocolV6F16AndF17MechanicalResultsPersistTheirExactTypedBindings()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        for (String scenarioId : java.util.List.of(
+                "F16-recovery-append-section",
+                "F17-recovery-full-file-preservation")) {
+            QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
+            var obligation = catalog.expectedRequestObligation(scenario.id());
+            Map<String, byte[]> before = fixtureBytes(
+                    catalog.fixtures().get(scenario.fixture()).manifest().files());
+            Map<String, byte[]> after;
+            if (obligation.actionKind()
+                    == dev.talos.runtime.obligation.RequestObligation.ActionKind
+                            .APPEND_SECTION) {
+                String readme = new String(
+                        before.get("README.md"),
+                        StandardCharsets.UTF_8);
+                after = withFile(
+                        before,
+                        "README.md",
+                        readme + "\n## Contributing\nRun tests before review.\n");
+            } else {
+                String notes = new String(
+                        before.get("notes.md"),
+                        StandardCharsets.UTF_8);
+                after = withFile(
+                        before,
+                        "notes.md",
+                        notes.replace("Status: draft", "Status: final"));
+            }
+
+            QualificationRequirementFinalizer.Document document =
+                    QualificationRequirementFinalizer.evaluate(
+                            6,
+                            catalog.sha256(),
+                            scenario,
+                            new QualificationRequirementEvaluator.Evidence(
+                                    "",
+                                    traceFor(obligation, true),
+                                    before,
+                                    after));
+
+            assertEquals(
+                    obligation.canonicalSha256(),
+                    document.requestObligationSha256(),
+                    scenarioId);
+            assertEquals(
+                    QualificationJson.tree(obligation.redactedProjection()),
+                    document.requestObligation(),
+                    scenarioId);
+            assertEquals(
+                    document,
+                    QualificationJson.read(
+                            QualificationJson.bytes(document),
+                            QualificationRequirementFinalizer.Document.class),
+                    scenarioId);
+        }
     }
 
     @Test
@@ -821,13 +1005,7 @@ class QualificationRequestObligationTest {
         obligationData.setAll((com.fasterxml.jackson.databind.node.ObjectNode)
                 QualificationJson.tree(obligation.redactedProjection()));
         if (includeStructuredExpectation) {
-            var output = obligation.outputShape();
-            var expectation = new dev.talos.runtime.expectation.AppendStatementExpectation(
-                    output.target(),
-                    output.label(),
-                    output.statement(),
-                    "request-obligation-v" + obligation.schemaVersion());
-            String observed = output.label() + ": " + output.statement() + ".";
+            TraceExpectation expectation = traceExpectation(obligation);
             var expectationEvent = events.addObject();
             expectationEvent.put("type", "EXPECTATION_VERIFIED");
             var expectationData = expectationEvent.putObject("data");
@@ -836,22 +1014,19 @@ class QualificationRequestObligationTest {
             expectationData.put(
                     "pathHint",
                     dev.talos.runtime.obligation.RequestObligation.diagnosticPath(
-                            output.target()));
+                            obligation.outputShape().target()));
             expectationData.put("sourcePattern", expectation.sourcePattern());
             expectationData.put("expectedHash", expectation.expectedHash());
             expectationData.put("expectedBytes", expectation.expectedBytes());
             expectationData.put("expectedChars", expectation.expectedChars());
-            expectationData.put("expectedLines", 1);
+            expectationData.put("expectedLines", expectation.expectedLines());
             expectationData.put(
                     "observedHash",
-                    dev.talos.runtime.expectation.LiteralContentExpectation.hash(observed));
-            expectationData.put(
-                    "observedBytes",
-                    dev.talos.runtime.expectation.LiteralContentExpectation.byteCount(observed));
-            expectationData.put(
-                    "observedChars",
-                    dev.talos.runtime.expectation.LiteralContentExpectation.charCount(observed));
-            expectationData.put("observedLines", 1);
+                    dev.talos.runtime.expectation.LiteralContentExpectation.hash(
+                            expectation.observed()));
+            expectationData.put("observedBytes", expectation.observedBytes());
+            expectationData.put("observedChars", expectation.observedChars());
+            expectationData.put("observedLines", expectation.observedLines());
         }
         var verificationEvent = events.addObject();
         verificationEvent.put("type", "VERIFICATION_COMPLETED");
@@ -863,6 +1038,98 @@ class QualificationRequestObligationTest {
         verificationData.putArray("authoritativeProofKinds");
         return new String(QualificationJson.bytes(root), StandardCharsets.UTF_8);
     }
+
+    private static TraceExpectation traceExpectation(
+            dev.talos.runtime.obligation.RequestObligation obligation
+    ) {
+        var output = obligation.outputShape();
+        String sourcePattern =
+                "request-obligation-v" + obligation.schemaVersion();
+        return switch (obligation.actionKind()) {
+            case APPEND_STATEMENT -> {
+                var expectation =
+                        new dev.talos.runtime.expectation.AppendStatementExpectation(
+                                output.target(),
+                                output.label(),
+                                output.statement(),
+                                sourcePattern);
+                String observed =
+                        output.label() + ": " + output.statement() + ".";
+                yield new TraceExpectation(
+                        expectation.kind(),
+                        sourcePattern,
+                        expectation.expectedHash(),
+                        expectation.expectedBytes(),
+                        expectation.expectedChars(),
+                        1,
+                        observed,
+                        dev.talos.runtime.expectation.LiteralContentExpectation
+                                .byteCount(observed),
+                        dev.talos.runtime.expectation.LiteralContentExpectation
+                                .charCount(observed),
+                        1);
+            }
+            case APPEND_SECTION -> {
+                var expectation =
+                        new dev.talos.runtime.expectation.AppendSectionExpectation(
+                                output.target(),
+                                output.label(),
+                                output.statement(),
+                                sourcePattern);
+                String observed = expectation.expectedContent();
+                yield new TraceExpectation(
+                        expectation.kind(),
+                        sourcePattern,
+                        expectation.expectedHash(),
+                        expectation.expectedBytes(),
+                        expectation.expectedChars(),
+                        2,
+                        observed,
+                        dev.talos.runtime.expectation.LiteralContentExpectation
+                                .byteCount(observed),
+                        dev.talos.runtime.expectation.LiteralContentExpectation
+                                .charCount(observed),
+                        2);
+            }
+            case REPLACE_TEXT_PRESERVE_REST -> {
+                var expectation =
+                        new dev.talos.runtime.expectation.ReplacementExpectation(
+                                output.target(),
+                                output.label(),
+                                output.statement(),
+                                sourcePattern,
+                                true);
+                String observed = "oldPresent:false;newPresent:true";
+                yield new TraceExpectation(
+                        expectation.kind(),
+                        sourcePattern,
+                        "old:" + expectation.oldHash()
+                                + ";new:" + expectation.newHash(),
+                        expectation.newBytes(),
+                        expectation.newChars(),
+                        0,
+                        observed,
+                        0,
+                        0,
+                        0);
+            }
+            case NONE -> throw new IllegalArgumentException(
+                    "Complete request obligation cannot name no action");
+        };
+    }
+
+    private record TraceExpectation(
+            String kind,
+            String sourcePattern,
+            String expectedHash,
+            int expectedBytes,
+            int expectedChars,
+            int expectedLines,
+            String observed,
+            int observedBytes,
+            int observedChars,
+            int observedLines
+    ) {}
 
     private static String jsonText(com.fasterxml.jackson.databind.JsonNode value) {
         return new String(QualificationJson.bytes(value), StandardCharsets.UTF_8);

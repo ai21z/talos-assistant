@@ -30,6 +30,11 @@ public final class ToolOutcomeFailureShape {
         return outcome.failureReason() == ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND;
     }
 
+    public static boolean oldStringAmbiguousEditFailure(ToolCallLoop.ToolOutcome outcome) {
+        if (!invalidParamsMutationFailure(outcome, "talos.edit_file")) return false;
+        return outcome.failureReason() == ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS;
+    }
+
     public static boolean appendLinePreservationFailure(ToolCallLoop.ToolOutcome outcome) {
         if (!invalidParamsMutationFailure(outcome, "talos.write_file")) return false;
         return outcome.failureReason() == ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION;

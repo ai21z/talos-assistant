@@ -2520,6 +2520,15 @@ class ToolCallLoopTest {
                     .findFirst()
                     .orElseThrow();
             String toolCallId = String.valueOf(transformed.data().get("toolCallId"));
+            ToolCallLoop.ToolOutcome transformedOutcome = result.toolOutcomes().stream()
+                    .filter(outcome -> "office-summary.md".equals(outcome.pathHint()))
+                    .filter(ToolCallLoop.ToolOutcome::success)
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(
+                    toolCallId,
+                    transformedOutcome.toolCallId(),
+                    "the runtime outcome must retain the exact parsed-call lineage");
             var parsed = trace.events().stream()
                     .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
                     .filter(event -> toolCallId.equals(String.valueOf(
@@ -2874,7 +2883,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement() throws Exception {
+    void staticWebOldStringFailureAfterReadCanContinueThroughFullWriteReplacement() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-edit-rewrite-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2943,11 +2952,33 @@ class ToolCallLoopTest {
             }
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
-            assertFalse(result.summary().contains("failed"),
-                    "Recovered static web edit failures should not make the normal tool summary look failed.");
+            assertTrue(result.summary().contains("failed"),
+                    "The pre-verification tool summary must retain the failed edit attempt.");
             assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
             assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::oldStringNotFoundEditFailure),
                     "The initial old_string miss should be visible in tool outcomes.");
+            assertFalse(result.toolOutcomes().isEmpty());
+            for (ToolCallLoop.ToolOutcome outcome : result.toolOutcomes()) {
+                assertFalse(outcome.toolCallId().isBlank(),
+                        "Every executed outcome in the captured loop must retain exact call identity.");
+                int executedIndex = traceEventIndex(
+                        trace,
+                        "TOOL_EXECUTED",
+                        outcome.toolCallId());
+                int blockedIndex = traceEventIndex(
+                        trace,
+                        "TOOL_CALL_BLOCKED",
+                        outcome.toolCallId());
+                int classificationIndex = traceEventIndex(
+                        trace,
+                        "TOOL_OUTCOME_CLASSIFIED",
+                        outcome.toolCallId());
+                assertNotEquals(executedIndex >= 0, blockedIndex >= 0,
+                        "Each outcome must have exactly one terminal execution or block event.");
+                int terminalIndex = Math.max(executedIndex, blockedIndex);
+                assertTrue(classificationIndex > terminalIndex,
+                        "Typed outcome classification must follow terminal settlement.");
+            }
             assertTrue(trace.events().stream()
                             .anyMatch(event -> "REPAIR_DECISION_RECORDED".equals(event.type())
                                     && String.valueOf(event.data().get("summary"))
@@ -4045,9 +4076,10 @@ class ToolCallLoopTest {
             LocalTurnTraceCapture.begin("trc-append-line-preapproval", "session", 1,
                     "2026-05-19T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
             ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
             try {
                 result = loop.run(badWrite, messages, ws, ctx);
-                LocalTurnTraceCapture.complete();
+                trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -4063,6 +4095,25 @@ class ToolCallLoopTest {
                                     && !outcome.success()
                                     && outcome.errorMessage().contains("append-line")),
                     result.toolOutcomes().toString());
+            ToolCallLoop.ToolOutcome blockedMutation = result.toolOutcomes().stream()
+                    .filter(ToolCallLoop.ToolOutcome::mutating)
+                    .filter(outcome -> !outcome.success())
+                    .findFirst()
+                    .orElseThrow();
+            assertFalse(blockedMutation.toolCallId().isBlank(),
+                    "The pre-approval failure must retain exact parsed-call identity.");
+            int blockedIndex = traceEventIndex(
+                    trace,
+                    "TOOL_CALL_BLOCKED",
+                    blockedMutation.toolCallId());
+            int classificationIndex = traceEventIndex(
+                    trace,
+                    "TOOL_OUTCOME_CLASSIFIED",
+                    blockedMutation.toolCallId());
+            assertTrue(blockedIndex >= 0,
+                    "The guard must settle the exact call before classification.");
+            assertTrue(classificationIndex > blockedIndex,
+                    "The typed blocked outcome must follow its terminal block event.");
         } finally {
             deleteRecursive(ws);
         }
@@ -5566,6 +5617,23 @@ class ToolCallLoopTest {
                 "spelling variants of one read replace each other in the ledger");
         assertNotNull(state.readEvidence.latestReadFileForPath("index.html", true),
                 "both spellings resolve to the same evidence path");
+    }
+
+    private static int traceEventIndex(
+            LocalTurnTrace trace,
+            String type,
+            String toolCallId
+    ) {
+        if (trace == null) return -1;
+        for (int index = 0; index < trace.events().size(); index++) {
+            var event = trace.events().get(index);
+            if (type.equals(event.type())
+                    && toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId")))) {
+                return index;
+            }
+        }
+        return -1;
     }
 }
 

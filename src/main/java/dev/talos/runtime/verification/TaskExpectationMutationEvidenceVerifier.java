@@ -79,6 +79,88 @@ final class TaskExpectationMutationEvidenceVerifier {
         return true;
     }
 
+    static FinalStateEvidence collectReplacementFinalStateEvidence(
+            ReplacementExpectation expectation,
+            String pathHint,
+            String finalContent,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) {
+            problems.add(pathHint + ": replacement preservation had no mutation evidence.");
+            return FinalStateEvidence.failed();
+        }
+        List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
+                .filter(outcome -> outcome != null
+                        && outcome.success()
+                        && normalizePath(outcome.pathHint()).equals(pathHint))
+                .toList();
+        if (relevant.size() != 1) {
+            problems.add(pathHint
+                    + ": preserve-rest replacement requires exactly one successful matching mutation.");
+            return FinalStateEvidence.failed();
+        }
+
+        ToolCallLoop.ToolOutcome outcome = relevant.getFirst();
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+        ToolMutationEvidence evidence = outcome.mutationEvidence();
+        String beforeContent;
+        if ("edit_file".equals(canonicalTool)) {
+            if (evidence == null || !evidence.exactEditReplacement()) {
+                problems.add(pathHint + ": talos.edit_file cannot prove preserve-rest replacement "
+                        + "without exact edit evidence.");
+                return FinalStateEvidence.failed();
+            }
+            if (!replacementOnlyChangesRequestedText(
+                    evidence.oldString(),
+                    evidence.newString(),
+                    expectation.oldText(),
+                    expectation.newText())) {
+                problems.add(pathHint
+                        + ": replacement preservation exact edit changed content beyond the requested text.");
+                return FinalStateEvidence.failed();
+            }
+            beforeContent = reconstructExactEditBefore(
+                    finalContent,
+                    evidence.oldString(),
+                    evidence.newString());
+            if (beforeContent == null) {
+                problems.add(pathHint
+                        + ": exact edit evidence could not reconstruct the prior file.");
+                return FinalStateEvidence.failed();
+            }
+            facts.add(pathHint
+                    + ": exact edit evidence preserved content beyond requested replacement.");
+        } else if ("write_file".equals(canonicalTool)) {
+            if (evidence == null || !evidence.fullWriteReplacement()) {
+                problems.add(pathHint + ": talos.write_file cannot prove preserve-rest replacement "
+                        + "without complete same-turn read evidence.");
+                return FinalStateEvidence.failed();
+            }
+            if (!replacementOnlyChangesRequestedText(
+                    evidence.oldString(),
+                    evidence.newString(),
+                    expectation.oldText(),
+                    expectation.newText())) {
+                problems.add(pathHint
+                        + ": replacement preservation changed content beyond the requested text.");
+                return FinalStateEvidence.failed();
+            }
+            if (!sameNormalizedContent(evidence.newString(), finalContent)) {
+                problems.add(pathHint
+                        + ": replacement mutation evidence did not match final readback.");
+                return FinalStateEvidence.failed();
+            }
+            beforeContent = evidence.oldString();
+            facts.add(pathHint + ": replacement preservation matched prior content.");
+        } else {
+            problems.add(pathHint + ": mutation tool cannot prove preserve-rest replacement.");
+            return FinalStateEvidence.failed();
+        }
+        return new FinalStateEvidence(true, beforeContent);
+    }
+
     static boolean verifyAppendLineMutationEvidence(
             String pathHint,
             String expectedLine,
@@ -184,6 +266,79 @@ final class TaskExpectationMutationEvidenceVerifier {
         }
         facts.add(pathHint + ": append-section mutation evidence preserved prior content.");
         return true;
+    }
+
+    static FinalStateEvidence collectAppendSectionFinalStateEvidence(
+            String pathHint,
+            String sectionName,
+            String expectedSentence,
+            String finalContent,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) {
+            problems.add(pathHint + ": append-section verification had no mutation evidence.");
+            return FinalStateEvidence.failed();
+        }
+        List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
+                .filter(outcome -> outcome != null
+                        && outcome.success()
+                        && normalizePath(outcome.pathHint()).equals(pathHint))
+                .toList();
+        if (relevant.size() != 1) {
+            problems.add(pathHint
+                    + ": append-section verification requires exactly one successful matching mutation.");
+            return FinalStateEvidence.failed();
+        }
+
+        ToolCallLoop.ToolOutcome outcome = relevant.getFirst();
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+        ToolMutationEvidence evidence = outcome.mutationEvidence();
+        String beforeContent;
+        if ("write_file".equals(canonicalTool)) {
+            if (evidence == null || !evidence.fullWriteReplacement()) {
+                problems.add(pathHint + ": talos.write_file cannot prove append-section preservation "
+                        + "without complete same-turn read evidence.");
+                return FinalStateEvidence.failed();
+            }
+            beforeContent = evidence.oldString();
+        } else if ("edit_file".equals(canonicalTool)) {
+            if (evidence == null || !evidence.exactEditReplacement()) {
+                problems.add(pathHint + ": talos.edit_file cannot prove append-section preservation "
+                        + "without exact edit evidence.");
+                return FinalStateEvidence.failed();
+            }
+            beforeContent = reconstructExactEditBefore(
+                    finalContent,
+                    evidence.oldString(),
+                    evidence.newString());
+            if (beforeContent == null) {
+                problems.add(pathHint
+                        + ": exact edit evidence could not reconstruct the prior file.");
+                return FinalStateEvidence.failed();
+            }
+        } else {
+            problems.add(pathHint + ": mutation tool cannot prove append-section preservation.");
+            return FinalStateEvidence.failed();
+        }
+        if (!appendsOnlyRequestedSection(
+                evidence.oldString(),
+                evidence.newString(),
+                sectionName,
+                expectedSentence)) {
+            problems.add(pathHint + ": append-section mutation did not preserve prior content "
+                    + "before the requested section.");
+            return FinalStateEvidence.failed();
+        }
+        if (!sameNormalizedContent(evidence.newString(), finalContent)
+                && "write_file".equals(canonicalTool)) {
+            problems.add(pathHint
+                    + ": append-section mutation evidence did not match final readback.");
+            return FinalStateEvidence.failed();
+        }
+        facts.add(pathHint + ": append-section mutation evidence preserved prior content.");
+        return new FinalStateEvidence(true, beforeContent);
     }
 
     static boolean verifyAppendStatementMutationEvidence(
@@ -343,22 +498,11 @@ final class TaskExpectationMutationEvidenceVerifier {
             String sectionName,
             String expectedSentence
     ) {
-        if (oldString == null || newString == null
-                || sectionName == null || sectionName.isBlank()
-                || expectedSentence == null || expectedSentence.isBlank()) {
-            return false;
-        }
-        String oldNormalized = normalizeLineEndings(oldString);
-        String newNormalized = normalizeLineEndings(newString);
-        if (!newNormalized.startsWith(oldNormalized)) return false;
-        String suffix = newNormalized.substring(oldNormalized.length());
-        List<String> nonBlank = suffix.lines()
-                .map(String::strip)
-                .filter(line -> !line.isBlank())
-                .toList();
-        return nonBlank.size() == 2
-                && MarkdownHeadingParser.headingText(nonBlank.get(0)).equals(sectionName)
-                && nonBlank.get(1).equals(expectedSentence);
+        return RequestObligationFinalStateVerifier.appendsOnlyRequestedSection(
+                oldString,
+                newString,
+                sectionName,
+                expectedSentence);
     }
 
     private static boolean appendsOnlyRequestedStatement(
@@ -381,6 +525,14 @@ final class TaskExpectationMutationEvidenceVerifier {
     private static String stripSingleTerminalNewline(String value) {
         if (value == null || value.isEmpty()) return value;
         return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private static boolean sameNormalizedContent(String expected, String observed) {
+        String expectedNormalized = normalizeLineEndings(expected);
+        String observedNormalized = normalizeLineEndings(observed);
+        return expectedNormalized.equals(observedNormalized)
+                || stripSingleTerminalNewline(expectedNormalized)
+                        .equals(stripSingleTerminalNewline(observedNormalized));
     }
 
     private static int countOccurrences(String haystack, String needle) {
@@ -411,6 +563,16 @@ final class TaskExpectationMutationEvidenceVerifier {
 
         static AppendStatementEvidence failed() {
             return new AppendStatementEvidence(false, "");
+        }
+    }
+
+    record FinalStateEvidence(boolean passed, String beforeContent) {
+        FinalStateEvidence {
+            beforeContent = beforeContent == null ? "" : beforeContent;
+        }
+
+        static FinalStateEvidence failed() {
+            return new FinalStateEvidence(false, "");
         }
     }
 }

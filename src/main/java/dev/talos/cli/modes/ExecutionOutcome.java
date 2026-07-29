@@ -11,6 +11,7 @@ import dev.talos.runtime.outcome.FileLookupAnswerGuard;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
+import dev.talos.runtime.outcome.MutationRecoveryAssessment;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.outcome.PathExistenceAnswerRenderer;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
@@ -246,10 +247,13 @@ record ExecutionOutcome(
         boolean invalidMutation = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
-                current, loopResult, extraMutationSuccesses);
-        boolean partialMutation = !Objects.equals(current, shaped);
-        current = shaped;
+        MutationRecoveryAssessment provisionalMutationAssessment =
+                MutationRecoveryAssessment.provisional(
+                        contract,
+                        safePlan.requestObligation(),
+                        loopResult,
+                        extraMutationSuccesses);
+        boolean provisionalPartialMutation = provisionalMutationAssessment.partial();
 
         current = MutationFailureAnswerRenderer.discloseActionObligationBlockedAfterMutationIfNeeded(
                 current, loopResult, extraMutationSuccesses);
@@ -356,7 +360,7 @@ record ExecutionOutcome(
                 commandVerificationSucceeded,
                 deniedMutation,
                 deniedProtectedRead,
-                partialMutation,
+                provisionalPartialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
                 readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
@@ -402,6 +406,39 @@ record ExecutionOutcome(
         VerificationReport verificationReport = taskVerificationEvidence.report();
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
         LocalTurnTraceCapture.enterExecutionStage(priorVerificationStage);
+
+        MutationRecoveryAssessment mutationAssessment = MutationRecoveryAssessment.assess(
+                contract,
+                safePlan.requestObligation(),
+                loopResult,
+                extraMutationSuccesses,
+                taskVerificationEvidence);
+        boolean partialMutation = mutationAssessment.partial();
+        OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
+                contract,
+                invalidMutation,
+                false,
+                readOnlyDeniedMutation,
+                failedAnyActionObligation,
+                commandFailed,
+                commandDenied,
+                commandVerificationSucceeded,
+                deniedMutation,
+                deniedProtectedRead,
+                partialMutation,
+                falseMutationClaim,
+                inspectUnderCompleted,
+                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
+                unsupportedDocumentCapabilityLimited,
+                missingEvidence,
+                protectedReadApprovalMissing,
+                approvedProtectedReadPostcondition,
+                verificationStatus);
+        completionStatus = finalDecision.completionStatus();
+
+        current = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
+                current,
+                mutationAssessment);
         if (verificationStatus == VerificationStatus.FAILED) {
             if (usingEmbeddedVerification) {
                 // The tool loop already rendered the static-verification failure alongside
@@ -434,32 +471,10 @@ record ExecutionOutcome(
             current = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
                     current, loopResult);
         }
-
-        OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
-                contract,
-                invalidMutation,
-                false,
-                readOnlyDeniedMutation,
-                failedAnyActionObligation,
-                commandFailed,
-                commandDenied,
-                commandVerificationSucceeded,
-                deniedMutation,
-                deniedProtectedRead,
-                partialMutation,
-                falseMutationClaim,
-                inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
-                unsupportedDocumentCapabilityLimited,
-                missingEvidence,
-                protectedReadApprovalMissing,
-                approvedProtectedReadPostcondition,
-                verificationStatus);
-        completionStatus = finalDecision.completionStatus();
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 finalDecision.taskCompletionStatus(),
-                MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
+                mutationAssessment.mutationOutcome(),
                 taskVerification,
                 verificationReport,
                 TaskOutcomeWarningBuilder.toolLoopWarnings(
@@ -504,7 +519,8 @@ record ExecutionOutcome(
                 verificationStatus == null ? "" : verificationStatus.name(),
                 taskOutcome,
                 taskVerification,
-                verificationReport);
+                verificationReport,
+                mutationAssessment);
 
         return new ExecutionOutcome(
                 current,

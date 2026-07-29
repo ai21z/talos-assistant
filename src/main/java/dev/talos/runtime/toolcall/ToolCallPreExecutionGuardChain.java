@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -89,11 +90,18 @@ final class ToolCallPreExecutionGuardChain {
             String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                     + "[error] " + diagnosticError
                     + "\n[/tool_result]";
-            state.toolOutcomes.add(ToolOutcomeFactory.failedEditPreApproval(
-                    effective, pathHint, diagnosticError, editPreApprovalDecision));
+            recordBlockedOutcome(
+                    state,
+                    effective,
+                    diagnosticError,
+                    ToolOutcomeFactory.failedEditPreApproval(
+                            effective,
+                            pathHint,
+                            diagnosticError,
+                            editPreApprovalDecision,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex, diagnostic);
             logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
-            recordBlockedCall(effective, diagnosticError);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -133,11 +141,15 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     privateDocumentNamedTargetDiagnostic,
                     "PRIVATE_DOCUMENT_READ_OUTSIDE_REQUESTED_TARGET_SET");
-            recordBlockedCall(effective, privateDocumentNamedTargetDiagnostic);
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionRead(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
-                    privateDocumentNamedTargetDiagnostic));
+                    privateDocumentNamedTargetDiagnostic,
+                    ToolOutcomeFactory.failedPreExecutionRead(
+                            effective,
+                            pathHint,
+                            privateDocumentNamedTargetDiagnostic,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked private document read {} for {} before extraction: {}",
@@ -166,19 +178,23 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     diagnosticError,
                     "SOURCE_EVIDENCE_WRITE_BEFORE_READ");
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     diagnosticError,
-                    workspaceOperationPlan,
-                    ToolFailureReason.NONE));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            diagnosticError,
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.value(requiredSourceEvidence.missingSourceTargets()));
-            recordBlockedCall(effective, diagnosticError);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -223,19 +239,23 @@ final class ToolCallPreExecutionGuardChain {
                         "FAILED",
                         sourceEvidenceCoverageDiagnostic,
                         "SOURCE_EVIDENCE_WRITE_MISSING_EXACT_EVIDENCE");
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                recordBlockedOutcome(
+                        state,
                         effective,
-                        pathHint,
                         sourceEvidenceCoverageDiagnostic,
-                        workspaceOperationPlan,
-                        ToolFailureReason.NONE));
+                        ToolOutcomeFactory.failedPreExecutionMutation(
+                                effective,
+                                pathHint,
+                                sourceEvidenceCoverageDiagnostic,
+                                workspaceOperationPlan,
+                                ToolFailureReason.NONE,
+                                parsedPermit));
                 resultMessageAppender.append(state, nativePath, callIndex,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked source-derived {} for {} before approval: {}",
                         effective.toolName(),
                         SafeLogFormatter.value(pathHint),
                         SafeLogFormatter.text(sourceEvidenceCoverageDiagnostic));
-                recordBlockedCall(effective, sourceEvidenceCoverageDiagnostic);
                 return Result.blocked(effective, pathContext, failures, false);
             }
         }
@@ -257,19 +277,23 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     appendLineDiagnostic,
                     "APPEND_LINE_WRITE_BEFORE_VALID_PRESERVATION");
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     appendLineDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            appendLineDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked append-line {} for {} before approval: {}",
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(appendLineDiagnostic));
-            recordBlockedCall(effective, appendLineDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -289,13 +313,17 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     redactedReadWritebackDiagnostic,
                     "REDACTED_READBACK_WRITE_BLOCKED");
-            recordBlockedCall(effective, redactedReadWritebackDiagnostic);
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     redactedReadWritebackDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.NONE));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            redactedReadWritebackDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked redacted-read writeback {} for {} before approval: {}",
@@ -328,8 +356,10 @@ final class ToolCallPreExecutionGuardChain {
                         ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                         diagnostic));
                 toolResultEmitter.emit(effective.toolName(), result);
-                state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(
-                        effective, diagnostic));
+                state.addClassifiedToolOutcome(ToolOutcomeFactory.failedAuthority(
+                        effective,
+                        diagnostic,
+                        parsedPermit));
                 resultMessageAppender.append(
                         state,
                         nativePath,
@@ -369,13 +399,17 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     namedTargetExistenceDiagnostic,
                     "NAMED_TARGET_NOT_FOUND");
-            recordBlockedCall(effective, namedTargetExistenceDiagnostic);
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     namedTargetExistenceDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            namedTargetExistenceDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked named-target {} for {} before approval: {}",
@@ -401,13 +435,17 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     readDisplayWriteDiagnostic,
                     "READ_DISPLAY_PREFIX_WRITE");
-            recordBlockedCall(effective, readDisplayWriteDiagnostic);
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     readDisplayWriteDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.NONE));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            readDisplayWriteDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked read-display-contaminated {} for {} before approval: {}",
@@ -435,19 +473,23 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     staticWebRewriteGroundingDiagnostic,
                     "STATIC_WEB_WRITE_BEFORE_READ");
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     staticWebRewriteGroundingDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.NONE));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            staticWebRewriteGroundingDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked static-web rewrite {} for {} before approval: {}",
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(staticWebRewriteGroundingDiagnostic));
-            recordBlockedCall(effective, staticWebRewriteGroundingDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -465,13 +507,17 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     staticWebRepairPathDiagnostic,
                     "STATIC_WEB_REPAIR_DIRECTORY_TARGET_BEFORE_APPROVAL");
-            recordBlockedCall(effective, staticWebRepairPathDiagnostic);
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     staticWebRepairPathDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            staticWebRepairPathDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked static-web repair {} for invalid target {} before approval: {}",
@@ -499,19 +545,23 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     staticWebBlankRequiredAssetDiagnostic,
                     "STATIC_WEB_REQUIRED_ASSET_BLANK_WRITE_BEFORE_APPROVAL");
-            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+            recordBlockedOutcome(
+                    state,
                     effective,
-                    pathHint,
                     staticWebBlankRequiredAssetDiagnostic,
-                    workspaceOperationPlan,
-                    ToolFailureReason.NONE));
+                    ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
+                            pathHint,
+                            staticWebBlankRequiredAssetDiagnostic,
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE,
+                            parsedPermit));
             resultMessageAppender.append(state, nativePath, callIndex,
                     ToolCallSupport.formatToolResult(effective, result));
             LOG.debug("Blocked static-web blank required asset write {} for {} before approval: {}",
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(staticWebBlankRequiredAssetDiagnostic));
-            recordBlockedCall(effective, staticWebBlankRequiredAssetDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -547,6 +597,16 @@ final class ToolCallPreExecutionGuardChain {
 
     private static void recordBlockedCall(ToolCall call, String reason) {
         LocalTurnTraceCapture.recordToolCallBlocked("tool_loop", call, reason);
+    }
+
+    private static void recordBlockedOutcome(
+            LoopState state,
+            ToolCall call,
+            String reason,
+            ToolCallLoop.ToolOutcome outcome
+    ) {
+        recordBlockedCall(call, reason);
+        state.addClassifiedToolOutcome(outcome);
     }
 
     private static void recordTransformation(

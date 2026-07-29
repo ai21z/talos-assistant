@@ -12,7 +12,8 @@ import java.util.List;
 public record TaskVerificationEvidence(
         TaskVerificationResult compatibilityResult,
         VerificationReport report,
-        TaskVerificationEvidenceSource source
+        TaskVerificationEvidenceSource source,
+        RequestObligationVerificationReceipt requestObligationReceipt
 ) {
     public TaskVerificationEvidence {
         compatibilityResult = compatibilityResult == null
@@ -20,13 +21,29 @@ public record TaskVerificationEvidence(
                 : compatibilityResult;
         report = report == null ? VerificationReport.empty() : report;
         source = source == null ? TaskVerificationEvidenceSource.NOT_RUN : source;
+        requestObligationReceipt = requestObligationReceipt == null
+                ? RequestObligationVerificationReceipt.none()
+                : requestObligationReceipt;
+    }
+
+    public TaskVerificationEvidence(
+            TaskVerificationResult compatibilityResult,
+            VerificationReport report,
+            TaskVerificationEvidenceSource source
+    ) {
+        this(
+                compatibilityResult,
+                report,
+                source,
+                RequestObligationVerificationReceipt.none());
     }
 
     public static TaskVerificationEvidence notRun(String summary) {
         return new TaskVerificationEvidence(
                 TaskVerificationResult.notRun(summary),
                 VerificationReport.empty(),
-                TaskVerificationEvidenceSource.NOT_RUN);
+                TaskVerificationEvidenceSource.NOT_RUN,
+                RequestObligationVerificationReceipt.none());
     }
 
     public static TaskVerificationEvidence postApply(
@@ -36,7 +53,20 @@ public record TaskVerificationEvidence(
         return new TaskVerificationEvidence(
                 compatibilityResult,
                 report,
-                TaskVerificationEvidenceSource.POST_APPLY_STATIC);
+                TaskVerificationEvidenceSource.POST_APPLY_STATIC,
+                RequestObligationVerificationReceipt.none());
+    }
+
+    static TaskVerificationEvidence postApply(
+            TaskVerificationResult compatibilityResult,
+            VerificationReport report,
+            RequestObligationVerificationReceipt requestObligationReceipt
+    ) {
+        return new TaskVerificationEvidence(
+                compatibilityResult,
+                report,
+                TaskVerificationEvidenceSource.POST_APPLY_STATIC,
+                requestObligationReceipt);
     }
 
     public static TaskVerificationEvidence documentExtraction(
@@ -46,7 +76,8 @@ public record TaskVerificationEvidence(
         return new TaskVerificationEvidence(
                 compatibilityResult,
                 report,
-                TaskVerificationEvidenceSource.DOCUMENT_EXTRACTION_TOOL_RESULT);
+                TaskVerificationEvidenceSource.DOCUMENT_EXTRACTION_TOOL_RESULT,
+                RequestObligationVerificationReceipt.none());
     }
 
     public static TaskVerificationEvidence embeddedAssistant(TaskVerificationResult compatibilityResult) {
@@ -58,7 +89,8 @@ public record TaskVerificationEvidence(
         return new TaskVerificationEvidence(
                 compatibilityResult,
                 embeddedAssistantReport(compatibilityResult),
-                TaskVerificationEvidenceSource.EMBEDDED_ASSISTANT_TEXT);
+                TaskVerificationEvidenceSource.EMBEDDED_ASSISTANT_TEXT,
+                RequestObligationVerificationReceipt.none());
     }
 
     private static VerificationReport embeddedAssistantReport(TaskVerificationResult result) {

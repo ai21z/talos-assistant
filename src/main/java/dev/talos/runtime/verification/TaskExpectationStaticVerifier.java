@@ -149,11 +149,6 @@ final class TaskExpectationStaticVerifier {
             boolean recordExpectationTrace
     ) {
         RequestObligation.OutputShape output = obligation.outputShape();
-        AppendStatementExpectation expectation = new AppendStatementExpectation(
-                output.target(),
-                output.label(),
-                output.statement(),
-                "request-obligation-v" + obligation.schemaVersion());
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
@@ -164,33 +159,80 @@ final class TaskExpectationStaticVerifier {
                 "request-obligation verification could not read target");
         if (target.hasProblem()) {
             problems.add(target.problem());
-            if (recordExpectationTrace) {
-                TaskExpectationTraceRecorder.recordAppendStatementExpectation(
-                        expectation,
-                        ExpectationVerificationStatus.FAILED,
-                        "");
-            }
-            return completeAppendResult(
+            recordCompleteObligationTrace(
+                    obligation,
+                    "",
                     false,
+                    recordExpectationTrace);
+            return completeObligationResult(
+                    obligation,
+                    false,
+                    null,
                     Set.of(output.target()),
                     successfulMutations,
                     facts,
                     problems);
         }
 
-        TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence mutationEvidence =
-                TaskExpectationMutationEvidenceVerifier.collectAppendStatementMutationEvidence(
-                        target.pathHint(),
+        boolean mutationEvidencePassed = false;
+        String beforeContent = "";
+        switch (obligation.actionKind()) {
+            case APPEND_STATEMENT -> {
+                TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence evidence =
+                        TaskExpectationMutationEvidenceVerifier.collectAppendStatementMutationEvidence(
+                                target.pathHint(),
+                                output.label(),
+                                output.statement(),
+                                target.content(),
+                                successfulMutations,
+                                facts,
+                                problems);
+                mutationEvidencePassed = evidence.passed();
+                beforeContent = evidence.beforeContent();
+            }
+            case APPEND_SECTION -> {
+                TaskExpectationMutationEvidenceVerifier.FinalStateEvidence evidence =
+                        TaskExpectationMutationEvidenceVerifier.collectAppendSectionFinalStateEvidence(
+                                target.pathHint(),
+                                output.label(),
+                                output.statement(),
+                                target.content(),
+                                successfulMutations,
+                                facts,
+                                problems);
+                mutationEvidencePassed = evidence.passed();
+                beforeContent = evidence.beforeContent();
+            }
+            case REPLACE_TEXT_PRESERVE_REST -> {
+                ReplacementExpectation replacement = new ReplacementExpectation(
+                        output.target(),
                         output.label(),
                         output.statement(),
-                        target.content(),
-                        successfulMutations,
-                        facts,
-                        problems);
-        byte[] before = mutationEvidence.beforeContent().getBytes(StandardCharsets.UTF_8);
+                        "request-obligation-v" + obligation.schemaVersion(),
+                        true);
+                TaskExpectationMutationEvidenceVerifier.FinalStateEvidence evidence =
+                        TaskExpectationMutationEvidenceVerifier.collectReplacementFinalStateEvidence(
+                                replacement,
+                                target.pathHint(),
+                                target.content(),
+                                successfulMutations,
+                                facts,
+                                problems);
+                mutationEvidencePassed = evidence.passed();
+                beforeContent = evidence.beforeContent();
+            }
+            case NONE -> {
+                mutationEvidencePassed = false;
+                beforeContent = "";
+                problems.add(target.pathHint()
+                        + ": complete request obligation named no supported action.");
+            }
+        }
+
+        byte[] before = beforeContent.getBytes(StandardCharsets.UTF_8);
         byte[] after = target.content().getBytes(StandardCharsets.UTF_8);
         RequestObligationFinalStateVerifier.Result finalState =
-                mutationEvidence.passed()
+                mutationEvidencePassed
                         ? RequestObligationFinalStateVerifier.verify(
                                 obligation,
                                 new RequestObligationFinalStateVerifier.Evidence(
@@ -200,34 +242,45 @@ final class TaskExpectationStaticVerifier {
                         : new RequestObligationFinalStateVerifier.Result(
                                 false,
                                 List.of("STRUCTURED_MUTATION_EVIDENCE_UNAVAILABLE"));
-        boolean passed = mutationEvidence.passed() && finalState.passed();
-        String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(after);
-        if (recordExpectationTrace) {
-            TaskExpectationTraceRecorder.recordAppendStatementExpectation(
-                    expectation,
-                    passed
-                            ? ExpectationVerificationStatus.PASSED
-                            : ExpectationVerificationStatus.FAILED,
-                    finalLine == null ? "" : finalLine);
-        }
-        if (passed) {
-            facts.add(target.pathHint()
-                    + ": appended statement matched requested final line.");
-        } else {
-            finalState.failedPostconditions().forEach(failure ->
-                    problems.add(target.pathHint()
-                            + ": request-obligation postcondition failed: " + failure + "."));
-        }
-        return completeAppendResult(
+        boolean passed = mutationEvidencePassed && finalState.passed();
+        recordCompleteObligationTrace(
+                obligation,
+                target.content(),
                 passed,
+                recordExpectationTrace);
+        if (passed) {
+            facts.add(switch (obligation.actionKind()) {
+                case APPEND_STATEMENT -> target.pathHint()
+                        + ": appended statement matched requested final line.";
+                case APPEND_SECTION -> target.pathHint()
+                        + ": requested appended section matched heading and sentence.";
+                case REPLACE_TEXT_PRESERVE_REST -> target.pathHint()
+                        + ": replacement text observed and old text absent.";
+                case NONE -> target.pathHint()
+                        + ": unsupported request obligation unexpectedly passed.";
+            });
+        } else {
+            addCompleteObligationProblems(
+                    obligation,
+                    target.pathHint(),
+                    target.content(),
+                    finalState.failedPostconditions(),
+                    problems);
+        }
+        return completeObligationResult(
+                obligation,
+                passed,
+                finalState,
                 Set.of(output.target()),
                 successfulMutations,
                 facts,
                 problems);
     }
 
-    private static Result completeAppendResult(
+    private static Result completeObligationResult(
+            RequestObligation obligation,
             boolean passed,
+            RequestObligationFinalStateVerifier.Result finalState,
             Set<String> verifiedTargets,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
             List<String> facts,
@@ -240,16 +293,143 @@ final class TaskExpectationStaticVerifier {
             problems.add(
                     "Request-obligation evidence did not cover every successful mutation.");
         }
+        RequestObligationVerificationReceipt receipt =
+                RequestObligationVerificationReceipt.verified(
+                        obligation,
+                        finalState,
+                        verifiedTargets,
+                        successfulMutations);
+        RequestObligation.ActionKind actionKind = obligation.actionKind();
         return new Result(
                 true,
+                actionKind == RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST,
                 false,
-                false,
-                false,
-                true,
+                actionKind == RequestObligation.ActionKind.APPEND_SECTION,
+                actionKind == RequestObligation.ActionKind.APPEND_STATEMENT,
                 false,
                 passed && coversAllMutations,
                 facts,
-                problems);
+                problems,
+                receipt);
+    }
+
+    private static void recordCompleteObligationTrace(
+            RequestObligation obligation,
+            String observed,
+            boolean passed,
+            boolean recordExpectationTrace
+    ) {
+        if (!recordExpectationTrace) return;
+        RequestObligation.OutputShape output = obligation.outputShape();
+        ExpectationVerificationStatus status = passed
+                ? ExpectationVerificationStatus.PASSED
+                : ExpectationVerificationStatus.FAILED;
+        switch (obligation.actionKind()) {
+            case APPEND_STATEMENT -> {
+                String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(
+                        observed.getBytes(StandardCharsets.UTF_8));
+                TaskExpectationTraceRecorder.recordAppendStatementExpectation(
+                        new AppendStatementExpectation(
+                                output.target(),
+                                output.label(),
+                                output.statement(),
+                                "request-obligation-v" + obligation.schemaVersion()),
+                        status,
+                        finalLine == null ? "" : finalLine);
+            }
+            case APPEND_SECTION -> {
+                AppendSectionObservation observation = observeAppendedSection(
+                        observed,
+                        output.label(),
+                        output.statement());
+                TaskExpectationTraceRecorder.recordAppendSectionExpectation(
+                        new AppendSectionExpectation(
+                                output.target(),
+                                output.label(),
+                                output.statement(),
+                                "request-obligation-v" + obligation.schemaVersion()),
+                        status,
+                        observation.observedBlock());
+            }
+            case REPLACE_TEXT_PRESERVE_REST ->
+                    TaskExpectationTraceRecorder.recordReplacementExpectation(
+                            new ReplacementExpectation(
+                                    output.target(),
+                                    output.label(),
+                                    output.statement(),
+                                    "request-obligation-v" + obligation.schemaVersion(),
+                                    true),
+                            status,
+                            ReplacementTextPresence.oldTextRemainsOutsideReplacement(
+                                    observed,
+                                    output.label(),
+                                    output.statement()),
+                            ReplacementTextPresence.replacementTextObserved(
+                                    observed,
+                                    output.statement()));
+            case NONE -> {
+                // A COMPLETE obligation cannot carry NONE; constructor validation owns this.
+            }
+        }
+    }
+
+    private static void addCompleteObligationProblems(
+            RequestObligation obligation,
+            String pathHint,
+            String observed,
+            List<String> failedPostconditions,
+            List<String> problems
+    ) {
+        RequestObligation.OutputShape output = obligation.outputShape();
+        switch (obligation.actionKind()) {
+            case APPEND_SECTION -> {
+                AppendSectionObservation observation = observeAppendedSection(
+                        observed,
+                        output.label(),
+                        output.statement());
+                if (!observation.headingFound()) {
+                    problems.add(pathHint
+                            + ": requested Markdown section heading was not found.");
+                } else if (!observation.uniqueHeading()) {
+                    problems.add(pathHint
+                            + ": requested Markdown section heading was not unique.");
+                } else if (!observation.sentenceFound()) {
+                    problems.add(pathHint
+                            + ": requested section sentence was not found under its heading.");
+                } else if (!observation.exactOneSentenceSection()) {
+                    problems.add(pathHint
+                            + ": requested section did not contain exactly the requested sentence.");
+                } else if (!observation.finalSection()) {
+                    problems.add(pathHint
+                            + ": requested section was not appended as the final document section.");
+                }
+            }
+            case REPLACE_TEXT_PRESERVE_REST -> {
+                boolean oldPresent = ReplacementTextPresence.oldTextRemainsOutsideReplacement(
+                        observed,
+                        output.label(),
+                        output.statement());
+                boolean newPresent = ReplacementTextPresence.replacementTextObserved(
+                        observed,
+                        output.statement());
+                if (!newPresent) {
+                    problems.add(pathHint
+                            + ": replacement new text was not observed after apply.");
+                }
+                if (oldPresent) {
+                    problems.add(pathHint
+                            + ": replacement old text remained after apply.");
+                }
+            }
+            case APPEND_STATEMENT, NONE -> {
+                // The typed postcondition details below are the precise diagnostic.
+            }
+        }
+        failedPostconditions.forEach(failure -> {
+            String detail = pathHint
+                    + ": request-obligation postcondition failed: " + failure + ".";
+            if (!problems.contains(detail)) problems.add(detail);
+        });
     }
 
     private static Result failedObligationResult(String problem) {
@@ -695,11 +875,39 @@ final class TaskExpectationStaticVerifier {
             boolean bulletCountRequired,
             boolean coversAllSuccessfulMutations,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            RequestObligationVerificationReceipt requestObligationReceipt
     ) {
         Result {
             facts = facts == null ? List.of() : List.copyOf(facts);
             problems = problems == null ? List.of() : List.copyOf(problems);
+            requestObligationReceipt = requestObligationReceipt == null
+                    ? RequestObligationVerificationReceipt.none()
+                    : requestObligationReceipt;
+        }
+
+        Result(
+                boolean verifiedAny,
+                boolean replacementRequired,
+                boolean appendLineRequired,
+                boolean appendSectionRequired,
+                boolean appendStatementRequired,
+                boolean bulletCountRequired,
+                boolean coversAllSuccessfulMutations,
+                List<String> facts,
+                List<String> problems
+        ) {
+            this(
+                    verifiedAny,
+                    replacementRequired,
+                    appendLineRequired,
+                    appendSectionRequired,
+                    appendStatementRequired,
+                    bulletCountRequired,
+                    coversAllSuccessfulMutations,
+                    facts,
+                    problems,
+                    RequestObligationVerificationReceipt.none());
         }
 
         static Result empty() {
