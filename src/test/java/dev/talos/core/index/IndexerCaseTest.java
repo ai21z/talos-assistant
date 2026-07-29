@@ -7,10 +7,12 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.PatternSyntaxException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -112,6 +114,155 @@ class IndexerCaseTest {
         // Root HTML should be included, build HTML should be excluded
         assertTrue(predicate.test(rootHtml), "main.html should be included");
         assertFalse(predicate.test(buildHtml), "build/index.html should be excluded");
+    }
+
+    @Test
+    void recursiveGlobsMatchRootNestedAndDeepPathsPortably(@TempDir Path tempDir) throws Exception {
+        Path rootMarkdown = tempDir.resolve("README.md");
+        Path nestedMarkdown = tempDir.resolve("docs").resolve("guide.md");
+        Path deepMarkdown = tempDir.resolve("docs").resolve("reference").resolve("details.md");
+        Path rootBuildMarkdown = tempDir.resolve("build").resolve("generated.md");
+        Path nestedBuildMarkdown = tempDir.resolve("docs").resolve("build").resolve("generated.md");
+        Path rootDependencyMarkdown = tempDir.resolve("node_modules").resolve("package").resolve("README.md");
+        Path nestedDependencyMarkdown = tempDir.resolve("web").resolve("node_modules").resolve("package").resolve("README.md");
+
+        for (Path path : List.of(
+                rootMarkdown,
+                nestedMarkdown,
+                deepMarkdown,
+                rootBuildMarkdown,
+                nestedBuildMarkdown,
+                rootDependencyMarkdown,
+                nestedDependencyMarkdown)) {
+            Files.createDirectories(path.getParent());
+            Files.writeString(path, "# fixture");
+        }
+
+        Config config = createTestConfig();
+        Indexer indexer = new Indexer(config);
+        var includeGlobs = List.of("**/*.md");
+        var excludeGlobs = List.of("**/build/**", "**/node_modules/**");
+
+        var method = Indexer.class.getDeclaredMethod(
+                "createFileFilter",
+                Path.class,
+                java.util.List.class,
+                java.util.List.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        java.util.function.Predicate<Path> predicate =
+                (java.util.function.Predicate<Path>) method.invoke(
+                        indexer,
+                        tempDir,
+                        includeGlobs,
+                        excludeGlobs);
+
+        assertAll(
+                () -> assertTrue(predicate.test(rootMarkdown), "root Markdown should be included"),
+                () -> assertTrue(predicate.test(nestedMarkdown), "nested Markdown should be included"),
+                () -> assertTrue(predicate.test(deepMarkdown), "deep Markdown should be included"),
+                () -> assertFalse(predicate.test(rootBuildMarkdown), "root build tree should be excluded"),
+                () -> assertFalse(predicate.test(nestedBuildMarkdown), "nested build tree should be excluded"),
+                () -> assertFalse(predicate.test(rootDependencyMarkdown), "root node_modules tree should be excluded"),
+                () -> assertFalse(predicate.test(nestedDependencyMarkdown), "nested node_modules tree should be excluded"));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void recursiveExpansionPreservesNativeBraceAndCharacterClassSemantics(@TempDir Path tempDir) throws Exception {
+        Path rootBraceAndClassMatch = tempDir.resolve("guide1.md");
+        Path nestedBraceAndClassMatch = tempDir.resolve("docs").resolve("reference9.txt");
+        Path wrongStem = tempDir.resolve("manual1.md");
+        Path wrongClass = tempDir.resolve("guideX.md");
+        Path wrongExtension = tempDir.resolve("guide1.rst");
+
+        for (Path path : List.of(
+                rootBraceAndClassMatch,
+                nestedBraceAndClassMatch,
+                wrongStem,
+                wrongClass,
+                wrongExtension)) {
+            Files.createDirectories(path.getParent());
+            Files.writeString(path, "fixture");
+        }
+
+        Config config = createTestConfig();
+        Indexer indexer = new Indexer(config);
+        var includeGlobs = List.of("**/{guide,reference}[0-9].{md,txt}");
+
+        var method = Indexer.class.getDeclaredMethod(
+                "createFileFilter",
+                Path.class,
+                java.util.List.class,
+                java.util.List.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        java.util.function.Predicate<Path> predicate =
+                (java.util.function.Predicate<Path>) method.invoke(
+                        indexer,
+                        tempDir,
+                        includeGlobs,
+                        List.of());
+
+        assertAll(
+                () -> assertTrue(
+                        predicate.test(rootBraceAndClassMatch),
+                        "root match must retain native brace and character-class semantics"),
+                () -> assertTrue(
+                        predicate.test(nestedBraceAndClassMatch),
+                        "nested match must retain native brace and character-class semantics"),
+                () -> assertFalse(predicate.test(wrongStem), "brace alternatives must remain strict"),
+                () -> assertFalse(predicate.test(wrongClass), "character classes must remain strict"),
+                () -> assertFalse(predicate.test(wrongExtension), "brace extensions must remain strict"));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void exactRecursiveDirectoryGlobDoesNotAcquireAnEmptyPathMatch(@TempDir Path tempDir) throws Exception {
+        Config config = createTestConfig();
+        Indexer indexer = new Indexer(config);
+        var method = Indexer.class.getDeclaredMethod(
+                "createFileFilter",
+                Path.class,
+                java.util.List.class,
+                java.util.List.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        java.util.function.Predicate<Path> predicate =
+                (java.util.function.Predicate<Path>) method.invoke(
+                        indexer,
+                        tempDir,
+                        List.of("**/"),
+                        List.of());
+
+        assertFalse(
+                predicate.test(tempDir),
+                "an exact **/ glob must not gain the empty path through prefix expansion");
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void malformedRecursiveGlobStillFailsThroughTheNativeMatcher(@TempDir Path tempDir) throws Exception {
+        Config config = createTestConfig();
+        Indexer indexer = new Indexer(config);
+        var method = Indexer.class.getDeclaredMethod(
+                "createFileFilter",
+                Path.class,
+                java.util.List.class,
+                java.util.List.class);
+        method.setAccessible(true);
+
+        InvocationTargetException failure = assertThrows(
+                InvocationTargetException.class,
+                () -> method.invoke(indexer, tempDir, List.of("**/["), List.of()));
+
+        assertInstanceOf(
+                PatternSyntaxException.class,
+                failure.getCause(),
+                "leading recursive expansion must not mask malformed native glob syntax");
     }
 
     @Test

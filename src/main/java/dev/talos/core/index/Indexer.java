@@ -51,7 +51,9 @@ public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int INDEX_METADATA_SCHEMA_VERSION = 3;
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 4;
+    private static final String FILE_GLOB_SEMANTICS_VERSION =
+            "native-leading-recursive-zero-directory-v1";
 
     private final Config cfg;
     private final Supplier<Embeddings> documentEmbeddingsFactory;
@@ -99,6 +101,8 @@ public class Indexer {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = JSON.readValue(metadata.toFile(), Map.class);
             return INDEX_METADATA_SCHEMA_VERSION == intValue(data.get("schemaVersion"))
+                    && FILE_GLOB_SEMANTICS_VERSION.equals(
+                            String.valueOf(data.get("fileGlobSemanticsVersion")))
                     && ProtectedWorkspacePaths.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
                     && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
                     && DocumentExtractionService.EXTRACTION_POLICY_VERSION.equals(String.valueOf(data.get("documentExtractionPolicyVersion")))
@@ -146,7 +150,8 @@ public class Indexer {
 
         // Check force_full_reindex config
         boolean configForceReindex = CfgUtil.intAt(rag, "force_full_reindex", 0) == 1;
-        if (forceFullReindex || configForceReindex) {
+        boolean metadataRequiresFullReindex = !isPolicyMetadataCurrent(rootPath);
+        if (forceFullReindex || configForceReindex || metadataRequiresFullReindex) {
             invalidateIndex(rootPath);
         }
         final boolean skipHashing = forceFullReindex || configForceReindex;
@@ -471,6 +476,7 @@ public class Indexer {
         Files.createDirectories(metadata.getParent());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("schemaVersion", INDEX_METADATA_SCHEMA_VERSION);
+        data.put("fileGlobSemanticsVersion", FILE_GLOB_SEMANTICS_VERSION);
         data.put("privacyPolicyVersion", ProtectedWorkspacePaths.POLICY_VERSION);
         data.put("fileCapabilityPolicyVersion", FileCapabilityPolicy.POLICY_VERSION);
         data.put("documentExtractionPolicyVersion", DocumentExtractionService.EXTRACTION_POLICY_VERSION);
@@ -532,10 +538,8 @@ public class Indexer {
      */
     private Predicate<Path> createCaseSensitiveFilter(Path rootPath, List<String> includeGlobs, List<String> excludeGlobs) {
         final FileSystem fs = rootPath.getFileSystem();
-        final List<PathMatcher> includeMatchers = new ArrayList<>();
-        for (String g : includeGlobs) includeMatchers.add(fs.getPathMatcher("glob:" + g));
-        final List<PathMatcher> excludeMatchers = new ArrayList<>();
-        for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
+        final List<PathMatcher> includeMatchers = createCaseSensitiveMatchers(fs, includeGlobs);
+        final List<PathMatcher> excludeMatchers = createCaseSensitiveMatchers(fs, excludeGlobs);
 
         return p -> {
             if (ProtectedWorkspacePaths.isProtectedPath(rootPath, p)
@@ -547,6 +551,20 @@ public class Indexer {
             boolean exc = excludeMatchers.stream().anyMatch(m -> m.matches(rel));
             return inc && !exc;
         };
+    }
+
+    private static List<PathMatcher> createCaseSensitiveMatchers(FileSystem fs, List<String> globs) {
+        List<PathMatcher> matchers = new ArrayList<>();
+        for (String glob : globs) {
+            matchers.add(fs.getPathMatcher("glob:" + glob));
+            if (glob != null && glob.length() > 3 && glob.startsWith("**/")) {
+                // A case-sensitive native matcher can require a separator for leading **/.
+                // Compile the zero-directory form with the same native matcher so
+                // brace, character-class, escaping, and separator rules stay native.
+                matchers.add(fs.getPathMatcher("glob:" + glob.substring(3)));
+            }
+        }
+        return matchers;
     }
 
     /**

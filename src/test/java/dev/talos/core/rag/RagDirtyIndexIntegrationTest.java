@@ -1,7 +1,9 @@
 package dev.talos.core.rag;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.core.extract.FakeOcrCli;
+import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.Indexer;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
@@ -29,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RagDirtyIndexIntegrationTest {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @TempDir
     Path workspace;
@@ -76,6 +80,78 @@ class RagDirtyIndexIntegrationTest {
         new RagService(changed).prepare(workspace, "public", 1);
 
         assertTrue(changedIndexer.isPolicyMetadataCurrent(workspace));
+    }
+
+    @Test
+    void rag_previous_glob_semantics_metadata_rebuilds_and_removes_root_excluded_chunks() throws Exception {
+        String canary = "ROOT_BUILD_GLOB_SEMANTICS_CANARY";
+        Files.writeString(workspace.resolve("README.md"), "public text\n");
+        Path excluded = workspace.resolve("build").resolve("generated.md");
+        Files.createDirectories(excluded.getParent());
+        Files.writeString(excluded, canary + "\n");
+        Config cfg = safeRagConfig();
+        Indexer indexer = new Indexer(cfg);
+        indexer.index(workspace, true);
+        Path metadata = indexer.policyMetadataFile(workspace);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> previous = JSON.readValue(metadata.toFile(), Map.class);
+        previous.put("schemaVersion", 3);
+        previous.remove("fileGlobSemanticsVersion");
+        JSON.writerWithDefaultPrettyPrinter().writeValue(metadata.toFile(), previous);
+
+        try (LuceneStore store = new LuceneStore(indexer.indexDirFor(workspace), 0)) {
+            store.add("build/generated.md#0", canary, null);
+            store.commit();
+        }
+        lastIndexDir = indexer.indexDirFor(workspace);
+
+        RagService.Prepared prepared = new RagService(cfg).prepare(workspace, canary, 5);
+
+        String rendered = prepared.snippets().toString();
+        assertFalse(rendered.contains(canary), rendered);
+        assertTrue(indexer.isPolicyMetadataCurrent(workspace));
+        try (LuceneStore store = new LuceneStore(indexer.indexDirFor(workspace), 0)) {
+            assertNull(store.getTextByPath("build/generated.md#0"));
+        }
+    }
+
+    @Test
+    void explicit_reindex_cannot_stamp_current_metadata_over_prior_glob_semantics() throws Exception {
+        String canary = "EXPLICIT_REINDEX_ROOT_BUILD_CANARY";
+        Files.writeString(workspace.resolve("README.md"), "public text\n");
+        Path excluded = workspace.resolve("build").resolve("generated.md");
+        Files.createDirectories(excluded.getParent());
+        Files.writeString(excluded, canary + "\n");
+        Config cfg = safeRagConfig();
+        Indexer indexer = new Indexer(cfg);
+        indexer.index(workspace, true);
+        Path metadata = indexer.policyMetadataFile(workspace);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> previous = JSON.readValue(metadata.toFile(), Map.class);
+        previous.put("schemaVersion", 3);
+        previous.remove("fileGlobSemanticsVersion");
+        JSON.writerWithDefaultPrettyPrinter().writeValue(metadata.toFile(), previous);
+
+        try (LuceneStore store = new LuceneStore(indexer.indexDirFor(workspace), 0)) {
+            store.add("build/generated.md#0", canary, null);
+            store.commit();
+        }
+        lastIndexDir = indexer.indexDirFor(workspace);
+
+        RagService service = new RagService(cfg);
+        RagService.ReindexOutcome outcome =
+                service.reindex(workspace, false, IndexProgressListener.NOOP);
+
+        assertTrue(outcome.indexed());
+        assertTrue(indexer.isPolicyMetadataCurrent(workspace));
+        try (LuceneStore store = new LuceneStore(indexer.indexDirFor(workspace), 0)) {
+            assertNull(store.getTextByPath("build/generated.md#0"));
+        }
+
+        RagService.Prepared prepared = service.prepare(workspace, canary, 5);
+        assertFalse(prepared.snippets().toString().contains(canary), prepared.snippets().toString());
     }
 
     @Test
