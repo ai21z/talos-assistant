@@ -124,6 +124,23 @@ class ApprovalDiffPreviewTest {
                 ApprovalDiffPreview.forEdit(workspace, "dup.txt", "", "y").skippedReason());
     }
 
+    @Test
+    void editSkipsMixedRawAndNormalizedEquivalentMatchesAsAmbiguous() throws Exception {
+        Files.writeString(
+                workspace.resolve("mixed.txt"),
+                "alpha\nbeta\n---\nalpha\r\nbeta\r\n");
+
+        var preview = ApprovalDiffPreview.forEdit(
+                workspace,
+                "mixed.txt",
+                "alpha\nbeta",
+                "alpha\nBETA");
+
+        assertTrue(preview.skipped());
+        assertEquals("ambiguous-old-string", preview.skippedReason());
+        assertEquals("", preview.text());
+    }
+
     // ── caps ────────────────────────────────────────────────────────
 
     @Test

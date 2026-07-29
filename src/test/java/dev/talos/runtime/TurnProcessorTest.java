@@ -496,6 +496,152 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
+    void editFileCrLfProposalMatchesLfFileBeforeApprovalAndPreservesLf(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\nomega\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\r\nbeta",
+                        "new_string", "alpha\r\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        String detail = approvalDetails.getFirst();
+        int diffStart = detail.indexOf("\n    diff (+1 -1):");
+        assertTrue(diffStart >= 0, detail);
+        String diff = detail.substring(diffStart);
+        assertTrue(diff.contains("\n    -beta"), diff);
+        assertTrue(diff.contains("\n    +BETA"), diff);
+        assertFalse(diff.contains("\r"), diff);
+        assertEquals("alpha\nBETA\nomega\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileLfProposalMatchesCrLfFileBeforeApprovalAndPreservesCrLf(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\r\nbeta\r\nomega\r\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("alpha\r\nBETA\r\nomega\r\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileLfProposalMatchesCrOnlyFileBeforeApprovalAndPreservesCr(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\rbeta\romega\r");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("alpha\rBETA\romega\r", Files.readString(target));
+    }
+
+    @Test
+    void editFileNormalizedOldStringAbsentStillFailsBeforeApproval(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\r\ngamma",
+                        "new_string", "alpha\r\nGAMMA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("alpha\nbeta\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileNormalizedOldStringMultipleMatchesFailBeforeApprovalAsAmbiguous(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\r\nalpha\r\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\rbeta",
+                        "new_string", "alpha\rBETA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("alpha\nbeta\r\nalpha\r\nbeta\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileRawMatchPlusNormalizedEquivalentFailsBeforeApprovalAsAmbiguous(
+            @TempDir Path workspace
+    ) throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        String original = "alpha\nbeta\n---\nalpha\r\nbeta\r\n";
+        Files.writeString(target, original);
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals(original, Files.readString(target));
+    }
+
+    @Test
     void validWriteFileStillRequestsApproval(@TempDir Path workspace) {
         AtomicInteger approvals = new AtomicInteger();
         var tp = processorWithFileToolsAndApprovalCounter(approvals);

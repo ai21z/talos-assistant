@@ -49,9 +49,40 @@ class TextReplacementTest {
     }
 
     @Test
+    void normalizedDeletionEndingAtEofMapsRawEndAndPreservesCrLf() {
+        String content = "alpha\r\nbeta\r\n";
+        TextReplacement.Match match = TextReplacement.findUniqueMatch(
+                content,
+                "beta\n",
+                "");
+
+        assertEquals(1, match.count());
+        assertEquals("alpha\r\n".length(), match.startRaw());
+        assertEquals(content.length(), match.endRaw());
+        assertEquals("", match.replacement());
+        assertEquals(
+                "alpha\r\n",
+                content.substring(0, match.startRaw())
+                        + match.replacement()
+                        + content.substring(match.endRaw()));
+    }
+
+    @Test
     void normalizedAmbiguousMatchReturnsCountWithoutRawOffsets() {
         TextReplacement.Match match = TextReplacement.findUniqueMatch(
                 "alpha\r\nbeta\r\nalpha\r\nbeta\r\n",
+                "alpha\nbeta",
+                "alpha\nBETA");
+
+        assertEquals(2, match.count());
+        assertEquals(-1, match.startRaw());
+        assertEquals(-1, match.endRaw());
+    }
+
+    @Test
+    void rawMatchDoesNotMaskSecondNormalizedEquivalentMatch() {
+        TextReplacement.Match match = TextReplacement.findUniqueMatch(
+                "alpha\nbeta\n---\nalpha\r\nbeta\r\n",
                 "alpha\nbeta",
                 "alpha\nBETA");
 
@@ -70,6 +101,22 @@ class TextReplacementTest {
         assertEquals(0, match.count());
         assertEquals(-1, match.startRaw());
         assertEquals(-1, match.endRaw());
+    }
+
+    @Test
+    void nullAndEmptyInputsReturnNoMatchWithoutRawOffsets() {
+        assertEquals(
+                new TextReplacement.Match(0, -1, -1, ""),
+                TextReplacement.findUniqueMatch(null, "alpha", null));
+        assertEquals(
+                new TextReplacement.Match(0, -1, -1, "replacement"),
+                TextReplacement.findUniqueMatch("", "alpha", "replacement"));
+        assertEquals(
+                new TextReplacement.Match(0, -1, -1, "replacement"),
+                TextReplacement.findUniqueMatch("alpha", null, "replacement"));
+        assertEquals(
+                new TextReplacement.Match(0, -1, -1, "replacement"),
+                TextReplacement.findUniqueMatch("alpha", "", "replacement"));
     }
 
     @Test

@@ -17,20 +17,17 @@ public final class TextReplacement {
             return new Match(0, -1, -1, replacementText);
         }
 
-        int rawCount = countOccurrences(source, needle);
-        if (rawCount == 1) {
-            int start = source.indexOf(needle);
-            return new Match(1, start, start + needle.length(), replacementText);
-        }
-        if (rawCount > 1) {
-            return new Match(rawCount, -1, -1, replacementText);
-        }
-
         NormalizedText normalizedContent = normalizeLineEndingsWithRawMap(source);
         String normalizedOld = normalizeLineEndings(needle);
         int normalizedCount = countOccurrences(normalizedContent.text(), normalizedOld);
         if (normalizedCount != 1) {
             return new Match(normalizedCount, -1, -1, replacementText);
+        }
+
+        int rawCount = countOccurrences(source, needle);
+        if (rawCount == 1) {
+            int start = source.indexOf(needle);
+            return new Match(1, start, start + needle.length(), replacementText);
         }
 
         int startNormalized = normalizedContent.text().indexOf(normalizedOld);

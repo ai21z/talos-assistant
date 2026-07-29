@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.util.TextReplacement;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.command.CommandToolPlanner;
@@ -1312,7 +1313,7 @@ public final class TurnProcessor {
         }
 
         ToolResult exactEditMatchValidation =
-                validateExactEditMatchBeforeApproval(path, oldString, session.workspace());
+                validateExactEditMatchBeforeApproval(path, oldString, newString, session.workspace());
         if (exactEditMatchValidation != null) {
             return exactEditMatchValidation;
         }
@@ -1323,6 +1324,7 @@ public final class TurnProcessor {
     private static ToolResult validateExactEditMatchBeforeApproval(
             String path,
             String oldString,
+            String newString,
             Path workspace
     ) {
         if (workspace == null || path == null || path.isBlank()
@@ -1354,7 +1356,7 @@ public final class TurnProcessor {
                             + "`. Call talos.read_file first and retry with exact current text. "
                             + "No approval was requested and no file was changed."));
         }
-        int occurrences = countOccurrences(content, oldString);
+        int occurrences = TextReplacement.findUniqueMatch(content, oldString, newString).count();
         if (occurrences == 0) {
             return ToolResult.fail(ToolError.invalidParams(
                     ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
@@ -1376,17 +1378,6 @@ public final class TurnProcessor {
                             + "No approval was requested and no file was changed."));
         }
         return null;
-    }
-
-    private static int countOccurrences(String content, String needle) {
-        if (content == null || needle == null || needle.isEmpty()) return 0;
-        int count = 0;
-        int index = 0;
-        while ((index = content.indexOf(needle, index)) >= 0) {
-            count++;
-            index += needle.length();
-        }
-        return count;
     }
 
     private static ToolResult validateUnsupportedDocumentWriteBeforeApproval(String path) {

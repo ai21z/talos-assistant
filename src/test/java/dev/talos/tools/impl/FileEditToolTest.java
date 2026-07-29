@@ -216,6 +216,25 @@ class FileEditToolTest {
     }
 
     @Test
+    void mixedRawAndNormalizedEquivalentMatchesAreAmbiguousAndPreserveBytes() throws IOException {
+        Path file = workspace.resolve("mixed-dupes.txt");
+        String original = "alpha\nbeta\n---\nalpha\r\nbeta\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "mixed-dupes.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult result = tool.execute(call, ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("2 times"), result.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
     void replaceMultiLineBlockCopiedFromReadFileOnCrOnlyFile() throws IOException {
         Files.writeString(workspace.resolve("classic.txt"),
                 "alpha\rbeta\rgamma\r");
@@ -241,6 +260,20 @@ class FileEditToolTest {
         assertTrue(r.success());
         String content = Files.readString(workspace.resolve("config.yaml"));
         assertFalse(content.contains("debug"));
+    }
+
+    @Test
+    void normalizedDeletionEndingAtEofPreservesCrLf() throws IOException {
+        Path file = workspace.resolve("windows-delete.txt");
+        Files.writeString(file, "alpha\r\nbeta\r\n");
+
+        ToolResult result = tool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-delete.txt",
+                "old_string", "beta\n",
+                "new_string", "")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("alpha\r\n", Files.readString(file));
     }
 
     @Test
