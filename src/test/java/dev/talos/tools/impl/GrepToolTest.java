@@ -17,11 +17,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -87,6 +94,222 @@ class GrepToolTest {
         assertTrue(r.output().contains("App.java"));
         assertTrue(r.output().contains("Util.java"));
         assertEquals(List.of("App.java", "src/Util.java"), sourcePaths(r));
+    }
+
+    @Test void inverseCreationOrderProducesIdenticalUncappedOutputAndMetadata()
+            throws IOException {
+        Path forward = createDeterminismFixture("forward-uncapped", false);
+        Path reverse = createDeterminismFixture("reverse-uncapped", true);
+
+        GrepSnapshot first = grepSnapshot(forward, Map.of("pattern", "ordered needle"));
+        GrepSnapshot second = grepSnapshot(reverse, Map.of("pattern", "ordered needle"));
+
+        assertEquals(first, second);
+        assertEquals(
+                List.of("alpha.txt", "nested/beta.txt", "zeta.txt"),
+                first.sourcePaths());
+        assertOrdered(first.output(),
+                "alpha.txt:1",
+                "alpha.txt:2",
+                "nested/beta.txt:1",
+                "zeta.txt:1");
+    }
+
+    @Test void inverseCreationOrderProducesIdenticalCappedMembershipAndMetadata()
+            throws IOException {
+        Path forward = createDeterminismFixture("forward-capped", false);
+        Path reverse = createDeterminismFixture("reverse-capped", true);
+
+        GrepSnapshot first = grepSnapshot(forward, Map.of(
+                "pattern", "ordered needle",
+                "max_results", "1"));
+        GrepSnapshot second = grepSnapshot(reverse, Map.of(
+                "pattern", "ordered needle",
+                "max_results", "1"));
+
+        assertEquals(first, second);
+        assertEquals(List.of("alpha.txt"), first.sourcePaths());
+        assertTrue(first.output().contains("alpha.txt:1"), first.output());
+        assertFalse(first.output().contains("nested/beta.txt:"), first.output());
+        assertFalse(first.output().contains("zeta.txt:"), first.output());
+    }
+
+    @Test void inverseCreationOrderPreservesMultiMatchOrderingBeforeCap()
+            throws IOException {
+        Path forward = createDeterminismFixture("forward-multi", false);
+        Path reverse = createDeterminismFixture("reverse-multi", true);
+
+        GrepSnapshot first = grepSnapshot(forward, Map.of(
+                "pattern", "ordered needle",
+                "max_results", "3"));
+        GrepSnapshot second = grepSnapshot(reverse, Map.of(
+                "pattern", "ordered needle",
+                "max_results", "3"));
+
+        assertEquals(first, second);
+        assertEquals(List.of("alpha.txt", "nested/beta.txt"), first.sourcePaths());
+        assertOrdered(first.output(),
+                "alpha.txt:1",
+                "alpha.txt:2",
+                "nested/beta.txt:1");
+        assertFalse(first.output().contains("zeta.txt:"), first.output());
+    }
+
+    @Test void inverseCreationOrderKeepsGlobProtectionUnsupportedUnreadableAndNestedBehavior()
+            throws IOException {
+        Path forward = createDeterminismFixture("forward-policy", false);
+        Path reverse = createDeterminismFixture("reverse-policy", true);
+
+        GrepSnapshot first = grepSnapshot(forward, Map.of(
+                "pattern", "ordered needle",
+                "include", "*.txt"));
+        GrepSnapshot second = grepSnapshot(reverse, Map.of(
+                "pattern", "ordered needle",
+                "include", "*.txt"));
+
+        assertEquals(first, second);
+        assertEquals(
+                List.of("alpha.txt", "nested/beta.txt", "zeta.txt"),
+                first.sourcePaths());
+        assertFalse(first.output().contains("DO_NOT_EXPOSE_PROTECTED"), first.output());
+        assertFalse(first.output().contains("DO_NOT_SEARCH_SKIPPED"), first.output());
+        assertFalse(first.output().contains("invalid-utf8.txt:"), first.output());
+        assertTrue(first.output().contains("protected content"), first.output());
+
+        GrepSnapshot unsupportedFirst = grepSnapshot(
+                forward, Map.of("pattern", "no-file-matches-this"));
+        GrepSnapshot unsupportedSecond = grepSnapshot(
+                reverse, Map.of("pattern", "no-file-matches-this"));
+        assertEquals(unsupportedFirst, unsupportedSecond);
+        assertTrue(unsupportedFirst.output().contains(
+                "Skipped unsupported binary document(s):"), unsupportedFirst.output());
+        assertOrdered(unsupportedFirst.output(), "alpha.docx", "zeta.pdf");
+        assertEquals(List.of(), unsupportedFirst.sourcePaths());
+    }
+
+    @Test void validMatchingLineBeforeMalformedUtf8PublishesNoPartialMatchOrSource()
+            throws IOException {
+        Path root = Files.createDirectory(workspace.resolve("malformed-after-match"));
+        byte[] prefix = "ordered needle must remain unpublished\n"
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] invalidText = Arrays.copyOf(prefix, prefix.length + 2);
+        invalidText[prefix.length] = (byte) 0xc3;
+        invalidText[prefix.length + 1] = (byte) 0x28;
+        Files.write(root.resolve("invalid-utf8.txt"), invalidText);
+
+        GrepSnapshot snapshot = grepSnapshot(root, Map.of("pattern", "ordered needle"));
+
+        assertEquals(List.of(), snapshot.sourcePaths());
+        assertTrue(snapshot.output().contains("No matches found"), snapshot.output());
+        assertFalse(snapshot.output().contains("invalid-utf8.txt:"), snapshot.output());
+        assertFalse(snapshot.output().contains("must remain unpublished"), snapshot.output());
+    }
+
+    @Test void linkedExternalFileIsNotReadOrReportedAsSource() throws IOException {
+        Path root = Files.createDirectory(workspace.resolve("linked-file-root"));
+        Path external = Files.createDirectory(workspace.resolve("linked-file-external"));
+        Path externalFile = external.resolve("outside.txt");
+        Files.writeString(externalFile, "ordered needle EXTERNAL_LINK_FILE_BYTES\n");
+        Files.writeString(root.resolve("safe.txt"), "ordered needle internal bytes\n");
+        createSymbolicLinkOrSkip(root.resolve("linked.txt"), externalFile);
+
+        GrepSnapshot snapshot = grepSnapshot(root, Map.of("pattern", "ordered needle"));
+
+        assertEquals(List.of("safe.txt"), snapshot.sourcePaths());
+        assertTrue(snapshot.output().contains("safe.txt:1"), snapshot.output());
+        assertFalse(snapshot.output().contains("linked.txt:"), snapshot.output());
+        assertFalse(snapshot.output().contains("EXTERNAL_LINK_FILE_BYTES"), snapshot.output());
+    }
+
+    @Test void linkedExternalDirectoryIsNotTraversedOrReportedAsSource() throws IOException {
+        Path root = Files.createDirectory(workspace.resolve("linked-directory-root"));
+        Path external = Files.createDirectory(workspace.resolve("linked-directory-external"));
+        Files.writeString(
+                external.resolve("outside.txt"),
+                "ordered needle EXTERNAL_LINK_DIRECTORY_BYTES\n");
+        Files.writeString(root.resolve("safe.txt"), "ordered needle internal bytes\n");
+        createSymbolicLinkOrSkip(root.resolve("linked-directory"), external);
+
+        GrepSnapshot snapshot = grepSnapshot(root, Map.of("pattern", "ordered needle"));
+
+        assertEquals(List.of("safe.txt"), snapshot.sourcePaths());
+        assertTrue(snapshot.output().contains("safe.txt:1"), snapshot.output());
+        assertFalse(snapshot.output().contains("linked-directory/"), snapshot.output());
+        assertFalse(snapshot.output().contains(
+                "EXTERNAL_LINK_DIRECTORY_BYTES"), snapshot.output());
+    }
+
+    @Test void windowsExternalDirectoryJunctionIsNotTraversedOrReportedAsSource()
+            throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                System.getProperty("os.name", "").startsWith("Windows"),
+                "Windows junction fixture");
+        Path root = Files.createDirectory(workspace.resolve("junction-root"));
+        Path external = Files.createDirectory(workspace.resolve("junction-external"));
+        Files.writeString(
+                external.resolve("outside.txt"),
+                "ordered needle EXTERNAL_JUNCTION_BYTES\n");
+        Files.writeString(root.resolve("safe.txt"), "ordered needle internal bytes\n");
+        Path junction = root.resolve("linked-directory");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        boolean exited = process.waitFor(10, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(10, TimeUnit.SECONDS);
+        }
+        String commandOutput = new String(
+                process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                exited && !process.isAlive() && process.exitValue() == 0,
+                "Windows junction fixture unavailable: " + commandOutput);
+
+        GrepSnapshot snapshot = grepSnapshot(root, Map.of("pattern", "ordered needle"));
+
+        assertEquals(List.of("safe.txt"), snapshot.sourcePaths());
+        assertTrue(snapshot.output().contains("safe.txt:1"), snapshot.output());
+        assertFalse(snapshot.output().contains("linked-directory/"), snapshot.output());
+        assertFalse(snapshot.output().contains("EXTERNAL_JUNCTION_BYTES"), snapshot.output());
+    }
+
+    @Test void inverseCreationOrderSkipsUnreadablePosixEntriesDeterministically()
+            throws IOException {
+        Path forward = createUnreadableFixture("forward-unreadable", false);
+        Path reverse = createUnreadableFixture("reverse-unreadable", true);
+        Path forwardUnreadable = forward.resolve("zeta-unreadable.txt");
+        Path reverseUnreadable = reverse.resolve("zeta-unreadable.txt");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.getFileStore(forwardUnreadable)
+                        .supportsFileAttributeView("posix"),
+                "POSIX unreadable-file fixture");
+        Set<PosixFilePermission> forwardOriginal =
+                Files.getPosixFilePermissions(forwardUnreadable);
+        Set<PosixFilePermission> reverseOriginal =
+                Files.getPosixFilePermissions(reverseUnreadable);
+        try {
+            Files.setPosixFilePermissions(forwardUnreadable, Set.of());
+            Files.setPosixFilePermissions(reverseUnreadable, Set.of());
+            org.junit.jupiter.api.Assumptions.assumeTrue(
+                    !Files.isReadable(forwardUnreadable)
+                            && !Files.isReadable(reverseUnreadable),
+                    "Current account can still read mode-000 fixture");
+
+            GrepSnapshot first = grepSnapshot(
+                    forward, Map.of("pattern", "ordered needle"));
+            GrepSnapshot second = grepSnapshot(
+                    reverse, Map.of("pattern", "ordered needle"));
+
+            assertEquals(first, second);
+            assertEquals(List.of("alpha.txt"), first.sourcePaths());
+            assertFalse(first.output().contains("zeta-unreadable.txt:"), first.output());
+            assertFalse(first.output().contains("EXTERNAL_UNREADABLE_BYTES"), first.output());
+        } finally {
+            Files.setPosixFilePermissions(forwardUnreadable, forwardOriginal);
+            Files.setPosixFilePermissions(reverseUnreadable, reverseOriginal);
+        }
     }
 
     @Test void regexSearch() {
@@ -162,6 +385,100 @@ class GrepToolTest {
             throw new AssertionError("Tool content metadata must expose structured source paths", e);
         }
     }
+
+    private Path createDeterminismFixture(String directory, boolean reverse)
+            throws IOException {
+        Path root = Files.createDirectory(workspace.resolve(directory));
+        List<String> relativePaths = new ArrayList<>(List.of(
+                "zeta.txt",
+                "zeta.pdf",
+                "nested/beta.txt",
+                "invalid-utf8.txt",
+                "alpha.txt",
+                "alpha.docx",
+                "secrets/private.txt",
+                ".git/ignored.txt"));
+        if (reverse) {
+            Collections.reverse(relativePaths);
+        }
+        for (String relativePath : relativePaths) {
+            Path file = root.resolve(relativePath);
+            Files.createDirectories(file.getParent());
+            switch (relativePath) {
+                case "alpha.txt" -> Files.writeString(
+                        file, "ordered needle alpha one\nordered needle alpha two\n");
+                case "nested/beta.txt" -> Files.writeString(
+                        file, "ordered needle nested beta\n");
+                case "zeta.txt" -> Files.writeString(
+                        file, "ordered needle zeta\n");
+                case "invalid-utf8.txt" -> {
+                    byte[] prefix = "ordered needle must not survive partial decode\n"
+                            .getBytes(StandardCharsets.UTF_8);
+                    byte[] invalidText = Arrays.copyOf(prefix, prefix.length + 2);
+                    invalidText[prefix.length] = (byte) 0xc3;
+                    invalidText[prefix.length + 1] = (byte) 0x28;
+                    Files.write(file, invalidText);
+                }
+                case "alpha.docx", "zeta.pdf" -> Files.writeString(
+                        file, "unsupported document placeholder\n");
+                case "secrets/private.txt" -> Files.writeString(
+                        file, "ordered needle DO_NOT_EXPOSE_PROTECTED\n");
+                case ".git/ignored.txt" -> Files.writeString(
+                        file, "ordered needle DO_NOT_SEARCH_SKIPPED\n");
+                default -> throw new IllegalStateException("Unknown fixture path: " + relativePath);
+            }
+        }
+        return root;
+    }
+
+    private Path createUnreadableFixture(String directory, boolean reverse)
+            throws IOException {
+        Path root = Files.createDirectory(workspace.resolve(directory));
+        List<String> relativePaths = new ArrayList<>(List.of(
+                "zeta-unreadable.txt", "alpha.txt"));
+        if (reverse) {
+            Collections.reverse(relativePaths);
+        }
+        for (String relativePath : relativePaths) {
+            String content = relativePath.equals("alpha.txt")
+                    ? "ordered needle readable bytes\n"
+                    : "ordered needle EXTERNAL_UNREADABLE_BYTES\n";
+            Files.writeString(root.resolve(relativePath), content);
+        }
+        return root;
+    }
+
+    private GrepSnapshot grepSnapshot(Path root, Map<String, String> parameters) {
+        ToolContext fixtureContext = new ToolContext(
+                root, new Sandbox(root, Map.of()), new Config());
+        ToolResult result = tool.execute(new ToolCall("talos.grep", parameters), fixtureContext);
+        assertTrue(result.success(), result.errorMessage());
+        return new GrepSnapshot(result.output(), sourcePaths(result));
+    }
+
+    private static void assertOrdered(String value, String... fragments) {
+        int previous = -1;
+        for (String fragment : fragments) {
+            int current = value.indexOf(fragment);
+            assertTrue(current > previous,
+                    "Expected ordered fragment '" + fragment + "' after offset "
+                            + previous + " in:\n" + value);
+            previous = current;
+        }
+    }
+
+    private static void createSymbolicLinkOrSkip(Path link, Path target) {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(
+                    false,
+                    "Symbolic-link fixture unavailable: "
+                            + unavailable.getClass().getSimpleName());
+        }
+    }
+
+    private record GrepSnapshot(String output, List<String> sourcePaths) {}
 
     @Test void includeGlobReportsUnsupportedBinaryDocuments() throws IOException {
         Files.writeString(workspace.resolve("sample.xlsx"), "fake excel payload");
