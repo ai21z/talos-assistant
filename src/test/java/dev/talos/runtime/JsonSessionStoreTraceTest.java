@@ -54,6 +54,54 @@ class JsonSessionStoreTraceTest {
         assertEquals(2, latest.get().turnNumber());
     }
 
+    @Test
+    void rolefulTargetMetadataRoundTripsExactly(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "session-roleful-trace";
+        LocalTurnTrace.RolefulTargetSummary expectedTarget =
+                new LocalTurnTrace.RolefulTargetSummary(
+                        "style.css",
+                        "MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                        "USER_REQUEST",
+                        "explicit-post-read-mutation",
+                        "Read style.css, then update style.css.",
+                        0.875);
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-roleful",
+                        sid,
+                        4,
+                        "2026-07-30T00:00:00Z")
+                .workspaceHash("workspace-hash")
+                .mode("auto")
+                .model("ollama", "gpt-oss:20b")
+                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                        "FILE_EDIT",
+                        true,
+                        true,
+                        true,
+                        List.of("style.css"),
+                        List.of(),
+                        "required-post-read-mutation",
+                        List.of(expectedTarget)))
+                .outcome("OK", "PASSED", "APPROVED", "MUTATED", "COMPLETED")
+                .build();
+
+        store.saveTrace(sid, trace);
+
+        LocalTurnTrace loaded = store.loadTrace(sid, trace.traceId()).orElseThrow();
+        assertEquals(trace, loaded);
+        assertEquals(List.of(expectedTarget), loaded.taskContract().rolefulTargets());
+        LocalTurnTrace.RolefulTargetSummary target =
+                loaded.taskContract().rolefulTargets().getFirst();
+        assertAll(
+                () -> assertEquals("style.css", target.path()),
+                () -> assertEquals("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", target.role()),
+                () -> assertEquals("USER_REQUEST", target.source()),
+                () -> assertEquals("explicit-post-read-mutation", target.reason()),
+                () -> assertEquals("Read style.css, then update style.css.", target.sourceText()),
+                () -> assertEquals(0.875, target.confidence()));
+    }
+
     private static LocalTurnTrace trace(String traceId, String sessionId, int turnNumber) {
         return LocalTurnTrace.builder(traceId, sessionId, turnNumber, "2026-04-28T12:00:00Z")
                 .workspaceHash("workspace-hash")

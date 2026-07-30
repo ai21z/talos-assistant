@@ -608,7 +608,8 @@ public final class TurnProcessor {
         ToolOperationMetadata opMeta = tool.descriptor().operationMetadata();
         boolean mutatingTool = opMeta.mutatesWorkspace();
         String userRequest = TurnUserRequestCapture.get();
-        TaskContract taskContract = TurnTaskContractCapture.get();
+        TaskContract capturedTaskContract = TurnTaskContractCapture.get();
+        TaskContract taskContract = capturedTaskContract;
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
         }
@@ -737,8 +738,8 @@ public final class TurnProcessor {
         }
 
         if (mutatingTool
-                && userRequest != null
-                && !taskContract.mutationAllowed()) {
+                && !taskContract.mutationAllowed()
+                && (userRequest != null || capturedTaskContract != null)) {
             TurnAuditCapture.recordToolCall(
                     call, path == null ? "" : path, false,
                     "task-contract read-only denied " + call.toolName());

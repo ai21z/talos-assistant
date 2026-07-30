@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TaskIntent;
@@ -71,15 +72,29 @@ final class StaticWebContinuationPlanner {
 
     static Optional<Plan> directoryOnlyPlan(LoopState state, List<ToolSpec> baseTools) {
         if (!shouldContinueAfterDirectoryOnlyMutation(state)) return Optional.empty();
-        List<ToolSpec> narrowed = filterTools(baseTools, List.of("talos.write_file"));
+        TaskContract contract = taskContract(state);
+        List<String> missingSourceTargets =
+                SourceDerivedEvidenceGuard.missingSourceEvidenceTargets(state, contract);
+        List<String> preferredTools = missingSourceTargets.isEmpty()
+                ? List.of("talos.write_file")
+                : List.of("talos.read_file", "talos.write_file");
+        List<ToolSpec> narrowed = filterTools(baseTools, preferredTools);
         if (narrowed.isEmpty()) {
-            narrowed = filterTools(baseTools, List.of("talos.write_file", "talos.edit_file"));
+            narrowed = filterTools(
+                    baseTools,
+                    missingSourceTargets.isEmpty()
+                            ? List.of("talos.write_file", "talos.edit_file")
+                            : List.of("talos.read_file", "talos.write_file", "talos.edit_file"));
         }
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
+        if (!missingSourceTargets.isEmpty()
+                && (!hasTool(tools, "talos.read_file") || !hasMutatingTool(tools))) {
+            return Optional.empty();
+        }
         return Optional.of(new Plan(
-                staticWebCreationContinuationMessages(state),
+                staticWebCreationContinuationMessages(state, missingSourceTargets),
                 tools,
                 staticWebCreationContinuationControls(state, tools),
                 "static-web-directory-only-continuation",
@@ -91,13 +106,25 @@ final class StaticWebContinuationPlanner {
         Optional<VerificationContinuation> continuation = verificationContinuation(state);
         if (continuation.isEmpty()) return Optional.empty();
         VerificationContinuation value = continuation.get();
-        List<String> allowedTools = value.fullRewriteRepair()
+        List<String> mutationTools = value.fullRewriteRepair()
                 ? List.of("talos.write_file")
                 : List.of("talos.write_file", "talos.edit_file");
+        TaskContract contract = taskContract(state);
+        List<String> missingSourceTargets =
+                SourceDerivedEvidenceGuard.missingSourceEvidenceTargets(state, contract);
+        List<String> allowedTools = new ArrayList<>();
+        if (!missingSourceTargets.isEmpty()) {
+            allowedTools.add("talos.read_file");
+        }
+        allowedTools.addAll(mutationTools);
         List<ToolSpec> narrowed = filterTools(baseTools, allowedTools);
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
+        if (!missingSourceTargets.isEmpty()
+                && (!hasTool(tools, "talos.read_file") || !hasMutatingTool(tools))) {
+            return Optional.empty();
+        }
         Optional<PendingActionObligation> obligation = value.repairTargets().isEmpty()
                 ? Optional.empty()
                 : Optional.of(value.fullRewriteRepair()
@@ -115,7 +142,10 @@ final class StaticWebContinuationPlanner {
                 "STATIC_VERIFICATION_REPAIR: static-web verification continuation targets "
                         + String.join(", ", value.repairTargets()));
         return Optional.of(new Plan(
-                staticWebVerificationContinuationMessages(state, value),
+                staticWebVerificationContinuationMessages(
+                        state,
+                        value,
+                        missingSourceTargets),
                 tools,
                 staticWebCreationContinuationControls(state, tools),
                 "static-web-verification-continuation",
@@ -180,7 +210,10 @@ final class StaticWebContinuationPlanner {
         return false;
     }
 
-    private static List<ChatMessage> staticWebCreationContinuationMessages(LoopState state) {
+    private static List<ChatMessage> staticWebCreationContinuationMessages(
+            LoopState state,
+            List<String> missingSourceTargets
+    ) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
             TaskContract contract = taskContract(state);
@@ -198,22 +231,39 @@ final class StaticWebContinuationPlanner {
         if (!directorySummary.isBlank()) {
             frame.append("\nSuccessful directory mutation: ").append(directorySummary);
         }
-        return List.of(
-                ChatMessage.system("""
+        appendReadBeforeWriteRequirement(frame, missingSourceTargets);
+        String systemInstruction = missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? """
                         You are Talos, a local-first workspace assistant.
                         This is a bounded static-web creation continuation after a directory-only mutation.
                         Directory creation alone does not satisfy a website/app creation request.
                         Use the visible write-file tool now to create the actual web files.
-                        """),
+                        """
+                : """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web creation continuation after a directory-only mutation.
+                        Directory creation alone does not satisfy a website/app creation request.
+                        Read every required source target with the visible read-file tool before using a file mutation tool.
+                        """;
+        String toolInstruction = missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? "Call talos.write_file now for the actual static web files."
+                : "Call talos.read_file for "
+                        + String.join(", ", missingSourceTargets)
+                        + " first, then call talos.write_file for the actual static web files.";
+        return List.of(
+                ChatMessage.system(systemInstruction),
                 ChatMessage.system(frame.toString()),
                 ChatMessage.user("Current user request:\n"
                         + (userTask == null ? "" : userTask.strip())
-                        + "\n\nCall talos.write_file now for the actual static web files."));
+                        + "\n\n" + toolInstruction));
     }
 
     private static List<ChatMessage> staticWebVerificationContinuationMessages(
             LoopState state,
-            VerificationContinuation continuation
+            VerificationContinuation continuation,
+            List<String> missingSourceTargets
     ) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
@@ -249,16 +299,33 @@ final class StaticWebContinuationPlanner {
             frame.append("Write or repair the missing static web assets now. ")
                     .append("For linked CSS/JavaScript files, create the exact linked filenames.");
         }
+        appendReadBeforeWriteRequirement(frame, missingSourceTargets);
         String toolInstruction = continuation != null && continuation.fullRewriteRepair()
                 ? "Call talos.write_file now for the listed static web repair target files."
                 : "Call talos.write_file or talos.edit_file now for the missing static web target files.";
+        if (missingSourceTargets != null && !missingSourceTargets.isEmpty()) {
+            toolInstruction = "Call talos.read_file for "
+                    + String.join(", ", missingSourceTargets)
+                    + " first. After those reads, "
+                    + Character.toLowerCase(toolInstruction.charAt(0))
+                    + toolInstruction.substring(1);
+        }
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system("""
-                You are Talos, a local-first workspace assistant.
-                This is a bounded static-web verification continuation.
-                The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
-                Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
-                """));
+        messages.add(ChatMessage.system(missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web verification continuation.
+                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                        Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
+                        """
+                : """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web verification continuation.
+                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                        Read every required source target with the visible read-file tool before using a file mutation tool.
+                        Do not claim completion until tool-backed changes have executed.
+                        """));
         messages.add(ChatMessage.system(frame.toString().stripTrailing()));
         // T1011: workspace bytes are data, not policy. The readbacks travel
         // inside the user-role instruction as structured JSON, never in a
@@ -306,6 +373,18 @@ final class StaticWebContinuationPlanner {
         }
         out.append("\n\nThe requested task is not verified complete.");
         return out.toString();
+    }
+
+    private static void appendReadBeforeWriteRequirement(
+            StringBuilder frame,
+            List<String> missingSourceTargets
+    ) {
+        if (frame == null || missingSourceTargets == null || missingSourceTargets.isEmpty()) {
+            return;
+        }
+        frame.append("\nRead these exact source target path(s) before any file mutation: ")
+                .append(String.join(", ", missingSourceTargets))
+                .append(". A write or edit remains blocked until every listed read succeeds.");
     }
 
     private static ChatRequestControls staticWebCreationContinuationControls(
@@ -736,6 +815,10 @@ final class StaticWebContinuationPlanner {
 
     private static TaskContract taskContract(LoopState state) {
         if (state == null) return null;
+        TaskContract captured = TurnTaskContractCapture.get();
+        if (captured != null) {
+            return captured;
+        }
         return WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(state.messages),
                 state.workspace);
@@ -763,6 +846,14 @@ final class StaticWebContinuationPlanner {
             }
         }
         return false;
+    }
+
+    private static boolean hasTool(List<ToolSpec> specs, String toolName) {
+        if (specs == null || specs.isEmpty() || toolName == null || toolName.isBlank()) {
+            return false;
+        }
+        return specs.stream()
+                .anyMatch(spec -> spec != null && toolName.equals(spec.name()));
     }
 
     private static String normalizeExpectedTargetKey(String path) {

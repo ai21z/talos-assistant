@@ -771,6 +771,51 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewShowsRequiredPostReadMutationRoleWithoutOrdinaryFallback() {
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                new dev.talos.runtime.task.TaskContract(
+                        dev.talos.runtime.task.TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("style.css"),
+                        java.util.Set.of("style.css"),
+                        java.util.Set.of(),
+                        "Read style.css, then update style.css.",
+                        "required-post-read-mutation"),
+                "APPLY",
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.edit_file"));
+        TurnRecord turn = new TurnRecord(
+                15,
+                Instant.parse("2026-07-23T00:00:00Z"),
+                1234,
+                "read then update style",
+                "No file changed.",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                policyTrace);
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains(
+                "style.css = MUST_MUTATE_AFTER_SOURCE_EVIDENCE "
+                        + "(active-contract-projection)"), text);
+        assertEquals(
+                1,
+                text.split("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", -1).length - 1,
+                text);
+        assertFalse(java.util.regex.Pattern
+                .compile("style\\.css\\s*=\\s*MUST_MUTATE(?!_)")
+                .matcher(text)
+                .find(), text);
+    }
+
+    @Test
     void executeRejectsUnknownView() {
         var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
 

@@ -6,9 +6,13 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -26,6 +30,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class StaticWebContinuationPlannerTest {
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearContractCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void directoryOnlyPlanPrefersWriteFileAndPreservesContinuationFrame() {
@@ -55,6 +64,47 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticWebCreationContinuation]"), prompt);
         assertTrue(prompt.contains("Successful directory mutation: Created directory bmi-website"), prompt);
         assertTrue(prompt.contains("Call talos.write_file now for the actual static web files."), prompt);
+    }
+
+    @Test
+    void directoryOnlyPlanRetainsReadToolForCapturedCompositeSourceObligation() {
+        TurnTaskContractCapture.set(new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of("style.css"),
+                Set.of(),
+                "Improve the functional static website. Read style.css before updating "
+                        + "index.html, style.css, and script.js.",
+                "captured-composite-static-web-contract"));
+        LoopState state = state(
+                "I want to create a modern BMI calculator website to use! Can you make it?");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.mkdir",
+                "bmi-website",
+                true,
+                true,
+                false,
+                "Created directory bmi-website",
+                ""));
+        state.mutatingToolSuccesses = 1;
+
+        StaticWebContinuationPlanner.Plan continuation =
+                StaticWebContinuationPlanner.directoryOnlyPlan(state, baseTools())
+                        .orElseThrow();
+
+        assertEquals(
+                List.of("talos.read_file", "talos.write_file"),
+                toolNames(continuation.tools()));
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains(
+                "Read these exact source target path(s) before any file mutation: style.css"),
+                prompt);
+        assertTrue(prompt.contains(
+                "Call talos.read_file for style.css first, then call talos.write_file"),
+                prompt);
     }
 
     @Test
@@ -125,6 +175,91 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticWebVerificationContinuation]"), prompt);
         assertTrue(prompt.contains("Missing or unmutated target files: script.js, styles.css"), prompt);
         assertTrue(prompt.contains("Call talos.write_file or talos.edit_file now"), prompt);
+    }
+
+    @Test
+    void verificationFailurePlanRetainsReadToolForCapturedCompositeSourceObligation()
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="style.css">
+                </head>
+                <body>
+                  <button id="calculate">Calculate BMI</button>
+                  <p id="result"></p>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        TurnTaskContractCapture.set(capturedCompositeStaticContract());
+        LoopState state = state("Continue the current task.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.mutatingToolSuccesses = 1;
+
+        StaticWebContinuationPlanner.Plan continuation =
+                StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools())
+                        .orElseThrow();
+
+        assertEquals(
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                toolNames(continuation.tools()));
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains(
+                "Read these exact source target path(s) before any file mutation: style.css"),
+                prompt);
+        assertTrue(prompt.contains(
+                "Call talos.read_file for style.css first. After those reads, call "
+                        + "talos.write_file or talos.edit_file"),
+                prompt);
+    }
+
+    @Test
+    void verificationFailurePlanStopsWhenRequiredReadSurfaceIsUnavailable()
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="style.css">
+                </head>
+                <body>
+                  <button id="calculate">Calculate BMI</button>
+                  <p id="result"></p>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        TurnTaskContractCapture.set(capturedCompositeStaticContract());
+        LoopState state = state("Continue the current task.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.mutatingToolSuccesses = 1;
+        List<ToolSpec> mutationOnlyTools = List.of(
+                new ToolSpec("talos.write_file", "Write", "{}"),
+                new ToolSpec("talos.edit_file", "Edit", "{}"));
+
+        assertTrue(
+                StaticWebContinuationPlanner
+                        .verificationFailurePlan(state, mutationOnlyTools)
+                        .isEmpty(),
+                "an unread source obligation must not produce a mutation-only continuation");
     }
 
     @Test
@@ -490,6 +625,20 @@ class StaticWebContinuationPlannerTest {
                 new ToolSpec("talos.read_file", "Read", "{}"),
                 new ToolSpec("talos.write_file", "Write", "{}"),
                 new ToolSpec("talos.edit_file", "Edit", "{}"));
+    }
+
+    private static TaskContract capturedCompositeStaticContract() {
+        return new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of("style.css"),
+                Set.of(),
+                "Improve the functional BMI calculator website. Read style.css before updating "
+                        + "index.html, style.css, and script.js.",
+                "captured-composite-static-web-contract");
     }
 
     private static List<String> toolNames(List<ToolSpec> specs) {

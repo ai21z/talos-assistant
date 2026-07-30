@@ -1,13 +1,18 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.intent.TargetRef;
+import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 
 import java.util.LinkedHashMap;
+import java.util.Comparator;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Structured current-turn policy metadata persisted with the turn audit.
@@ -38,8 +43,17 @@ public record TurnPolicyTrace(
             double confidence
     ) {
         public RolefulTarget {
-            path = blankDefault(path, "");
-            role = blankDefault(role, "");
+            path = TargetRef.normalizePath(path);
+            if (role == null || role.isBlank()) {
+                throw new IllegalArgumentException("Roleful target role must be a named TargetRole");
+            }
+            try {
+                TargetRole.valueOf(role);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Unknown roleful target role: " + role,
+                        e);
+            }
             source = blankDefault(source, "");
             reason = blankDefault(reason, "");
             sourceText = sourceText == null ? "" : sourceText;
@@ -49,7 +63,9 @@ public record TurnPolicyTrace(
         }
 
         static RolefulTarget from(TargetRef ref) {
-            if (ref == null) return new RolefulTarget("", "", "", "", "", 0.0);
+            if (ref == null) {
+                throw new IllegalArgumentException("TargetRef must not be null");
+            }
             var derivation = ref.derivation();
             return new RolefulTarget(
                     ref.path(),
@@ -126,7 +142,7 @@ public record TurnPolicyTrace(
         promptTools = promptTools == null ? List.of() : List.copyOf(promptTools);
         blocks = blocks == null ? List.of() : List.copyOf(blocks);
         classificationReason = blankDefault(classificationReason, "");
-        rolefulTargets = rolefulTargets == null ? List.of() : List.copyOf(rolefulTargets);
+        rolefulTargets = validatedRolefulTargets(rolefulTargets);
     }
 
     public static TurnPolicyTrace empty() {
@@ -149,8 +165,8 @@ public record TurnPolicyTrace(
                 contract.type().name(),
                 contract.mutationAllowed(),
                 contract.verificationRequired(),
-                contract.expectedTargets().stream().sorted().toList(),
-                contract.forbiddenTargets().stream().sorted().toList(),
+                normalizedPaths(contract.expectedTargets()).stream().toList(),
+                normalizedPaths(contract.forbiddenTargets()).stream().toList(),
                 initialPhase,
                 initialPhase,
                 nativeTools,
@@ -204,52 +220,94 @@ public record TurnPolicyTrace(
     }
 
     private static boolean mutationTargetRole(String role) {
-        return "MUST_MUTATE".equals(role) || "OUTPUT_DESTINATION".equals(role);
+        return "MUST_MUTATE".equals(role)
+                || "MUST_MUTATE_AFTER_SOURCE_EVIDENCE".equals(role)
+                || "OUTPUT_DESTINATION".equals(role);
     }
 
-    private static String expectedTargetRole(TaskContract contract) {
+    private static String expectedTargetRole(
+            TaskContract contract,
+            Set<String> activeSourceEvidence,
+            String path
+    ) {
         if (contract != null && !contract.mutationAllowed()) {
-            return contract.verificationRequired() ? "VERIFY_ONLY" : "MUST_READ";
+            return activeSourceEvidence.contains(path)
+                    || !contract.verificationRequired()
+                    ? "MUST_READ"
+                    : "VERIFY_ONLY";
+        }
+        if (activeSourceEvidence.contains(path)) {
+            return "MUST_MUTATE_AFTER_SOURCE_EVIDENCE";
         }
         return "MUST_MUTATE";
     }
 
     private static List<RolefulTarget> rolefulTargetsFrom(TaskIntent intent, TaskContract contract) {
         LinkedHashMap<String, RolefulTarget> out = new LinkedHashMap<>();
-        Set<String> activeExpected = contract == null ? Set.of() : contract.expectedTargets();
-        Set<String> activeForbidden = contract == null ? Set.of() : contract.forbiddenTargets();
+        Set<String> activeExpected =
+                contract == null ? Set.of() : normalizedPaths(contract.expectedTargets());
+        Set<String> activeForbidden =
+                contract == null ? Set.of() : normalizedPaths(contract.forbiddenTargets());
+        Set<String> activeSourceEvidence =
+                contract == null ? Set.of() : normalizedPaths(contract.sourceEvidenceTargets());
         if (intent != null && !intent.targets().targets().isEmpty()) {
             for (TargetRef ref : intent.targets().targets()) {
                 if (ref == null) continue;
-                String role = ref.role().name();
-                if (mutationTargetRole(role)) {
-                    if (!activeExpected.contains(ref.path())) {
-                        continue;
-                    }
-                    if (!contract.mutationAllowed()) {
-                        continue;
-                    }
-                }
-                if ("FORBIDDEN".equals(role) && !activeForbidden.contains(ref.path())) {
+                if (activeForbidden.contains(ref.path())) {
+                    mergeRolefulTarget(
+                            out,
+                            ref.role() == TargetRole.FORBIDDEN
+                                    ? RolefulTarget.from(ref)
+                                    : activeContractProjection(
+                                            ref.path(),
+                                            TargetRole.FORBIDDEN.name()));
                     continue;
                 }
-                out.putIfAbsent(ref.path() + "\u0000" + role, RolefulTarget.from(ref));
+                if (activeExpected.contains(ref.path())) {
+                    String role = expectedTargetRole(contract, activeSourceEvidence, ref.path());
+                    mergeRolefulTarget(
+                            out,
+                            role.equals(ref.role().name())
+                                    ? RolefulTarget.from(ref)
+                                    : activeContractProjection(ref.path(), role));
+                    continue;
+                }
+                if (activeSourceEvidence.contains(ref.path())) {
+                    mergeRolefulTarget(
+                            out,
+                            ref.role() == TargetRole.SOURCE_EVIDENCE
+                                    ? RolefulTarget.from(ref)
+                                    : activeContractProjection(
+                                            ref.path(),
+                                            TargetRole.SOURCE_EVIDENCE.name()));
+                    continue;
+                }
+                String role = ref.role().name();
+                if (mutationTargetRole(role)) {
+                    continue;
+                }
+                if ("FORBIDDEN".equals(role)) {
+                    continue;
+                }
+                mergeRolefulTarget(out, RolefulTarget.from(ref));
             }
         }
-        String expectedRole = expectedTargetRole(contract);
         for (String expected : activeExpected.stream().sorted().toList()) {
-            String key = expected + "\u0000" + expectedRole;
-            out.putIfAbsent(key, new RolefulTarget(
-                    expected,
-                    expectedRole,
-                    "RUNTIME_DEFAULT",
-                    "active-contract-projection",
-                    "",
-                    1.0));
+            if (activeForbidden.contains(expected)) {
+                continue;
+            }
+            String expectedRole =
+                    expectedTargetRole(contract, activeSourceEvidence, expected);
+            mergeRolefulTarget(out, activeContractProjection(expected, expectedRole));
+        }
+        for (String source : activeSourceEvidence.stream().sorted().toList()) {
+            if (activeExpected.contains(source) || activeForbidden.contains(source)) {
+                continue;
+            }
+            mergeRolefulTarget(out, activeContractProjection(source, "SOURCE_EVIDENCE"));
         }
         for (String forbidden : activeForbidden.stream().sorted().toList()) {
-            String key = forbidden + "\u0000FORBIDDEN";
-            out.putIfAbsent(key, new RolefulTarget(
+            mergeRolefulTarget(out, new RolefulTarget(
                     forbidden,
                     "FORBIDDEN",
                     "RUNTIME_DEFAULT",
@@ -257,6 +315,61 @@ public record TurnPolicyTrace(
                     "",
                     1.0));
         }
-        return List.copyOf(out.values());
+        return out.values().stream()
+                .sorted(Comparator
+                        .comparing(RolefulTarget::path)
+                        .thenComparing(RolefulTarget::role))
+                .toList();
+    }
+
+    private static void mergeRolefulTarget(
+            LinkedHashMap<String, RolefulTarget> targets,
+            RolefulTarget candidate
+    ) {
+        RolefulTarget existing = targets.get(candidate.path());
+        if (existing == null) {
+            targets.put(candidate.path(), candidate);
+            return;
+        }
+        TargetRole existingRole = TargetRole.valueOf(existing.role());
+        TargetRole candidateRole = TargetRole.valueOf(candidate.role());
+        if (candidateRole.strongerThan(existingRole)) {
+            targets.put(candidate.path(), candidate);
+        }
+    }
+
+    private static RolefulTarget activeContractProjection(String path, String role) {
+        return new RolefulTarget(
+                path,
+                role,
+                "RUNTIME_DEFAULT",
+                "active-contract-projection",
+                "",
+                1.0);
+    }
+
+    private static Set<String> normalizedPaths(Set<String> paths) {
+        if (paths == null || paths.isEmpty()) return Set.of();
+        TreeSet<String> sorted = new TreeSet<>();
+        for (String path : paths) {
+            sorted.add(TargetRef.normalizePath(path));
+        }
+        return Collections.unmodifiableSet(new LinkedHashSet<>(sorted));
+    }
+
+    private static List<RolefulTarget> validatedRolefulTargets(List<RolefulTarget> targets) {
+        if (targets == null || targets.isEmpty()) return List.of();
+        LinkedHashMap<String, RolefulTarget> byPath = new LinkedHashMap<>();
+        for (RolefulTarget target : targets) {
+            if (target == null) {
+                throw new IllegalArgumentException("Roleful target entry must not be null");
+            }
+            RolefulTarget prior = byPath.putIfAbsent(target.path(), target);
+            if (prior != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate or conflicting roleful target path: " + target.path());
+            }
+        }
+        return List.copyOf(byPath.values());
     }
 }

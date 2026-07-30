@@ -165,6 +165,156 @@ class JsonSessionStoreTurnsTest {
     }
 
     @Test
+    void requiredPostReadMutationRoleRoundTripsWithoutCoercion(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "session-policy-required-post-read";
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                new dev.talos.runtime.task.TaskContract(
+                        dev.talos.runtime.task.TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("style.css"),
+                        java.util.Set.of("style.css"),
+                        java.util.Set.of(),
+                        "Read style.css, then update style.css.",
+                        "required-post-read-mutation"),
+                "APPLY",
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.edit_file"));
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-04-18T10:00:00Z"),
+                250,
+                "read then update style",
+                "No file changed.",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                trace));
+
+        TurnPolicyTrace loaded = store.loadTurns(sid).getFirst().policyTrace();
+        var styleTargets = loaded.rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .toList();
+        assertEquals(1, styleTargets.size());
+        assertEquals("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", styleTargets.getFirst().role());
+        assertEquals(trace.rolefulTargets(), loaded.rolefulTargets());
+    }
+
+    @Test
+    void malformedPersistedPolicyRolesFailClosedWithoutCoercion(@TempDir Path dir) throws Exception {
+        List<String> malformedRolefulTargets = List.of(
+                "{}",
+                """
+                ["not-an-object"]
+                """,
+                """
+                [{"path":"style.css","role":"MUTATE_IF_CONVENIENT","source":"RUNTIME_DEFAULT",
+                  "reason":"invalid-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"  ","source":"RUNTIME_DEFAULT",
+                  "reason":"blank-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":null,"source":"RUNTIME_DEFAULT",
+                  "reason":"null-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":123,"source":"RUNTIME_DEFAULT",
+                  "reason":"numeric-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"./style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"duplicate-a","sourceText":"","confidence":1.0},
+                 {"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"duplicate-b","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"conflict-a","sourceText":"","confidence":1.0},
+                 {"path":"style.css","role":"SOURCE_EVIDENCE","source":"RUNTIME_DEFAULT",
+                  "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                """);
+
+        for (int i = 0; i < malformedRolefulTargets.size(); i++) {
+            String sid = "session-malformed-policy-role-" + i;
+            Files.writeString(
+                    dir.resolve(sid + ".turns.jsonl"),
+                    turnLineWithRolefulTargets(malformedRolefulTargets.get(i)));
+
+            assertTrue(
+                    new JsonSessionStore(dir).loadTurns(sid).isEmpty(),
+                    "malformed role row must fail its turn closed: " + malformedRolefulTargets.get(i));
+        }
+    }
+
+    @Test
+    void malformedPersistedLocalTraceRolesFailClosed(@TempDir Path dir) throws Exception {
+        List<String> malformedRolefulTargets = List.of(
+                "{}",
+                """
+                ["not-an-object"]
+                """,
+                """
+                [{"path":"style.css","role":"MUTATE_IF_CONVENIENT","source":"RUNTIME_DEFAULT",
+                  "reason":"invalid-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"  ","source":"RUNTIME_DEFAULT",
+                  "reason":"blank-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":null,"source":"RUNTIME_DEFAULT",
+                  "reason":"null-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":123,"source":"RUNTIME_DEFAULT",
+                  "reason":"numeric-role","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"duplicate-a","sourceText":"","confidence":1.0},
+                 {"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"duplicate-b","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"./style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"conflict-a","sourceText":"","confidence":1.0},
+                 {"path":"style.css","role":"SOURCE_EVIDENCE","source":"RUNTIME_DEFAULT",
+                  "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                """);
+
+        JsonSessionStore store = new JsonSessionStore(dir);
+        for (int i = 0; i < malformedRolefulTargets.size(); i++) {
+            String sid = "session-malformed-local-trace-role-" + i;
+            String traceId = "trc-malformed-" + i;
+            Path traceDir = dir.resolve("traces").resolve(sid);
+            Files.createDirectories(traceDir);
+            Files.writeString(
+                    traceDir.resolve("000001-" + traceId + ".json"),
+                    localTraceWithRolefulTargets(
+                            sid,
+                            traceId,
+                            malformedRolefulTargets.get(i)));
+
+            assertTrue(
+                    store.loadTrace(sid, traceId).isEmpty(),
+                    "malformed local role must fail direct load closed: "
+                            + malformedRolefulTargets.get(i));
+            assertTrue(
+                    store.loadLatestTrace(sid).isEmpty(),
+                    "malformed local role must fail latest load closed: "
+                            + malformedRolefulTargets.get(i));
+        }
+    }
+
+    @Test
     void legacyPolicyTraceWithoutRolefulTargetsStillLoads(@TempDir Path dir) throws Exception {
         String sid = "session-legacy-policy";
         Files.writeString(dir.resolve(sid + ".turns.jsonl"), """
@@ -331,6 +481,52 @@ class JsonSessionStoreTurnsTest {
                 "corrupt UTF-8 must only lose its own line; surrounding lines survive");
         assertEquals("before", loaded.get(0).userInput());
         assertEquals("after", loaded.get(1).userInput());
+    }
+
+    private static String turnLineWithRolefulTargets(String rolefulTargetsJson) {
+        return """
+                {"turnNumber":1,"timestamp":"2026-04-18T10:00:00Z","durationMs":10,
+                 "userInput":"q","assistantText":"a","approvalsRequired":0,
+                 "approvalsGranted":0,"approvalsDenied":0,"retrievalTraceSummary":"",
+                 "status":"ok","traceId":"trc-role","policyTrace":{
+                   "taskType":"FILE_EDIT","mutationAllowed":true,"verificationRequired":true,
+                   "expectedTargets":["style.css"],"forbiddenTargets":[],
+                   "initialPhase":"APPLY","finalPhase":"APPLY",
+                   "nativeTools":["talos.write_file"],"promptTools":["talos.write_file"],
+                   "blocks":[],"classificationReason":"role-test","rolefulTargets":%s},
+                 "toolCalls":[]}
+                """.formatted(rolefulTargetsJson)
+                .replace("\r", "")
+                .replace("\n", "");
+    }
+
+    private static String localTraceWithRolefulTargets(
+            String sessionId,
+            String traceId,
+            String rolefulTargetsJson
+    ) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "traceId": "%s",
+                  "sessionId": "%s",
+                  "turnNumber": 1,
+                  "timestamp": "2026-04-18T10:00:00Z",
+                  "workspaceHash": "hash",
+                  "mode": "auto",
+                  "model": {"backend": "test", "model": "model"},
+                  "taskContract": {
+                    "type": "FILE_EDIT",
+                    "mutationAllowed": true,
+                    "verificationRequired": true,
+                    "mutationRequested": true,
+                    "expectedTargets": ["style.css"],
+                    "forbiddenTargets": [],
+                    "classificationReason": "malformed-role",
+                    "rolefulTargets": %s
+                  }
+                }
+                """.formatted(traceId, sessionId, rolefulTargetsJson);
     }
 }
 

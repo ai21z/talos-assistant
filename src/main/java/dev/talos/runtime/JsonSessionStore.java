@@ -10,6 +10,7 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.slf4j.Logger;
@@ -632,13 +633,23 @@ public final class JsonSessionStore implements SessionStore {
     }
 
     private static List<TurnPolicyTrace.RolefulTarget> rolefulTargetsFrom(Object raw) {
-        if (!(raw instanceof List<?> list)) return List.of();
+        if (raw == null) return List.of();
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException("rolefulTargets must be an array when present");
+        }
         List<TurnPolicyTrace.RolefulTarget> out = new java.util.ArrayList<>();
         for (Object value : list) {
-            if (!(value instanceof Map<?, ?> map)) continue;
+            if (!(value instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException("rolefulTargets entries must be objects");
+            }
+            Object rawRole = map.get("role");
+            if (!(rawRole instanceof String role) || role.isBlank()) {
+                throw new IllegalArgumentException("roleful target role must be a named string");
+            }
+            TargetRole.valueOf(role);
             out.add(new TurnPolicyTrace.RolefulTarget(
                     stringVal(map, "path", ""),
-                    stringVal(map, "role", ""),
+                    role,
                     stringVal(map, "source", ""),
                     stringVal(map, "reason", ""),
                     stringVal(map, "sourceText", ""),

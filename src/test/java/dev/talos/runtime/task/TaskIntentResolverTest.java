@@ -7,6 +7,8 @@ import dev.talos.runtime.intent.TargetRole;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskIntentResolverTest {
 
@@ -73,6 +75,285 @@ class TaskIntentResolverTest {
     }
 
     @Test
+    void overlappingLegacyContractRoundTripsWithoutLosingSourceEvidence() {
+        TaskContract legacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("styles.css"),
+                java.util.Set.of("styles.css"),
+                java.util.Set.of(),
+                "Read styles.css, then update styles.css.",
+                "overlap-round-trip");
+
+        TaskIntent intent = TaskIntentResolver.fromLegacyContract(legacy);
+        TaskContract projected = TaskContractCompiler.compile(intent);
+
+        assertEquals(
+                "MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                intent.targets().find("styles.css").orElseThrow().role().name());
+        assertEquals(java.util.Set.of("styles.css"), projected.expectedTargets());
+        assertEquals(java.util.Set.of("styles.css"), projected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void lexicalPathAliasesStillRoundTripAsOneCompositeObligation() {
+        for (TaskContract legacy : java.util.List.of(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("./assets/style.css"),
+                        java.util.Set.of("assets\\style.css"),
+                        java.util.Set.of(),
+                        "Read assets/style.css, then update assets/style.css.",
+                        "expected-alias"),
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("assets\\style.css"),
+                        java.util.Set.of("./assets/style.css"),
+                        java.util.Set.of(),
+                        "Read assets/style.css, then update assets/style.css.",
+                        "source-alias"))) {
+            TaskIntent intent = TaskIntentResolver.fromLegacyContract(legacy);
+            TaskContract projected = TaskContractCompiler.compile(intent);
+
+            assertEquals(1, intent.targets().targets().size(), legacy.toString());
+            assertEquals(
+                    "MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                    intent.targets().find("assets/style.css").orElseThrow().role().name(),
+                    legacy.toString());
+            assertEquals(java.util.Set.of("assets/style.css"), projected.expectedTargets());
+            assertEquals(java.util.Set.of("assets/style.css"), projected.sourceEvidenceTargets());
+        }
+    }
+
+    @Test
+    void optionalPostReadMutationFailsClosedWithoutRequiredCompositeAuthority() {
+        String prompt = "Update styles.css if needed.";
+        TaskContract legacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("styles.css"),
+                java.util.Set.of("styles.css"),
+                java.util.Set.of(),
+                prompt,
+                "optional-post-read-test");
+
+        TaskIntent intent = TaskIntentResolver.fromUserRequest(prompt, legacy);
+        TaskContract projected = TaskContractCompiler.compile(intent);
+
+        assertFalse(intent.mutationAllowed());
+        assertTrue(intent.targets().targets().stream()
+                .noneMatch(target -> "MUST_MUTATE_AFTER_SOURCE_EVIDENCE"
+                        .equals(target.role().name())));
+        assertTrue(intent.targets().targets().stream()
+                .noneMatch(target -> target.role()
+                        == dev.talos.runtime.intent.TargetRole.MUST_MUTATE));
+        assertEquals(
+                dev.talos.runtime.intent.TargetRole.SOURCE_EVIDENCE,
+                intent.targets().find("styles.css").orElseThrow().role());
+        assertFalse(projected.mutationAllowed());
+        assertTrue(projected.expectedTargets().isEmpty());
+        assertEquals(java.util.Set.of("styles.css"), projected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void lexicalAliasCannotTurnOptionalPostReadMutationIntoRequiredAuthority() {
+        for (TaskContract legacy : java.util.List.of(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("./styles.css"),
+                        java.util.Set.of("styles.css"),
+                        java.util.Set.of(),
+                        "Update styles.css if needed.",
+                        "expected-alias"),
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        java.util.Set.of("styles.css"),
+                        java.util.Set.of("./styles.css"),
+                        java.util.Set.of(),
+                        "Update styles.css if needed.",
+                        "source-alias"))) {
+            TaskContract projected = TaskContractCompiler.compile(
+                    TaskIntentResolver.fromUserRequest(
+                            legacy.originalUserRequest(),
+                            legacy));
+
+            assertFalse(projected.mutationAllowed(), legacy.toString());
+            assertTrue(projected.expectedTargets().isEmpty(), legacy.toString());
+            assertEquals(
+                    java.util.Set.of("styles.css"),
+                    projected.sourceEvidenceTargets(),
+                    legacy.toString());
+        }
+    }
+
+    @Test
+    void windowsSeparatorRequestKeepsOptionalAndRequiredPostReadRolesDistinct() {
+        TaskContract optionalLegacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("assets/style.css"),
+                java.util.Set.of("assets\\style.css"),
+                java.util.Set.of(),
+                "Update assets\\style.css if needed.",
+                "optional-windows-separator");
+
+        TaskContract optionalProjected = TaskContractCompiler.compile(
+                TaskIntentResolver.fromUserRequest(
+                        optionalLegacy.originalUserRequest(),
+                        optionalLegacy));
+
+        assertFalse(optionalProjected.mutationAllowed());
+        assertTrue(optionalProjected.expectedTargets().isEmpty());
+        assertEquals(
+                java.util.Set.of("assets/style.css"),
+                optionalProjected.sourceEvidenceTargets());
+
+        TaskContract requiredLegacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("assets/style.css"),
+                java.util.Set.of("assets\\style.css"),
+                java.util.Set.of(),
+                "Update assets\\style.css.",
+                "required-windows-separator");
+
+        TaskContract requiredProjected = TaskContractCompiler.compile(
+                TaskIntentResolver.fromUserRequest(
+                        requiredLegacy.originalUserRequest(),
+                        requiredLegacy));
+
+        assertTrue(requiredProjected.mutationAllowed());
+        assertEquals(
+                java.util.Set.of("assets/style.css"),
+                requiredProjected.expectedTargets());
+        assertEquals(
+                java.util.Set.of("assets/style.css"),
+                requiredProjected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void optionalPostReadOverlapDoesNotRemoveUnrelatedRequiredMutation() {
+        String prompt = "Update styles.css if needed. Rewrite index.html.";
+        TaskContract legacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("styles.css", "index.html"),
+                java.util.Set.of("styles.css"),
+                java.util.Set.of(),
+                prompt,
+                "mixed-required-and-optional-post-read");
+
+        TaskContract projected = TaskContractCompiler.compile(
+                TaskIntentResolver.fromUserRequest(prompt, legacy));
+
+        assertTrue(projected.mutationAllowed());
+        assertEquals(java.util.Set.of("index.html"), projected.expectedTargets());
+        assertEquals(java.util.Set.of("styles.css"), projected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void optionalPostReadOverlapDoesNotUpgradeAnotherOptionalTarget() {
+        String prompt = "Update styles.css if needed. Update index.html if needed.";
+        TaskContract legacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("styles.css", "index.html"),
+                java.util.Set.of("styles.css"),
+                java.util.Set.of(),
+                prompt,
+                "all-optional-with-post-read-overlap");
+
+        TaskContract projected = TaskContractCompiler.compile(
+                TaskIntentResolver.fromUserRequest(prompt, legacy));
+
+        assertFalse(projected.mutationAllowed());
+        assertTrue(projected.expectedTargets().isEmpty());
+        assertEquals(java.util.Set.of("styles.css"), projected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void readOnlyOverlapUsesReadRoleAndNeverCarriesCompositeMutationAuthority() {
+        TaskContract legacy = new TaskContract(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                java.util.Set.of("styles.css"),
+                java.util.Set.of("styles.css"),
+                java.util.Set.of(),
+                "Read styles.css.",
+                "read-only-overlap");
+
+        TaskIntent intent = TaskIntentResolver.fromLegacyContract(legacy);
+        TaskContract projected = TaskContractCompiler.compile(intent);
+
+        assertEquals(
+                dev.talos.runtime.intent.TargetRole.MUST_READ,
+                intent.targets().find("styles.css").orElseThrow().role());
+        assertFalse(intent.targets().targets().stream()
+                .anyMatch(target -> "MUST_MUTATE_AFTER_SOURCE_EVIDENCE"
+                        .equals(target.role().name())));
+        assertFalse(projected.mutationAllowed());
+        assertEquals(java.util.Set.of("styles.css"), projected.expectedTargets());
+        assertEquals(java.util.Set.of("styles.css"), projected.sourceEvidenceTargets());
+    }
+
+    @Test
+    void ordinaryReadOnlyExpectedTargetRoundTripsWithoutInventingSourceEvidence() {
+        TaskContract legacy = new TaskContract(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                java.util.Set.of("calc.py"),
+                java.util.Set.of(),
+                java.util.Set.of(),
+                "Inspect calc.py.",
+                "ordinary-read-only");
+
+        TaskContract projected =
+                TaskContractCompiler.compile(TaskIntentResolver.fromLegacyContract(legacy));
+
+        assertEquals(legacy, projected);
+        assertTrue(projected.sourceEvidenceTargets().isEmpty());
+    }
+
+    @Test
+    void nullLegacyContractRemainsUnknownWithoutThrowing() {
+        TaskIntent intent = TaskIntentResolver.fromUserRequest("Inspect calc.py.", null);
+        TaskContract projected = TaskContractCompiler.compile(intent);
+
+        assertEquals(TaskType.UNKNOWN, projected.type());
+        assertTrue(projected.expectedTargets().isEmpty());
+        assertTrue(projected.sourceEvidenceTargets().isEmpty());
+        assertFalse(projected.mutationAllowed());
+    }
+
+    @Test
     void scopedSymbolRenameProjectsEditedAndUnchangedFilesWithDistinctRoles() {
         String prompt = "Rename reset to resetAll in script.js only. "
                 + "scripts.js is a different file and must remain unchanged.";
@@ -86,6 +367,20 @@ class TaskIntentResolverTest {
         assertEquals(TargetRole.FORBIDDEN, intent.targets().find("scripts.js").orElseThrow().role());
         assertEquals(java.util.Set.of("script.js"), projected.expectedTargets());
         assertEquals(java.util.Set.of("scripts.js"), projected.forbiddenTargets());
+    }
+
+    @Test
+    void windowsSeparatorPreserveAliasKeepsTruthfulDerivation() {
+        String prompt = "Keep assets\\style.css unchanged. Update index.html.";
+
+        TaskIntent intent = TaskIntentResolver.fromUserRequest(
+                prompt,
+                TaskContractResolver.resolveLegacyFromUserRequest(prompt));
+
+        var preserved = intent.targets().find("assets/style.css").orElseThrow();
+        assertEquals(TargetRole.FORBIDDEN, preserved.role());
+        assertEquals("preserve-unchanged-target", preserved.derivation().reason());
+        assertTrue(preserved.derivation().sourceText().contains("assets\\style.css"));
     }
 
     @Test

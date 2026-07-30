@@ -1,7 +1,9 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -116,6 +119,105 @@ class LocalTurnTracePolicyTraceTest {
     }
 
     @Test
+    void overlappingEffectiveContractEmitsOneRequiredPostReadMutationRole() {
+        beginTrace();
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("style.css"),
+                Set.of("style.css"),
+                Set.of(),
+                "Read style.css, then update style.css.",
+                "required-post-read-mutation");
+
+        LocalTurnTraceCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of("tool_use:read_file", "tool_use:edit_file")));
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        var styleTargets = trace.taskContract().rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .toList();
+        assertEquals(1, styleTargets.size());
+        assertEquals("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", styleTargets.getFirst().role());
+        assertEquals("RUNTIME_DEFAULT", styleTargets.getFirst().source());
+        assertEquals("active-contract-projection", styleTargets.getFirst().reason());
+    }
+
+    @Test
+    void rolefulTargetsAreNormalizedAndSortedIndependentlyOfContractSetOrder() {
+        java.util.LinkedHashSet<String> expectedFirst =
+                new java.util.LinkedHashSet<>(List.of("z.css", "./a.css", "middle.css"));
+        java.util.LinkedHashSet<String> expectedSecond =
+                new java.util.LinkedHashSet<>(List.of("middle.css", "z.css", "./a.css"));
+        TaskContract first = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                expectedFirst,
+                Set.of("a.css"),
+                Set.of(),
+                "Read a.css, then update a.css, middle.css, and z.css.",
+                "first-order");
+        TaskContract second = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                expectedSecond,
+                Set.of("./a.css"),
+                Set.of(),
+                "Read a.css, then update a.css, middle.css, and z.css.",
+                "second-order");
+
+        List<String> expectedRoles = List.of(
+                "a.css=MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                "middle.css=MUST_MUTATE",
+                "z.css=MUST_MUTATE");
+        TurnPolicyTrace firstTrace =
+                TurnPolicyTrace.from(first, "APPLY", List.of(), List.of());
+        TurnPolicyTrace secondTrace =
+                TurnPolicyTrace.from(second, "APPLY", List.of(), List.of());
+        assertEquals(List.of("a.css", "middle.css", "z.css"), firstTrace.expectedTargets());
+        assertEquals(firstTrace.expectedTargets(), secondTrace.expectedTargets());
+        assertEquals(expectedRoles, renderedRoles(firstTrace));
+        assertEquals(expectedRoles, renderedRoles(secondTrace));
+    }
+
+    @Test
+    void effectiveContractRatherThanRawRequestOwnsRolefulTraceProjection() {
+        beginTrace();
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("style.css"),
+                Set.of("style.css", "brief.md"),
+                Set.of(),
+                "Read brief.md.",
+                "contextual-required-post-read-mutation");
+
+        LocalTurnTraceCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of("tool_use:read_file", "tool_use:edit_file")));
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertEquals(
+                List.of("MUST_MUTATE_AFTER_SOURCE_EVIDENCE"),
+                rolesFor(trace, "style.css"));
+        assertEquals(List.of("SOURCE_EVIDENCE"), rolesFor(trace, "brief.md"));
+        assertTrue(rolesFor(trace, "unrelated.js").isEmpty());
+    }
+
+    @Test
     void readOnlyPolicyTraceDoesNotRenderTargetHintsAsMutationObligations() {
         beginTrace();
 
@@ -211,6 +313,19 @@ class LocalTurnTracePolicyTraceTest {
             }
         }
         throw new AssertionError("method closing brace not found: " + methodName);
+    }
+
+    private static List<String> rolesFor(LocalTurnTrace trace, String path) {
+        return trace.taskContract().rolefulTargets().stream()
+                .filter(target -> path.equals(target.path()))
+                .map(LocalTurnTrace.RolefulTargetSummary::role)
+                .toList();
+    }
+
+    private static List<String> renderedRoles(TurnPolicyTrace trace) {
+        return trace.rolefulTargets().stream()
+                .map(target -> target.path() + "=" + target.role())
+                .toList();
     }
 
     private static void beginTrace() {

@@ -267,6 +267,13 @@ public final class ReplRouter {
                 .append('\n');
         sb.append("  nativeTools: ").append(listOrNone(trace.nativeTools())).append('\n');
         sb.append("  promptTools: ").append(listOrNone(trace.promptTools())).append('\n');
+        if (!trace.rolefulTargets().isEmpty()) {
+            sb.append("  targetRoles: ").append(trace.rolefulTargets().stream()
+                    .map(target -> target.path() + "=" + target.role())
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(", ")))
+                    .append('\n');
+        }
         sb.append("  blocked: ").append(listOrNone(trace.blocks())).append('\n');
         return sb.toString();
     }

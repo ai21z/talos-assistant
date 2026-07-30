@@ -15,13 +15,35 @@ public final class TaskContractCompiler {
             return TaskContract.unknown("");
         }
         ArtifactTargetSet targets = intent.targets();
+        if (!intent.mutationAllowed()
+                && !targets.pathsByRole(
+                        TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE).isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Read-only intent cannot carry required post-read mutation authority");
+        }
+        Set<String> expectedTargets = intent.mutationAllowed()
+                ? pathsWithRoles(
+                        targets,
+                        TargetRole.MUST_MUTATE,
+                        TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE,
+                        TargetRole.OUTPUT_DESTINATION)
+                : pathsWithRoles(
+                        targets,
+                        TargetRole.MUST_MUTATE,
+                        TargetRole.OUTPUT_DESTINATION,
+                        TargetRole.MUST_READ,
+                        TargetRole.VERIFY_ONLY);
         return new TaskContract(
                 intent.type(),
                 intent.mutationRequested(),
                 intent.mutationAllowed(),
                 intent.verificationRequired(),
-                pathsWithRoles(targets, TargetRole.MUST_MUTATE, TargetRole.OUTPUT_DESTINATION),
-                pathsWithRoles(targets, TargetRole.SOURCE_EVIDENCE, TargetRole.MUST_READ),
+                expectedTargets,
+                pathsWithRoles(
+                        targets,
+                        TargetRole.SOURCE_EVIDENCE,
+                        TargetRole.MUST_READ,
+                        TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE),
                 pathsWithRoles(targets, TargetRole.FORBIDDEN),
                 intent.originalUserRequest(),
                 intent.classificationReason());

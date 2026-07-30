@@ -1,5 +1,7 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnSettlement;
@@ -247,7 +249,7 @@ public record LocalTurnTrace(
             expectedTargets = expectedTargets == null ? List.of() : List.copyOf(expectedTargets);
             forbiddenTargets = forbiddenTargets == null ? List.of() : List.copyOf(forbiddenTargets);
             classificationReason = safe(classificationReason);
-            rolefulTargets = rolefulTargets == null ? List.of() : List.copyOf(rolefulTargets);
+            rolefulTargets = validatedRolefulTargets(rolefulTargets);
         }
 
         static TaskContractSummary empty() {
@@ -268,7 +270,9 @@ public record LocalTurnTrace(
         }
 
         static RolefulTargetSummary rolefulTargetFrom(TurnPolicyTrace.RolefulTarget target) {
-            if (target == null) return new RolefulTargetSummary("", "", "", "", "", 0.0);
+            if (target == null) {
+                throw new IllegalArgumentException("Roleful target must not be null");
+            }
             return new RolefulTargetSummary(
                     target.path(),
                     target.role(),
@@ -288,8 +292,18 @@ public record LocalTurnTrace(
             double confidence
     ) {
         public RolefulTargetSummary {
-            path = safe(path);
-            role = safe(role);
+            path = TargetRef.normalizePath(path);
+            if (role == null || role.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Roleful target summary role must be a named TargetRole");
+            }
+            try {
+                TargetRole.valueOf(role);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Unknown roleful target summary role: " + role,
+                        e);
+            }
             source = safe(source);
             reason = safe(reason);
             sourceText = sourceText == null ? "" : sourceText;
@@ -297,6 +311,25 @@ public record LocalTurnTrace(
                 confidence = 0.0;
             }
         }
+    }
+
+    private static List<RolefulTargetSummary> validatedRolefulTargets(
+            List<RolefulTargetSummary> targets
+    ) {
+        if (targets == null || targets.isEmpty()) return List.of();
+        java.util.LinkedHashMap<String, RolefulTargetSummary> byPath =
+                new java.util.LinkedHashMap<>();
+        for (RolefulTargetSummary target : targets) {
+            if (target == null) {
+                throw new IllegalArgumentException("Roleful target summary must not be null");
+            }
+            RolefulTargetSummary prior = byPath.putIfAbsent(target.path(), target);
+            if (prior != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate or conflicting roleful target summary path: " + target.path());
+            }
+        }
+        return List.copyOf(byPath.values());
     }
 
     public record PhaseTransition(String from, String to, String reason) {

@@ -6,6 +6,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,70 @@ class SourceDerivedEvidenceGuardTest {
                         "docs/summary.md");
 
         assertNull(diagnostic);
+    }
+
+    @Test
+    void overlappingRequiredTargetStillRequiresItsOwnRecordedReadBeforeMutation() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("style.css"),
+                java.util.Set.of("style.css"),
+                java.util.Set.of(),
+                "Read style.css, then update style.css.",
+                "required-post-read-mutation");
+        LoopState state = loopState(contract.originalUserRequest());
+        ToolCall write = new ToolCall(
+                "talos.write_file",
+                Map.of("path", "style.css", "content", "body { color: pink; }"));
+
+        var beforeRead = SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
+                state,
+                contract,
+                write,
+                "style.css");
+        assertNotNull(beforeRead);
+        assertEquals(List.of("style.css"), beforeRead.missingSourceTargets());
+
+        state.pathsReadThisTurn.add("wrong.css");
+        assertNotNull(SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
+                state,
+                contract,
+                write,
+                "style.css"));
+
+        state.pathsReadThisTurn.add("style.css");
+        var afterRead = SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
+                state,
+                contract,
+                write,
+                "style.css");
+        assertNull(afterRead);
+    }
+
+    @Test
+    void missingSourceTargetsAreNormalizedUniqueAndDeterministicallySorted() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                java.util.Set.of("target.css"),
+                new java.util.LinkedHashSet<>(List.of(
+                        "z.css",
+                        "./a.css",
+                        "middle.css",
+                        "a.css")),
+                java.util.Set.of(),
+                "Read the sources, then update target.css.",
+                "deterministic-source-order");
+        LoopState state = loopState(contract.originalUserRequest());
+
+        assertEquals(
+                List.of("a.css", "middle.css", "z.css"),
+                SourceDerivedEvidenceGuard.missingSourceEvidenceTargets(state, contract));
     }
 
     @Test

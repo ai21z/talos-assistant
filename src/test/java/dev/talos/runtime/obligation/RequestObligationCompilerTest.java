@@ -3,6 +3,8 @@ package dev.talos.runtime.obligation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
+import dev.talos.runtime.intent.TaskContractCompiler;
+import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -253,6 +255,32 @@ class RequestObligationCompilerTest {
         assertEquals(List.of("forbidden.txt"), obligation.forbiddenTargets());
         assertTrue(obligation.requiredMutationTargets().contains("shared.txt"));
         assertTrue(obligation.requiredSourceTargets().contains("shared.txt"));
+    }
+
+    @Test
+    void overlappingLegacyContractRetainsCompositeDimensionsThroughSharedObligation() {
+        TaskContract legacy = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("styles.css"),
+                Set.of("styles.css"),
+                Set.of(),
+                "Read styles.css, then update styles.css.",
+                "overlap-round-trip");
+
+        TaskContract projected = TaskContractCompiler.compile(
+                TaskIntentResolver.fromLegacyContract(legacy));
+        RequestObligation obligation = RequestObligationCompiler.compile(projected);
+
+        assertEquals(NOT_MIGRATED, obligation.derivationStatus());
+        assertEquals(List.of("styles.css"), obligation.requiredMutationTargets());
+        assertEquals(List.of("styles.css"), obligation.requiredSourceTargets());
+        assertTrue(obligation.canonicalJson().contains(
+                "\"requiredMutationTargets\":[\"styles.css\"]"));
+        assertTrue(obligation.canonicalJson().contains(
+                "\"requiredSourceTargets\":[\"styles.css\"]"));
     }
 
     @Test
@@ -513,6 +541,40 @@ class RequestObligationCompilerTest {
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 RequestObligationCompiler.notMigrated(contract)));
+    }
+
+    @Test
+    void currentTurnPlanRejectsCallerObligationThatOmitsRequiredSourceDimension() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("styles.css"),
+                Set.of("styles.css"),
+                Set.of(),
+                "Read styles.css, then update styles.css.",
+                "required-post-read-mutation");
+
+        RequestObligation sourceFreeForgery =
+                notMigratedWithMutationTarget("styles.css");
+
+        assertThrows(IllegalArgumentException.class, () -> new CurrentTurnPlan(
+                contract,
+                contract.originalUserRequest(),
+                ExecutionPhase.APPLY,
+                ExecutionPhase.APPLY,
+                null,
+                List.of(),
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.edit_file"),
+                List.of(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                sourceFreeForgery));
     }
 
     @Test

@@ -8,6 +8,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Process-local holder for the latest prompt debug snapshot. */
 public final class PromptDebugCapture {
     public static final String BACKGROUND_MAINTENANCE_TAG = "prompt-debug:background-maintenance";
+    public static final String TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC =
+            "taskContract.targetRoles";
 
     private static final AtomicReference<PromptDebugSnapshot> LATEST_RECORDED = new AtomicReference<>();
     private static final AtomicReference<PromptDebugSnapshot> LATEST_USER_FACING = new AtomicReference<>();

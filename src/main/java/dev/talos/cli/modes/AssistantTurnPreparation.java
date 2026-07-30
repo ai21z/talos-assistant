@@ -259,12 +259,31 @@ final class AssistantTurnPreparation {
                     plan.requestObligation().canonicalSha256());
             LocalTurnTraceCapture.recordRequestObligation(plan.requestObligation());
         }
-        if (ctx == null || !TurnAuditCapture.isActive()) return;
-        TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+        if (plan == null) return;
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
                 plan.taskContract(),
                 plan.phaseInitial().name(),
                 plan.nativeTools(),
-                plan.promptTools()));
+                plan.promptTools());
+        String targetRoles = policyTrace.rolefulTargets().stream()
+                .sorted(java.util.Comparator
+                        .comparing(TurnPolicyTrace.RolefulTarget::path)
+                        .thenComparing(TurnPolicyTrace.RolefulTarget::role))
+                .map(target -> {
+                    String rendered = target.path() + " = " + target.role();
+                    return target.reason().isBlank()
+                            ? rendered
+                            : rendered + " (" + target.reason() + ")";
+                })
+                .collect(java.util.stream.Collectors.joining(", "));
+        if (targetRoles.isBlank()) {
+            targetRoles = "(none)";
+        }
+        PromptDebugCapture.putTurnDiagnostic(
+                PromptDebugCapture.TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC,
+                targetRoles);
+        if (ctx == null || !TurnAuditCapture.isActive()) return;
+        TurnAuditCapture.recordPolicyTrace(policyTrace);
         LocalTurnTraceCapture.recordActionObligation(
                 plan.actionObligation().name(),
                 "SELECTED",

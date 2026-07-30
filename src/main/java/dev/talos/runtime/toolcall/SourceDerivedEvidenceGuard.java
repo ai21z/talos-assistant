@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.TreeSet;
 
 final class SourceDerivedEvidenceGuard {
     record SourceReadback(String path, String readback) {}
@@ -115,12 +116,12 @@ final class SourceDerivedEvidenceGuard {
                 readPaths.add(normalized);
             }
         }
-        List<String> missing = new ArrayList<>();
+        Set<String> missing = new TreeSet<>();
         for (String sourceTarget : contract.sourceEvidenceTargets()) {
             String normalized = evidencePathKey(sourceTarget);
             if (normalized.isBlank()) continue;
             if (!readPaths.contains(normalized)) {
-                missing.add(sourceTarget);
+                missing.add(normalized);
             }
         }
         return List.copyOf(missing);

@@ -37,6 +37,31 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void overlappingRequiredTargetRemainsVisibleAsMutationAndSourceEvidence() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("style.css"),
+                Set.of("style.css"),
+                Set.of(),
+                "Read style.css, then update style.css.",
+                "required-post-read-mutation");
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.edit_file"));
+
+        assertTrue(frame.contains("requiredTargets: style.css"), frame);
+        assertTrue(frame.contains("[SourceEvidenceTargets]"), frame);
+        assertTrue(frame.contains("sourceTargets: style.css"), frame);
+        assertTrue(frame.contains(
+                "Read these exact source target paths before writing or editing"), frame);
+    }
+
+    @Test
     void rendersActiveTaskContextGuidanceWhenPresent() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,

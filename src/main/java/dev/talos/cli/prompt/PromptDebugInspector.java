@@ -6,6 +6,7 @@ import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ToolSpec;
 
@@ -27,6 +28,7 @@ public final class PromptDebugInspector {
             PromptDebugRedactor.PROTECTED_ASSISTANT_ANSWER_REDACTION;
     private static final Pattern ABSOLUTE_PATH = Pattern.compile(
             "(?i)(?:^|\\s)(?:[a-z]:[\\\\/]|/|\\\\\\\\|//)\\S*");
+    private static final int MAX_TARGET_ROLE_DIAGNOSTIC_CHARS = 4_096;
 
     private PromptDebugInspector() {}
 
@@ -75,7 +77,7 @@ public final class PromptDebugInspector {
                 .append(", mutationAllowed=").append(contract.mutationAllowed())
                 .append(", verificationRequired=").append(contract.verificationRequired()).append('\n');
         out.append("- ").append(targetLabel(contract)).append(": ").append(joinOrNone(contract)).append('\n');
-        out.append("- Target roles: ").append(targetRoles(contract)).append('\n');
+        out.append("- Target roles: ").append(targetRoles(snapshot, contract)).append('\n');
         out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
         appendModelIdentity(out, snapshot.diagnostics());
@@ -301,7 +303,13 @@ public final class PromptDebugInspector {
                 .collect(Collectors.joining(", "));
     }
 
-    private static String targetRoles(TaskContract contract) {
+    private static String targetRoles(PromptDebugSnapshot snapshot, TaskContract contract) {
+        if (snapshot != null && snapshot.diagnostics().containsKey(
+                PromptDebugCapture.TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC)) {
+            String authoritative = safeTargetRoleDiagnostic(snapshot.diagnostics().get(
+                    PromptDebugCapture.TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC));
+            return authoritative.isBlank() ? "(none)" : authoritative;
+        }
         if (contract == null) return "(none)";
         List<TurnPolicyTrace.RolefulTarget> targets = TurnPolicyTrace.from(
                         contract,
@@ -325,6 +333,18 @@ public final class PromptDebugInspector {
             rendered += " (" + target.reason() + ")";
         }
         return rendered;
+    }
+
+    private static String safeTargetRoleDiagnostic(String raw) {
+        String clean = Objects.toString(raw, "").replaceAll("[\\r\\n\\t]+", " ").strip();
+        if (clean.isBlank()) return "";
+        if (ABSOLUTE_PATH.matcher(clean).find()) return "[path redacted]";
+        if (clean.length() <= MAX_TARGET_ROLE_DIAGNOSTIC_CHARS) return clean;
+        return "[omitted: authoritative target-role diagnostic length="
+                + clean.length()
+                + " exceeds "
+                + MAX_TARGET_ROLE_DIAGNOSTIC_CHARS
+                + " characters]";
     }
 
     private static int targetIndex(String requestLower, String target) {
