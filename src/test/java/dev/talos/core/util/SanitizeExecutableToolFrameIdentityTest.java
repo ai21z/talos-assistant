@@ -245,7 +245,7 @@ final class SanitizeExecutableToolFrameIdentityTest {
 
     @Test
     void manufacturedThinkBlocksAndSelectedRootsUseAMonotonicOverlapSweep() {
-        int count = 20_000;
+        int count = 30_000;
         StringBuilder source = new StringBuilder(3_500_000);
         StringBuilder expected = new StringBuilder(1_500_000);
         for (int index = 0; index < count; index++) {
@@ -265,6 +265,75 @@ final class SanitizeExecutableToolFrameIdentityTest {
                         expected.toString(),
                         Sanitize.sanitizeForOutputPreservingToolCalls(
                                 source.toString())));
+    }
+
+    @Test
+    void openingTagTerminatorsOutsideSelectedRootGapsUseBoundedSearch() {
+        int count = 70_000;
+        StringBuilder source = new StringBuilder(2_500_000);
+        java.util.List<String> expectedRoots = new java.util.ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            String root = "{\"name\":\"talos.read_file\","
+                    + "\"arguments\":{\"path\":\"" + index + "\"}}";
+            source.append("<script\n").append(root).append('\n');
+            expectedRoots.add(root);
+        }
+        source.append('>');
+        String input = source.toString();
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(4),
+                () -> {
+                    String output = Sanitize
+                            .sanitizeForOutputPreservingToolCalls(input);
+                    assertEquals(input, output);
+                    var selected = dev.talos.core.tool.ToolProtocolText
+                            .selectExecutableJsonProposals(output)
+                            .sourceOrder();
+                    assertEquals(count, selected.size());
+                    for (int index = 0; index < count; index++) {
+                        assertEquals(
+                                expectedRoots.get(index),
+                                selected.get(index).rootFrom(output));
+                    }
+                });
+    }
+
+    @Test
+    void closingTagsAcrossManySelectedRootGapsUseBoundedSearch() {
+        int count = 50_000;
+        StringBuilder source = new StringBuilder(2_500_000);
+        java.util.List<String> expectedRoots = new java.util.ArrayList<>(count);
+        source.append("<script>outside-before\n");
+        for (int index = 0; index < count; index++) {
+            String root = "{\"name\":\"talos.read_file\","
+                    + "\"arguments\":{\"path\":\"" + index + "\"}}";
+            source.append(root).append('\n');
+            expectedRoots.add(root);
+        }
+        source.append("outside-after</script>");
+        String expectedOutput = String.join("", expectedRoots);
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(4),
+                () -> {
+                    String output = Sanitize.sanitizeForOutputPreservingToolCalls(
+                            source.toString());
+                    assertEquals(expectedOutput, output);
+                    assertFalse(output.contains("outside-before"), output);
+                    assertFalse(output.contains("outside-after"), output);
+                    assertFalse(output.contains("<script>"), output);
+                    assertFalse(output.contains("</script>"), output);
+                    var selected = dev.talos.core.tool.ToolProtocolText
+                            .selectExecutableJsonProposals(output)
+                            .sourceOrder();
+                    assertEquals(count, selected.size());
+                    for (int index = 0; index < count; index++) {
+                        assertEquals(
+                                expectedRoots.get(index),
+                                selected.get(index).rootFrom(output));
+                    }
+                });
     }
 
     @Test

@@ -743,8 +743,9 @@ public final class Sanitize {
             String tag) {
         int cursor = fromInclusive;
         while (cursor < endExclusive) {
-            int opening = source.indexOf('<', cursor);
-            if (opening < 0 || opening >= endExclusive) return null;
+            int opening = indexOfWithin(
+                    source, '<', cursor, endExclusive);
+            if (opening < 0) return null;
             int nameStart = opening + 1;
             while (nameStart < endExclusive
                     && isRegexWhitespace(source.charAt(nameStart))) {
@@ -755,8 +756,9 @@ public final class Sanitize {
                     && source.regionMatches(true, nameStart, tag, 0, tag.length())
                     && (nameEnd == endExclusive
                     || !isRegexWord(source.charAt(nameEnd)))) {
-                int tagEnd = source.indexOf('>', nameEnd);
-                if (tagEnd < 0 || tagEnd >= endExclusive) {
+                int tagEnd = indexOfWithin(
+                        source, '>', nameEnd, endExclusive);
+                if (tagEnd < 0) {
                     return null;
                 }
                 return new DangerousTag(opening, tagEnd + 1);
@@ -773,8 +775,9 @@ public final class Sanitize {
             String tag) {
         int cursor = fromInclusive;
         while (cursor < endExclusive) {
-            int opening = source.indexOf('<', cursor);
-            if (opening < 0 || opening >= endExclusive) return -1;
+            int opening = indexOfWithin(
+                    source, '<', cursor, endExclusive);
+            if (opening < 0) return -1;
             int index = opening + 1;
             while (index < endExclusive
                     && isRegexWhitespace(source.charAt(index))) index++;
@@ -798,6 +801,17 @@ public final class Sanitize {
                 return index + 1;
             }
             cursor = opening + 1;
+        }
+        return -1;
+    }
+
+    private static int indexOfWithin(
+            String source,
+            char target,
+            int fromInclusive,
+            int endExclusive) {
+        for (int index = fromInclusive; index < endExclusive; index++) {
+            if (source.charAt(index) == target) return index;
         }
         return -1;
     }
