@@ -7,6 +7,7 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -47,6 +48,7 @@ class InspectCompletenessRetryTest {
     @AfterEach
     void clearTrace() {
         LocalTurnTraceCapture.clear();
+        TurnTaskContractCapture.clear();
     }
 
     @Test
@@ -97,6 +99,9 @@ class InspectCompletenessRetryTest {
                 List.of(outcome("talos.read_file", "index.html")));
         String request = "Read the main files and verify the web page.";
         CurrentTurnPlan retryPlan = plan(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
         var call = new ChatMessage.NativeToolCall(
                 "call_1", "talos.read_file", Map.of("path", "script.js"));
         var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
@@ -264,6 +269,10 @@ class InspectCompletenessRetryTest {
                         outcome("talos.read_file", "script.js")));
         String request = "What does this project do?";
         CurrentTurnPlan retryPlan = plan(request);
+        List<ChatMessage> messages = messages(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
         var call = new ChatMessage.NativeToolCall(
                 "call_readme",
                 "talos.read_file",
@@ -280,7 +289,7 @@ class InspectCompletenessRetryTest {
 
         InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
                 original.finalAnswer(),
-                messages(request),
+                messages,
                 retryPlan,
                 original,
                 workspace,

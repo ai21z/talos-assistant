@@ -1,7 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
-import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,7 +105,10 @@ public final class InspectUnderCompletionAnswerGuard {
         if (answer.length() < INSPECT_MIN_CHARS) return answer;
         int readOnlyToolCount = readOnlyToolCount(loopResult);
         if (readOnlyToolCount > 1) return answer;
-        if (!looksLikeInspectFirstRequest(latestUserRequest(messages))) return answer;
+        if (!looksLikeInspectFirstRequest(
+                TurnTaskContractCapture.originalUserRequestOrResolve(messages))) {
+            return answer;
+        }
 
         LOG.warn("Inspect under-completion detected: answer={} chars, "
                 + "read-only tool calls={}, tools invoked={}, "
@@ -114,16 +117,4 @@ public final class InspectUnderCompletionAnswerGuard {
         return UNDER_INSPECTION_ANNOTATION + answer;
     }
 
-    private static String latestUserRequest(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return null;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if ("user".equals(message.role())) {
-                String content = message.content();
-                if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
-                return content == null || content.isBlank() ? null : content;
-            }
-        }
-        return null;
-    }
 }

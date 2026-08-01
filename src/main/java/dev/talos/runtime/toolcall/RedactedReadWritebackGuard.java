@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
@@ -94,7 +95,9 @@ final class RedactedReadWritebackGuard {
     }
 
     private static boolean literalSentinelsWereRequested(LoopState state) {
-        String request = ToolCallSupport.latestUserRequestIn(state.messages);
+        String request =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         return containsRedactionSentinel(request);
     }
 

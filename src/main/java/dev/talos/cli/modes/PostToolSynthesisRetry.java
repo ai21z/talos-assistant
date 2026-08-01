@@ -1,7 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
@@ -66,7 +66,8 @@ final class PostToolSynthesisRetry {
 
         LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
 
-        String originalRequest = latestUserRequest(messages);
+        String originalRequest =
+                TurnTaskContractCapture.originalUserRequestOrResolve(messages);
         String retryPrompt;
         if (originalRequest != null && !originalRequest.isBlank()) {
             String pinned = originalRequest.length() <= 2000
@@ -85,15 +86,18 @@ final class PostToolSynthesisRetry {
                     + "Do not ask what I want - answer the question.";
         }
 
-        messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(retryPrompt));
+        List<ChatMessage> retryMessages =
+                new java.util.ArrayList<>(messages);
+        retryMessages.add(ChatMessage.assistant(answer));
+        retryMessages.add(ChatMessage.user(retryPrompt));
         LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
         dev.talos.runtime.TurnExecutionStage priorStage =
                 LocalTurnTraceCapture.currentExecutionStage();
 
         try {
-            LlmClient.StreamResult retry = chatFull.chat(messages);
+            LlmClient.StreamResult retry = chatFull.chat(
+                    List.copyOf(retryMessages));
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
                 LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
@@ -164,16 +168,4 @@ final class PostToolSynthesisRetry {
         return false;
     }
 
-    private static String latestUserRequest(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return null;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if ("user".equals(message.role())) {
-                String content = message.content();
-                if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
-                return content == null || content.isBlank() ? null : content;
-            }
-        }
-        return null;
-    }
 }

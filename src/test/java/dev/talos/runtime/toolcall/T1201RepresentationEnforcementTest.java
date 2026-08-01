@@ -13,6 +13,7 @@ import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class T1201RepresentationEnforcementTest {
     @TempDir
@@ -96,6 +98,130 @@ class T1201RepresentationEnforcementTest {
         assertAll(
                 () -> assertEquals(1, beforeRead.failuresThisIteration()),
                 () -> assertEquals(0, beforeRead.successesThisIteration()),
+                () -> assertEquals(1, read.successesThisIteration()),
+                () -> assertEquals(Set.of("style.css"), harness.state().pathsReadThisTurn),
+                () -> assertEquals(1, afterRead.successesThisIteration()),
+                () -> assertEquals(1, afterRead.mutationsThisIteration()),
+                () -> assertEquals(1, approvals.get()),
+                () -> assertEquals("after", Files.readString(workspace.resolve("style.css"))));
+    }
+
+    @Test
+    void repairFollowUpPreservesSourceReadBeforeDerivedWrites()
+            throws Exception {
+        Files.writeString(workspace.resolve("problem.md"), "Use Dijkstra's algorithm.\n");
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(
+                        "Create dijkstra.py and test_dijkstra.py according to problem.md."),
+                ChatMessage.assistant(
+                        "Task incomplete; the requested files were not created."),
+                ChatMessage.user("Fix it."));
+        var resolution = TaskContractResolver.resolveFromMessages(messages);
+        TurnTaskContractCapture.set(resolution, messages);
+        AtomicInteger approvals = new AtomicInteger();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        StageHarness harness = harness(
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"dijkstra.py\",\"content\":\"premature\""),
+                registry,
+                approvals);
+
+        ToolCallExecutionStage.IterationOutcome prematureFirst = execute(harness);
+        ToolCallExecutionStage.IterationOutcome prematureSecond = executeTextCall(
+                harness,
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"test_dijkstra.py\",\"content\":\"premature\""));
+        ToolCallExecutionStage.IterationOutcome read = executeTextCall(
+                harness,
+                toolCall("talos.read_file", "\"path\":\"problem.md\""));
+        ToolCallExecutionStage.IterationOutcome firstWrite = executeTextCall(
+                harness,
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"dijkstra.py\",\"content\":\"def shortest_path(): pass\""));
+        ToolCallExecutionStage.IterationOutcome secondWrite = executeTextCall(
+                harness,
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"test_dijkstra.py\",\"content\":\"def test_shortest_path(): pass\""));
+
+        assertAll(
+                () -> assertEquals(
+                        Set.of("problem.md"),
+                        resolution.contract().sourceEvidenceTargets()),
+                () -> assertEquals(1, prematureFirst.failuresThisIteration()),
+                () -> assertEquals(0, prematureFirst.successesThisIteration()),
+                () -> assertEquals(1, prematureSecond.failuresThisIteration()),
+                () -> assertEquals(0, prematureSecond.successesThisIteration()),
+                () -> assertEquals(1, read.successesThisIteration()),
+                () -> assertEquals(Set.of("problem.md"), harness.state().pathsReadThisTurn),
+                () -> assertEquals(1, firstWrite.mutationsThisIteration()),
+                () -> assertEquals(1, secondWrite.mutationsThisIteration()),
+                () -> assertEquals(2, approvals.get()),
+                () -> assertFalse(Files.readString(workspace.resolve("dijkstra.py"))
+                        .contains("premature")),
+                () -> assertFalse(Files.readString(workspace.resolve("test_dijkstra.py"))
+                        .contains("premature")),
+                () -> assertTrue(Files.exists(workspace.resolve("dijkstra.py"))),
+                () -> assertTrue(Files.exists(workspace.resolve("test_dijkstra.py"))));
+    }
+
+    @Test
+    void repairFollowUpPreservesSamePathCompositeReadBeforeWrite()
+            throws Exception {
+        Files.writeString(workspace.resolve("style.css"), "before");
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(
+                        "Edit index.html so read style.css, then update style.css."),
+                ChatMessage.assistant(
+                        "Task incomplete; style.css was not updated."),
+                ChatMessage.user("Fix it."));
+        var resolution = TaskContractResolver.resolveFromMessages(messages);
+        TurnTaskContractCapture.set(resolution, messages);
+        AtomicInteger approvals = new AtomicInteger();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        StageHarness harness = harness(
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"style.css\",\"content\":\"premature\""),
+                registry,
+                approvals);
+
+        ToolCallExecutionStage.IterationOutcome premature = execute(harness);
+        ToolCallExecutionStage.IterationOutcome read = executeTextCall(
+                harness,
+                toolCall("talos.read_file", "\"path\":\"style.css\""));
+        ToolCallExecutionStage.IterationOutcome afterRead = executeTextCall(
+                harness,
+                toolCall(
+                        "talos.write_file",
+                        "\"path\":\"style.css\",\"content\":\"after\""));
+
+        assertAll(
+                () -> assertEquals(
+                        Set.of("index.html", "style.css"),
+                        resolution.contract().expectedTargets()),
+                () -> assertEquals(
+                        Set.of("style.css"),
+                        resolution.contract().sourceEvidenceTargets()),
+                () -> assertEquals(
+                        "MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                        resolution.intent()
+                                .targets()
+                                .find("style.css")
+                                .orElseThrow()
+                                .role()
+                                .name()),
+                () -> assertEquals(1, premature.failuresThisIteration()),
+                () -> assertEquals(0, premature.successesThisIteration()),
                 () -> assertEquals(1, read.successesThisIteration()),
                 () -> assertEquals(Set.of("style.css"), harness.state().pathsReadThisTurn),
                 () -> assertEquals(1, afterRead.successesThisIteration()),

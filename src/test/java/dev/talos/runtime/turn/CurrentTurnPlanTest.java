@@ -122,6 +122,24 @@ class CurrentTurnPlanTest {
     }
 
     @Test
+    void visibleToolsUnionsTypedSurfacesAndRemovesBlockedNames() {
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(
+                        "Read README.md and summarize it."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file", "talos.grep"),
+                List.of("talos.read_file", "talos.retrieve"),
+                List.of("talos.grep"));
+
+        assertEquals(
+                List.of("talos.read_file", "talos.retrieve"),
+                plan.visibleTools());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> plan.visibleTools().add("talos.write_file"));
+    }
+
+    @Test
     void readTargetPlanCapturesReadEvidenceObligation() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read README.md and summarize it.");
 

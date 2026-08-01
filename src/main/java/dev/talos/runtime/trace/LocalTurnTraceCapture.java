@@ -11,6 +11,7 @@ import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.outcome.MutationRecoveryAssessment;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
@@ -493,11 +494,26 @@ public final class LocalTurnTraceCapture {
 
     /** Records the typed request decision without persisting matched prompt text. */
     public static void recordMutationRequestDecision(MutationIntent.RequestShape shape) {
+        recordMutationRequestDecision(
+                shape,
+                TaskResolution.Provenance.CURRENT_USER_REQUEST);
+    }
+
+    /** Records the decision and whether its authority came from this request or confirmed history. */
+    public static void recordMutationRequestDecision(
+            MutationIntent.RequestShape shape,
+            TaskResolution.Provenance provenance
+    ) {
         Bag bag = HOLDER.get();
         if (bag == null || shape == null) return;
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("decision", shape.decision().name());
         data.put("reason", safe(shape.reason()));
+        data.put(
+                "requestProvenance",
+                (provenance == null
+                        ? TaskResolution.Provenance.CURRENT_USER_REQUEST
+                        : provenance).name());
         String evidence = safe(shape.evidenceSpan());
         data.put("evidencePresent", !evidence.isBlank());
         if (!evidence.isBlank()) {

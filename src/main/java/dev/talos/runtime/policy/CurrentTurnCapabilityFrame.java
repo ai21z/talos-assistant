@@ -26,11 +26,12 @@ public final class CurrentTurnCapabilityFrame {
         return render(
                 plan.taskContract(),
                 plan.phaseInitial(),
-                plan.nativeTools(),
+                plan.visibleTools(),
                 EvidenceObligationPolicy.parse(plan.evidenceObligation()),
                 plan.activeTaskContext(),
                 plan.artifactGoal(),
-                plan.taskExpectations());
+                plan.taskExpectations(),
+                plan.actionObligation());
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
@@ -44,7 +45,8 @@ public final class CurrentTurnCapabilityFrame {
                         java.nio.file.Path.of("").toAbsolutePath()),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
-                List.of());
+                List.of(),
+                null);
     }
 
     private static String render(
@@ -54,15 +56,20 @@ public final class CurrentTurnCapabilityFrame {
             EvidenceObligation evidenceObligation,
             String activeTaskContext,
             String artifactGoal,
-            List<TaskExpectation> taskExpectations
+            List<TaskExpectation> taskExpectations,
+            ActionObligation suppliedActionObligation
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
-        ActionObligation obligation = ActionObligationPolicy.derive(contract, safePhase);
+        ActionObligation obligation = suppliedActionObligation == null
+                ? ActionObligationPolicy.derive(contract, safePhase)
+                : suppliedActionObligation;
         EvidenceObligation evidence = evidenceObligation == null
                 ? EvidenceObligation.NONE
                 : evidenceObligation;
-        boolean mutationAllowed = contract != null && contract.mutationAllowed();
+        boolean mutationAllowed = contract != null
+                && contract.mutationAllowed()
+                && carriesMutationAuthority(obligation);
         boolean verificationRequired = contract != null && contract.verificationRequired();
         String tools = visibleTools == null || visibleTools.isEmpty()
                 ? "(none)"
@@ -85,7 +92,9 @@ public final class CurrentTurnCapabilityFrame {
         appendStaticWebRewriteGroundingGuidance(frame, contract, mutationAllowed, visibleTools);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
-        appendTaskExpectations(frame, taskExpectations);
+        if (mutationAllowed) {
+            appendTaskExpectations(frame, taskExpectations);
+        }
 
         switch (obligation) {
             case MUTATING_TOOL_REQUIRED -> frame
@@ -117,12 +126,12 @@ public final class CurrentTurnCapabilityFrame {
             case INSPECT_REQUIRED -> frame.append("""
                     This turn is read-only workspace inspection.
                     Use read-only tools to inspect evidence before answering.
-                    Do not call talos.write_file or talos.edit_file.
+                    Do not call mutating tools.
                     If you identify a possible fix, describe it and wait for an explicit change request before editing.""");
             case VERIFY_FROM_EVIDENCE -> frame.append("""
                     This turn is verify/status-oriented.
                     Use read-only evidence or prior verified outcomes.
-                    Do not call talos.write_file or talos.edit_file.
+                    Do not call mutating tools.
                     If you identify a possible fix, describe it and wait for an explicit change request before editing.""");
             case DIRECT_ANSWER_ONLY -> frame.append("""
                     This turn is conversational or capability-oriented.
@@ -141,6 +150,17 @@ public final class CurrentTurnCapabilityFrame {
         appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static boolean carriesMutationAuthority(
+            ActionObligation obligation
+    ) {
+        return obligation == ActionObligation.MUTATING_TOOL_REQUIRED
+                || obligation
+                        == ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                || obligation == ActionObligation.CONDITIONAL_REVIEW_FIX
+                || obligation
+                        == ActionObligation.REPAIR_FROM_VERIFIER_FINDINGS;
     }
 
     private static String availableFileMutationTools(List<String> visibleTools) {

@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.TextReplacement;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
@@ -1209,7 +1210,11 @@ public final class TurnProcessor {
         }
 
         ToolResult forbiddenTargetValidation =
-                validateForbiddenTargetBeforeApproval(call, taskContract, mutatingTool);
+                validateForbiddenTargetBeforeApproval(
+                        call,
+                        taskContract,
+                        mutatingTool,
+                        session == null ? null : session.workspace());
         if (forbiddenTargetValidation != null) {
             return forbiddenTargetValidation;
         }
@@ -1221,7 +1226,11 @@ public final class TurnProcessor {
         }
 
         ToolResult expectedTargetValidation =
-                validateExpectedTargetBeforeApproval(call, taskContract, mutatingTool);
+                validateExpectedTargetBeforeApproval(
+                        call,
+                        taskContract,
+                        mutatingTool,
+                        session.workspace());
         if (expectedTargetValidation != null) {
             return expectedTargetValidation;
         }
@@ -1396,11 +1405,26 @@ public final class TurnProcessor {
     private static ToolResult validateWorkspaceOrganizationToolBeforeApproval(
             ToolCall call,
             TaskContract taskContract) {
+        var capturedResolution = TurnTaskContractCapture.getResolution();
+        if (call != null
+                && WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())
+                && capturedResolution != null
+                && capturedResolution.blocksWorkspaceOperations()) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    "Workspace operation `" + call.toolName()
+                            + "` is not authorized by the current typed task plan. "
+                            + "Coordinated workspace-operation tails remain blocked until "
+                            + "their dedicated planner binds source and destination authority. "
+                            + "No approval was requested and no file was changed."));
+        }
         if (call == null
                 || taskContract == null
                 || taskContract.type() != TaskType.FILE_EDIT
                 || taskContract.expectedTargets().isEmpty()
-                || !isWorkspaceOrganizationTool(call.toolName())) {
+                || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())) {
             return null;
         }
         if (WorkspaceOperationIntent.detect(taskContract).isPresent()) {
@@ -1417,8 +1441,20 @@ public final class TurnProcessor {
     private static ToolResult validateExpectedTargetBeforeApproval(
             ToolCall call,
             TaskContract taskContract,
-            boolean mutatingTool
+            boolean mutatingTool,
+            Path workspace
     ) {
+        var capturedResolution = TurnTaskContractCapture.getResolution();
+        if (call != null
+                && mutatingTool
+                && capturedResolution != null
+                && capturedResolution.blocksUnscopedMutation()) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    "The current typed task plan authorizes no content-mutation "
+                            + "target for this non-authoritative mutation tail. "
+                            + "No approval was requested and no file was changed."));
+        }
         if (call == null
                 || taskContract == null
                 || !taskContract.mutationAllowed()
@@ -1437,14 +1473,22 @@ public final class TurnProcessor {
         for (String path : paths) {
             boolean matched = false;
             for (String expected : taskContract.expectedTargets()) {
-                if (sameExpectedTarget(call.toolName(), path, expected)) {
+                if (sameExpectedTarget(
+                        call.toolName(),
+                        path,
+                        expected,
+                        workspace)) {
                     matched = true;
                     break;
                 }
             }
             if (!matched) {
                 for (String optional : optionalMutationTargets(taskContract)) {
-                    if (sameExpectedTarget(call.toolName(), path, optional)) {
+                    if (sameExpectedTarget(
+                            call.toolName(),
+                            path,
+                            optional,
+                            workspace)) {
                         matched = true;
                         break;
                     }
@@ -1481,7 +1525,8 @@ public final class TurnProcessor {
     }
 
     private static boolean workspaceOperationRequestOwnsTargetShape(TaskContract taskContract) {
-        return WorkspaceOperationIntent.detect(taskContract).isPresent();
+        return !TurnTaskContractCapture.blocksWorkspaceOperations()
+                && WorkspaceOperationIntent.detect(taskContract).isPresent();
     }
 
     private static Set<String> optionalMutationTargets(TaskContract taskContract) {
@@ -1491,7 +1536,12 @@ public final class TurnProcessor {
             return Set.of();
         }
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        TaskContractResolver.intentFromUserRequest(taskContract.originalUserRequest())
+        var capturedIntent = TurnTaskContractCapture.getIntent();
+        var intent = capturedIntent == null
+                ? TaskContractResolver.resolveFromUserRequest(
+                        taskContract.originalUserRequest()).intent()
+                : capturedIntent;
+        intent
                 .targets()
                 .targets()
                 .stream()
@@ -1539,7 +1589,8 @@ public final class TurnProcessor {
     private static ToolResult validateForbiddenTargetBeforeApproval(
             ToolCall call,
             TaskContract taskContract,
-            boolean mutatingTool
+            boolean mutatingTool,
+            Path workspace
     ) {
         if (call == null || taskContract == null || taskContract.forbiddenTargets().isEmpty()) {
             return null;
@@ -1553,7 +1604,10 @@ public final class TurnProcessor {
         }
         for (PathParam param : params) {
             for (String forbidden : taskContract.forbiddenTargets()) {
-                if (sameScopedTarget(param.value(), forbidden)) {
+                if (sameForbiddenTarget(
+                        param.value(),
+                        forbidden,
+                        workspace)) {
                     return ToolResult.fail(ToolError.invalidParams(
                             ToolFailureReason.PRE_APPROVAL_TARGET_FORBIDDEN,
                             "Target forbidden before approval: `" + param.value()
@@ -1764,41 +1818,193 @@ public final class TurnProcessor {
                 || "create_directory".equals(normalized);
     }
 
-    private static boolean isWorkspaceOrganizationTool(String toolName) {
-        return switch (normalizeToolName(toolName)) {
-            case "apply_workspace_batch", "copy_path", "move_path", "rename_path", "delete_path" -> true;
-            default -> false;
-        };
-    }
-
     private static String normalizeToolName(String toolName) {
         return ToolAliasPolicy.localCanonicalName(toolName);
     }
 
-    private static boolean sameScopedTarget(String candidate, String forbidden) {
-        String c = normalizeScopedTarget(candidate);
-        String f = normalizeScopedTarget(forbidden);
-        if (c.isBlank() || f.isBlank()) return false;
-        return c.equals(f) || c.endsWith("/" + f);
+    private static boolean sameForbiddenTarget(
+            String candidate,
+            String forbidden,
+            Path workspace
+    ) {
+        String f = normalizeScopedTargetPreservingCase(forbidden);
+        if (candidate == null || candidate.isBlank() || f.isBlank()) {
+            return false;
+        }
+        try {
+            Path root = workspace == null
+                    ? Path.of("").toAbsolutePath().normalize()
+                    : workspace.toAbsolutePath().normalize();
+            PathArgumentCanonicalizer.Resolution candidateResolution =
+                    PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(
+                            root,
+                            candidate);
+            Path candidatePath = candidateResolution.resolvedPath();
+            Path forbiddenLexical = Path.of(f);
+            Path forbiddenPath = forbiddenLexical.isAbsolute()
+                    ? forbiddenLexical.normalize()
+                    : root.resolve(forbiddenLexical).normalize();
+            if (candidatePath == null
+                    || !lexicallyWithin(root, candidatePath)
+                    || !lexicallyWithin(root, forbiddenPath)) {
+                return false;
+            }
+            PathIdentity identity = guardedPathIdentity(
+                    root,
+                    candidatePath,
+                    forbiddenPath);
+            return identity == PathIdentity.SAME
+                    || identity == PathIdentity.UNPROVEN
+                    || identity == PathIdentity.REJECTED;
+        } catch (RuntimeException rejected) {
+            return false;
+        }
     }
 
-    private static boolean sameExpectedTarget(String toolName, String candidate, String expected) {
-        String c = normalizeScopedTarget(candidate);
-        String e = normalizeScopedTarget(expected);
-        if (c.isBlank() || e.isBlank()) return false;
-        return c.equals(e) || (isMkdirTool(toolName) && e.startsWith(c + "/"));
+    private static boolean sameExpectedTarget(
+            String toolName,
+            String candidate,
+            String expected,
+            Path workspace
+    ) {
+        String e = normalizeScopedTargetPreservingCase(expected);
+        if (candidate == null || candidate.isBlank() || e.isBlank()) return false;
+        try {
+            Path root = workspace == null
+                    ? Path.of("").toAbsolutePath().normalize()
+                    : workspace.toAbsolutePath().normalize();
+            PathArgumentCanonicalizer.Resolution candidateResolution =
+                    PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(
+                            root,
+                            candidate);
+            Path candidatePath = candidateResolution.resolvedPath();
+            Path expectedLexical = Path.of(e);
+            Path expectedPath = expectedLexical.isAbsolute()
+                    ? expectedLexical.normalize()
+                    : root.resolve(expectedLexical).normalize();
+            if (candidatePath == null
+                    || !lexicallyWithin(root, candidatePath)
+                    || !lexicallyWithin(root, expectedPath)) {
+                return false;
+            }
+            if (guardedPathIdentity(root, candidatePath, expectedPath)
+                    == PathIdentity.SAME) {
+                return true;
+            }
+            if (!isMkdirTool(toolName)) return false;
+
+            Path expectedParent = expectedPath.getParent();
+            while (expectedParent != null
+                    && lexicallyWithin(root, expectedParent)
+                    && guardedPathIdentity(root, expectedParent, root)
+                            != PathIdentity.SAME) {
+                if (guardedPathIdentity(root, candidatePath, expectedParent)
+                        == PathIdentity.SAME) {
+                    return true;
+                }
+                expectedParent = expectedParent.getParent();
+            }
+            return false;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static PathIdentity guardedPathIdentity(
+            Path root,
+            Path first,
+            Path second
+    ) {
+        Path a = first.toAbsolutePath().normalize();
+        Path b = second.toAbsolutePath().normalize();
+        boolean sameLexicalShape = a.toString().equals(b.toString())
+                || isWindowsPathPlatform()
+                        && samePathShapeIgnoringCase(a, b);
+        if (!sameLexicalShape) {
+            return PathIdentity.DISTINCT;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot guardedRoot =
+                    NoFollowPathPolicy.bindExistingDirectory(root);
+            NoFollowPathPolicy.EntryType firstType = guardedRoot.inspect(first);
+            NoFollowPathPolicy.EntryType secondType = guardedRoot.inspect(second);
+            if (a.toString().equals(b.toString())) return PathIdentity.SAME;
+            if (firstType == NoFollowPathPolicy.EntryType.MISSING
+                    || secondType == NoFollowPathPolicy.EntryType.MISSING) {
+                return PathIdentity.UNPROVEN;
+            }
+            return Files.isSameFile(a, b)
+                    ? PathIdentity.SAME
+                    : PathIdentity.DISTINCT;
+        } catch (java.io.IOException | RuntimeException identityFailure) {
+            return PathIdentity.REJECTED;
+        }
+    }
+
+    private enum PathIdentity {
+        SAME,
+        DISTINCT,
+        UNPROVEN,
+        REJECTED
+    }
+
+    private static boolean lexicallyWithin(Path root, Path candidate) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalizedCandidate = candidate.toAbsolutePath().normalize();
+        if (normalizedCandidate.startsWith(normalizedRoot)) return true;
+        if (!isWindowsPathPlatform()
+                || normalizedCandidate.getNameCount() < normalizedRoot.getNameCount()
+                || !sameRootIgnoringCase(normalizedCandidate, normalizedRoot)) {
+            return false;
+        }
+        for (int index = 0; index < normalizedRoot.getNameCount(); index++) {
+            if (!normalizedCandidate.getName(index).toString().equalsIgnoreCase(
+                    normalizedRoot.getName(index).toString())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean samePathShapeIgnoringCase(Path first, Path second) {
+        if (first.getNameCount() != second.getNameCount()
+                || !sameRootIgnoringCase(first, second)) {
+            return false;
+        }
+        for (int index = 0; index < first.getNameCount(); index++) {
+            if (!first.getName(index).toString().equalsIgnoreCase(
+                    second.getName(index).toString())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameRootIgnoringCase(Path first, Path second) {
+        Path firstRoot = first.getRoot();
+        Path secondRoot = second.getRoot();
+        if (firstRoot == null || secondRoot == null) {
+            return firstRoot == null && secondRoot == null;
+        }
+        return firstRoot.toString().equalsIgnoreCase(secondRoot.toString());
+    }
+
+    private static boolean isWindowsPathPlatform() {
+        return System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains("win");
     }
 
     private static List<String> orderedExpectedTargets(TaskContract taskContract) {
         if (taskContract == null || taskContract.expectedTargets().isEmpty()) return List.of();
         return taskContract.expectedTargets().stream()
-                .map(TurnProcessor::normalizeScopedTarget)
+                .map(TurnProcessor::normalizeScopedTargetPreservingCase)
                 .filter(path -> !path.isBlank())
                 .sorted()
                 .toList();
     }
 
-    private static String normalizeScopedTarget(String path) {
+    private static String normalizeScopedTargetPreservingCase(String path) {
         if (path == null) return "";
         String normalized = ToolCallSupport.normalizePath(path)
                 .strip()
@@ -1809,7 +2015,7 @@ public final class TurnProcessor {
         while (normalized.contains("//")) {
             normalized = normalized.replace("//", "/");
         }
-        return normalized.toLowerCase(java.util.Locale.ROOT);
+        return normalized;
     }
 
     /*

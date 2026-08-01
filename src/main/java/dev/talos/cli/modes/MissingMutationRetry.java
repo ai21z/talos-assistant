@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.policy.ActionObligation;
@@ -122,7 +123,9 @@ final class MissingMutationRetry {
             return new Result(answer, 0, null);
         }
         String priorMutationRequest = retryShouldReissuePriorMutationRequest(retryContract)
-                ? previousMutationUserRequest(messages, userRequest)
+                ? previousMutationUserRequest(
+                        messages,
+                        capturedCurrentRequestBoundary(retryContract))
                 : null;
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
@@ -149,11 +152,17 @@ final class MissingMutationRetry {
                     + "\nRe-issue one corrected tool call with valid parameters.";
         }
         String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs, retryToolNames);
-        messages.add(ChatMessage.assistant(retrySummary));
-        messages.add(ChatMessage.system(retryFrame));
-        messages.add(ChatMessage.user(retryInstruction));
+        List<ChatMessage> retryConversation =
+                new ArrayList<>(messages);
+        retryConversation.add(ChatMessage.assistant(retrySummary));
+        retryConversation.add(ChatMessage.system(retryFrame));
+        retryConversation.add(ChatMessage.user(retryInstruction));
         List<ChatMessage> retryMessages = compactMutationRetryMessages(
-                messages, safePlan, retryInstruction, retryToolSpecs, retryToolNames);
+                retryConversation,
+                safePlan,
+                retryInstruction,
+                retryToolSpecs,
+                retryToolNames);
         LocalTurnTraceCapture.AnswerCandidateCheckpoint fallbackCheckpoint =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
         dev.talos.runtime.TurnExecutionStage priorStage =
@@ -200,18 +209,20 @@ final class MissingMutationRetry {
                             retryLoop,
                             true);
                 } else if (retryLoop.mutatingToolSuccesses() > 0) {
-                    ToolCallLoop.LoopResult continued =
-                            continueRemainingExpectedTargetsAfterPartialRetry(
-                                    safePlan,
-                                    retryLoop,
-                                    workspace,
-                                    ctx,
-                                    chat,
-                                    retryToolNames);
-                    if (continued != retryLoop) {
-                        retryLoop = continued;
-                        mergedAnswer = retryLoop.finalAnswer();
-                        summary = retryLoop.summary();
+                    if (!retryLoop.failureDecision().shouldStop()) {
+                        ToolCallLoop.LoopResult continued =
+                                continueRemainingExpectedTargetsAfterPartialRetry(
+                                        safePlan,
+                                        retryLoop,
+                                        workspace,
+                                        ctx,
+                                        chat,
+                                        retryToolNames);
+                        if (continued != retryLoop) {
+                            retryLoop = continued;
+                            mergedAnswer = retryLoop.finalAnswer();
+                            summary = retryLoop.summary();
+                        }
                     }
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
@@ -639,7 +650,12 @@ final class MissingMutationRetry {
 
     private static List<String> toolNames(CurrentTurnPlan plan, List<ChatMessage> messages) {
         TaskContract contract = plan == null ? null : plan.taskContract();
-        Optional<WorkspaceOperationIntent.Intent> workspaceOperation = WorkspaceOperationIntent.detect(contract);
+        Optional<WorkspaceOperationIntent.Intent> workspaceOperation =
+                plan != null
+                        && plan.actionObligation()
+                        == ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                        ? WorkspaceOperationIntent.detect(contract)
+                        : Optional.empty();
         if (workspaceOperation.isPresent()) {
             return workspaceOperation.get().toolNames();
         }
@@ -949,6 +965,7 @@ final class MissingMutationRetry {
 
     private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
         return message != null
+                && "system".equals(message.role())
                 && message.content() != null
                 && message.content().startsWith("[Static verification repair context]");
     }
@@ -1076,19 +1093,44 @@ final class MissingMutationRetry {
                 .equals(retryContract.classificationReason());
     }
 
-    private static String previousMutationUserRequest(List<ChatMessage> messages, String latestUserRequest) {
-        if (messages == null || messages.isEmpty()) return null;
-        boolean skippedLatest = false;
-        for (int i = messages.size() - 1; i >= 0; i--) {
+    private static String capturedCurrentRequestBoundary(TaskContract retryContract) {
+        if (retryContract == null
+                || !retryShouldReissuePriorMutationRequest(retryContract)) {
+            return null;
+        }
+        String canonicalRequest = retryContract.originalUserRequest();
+        if (canonicalRequest == null || canonicalRequest.isBlank()) return null;
+        String marker = "\n\nRepair follow-up: ";
+        int markerStart = canonicalRequest.lastIndexOf(marker);
+        if (markerStart < 0) return null;
+        String currentRequest =
+                canonicalRequest.substring(markerStart + marker.length()).strip();
+        return currentRequest.isBlank() ? null : currentRequest;
+    }
+
+    private static String previousMutationUserRequest(
+            List<ChatMessage> messages,
+            String currentUserRequest
+    ) {
+        if (messages == null
+                || messages.isEmpty()
+                || currentUserRequest == null
+                || currentUserRequest.isBlank()) {
+            return null;
+        }
+        int currentRequestIndex =
+                TurnTaskContractCapture.currentUserBoundaryIndex(messages);
+        if (currentRequestIndex < 0) return null;
+        ChatMessage capturedBoundary = messages.get(currentRequestIndex);
+        if (!Objects.equals(capturedBoundary.content(), currentUserRequest)) {
+            return null;
+        }
+        for (int i = currentRequestIndex - 1; i >= 0; i--) {
             ChatMessage message = messages.get(i);
             if (message == null || !"user".equals(message.role())) continue;
             String content = message.content();
             if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
             if (content == null || content.isBlank()) continue;
-            if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
-                skippedLatest = true;
-                continue;
-            }
             TaskContract prior = TaskContractResolver.fromUserRequest(content);
             if (prior.mutationAllowed()) {
                 return content;

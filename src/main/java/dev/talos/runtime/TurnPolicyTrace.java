@@ -1,8 +1,10 @@
 package dev.talos.runtime;
 
+import dev.talos.runtime.intent.IntentDerivation;
 import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentEvidence;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 
@@ -40,8 +42,53 @@ public record TurnPolicyTrace(
             String source,
             String reason,
             String sourceText,
-            double confidence
+            double confidence,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset
     ) {
+        public RolefulTarget(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                     confidence,
+                     IntentDerivation.UNKNOWN_OFFSET,
+                     IntentDerivation.UNKNOWN_OFFSET,
+                     IntentDerivation.UNKNOWN_OFFSET);
+        }
+
+        public RolefulTarget(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence,
+                int startOffset,
+                int endOffset
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                    confidence,
+                    startOffset,
+                    IntentDerivation.UNKNOWN_OFFSET,
+                    endOffset);
+        }
+
         public RolefulTarget {
             path = TargetRef.normalizePath(path);
             if (role == null || role.isBlank()) {
@@ -54,12 +101,16 @@ public record TurnPolicyTrace(
                         "Unknown roleful target role: " + role,
                         e);
             }
-            source = blankDefault(source, "");
+            TaskIntentEvidence.requireDurableShape(
+                    path,
+                    source,
+                    startOffset,
+                    authorityEndOffset,
+                    endOffset,
+                    sourceText,
+                    confidence);
             reason = blankDefault(reason, "");
             sourceText = sourceText == null ? "" : sourceText;
-            if (Double.isNaN(confidence) || confidence < 0.0 || confidence > 1.0) {
-                confidence = 0.0;
-            }
         }
 
         static RolefulTarget from(TargetRef ref) {
@@ -73,7 +124,10 @@ public record TurnPolicyTrace(
                     derivation.source().name(),
                     derivation.reason(),
                     derivation.sourceText(),
-                    derivation.confidence());
+                    derivation.confidence(),
+                    derivation.startOffset(),
+                    derivation.authorityEndOffset(),
+                    derivation.endOffset());
         }
     }
 
@@ -157,10 +211,29 @@ public record TurnPolicyTrace(
             List<String> nativeTools,
             List<String> promptTools
     ) {
+        TaskIntent captured = TurnTaskContractCapture.getIntent();
+        return from(
+                contract,
+                captured == null
+                        ? TaskContractResolver.resolveFromUserRequest(
+                                contract == null ? "" : contract.originalUserRequest()).intent()
+                        : captured,
+                initialPhase,
+                nativeTools,
+                promptTools);
+    }
+
+    public static TurnPolicyTrace from(
+            TaskContract contract,
+            TaskIntent intent,
+            String initialPhase,
+            List<String> nativeTools,
+            List<String> promptTools
+    ) {
         if (contract == null) return empty().withInitialPhase(initialPhase)
                 .withNativeTools(nativeTools)
                 .withPromptTools(promptTools);
-        TaskIntent intent = TaskContractResolver.intentFromUserRequest(contract.originalUserRequest());
+        TaskIntentEvidence.requireCanonicalAgreement(contract, intent);
         return new TurnPolicyTrace(
                 contract.type().name(),
                 contract.mutationAllowed(),
@@ -259,7 +332,7 @@ public record TurnPolicyTrace(
                             ref.role() == TargetRole.FORBIDDEN
                                     ? RolefulTarget.from(ref)
                                     : activeContractProjection(
-                                            ref.path(),
+                                            ref,
                                             TargetRole.FORBIDDEN.name()));
                     continue;
                 }
@@ -269,7 +342,7 @@ public record TurnPolicyTrace(
                             out,
                             role.equals(ref.role().name())
                                     ? RolefulTarget.from(ref)
-                                    : activeContractProjection(ref.path(), role));
+                                    : activeContractProjection(ref, role));
                     continue;
                 }
                 if (activeSourceEvidence.contains(ref.path())) {
@@ -278,7 +351,7 @@ public record TurnPolicyTrace(
                             ref.role() == TargetRole.SOURCE_EVIDENCE
                                     ? RolefulTarget.from(ref)
                                     : activeContractProjection(
-                                            ref.path(),
+                                            ref,
                                             TargetRole.SOURCE_EVIDENCE.name()));
                     continue;
                 }
@@ -346,6 +419,23 @@ public record TurnPolicyTrace(
                 "active-contract-projection",
                 "",
                 1.0);
+    }
+
+    private static RolefulTarget activeContractProjection(
+            TargetRef ref,
+            String role
+    ) {
+        var derivation = ref.derivation();
+        return new RolefulTarget(
+                ref.path(),
+                role,
+                derivation.source().name(),
+                derivation.reason(),
+                derivation.sourceText(),
+                derivation.confidence(),
+                derivation.startOffset(),
+                derivation.authorityEndOffset(),
+                derivation.endOffset());
     }
 
     private static Set<String> normalizedPaths(Set<String> paths) {

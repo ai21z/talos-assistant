@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
@@ -42,11 +43,15 @@ final class CompactMutationContinuationPlanner {
         if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return Optional.empty();
         if (!readOnlyProgressOnly(state)) return Optional.empty();
 
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract captured = TurnTaskContractCapture.get();
+        TaskContract contract = captured == null
+                ? TaskContractResolver.fromMessages(state.messages)
+                : captured;
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
             return Optional.empty();
         }
-        if (WorkspaceOperationIntent.detect(contract).isPresent()) {
+        if (!TurnTaskContractCapture.blocksWorkspaceOperations()
+                && WorkspaceOperationIntent.detect(contract).isPresent()) {
             return Optional.empty();
         }
         if (!hasMutationTargets(state, contract)) {
@@ -56,7 +61,11 @@ final class CompactMutationContinuationPlanner {
         List<ToolSpec> tools = compactMutationContinuationToolSpecs(state, baseTools);
         if (tools.isEmpty()) return Optional.empty();
 
-        List<ChatMessage> messages = compactMutationContinuationMessages(state, contract, retryName);
+        List<ChatMessage> messages = compactMutationContinuationMessages(
+                state,
+                contract,
+                retryName,
+                tools);
         ChatRequestControls controls = compactMutationContinuationControls(state, tools);
         return Optional.of(new Plan(messages, tools, controls));
     }
@@ -125,9 +134,12 @@ final class CompactMutationContinuationPlanner {
     private static List<ChatMessage> compactMutationContinuationMessages(
             LoopState state,
             TaskContract contract,
-            String retryName
+            String retryName,
+            List<ToolSpec> tools
     ) {
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) {
             userTask = contract == null ? "" : contract.originalUserRequest();
         }
@@ -135,12 +147,15 @@ final class CompactMutationContinuationPlanner {
         // target paths only; readbacks and source evidence are workspace
         // bytes and travel as user-role data.
         StringBuilder frame = new StringBuilder();
+        String toolInstruction = mutationToolInstruction(tools);
         frame.append("[CompactMutationContinuation]\n")
                 .append("Normal tool-loop continuation exceeded the local context budget during ")
                 .append(retryName == null || retryName.isBlank() ? "tool-call loop continuation" : retryName)
                 .append(".\n")
                 .append("Continue only the current mutation request. Older conversation history is intentionally omitted.\n")
-                .append("Prose/manual snippets do not change files; call the provided write/edit tools now.\n");
+                .append("Prose/manual snippets do not change files; ")
+                .append(toolInstruction)
+                .append(".\n");
         appendCompactMutationContract(frame, state, contract);
         String readbackEnvelope = compactMutationReadbackEnvelope(state, contract);
         if (!readbackEnvelope.isBlank()) {
@@ -162,8 +177,30 @@ final class CompactMutationContinuationPlanner {
                         """),
                 ChatMessage.system(frame.toString()),
                 ChatMessage.user("Current mutation request:\n" + currentRequest
-                        + "\n\nCall talos.write_file or talos.edit_file now."
+                        + "\n\n" + capitalize(toolInstruction) + " now."
                         + (readbackEnvelope.isBlank() ? "" : "\n\n" + readbackEnvelope)));
+    }
+
+    private static String mutationToolInstruction(List<ToolSpec> tools) {
+        List<String> names = tools == null
+                ? List.of()
+                : tools.stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(ToolSpec::name)
+                        .filter(java.util.Objects::nonNull)
+                        .toList();
+        if (names.equals(List.of("talos.write_file"))) {
+            return "call talos.write_file";
+        }
+        if (names.equals(List.of("talos.edit_file"))) {
+            return "call talos.edit_file";
+        }
+        return "call only " + String.join(" or ", names);
+    }
+
+    private static String capitalize(String value) {
+        if (value == null || value.isBlank()) return "Call the selected mutation tool";
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
     private static void appendCompactMutationContract(StringBuilder frame, LoopState state, TaskContract contract) {

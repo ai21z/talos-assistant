@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -22,8 +23,10 @@ final class ExpectedTargetProgressAccounting {
 
     static List<String> remainingExpectedMutationTargets(LoopState state) {
         if (state == null || state.messages == null) return List.of();
+        boolean capturedAuthority =
+                TurnTaskContractCapture.getResolution() != null;
         TaskContract contract = WorkspaceTargetReconciler.reconcile(
-                TaskContractResolver.fromMessages(state.messages),
+                TurnTaskContractCapture.currentOrResolve(state.messages),
                 state.workspace);
         if (contract == null || !contract.mutationAllowed()) {
             return List.of();
@@ -32,9 +35,13 @@ final class ExpectedTargetProgressAccounting {
                 || !state.staticWebFullRewriteRequiredTargets.isEmpty()) {
             return List.of();
         }
-        String latestUserRequest = ToolCallSupport.latestUserRequestIn(state.messages);
-        Set<String> expectedTargets = contract.expectedTargets().isEmpty()
-                ? TaskContractResolver.extractExpectedTargets(latestUserRequest)
+        String authorityRequest = capturedAuthority
+                ? contract.originalUserRequest()
+                : TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
+        Set<String> expectedTargets =
+                contract.expectedTargets().isEmpty() && !capturedAuthority
+                ? TaskContractResolver.extractExpectedTargets(authorityRequest)
                 : contract.expectedTargets();
         if (expectedTargets.isEmpty()) {
             return List.of();
@@ -47,7 +54,7 @@ final class ExpectedTargetProgressAccounting {
         expectedTargets = hardExpectedTargetsForProgress(
                 expectedTargets,
                 contract,
-                latestUserRequest,
+                authorityRequest,
                 state.workspace,
                 satisfiedTargets);
         java.util.LinkedHashMap<String, String> expectedDisplayByKey = new java.util.LinkedHashMap<>();

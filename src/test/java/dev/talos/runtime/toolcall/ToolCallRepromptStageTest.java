@@ -317,7 +317,6 @@ class ToolCallRepromptStageTest {
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
 
         assertTrue(source.contains("ToolRepromptStaleEditRereadStop.tryHandle("), source);
-        assertFalse(source.contains("import dev.talos.runtime.failure.FailureAction;"), source);
         assertFalse(source.contains("import dev.talos.safety.SafeLogFormatter;"), source);
         assertFalse(source.contains("staleEditRereadIgnoredPath != null"), source);
         assertFalse(source.contains("before rereading the file after a same-turn mutation changed it"), source);

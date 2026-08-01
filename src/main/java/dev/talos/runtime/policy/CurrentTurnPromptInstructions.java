@@ -78,9 +78,10 @@ public final class CurrentTurnPromptInstructions {
             boolean replaceExisting
     ) {
         if (messages == null || messages.isEmpty()) return;
-        if (replaceExisting) {
-            messages.removeIf(CurrentTurnPromptInstructions::isTaskContractInstruction);
-        } else if (messages.stream().anyMatch(CurrentTurnPromptInstructions::isTaskContractInstruction)) {
+        if (!replaceExisting
+                && messages.stream().anyMatch(
+                        CurrentTurnPromptInstructions
+                                ::isTaskContractInstruction)) {
             return;
         }
 
@@ -100,7 +101,19 @@ public final class CurrentTurnPromptInstructions {
     ) {
         if (messages == null || messages.isEmpty()) return;
         if (replaceExisting) {
-            messages.removeIf(CurrentTurnPromptInstructions::isTaskContractInstruction);
+            int existingIndex = firstTaskContractInstruction(messages);
+            if (existingIndex >= 0) {
+                ChatMessage prior = messages.get(existingIndex);
+                messages.set(existingIndex, new ChatMessage(
+                        prior.role(),
+                        instruction,
+                        prior.toolCalls(),
+                        prior.toolCallId()));
+                removeDuplicateTaskContractInstructions(
+                        messages,
+                        existingIndex);
+                return;
+            }
         } else if (messages.stream().anyMatch(CurrentTurnPromptInstructions::isTaskContractInstruction)) {
             return;
         }
@@ -122,6 +135,29 @@ public final class CurrentTurnPromptInstructions {
             }
         }
         messages.add(insertAt, ChatMessage.system(instruction));
+    }
+
+    private static int firstTaskContractInstruction(
+            List<ChatMessage> messages
+    ) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (isTaskContractInstruction(messages.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void removeDuplicateTaskContractInstructions(
+            List<ChatMessage> messages,
+            int retainedIndex
+    ) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (i != retainedIndex
+                    && isTaskContractInstruction(messages.get(i))) {
+                messages.remove(i);
+            }
+        }
     }
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {

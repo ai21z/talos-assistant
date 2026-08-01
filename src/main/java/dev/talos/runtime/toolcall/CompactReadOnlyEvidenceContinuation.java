@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.failure.FailureDecision;
@@ -91,11 +92,14 @@ final class CompactReadOnlyEvidenceContinuation {
         if (state == null || state.ctx == null || state.ctx.llm() == null) return Optional.empty();
         if (state.hasPendingActionObligation()) return Optional.empty();
         if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return Optional.empty();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) {
             return Optional.empty();
         }
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (!looksLikeReadOnlyReviewProposal(userTask)) return Optional.empty();
         String target = contract.expectedTargets().iterator().next();
         String normalizedTarget = ToolCallSupport.normalizePath(target);

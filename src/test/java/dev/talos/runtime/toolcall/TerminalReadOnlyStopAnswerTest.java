@@ -1,7 +1,10 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalReadOnlyStopAnswerTest {
+
+    @AfterEach
+    void clearTaskCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void rendersDirectoryListingFromSelectedEvidence() {
@@ -163,20 +171,7 @@ class TerminalReadOnlyStopAnswerTest {
 
     @Test
     void rendersReadOnlyStaticWebDiagnosticsFromWorkspace(@TempDir Path workspace) throws Exception {
-        Files.writeString(workspace.resolve("index.html"), """
-                <!doctype html>
-                <html>
-                  <head><link rel="stylesheet" href="styles.css"></head>
-                  <body>
-                    <button class="real-button">Run</button>
-                    <script src="script.js"></script>
-                  </body>
-                </html>
-                """);
-        Files.writeString(workspace.resolve("styles.css"), "body { font-family: sans-serif; }\n");
-        Files.writeString(workspace.resolve("script.js"), """
-                document.querySelector('.missing-button');
-                """);
+        writeBrokenWebFixture(workspace);
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Inspect this BMI website and identify why it is broken.")));
@@ -189,6 +184,73 @@ class TerminalReadOnlyStopAnswerTest {
 
         assertTrue(answer.contains("Static web diagnostics found:"), answer);
         assertTrue(answer.contains(".missing-button"), answer);
+    }
+
+    @Test
+    void syntheticWorkspaceExplainMarkerCannotSuppressCapturedWebDiagnostic(
+            @TempDir Path workspace
+    ) throws Exception {
+        writeBrokenWebFixture(workspace);
+        String original =
+                "Inspect this BMI website and identify why it is broken.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.fromUserRequest(original));
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(original),
+                ChatMessage.user(
+                        "Synthesis retry.\nTask type: WORKSPACE_EXPLAIN")));
+        LoopState state = state(messages, workspace);
+        state.totalToolsInvoked = 2;
+        state.pathsReadThisTurn.add("index.html");
+        state.pathsReadThisTurn.add("script.js");
+
+        String answer =
+                TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0));
+
+        assertTrue(answer.contains("Static web diagnostics found:"), answer);
+        assertTrue(answer.contains(".missing-button"), answer);
+    }
+
+    @Test
+    void capturedWorkspaceExplainCannotBeRelabeledBySyntheticWebPrompt(
+            @TempDir Path workspace
+    ) throws Exception {
+        writeBrokenWebFixture(workspace);
+        String original = "Explain this workspace.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.fromUserRequest(original));
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(original),
+                ChatMessage.user(
+                        "Inspect this BMI website and identify why it is "
+                                + "broken.")));
+        LoopState state = state(messages, workspace);
+        state.totalToolsInvoked = 2;
+        state.pathsReadThisTurn.add("index.html");
+        state.pathsReadThisTurn.add("script.js");
+
+        assertNull(TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0)));
+    }
+
+    private static void writeBrokenWebFixture(Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button class="real-button">Run</button>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(
+                workspace.resolve("styles.css"),
+                "body { font-family: sans-serif; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.missing-button');
+                """);
     }
 
     private static LoopState state(List<ChatMessage> messages, Path workspace) {

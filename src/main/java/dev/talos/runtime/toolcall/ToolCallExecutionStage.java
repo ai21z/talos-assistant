@@ -50,7 +50,8 @@ public final class ToolCallExecutionStage {
                                    boolean mutatingDeniedThisIteration,
                                    boolean pathPolicyBlockedThisIteration,
                                    int successesThisIteration,
-                                   List<String> unsupportedReadPathsThisIteration) {
+                                   List<String> unsupportedReadPathsThisIteration,
+                                   boolean executionAuthorityRejectedThisIteration) {
         public IterationOutcome {
             unsupportedReadPathsThisIteration = unsupportedReadPathsThisIteration == null
                     ? List.of()
@@ -72,7 +73,28 @@ public final class ToolCallExecutionStage {
                     mutatingDeniedThisIteration,
                     pathPolicyBlockedThisIteration,
                     successesThisIteration,
-                    List.of());
+                    List.of(),
+                    false);
+        }
+
+        public IterationOutcome(int mutationsThisIteration,
+                                List<String> mutationSummaries,
+                                int failuresThisIteration,
+                                boolean approvalDeniedThisIteration,
+                                boolean mutatingDeniedThisIteration,
+                                boolean pathPolicyBlockedThisIteration,
+                                int successesThisIteration,
+                                List<String> unsupportedReadPathsThisIteration) {
+            this(
+                    mutationsThisIteration,
+                    mutationSummaries,
+                    failuresThisIteration,
+                    approvalDeniedThisIteration,
+                    mutatingDeniedThisIteration,
+                    pathPolicyBlockedThisIteration,
+                    successesThisIteration,
+                    unsupportedReadPathsThisIteration,
+                    false);
         }
     }
 
@@ -92,6 +114,7 @@ public final class ToolCallExecutionStage {
     }
 
     public IterationOutcome execute(LoopState state, ToolCallParseStage.ParsedCalls parsed) {
+        int outcomeStart = state.toolOutcomes.size();
         if (parsed.useNativePath()) {
             state.messages.add(ChatMessage.assistantWithToolCalls(state.currentText, state.currentNativeCalls));
         } else {
@@ -316,7 +339,26 @@ public final class ToolCallExecutionStage {
                 mutatingDeniedThisIter,
                 pathPolicyBlockedThisIter,
                 successesThisIter,
-                unsupportedReadPathsThisIter);
+                unsupportedReadPathsThisIter,
+                executionAuthorityRejectedSince(state, outcomeStart));
+    }
+
+    private static boolean executionAuthorityRejectedSince(
+            LoopState state,
+            int outcomeStart
+    ) {
+        if (state == null || state.toolOutcomes.isEmpty()) return false;
+        int safeStart = Math.max(0, Math.min(
+                outcomeStart,
+                state.toolOutcomes.size()));
+        return state.toolOutcomes.subList(
+                        safeStart,
+                        state.toolOutcomes.size())
+                .stream()
+                .anyMatch(outcome ->
+                        outcome.failureReason()
+                                == ToolFailureReason
+                                        .TOOL_EXECUTION_AUTHORITY_INVALID);
     }
 
     private static void recordTransformation(

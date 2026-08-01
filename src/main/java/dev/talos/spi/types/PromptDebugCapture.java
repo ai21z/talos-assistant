@@ -10,6 +10,16 @@ public final class PromptDebugCapture {
     public static final String BACKGROUND_MAINTENANCE_TAG = "prompt-debug:background-maintenance";
     public static final String TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC =
             "taskContract.targetRoles";
+    public static final String TASK_CONTRACT_SUMMARY_DIAGNOSTIC =
+            "taskContract.summary";
+    public static final String TASK_CONTRACT_TARGET_LABEL_DIAGNOSTIC =
+            "taskContract.targetLabel";
+    public static final String TASK_CONTRACT_TARGETS_DIAGNOSTIC =
+            "taskContract.targets";
+    public static final String TASK_CONTRACT_TARGET_COVERAGE_LABEL_DIAGNOSTIC =
+            "taskContract.targetCoverageLabel";
+    public static final String TASK_CONTRACT_TARGET_COVERAGE_DIAGNOSTIC =
+            "taskContract.targetCoverage";
 
     private static final AtomicReference<PromptDebugSnapshot> LATEST_RECORDED = new AtomicReference<>();
     private static final AtomicReference<PromptDebugSnapshot> LATEST_USER_FACING = new AtomicReference<>();

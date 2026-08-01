@@ -5,10 +5,16 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.util.Sanitize;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
@@ -38,6 +44,7 @@ class ToolCallLoopOrchestrationCharacterizationTest {
 
     @AfterEach
     void clearTrace() {
+        TurnTaskContractCapture.clear();
         LocalTurnTraceCapture.clear();
     }
 
@@ -65,7 +72,8 @@ class ToolCallLoopOrchestrationCharacterizationTest {
         ToolCallLoop loop = createLoop(echoTool());
         List<ChatMessage> messages = baseMessages("Echo T823 through the tool.");
 
-        ToolCallLoop.LoopResult result = loop.run(
+        ToolCallLoop.LoopResult result = runCapturedRuntime(
+                loop,
                 textToolCall("T823-text"),
                 messages,
                 WORKSPACE,
@@ -98,7 +106,8 @@ class ToolCallLoopOrchestrationCharacterizationTest {
                 "talos.echo",
                 Map.of("input", "T823-native")));
 
-        ToolCallLoop.LoopResult result = loop.run(
+        ToolCallLoop.LoopResult result = runCapturedRuntime(
+                loop,
                 "",
                 nativeCalls,
                 messages,
@@ -136,8 +145,10 @@ class ToolCallLoopOrchestrationCharacterizationTest {
                         "{\"type\":\"object\"}")))
                 .build();
 
-        ToolCallLoop.LoopResult result = loop.run(
+        ToolCallLoop.LoopResult result = runCapturedProviderText(
+                loop,
                 textToolCall("first"),
+                List.of("talos.echo"),
                 messages,
                 WORKSPACE,
                 context);
@@ -159,7 +170,8 @@ class ToolCallLoopOrchestrationCharacterizationTest {
         ToolCallLoop loop = createLoop(echoTool());
         List<ChatMessage> messages = baseMessages("Echo once, then stop truthfully if continuation is malformed.");
 
-        ToolCallLoop.LoopResult result = loop.run(
+        ToolCallLoop.LoopResult result = runCapturedRuntime(
+                loop,
                 textToolCall("first"),
                 messages,
                 WORKSPACE,
@@ -189,15 +201,29 @@ class ToolCallLoopOrchestrationCharacterizationTest {
         List<ChatMessage> messages = baseMessages("Keep echoing until the deterministic limit stops the loop.");
         String providerContinuation = """
                 Provider preface. <script>removeMe()</script>
-                <tool_call>{"name":"talos.echo","parameters":{"input":"second"}}</tool_call>
+                ```json
+                {"name":"talos.echo","arguments":{"input":"second"}}
+                ```
                 """;
+        String selectedProviderContinuation =
+                Sanitize.sanitizeForOutputPreservingToolCalls(
+                        providerContinuation);
         Context context = Context.builder(new Config())
-                .llm(ScriptedNativeLlmClient.of(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackOf(List.of(
                         new LlmClient.StreamResult(providerContinuation, List.of(), "stop"))))
+                .nativeToolSpecs(List.of(new ToolSpec(
+                        "talos.echo",
+                        "Echo the supplied input.",
+                        "{\"type\":\"object\"}")))
                 .build();
 
-        ToolCallLoop.LoopResult result = loop.run(
-                textToolCall("first"), messages, WORKSPACE, context);
+        ToolCallLoop.LoopResult result = runCapturedProviderText(
+                loop,
+                textToolCall("first"),
+                List.of("talos.echo"),
+                messages,
+                WORKSPACE,
+                context);
 
         assertTrue(result.hitIterLimit());
         assertFalse(result.finalAnswer().contains("removeMe"), result.finalAnswer());
@@ -207,8 +233,16 @@ class ToolCallLoopOrchestrationCharacterizationTest {
         TurnTraceEvent iterationLimit = transformed.get(0);
         assertEquals("TOOL_LOOP_ITERATION_LIMIT",
                 iterationLimit.data().get("reasonCode"));
-        assertEquals(event(trace, "GENERATION_RESPONSE_CAPTURED").data().get("assistantHash"),
+        assertEquals(
+                hash(selectedProviderContinuation),
                 iterationLimit.data().get("fromAnswerHash"));
+        assertEquals(
+                1,
+                events(trace, "GENERATION_RESPONSE_CAPTURED").stream()
+                        .filter(captured -> hash(selectedProviderContinuation)
+                                .equals(captured.data().get("assistantHash")))
+                        .count(),
+                trace.events().toString());
         assertEquals(hash(result.finalAnswer()),
                 iterationLimit.data().get("answerHash"));
         assertEquals(hash(result.finalAnswer()),
@@ -227,7 +261,8 @@ class ToolCallLoopOrchestrationCharacterizationTest {
                         new LlmClient.StreamResult(providerAnswer, List.of(), "stop"))))
                 .build();
 
-        ToolCallLoop.LoopResult result = loop.run(
+        ToolCallLoop.LoopResult result = runCapturedRuntime(
+                loop,
                 withheldCommandToolCall(), messages, WORKSPACE, context);
 
         assertTrue(result.finalAnswer().contains(providerAnswer), result.finalAnswer());
@@ -260,6 +295,105 @@ class ToolCallLoopOrchestrationCharacterizationTest {
         return new ArrayList<>(List.of(
                 ChatMessage.system("You are Talos."),
                 ChatMessage.user(userRequest)));
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedRuntime(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        try {
+            return loop.run(initialAnswer, messages, workspace, ctx);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedRuntime(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<ChatMessage.NativeToolCall> nativeToolCalls,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        try {
+            return loop.run(
+                    initialAnswer,
+                    nativeToolCalls,
+                    messages,
+                    workspace,
+                    ctx);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedProviderText(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<String> selectedToolNames,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source
+                                    .FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract
+                                    .bound(
+                                            ProviderResponseCapture
+                                                    .ToolAuthorityMode
+                                                    .PROVIDER_TEXT_JSON,
+                                            selectedToolNames,
+                                            ToolChoiceMode.AUTO,
+                                            ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "d".repeat(64),
+                            List.of()));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    initialAnswer,
+                                    List.of(),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion
+                                            .PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    true));
+            generation.complete(receipt);
+            return loop.run(
+                    initialAnswer,
+                    List.of(),
+                    receipt,
+                    messages,
+                    workspace,
+                    ctx);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     private static Context ctxWithResponses(String... responses) {

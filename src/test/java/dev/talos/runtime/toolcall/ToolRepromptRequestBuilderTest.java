@@ -5,6 +5,9 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
@@ -16,7 +19,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRepromptRequestBuilderTest {
@@ -54,13 +57,45 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
-    void narrowingPreservesOriginalToolsWhenNoRequestedToolsAreAvailable() {
+    void narrowingFailsClosedWhenNoRequestedToolsAreAvailable() {
         List<ToolSpec> readOnlyTools = List.of(tool("talos.read_file"), tool("talos.list_dir"));
         LoopState state = loopState(readOnlyTools, List.of(ChatMessage.user("Fix README.md.")));
 
         List<ToolSpec> tools = ToolRepromptRequestBuilder.toolSpecs(state, true, false);
 
-        assertSame(readOnlyTools, tools);
+        assertTrue(tools.isEmpty());
+    }
+
+    @Test
+    void nestedRepromptFailsClosedWithoutExactBoundResponseAuthority() {
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user("Fix README.md.")));
+
+        state.currentResponseReceipt = null;
+        assertTrue(ToolRepromptRequestBuilder.currentNativeToolSpecs(
+                state).isEmpty());
+
+        state.currentResponseReceipt =
+                ProviderResponseCapture.Receipt.none();
+        assertTrue(ToolRepromptRequestBuilder.currentNativeToolSpecs(
+                state).isEmpty());
+
+        state.currentResponseReceipt =
+                unboundProviderReceipt();
+        assertTrue(ToolRepromptRequestBuilder.currentNativeToolSpecs(
+                state).isEmpty());
+
+        ProviderResponseCapture.Receipt staticOnly =
+                boundButProviderIneligibleReceipt(
+                        broadTools().stream()
+                                .map(ToolSpec::name)
+                                .toList());
+        assertTrue(staticOnly.toolAuthorityContract().bound());
+        assertFalse(staticOnly.providerToolCallEligible());
+        state.currentResponseReceipt = staticOnly;
+        assertTrue(ToolRepromptRequestBuilder.currentNativeToolSpecs(
+                state).isEmpty());
     }
 
     @Test
@@ -210,11 +245,18 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
-    void nonStaticRepairMessagesReuseCurrentStateMessages() {
+    void nonStaticRepromptWithoutCapturedResolutionFailsClosed() {
         List<ChatMessage> messages = List.of(ChatMessage.system("sys"), ChatMessage.user("Continue."));
         LoopState state = loopState(broadTools(), messages);
+        dev.talos.runtime.TurnTaskContractCapture.clear();
 
-        assertSame(messages, ToolRepromptRequestBuilder.messages(state, false, List.of(), "Continue."));
+        assertThrows(
+                IllegalStateException.class,
+                () -> ToolRepromptRequestBuilder.messages(
+                        state,
+                        false,
+                        List.of(),
+                        "Continue."));
     }
 
     @Test
@@ -259,7 +301,17 @@ class ToolRepromptRequestBuilderTest {
                 .llm(LlmClient.scripted("No tool call."))
                 .nativeToolSpecs(tools)
                 .build();
-        return new LoopState("", List.of(), messages, workspace, ctx, null, 5, 0);
+        return new LoopState(
+                "",
+                List.of(),
+                boundProviderReceipt(
+                        tools.stream().map(ToolSpec::name).toList()),
+                messages,
+                workspace,
+                ctx,
+                null,
+                5,
+                0);
     }
 
     private static List<ToolSpec> broadTools() {
@@ -277,5 +329,117 @@ class ToolRepromptRequestBuilderTest {
 
     private static List<String> toolNames(List<ToolSpec> tools) {
         return tools.stream().map(ToolSpec::name).toList();
+    }
+
+    private static ProviderResponseCapture.Receipt boundProviderReceipt(
+            List<String> selectedToolNames
+    ) {
+        ProviderResponseCapture.Scope scope =
+                ProviderResponseCapture.begin(
+                        new ProviderResponseCapture.Listener() {},
+                        "tool-reprompt-request-builder");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    scope.openGeneration(
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                        ProviderResponseCapture.ToolAuthorityContract.bound(
+                                ProviderResponseCapture.ToolAuthorityMode
+                                        .PROVIDER_NATIVE,
+                                selectedToolNames,
+                                ToolChoiceMode.AUTO,
+                                ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "a".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt = attempt.respond(
+                    new ProviderResponseCapture.Response(
+                            "",
+                            1,
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Completion.PROVIDER_EOS,
+                            false,
+                            false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
+    }
+
+    private static ProviderResponseCapture.Receipt
+            boundButProviderIneligibleReceipt(
+                    List<String> selectedToolNames
+            ) {
+        ProviderResponseCapture.Scope scope =
+                ProviderResponseCapture.begin(
+                        new ProviderResponseCapture.Listener() {},
+                        "tool-reprompt-static-only-receipt");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    scope.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            attempt.requestDispatched(
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "d".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt = attempt.respond(
+                    new ProviderResponseCapture.Response(
+                            "",
+                            1,
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Completion.PROVIDER_EOS,
+                            false,
+                            false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
+    }
+
+    private static ProviderResponseCapture.Receipt unboundProviderReceipt() {
+        ProviderResponseCapture.Generation generation =
+                ProviderResponseCapture.openGeneration(
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                        ProviderResponseCapture.ToolAuthorityContract.unbound(
+                                ProviderResponseCapture.ToolAuthorityMode
+                                        .PROVIDER_NATIVE));
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt,
+                new ProviderTransportHandoff.DispatchEvidence(
+                        "sha256:" + "b".repeat(64),
+                        List.of()));
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        "",
+                        0,
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false,
+                        false));
+        generation.complete(receipt);
+        return receipt;
     }
 }

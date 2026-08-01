@@ -3,14 +3,20 @@ package dev.talos.core.llm;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -31,6 +38,8 @@ class ToolCallRepromptStagePromptDebugTest {
     @AfterEach
     void clearPromptDebug() {
         PromptDebugCapture.clear();
+        TurnTaskContractCapture.clear();
+        ProviderResponseCapture.clear();
     }
 
     @Test
@@ -62,9 +71,13 @@ class ToolCallRepromptStagePromptDebugTest {
                         """),
                 ChatMessage.user("Fix the remaining static BMI calculator verification problems.")
         ));
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
         LoopState state = new LoopState(
                 "",
                 List.of(),
+                boundForegroundProviderReceipt(writeTools),
                 messages,
                 workspace,
                 ctx,
@@ -152,6 +165,55 @@ class ToolCallRepromptStagePromptDebugTest {
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
     }
 
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> tools
+    ) {
+        List<String> selectedToolNames =
+                tools.stream().map(ToolSpec::name).toList();
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "tool-call-reprompt-stage-prompt-debug");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "d".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    List.of(new ChatMessage.NativeToolCall(
+                                            "fixture-prior-call",
+                                            selectedToolNames.getFirst(),
+                                            Map.of())),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
+    }
+
     private static Config engineConfig() {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
@@ -195,6 +257,15 @@ class ToolCallRepromptStagePromptDebugTest {
             return Stream.of(
                     TokenChunk.of("I still need to know what to change."),
                     TokenChunk.eos());
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff
+        ) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override

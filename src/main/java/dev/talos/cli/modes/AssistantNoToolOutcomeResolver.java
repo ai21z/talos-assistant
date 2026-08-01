@@ -18,11 +18,6 @@ final class AssistantNoToolOutcomeResolver {
     }
 
     @FunctionalInterface
-    interface RetryPlanResolver {
-        CurrentTurnPlan resolve(List<ChatMessage> messages);
-    }
-
-    @FunctionalInterface
     interface PhaseTransition {
         void moveToVerify(ToolCallLoop.LoopResult loopResult, int extraMutationSuccesses);
     }
@@ -47,12 +42,15 @@ final class AssistantNoToolOutcomeResolver {
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx,
-            RetryPlanResolver retryPlanResolver,
             PhaseTransition phaseTransition,
             ToolAnswerShaper toolAnswerShaper,
             NoToolAnswerShaper noToolAnswerShaper
     ) {
-        CurrentTurnPlan safePlan = safePlan(plan, messages, retryPlanResolver);
+        if (plan == null) {
+            throw new IllegalArgumentException(
+                    "captured retry plan is required");
+        }
+        CurrentTurnPlan safePlan = plan;
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
                 || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
             // T743: on mutation/workspace-obligation turns, malformed protocol
@@ -129,10 +127,11 @@ final class AssistantNoToolOutcomeResolver {
                 safePlan,
                 workspace,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        retryPlanResolver.resolve(retryMessages)));
+                        safePlan,
+                        RetryDispatchPurpose.READ_ONLY_INSPECTION));
         if (inspectionRetry.loopResult() != null) {
             return new Resolution(
                     toolAnswerShaper.shape(
@@ -149,14 +148,6 @@ final class AssistantNoToolOutcomeResolver {
                         inspectionRetry.answer(),
                         mutationRetry.actionObligationFailed()),
                 AnswerGroundingDisclosure.zeroReadWorkspaceNote(safePlan));
-    }
-
-    private static CurrentTurnPlan safePlan(
-            CurrentTurnPlan plan,
-            List<ChatMessage> messages,
-            RetryPlanResolver retryPlanResolver
-    ) {
-        return plan == null ? retryPlanResolver.resolve(messages) : plan;
     }
 
     private static MissingMutationRetry.Result mutationRetryIfNeeded(
@@ -179,7 +170,8 @@ final class AssistantNoToolOutcomeResolver {
                                 ctx,
                                 retryMessages,
                                 retryPlan,
-                                retryToolSpecs));
+                                retryToolSpecs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
     }
 
     private static ToolCallLoop.LoopResult emptyNoToolLoopResult(

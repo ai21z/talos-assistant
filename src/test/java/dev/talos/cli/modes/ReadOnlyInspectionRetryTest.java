@@ -7,6 +7,8 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -47,6 +49,7 @@ class ReadOnlyInspectionRetryTest {
     @AfterEach
     void clearTrace() {
         LocalTurnTraceCapture.clear();
+        TurnTaskContractCapture.clear();
     }
 
     @Test
@@ -70,6 +73,9 @@ class ReadOnlyInspectionRetryTest {
                 List.of(),
                 List.of("talos.read_file"),
                 List.of());
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
         AtomicReference<List<ChatMessage>> retryMessages = new AtomicReference<>();
 
         ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
@@ -108,6 +114,39 @@ class ReadOnlyInspectionRetryTest {
     }
 
     @Test
+    void higherLevelRetryWithoutCapturedPlanFailsBeforeDispatchOrStageMutation(
+            @TempDir Path workspace) {
+        String request = "Explain this workspace.";
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("must not dispatch", List.of())),
+                16_384);
+        Context ctx = providerContext(workspace, provider.client());
+        List<ChatMessage> messages = messages(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        beginTrace("read-only-retry-missing-captured-plan");
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.VERIFICATION);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> AssistantTurnExecutor.readOnlyInspectionRetryIfNeeded(
+                        "I cannot inspect from here.",
+                        messages,
+                        null,
+                        workspace,
+                        ctx));
+
+        assertTrue(provider.requests().isEmpty(),
+                "missing captured plan must fail before provider dispatch");
+        assertEquals(TurnExecutionStage.VERIFICATION,
+                LocalTurnTraceCapture.currentExecutionStage(),
+                "missing captured plan must not advance the execution stage");
+        assertEquals(2, messages.size(),
+                "missing captured plan must not append a synthetic retry prompt");
+    }
+
+    @Test
     void runtimeLegacyTextStopCannotAuthorizeReadOnlyRetryToolCall(
             @TempDir Path workspace) throws Exception {
         beginTrace("read-only-legacy-stop-rejected");
@@ -116,10 +155,14 @@ class ReadOnlyInspectionRetryTest {
         String readJson =
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
         Context ctx = context(workspace, "unused continuation");
+        List<ChatMessage> messages = messages(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
 
         ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
                 "I cannot inspect from here.",
-                messages(request),
+                messages,
                 plan(TaskContractResolver.fromUserRequest(request), ExecutionPhase.INSPECT),
                 workspace,
                 ctx,

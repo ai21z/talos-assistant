@@ -214,7 +214,9 @@ final class StaticWebContinuationPlanner {
             LoopState state,
             List<String> missingSourceTargets
     ) {
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) {
             TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
@@ -265,7 +267,9 @@ final class StaticWebContinuationPlanner {
             VerificationContinuation continuation,
             List<String> missingSourceTargets
     ) {
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) {
             TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
@@ -483,7 +487,11 @@ final class StaticWebContinuationPlanner {
 
     private static List<String> optionalCssRepairTargets(TaskContract contract) {
         if (contract == null || contract.originalUserRequest().isBlank()) return List.of();
-        TaskIntent intent = TaskContractResolver.intentFromUserRequest(contract.originalUserRequest());
+        TaskIntent intent = TurnTaskContractCapture.getIntent();
+        if (intent == null) {
+            intent = TaskContractResolver.resolveFromUserRequest(
+                    contract.originalUserRequest()).intent();
+        }
         return intent.targets().pathsByRole(TargetRole.MAY_MUTATE).stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())

@@ -22,6 +22,15 @@ final class ToolRepromptOverlayContinuation {
             boolean staticRepairObligationActive,
             List<ToolSpec> repromptToolSpecs
     ) {
+        if (state != null
+                && state.hasPendingActionObligation()
+                && (repromptToolSpecs == null
+                        || repromptToolSpecs.isEmpty())) {
+            state.failPendingActionObligation(
+                    "required retry tool is unavailable in the captured "
+                            + "current-turn surface");
+            return false;
+        }
         List<ChatMessage> requestMessages = List.of();
         TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
@@ -34,7 +43,8 @@ final class ToolRepromptOverlayContinuation {
                     state,
                     staticRepairObligationActive,
                     remainingRepairTargets,
-                    userTask));
+                    userTask,
+                    repromptToolSpecs));
             return ToolRepromptChatExecutor.executeResult(
                     state,
                     requestMessages,

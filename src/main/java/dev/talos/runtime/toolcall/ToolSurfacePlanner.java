@@ -6,8 +6,10 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolOperationMetadata;
@@ -44,6 +46,16 @@ public final class ToolSurfacePlanner {
             ExecutionPhase phase,
             ToolRegistry registry,
             ToolCapabilityAvailability availability
+    ) {
+        return plan(contract, phase, registry, availability, false);
+    }
+
+    private static Plan plan(
+            TaskContract contract,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            ToolCapabilityAvailability availability,
+            boolean suppressWorkspaceOperationBranch
     ) {
         if (registry == null || registry.isEmpty()) {
             return new Plan(List.of(), "no registry tools");
@@ -105,7 +117,9 @@ public final class ToolSurfacePlanner {
                         safeAvailability,
                         "text format apply surface");
             }
-            var workspaceOperation = WorkspaceOperationIntent.detect(contract);
+            var workspaceOperation = suppressWorkspaceOperationBranch
+                    ? java.util.Optional.<WorkspaceOperationIntent.Intent>empty()
+                    : WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
                 return select(
@@ -151,6 +165,51 @@ public final class ToolSurfacePlanner {
             return select(registry, ToolSurfacePlanner::isVerificationOperation, safeAvailability, "verification command surface");
         }
         return select(registry, ToolSurfacePlanner::isReadOnlyOperation, safeAvailability, "read-only metadata surface");
+    }
+
+    /**
+     * Plans from the authoritative typed resolution when one is available.
+     *
+     * <p>Until the dedicated workspace-operation planner owns coordinated
+     * source/destination clauses, an explicitly blocked tail must not be
+     * advertised merely because legacy request prose resembles an operation.
+     */
+    public static Plan plan(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            ToolCapabilityAvailability availability
+    ) {
+        TaskResolution safeResolution = resolution == null
+                ? TaskResolution.contractOnly(TaskContract.unknown(""))
+                : resolution;
+        if (safeResolution.blocksWorkspaceOperations()
+                && safeResolution.blocksUnscopedMutation()) {
+            return new Plan(
+                    List.of(),
+                    "coordinated workspace-operation tail blocked without "
+                            + "authorized content mutation");
+        }
+        if (safeResolution.blocksUnscopedMutation()) {
+            return select(
+                    registry,
+                    ToolSurfacePlanner::isReadOnlyOperation,
+                    availability,
+                    "non-authoritative mutation tail read-only surface");
+        }
+        Plan base = plan(
+                safeResolution.contract(),
+                phase,
+                registry,
+                availability,
+                safeResolution.blocksWorkspaceOperations());
+        if (!safeResolution.blocksWorkspaceOperations()) return base;
+        return new Plan(
+                base.nativeToolSpecs().stream()
+                        .filter(spec -> !WorkspaceOperationPlanner
+                                .isWorkspaceOperationTool(spec.name()))
+                        .toList(),
+                base.reason() + "; coordinated workspace-operation tail blocked");
     }
 
     /**

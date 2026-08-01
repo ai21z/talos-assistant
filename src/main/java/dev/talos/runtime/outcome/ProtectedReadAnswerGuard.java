@@ -1,6 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
@@ -248,7 +249,8 @@ public final class ProtectedReadAnswerGuard {
         if (loopResult == null || loopResult.readFileBodies() == null || loopResult.readFileBodies().isEmpty()) {
             return "";
         }
-        String prompt = latestNaturalLanguageUserPrompt(messages);
+        String prompt =
+                TurnTaskContractCapture.originalUserRequestOrResolve(messages);
         String phrase = containmentPhrase(prompt);
         if (phrase.isBlank()) return "";
         for (String body : loopResult.readFileBodies().values()) {
@@ -346,19 +348,6 @@ public final class ProtectedReadAnswerGuard {
         String normalizedAnswer = normalizeSensitiveSnippet(answer).toLowerCase(Locale.ROOT);
         String normalizedSnippet = normalizeSensitiveSnippet(snippet).toLowerCase(Locale.ROOT);
         return normalizedSnippet.length() >= 8 && normalizedAnswer.contains(normalizedSnippet);
-    }
-
-    private static String latestNaturalLanguageUserPrompt(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return "";
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if (message == null || !"user".equals(message.role())) continue;
-            String content = message.content() == null ? "" : message.content().strip();
-            if (content.isBlank()) continue;
-            if (content.startsWith("[tool_result:")) continue;
-            return content;
-        }
-        return "";
     }
 
     private static String containmentPhrase(String prompt) {

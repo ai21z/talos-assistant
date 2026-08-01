@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResourceDecision;
 import dev.talos.runtime.task.TaskContract;
@@ -92,7 +93,8 @@ final class EditRecoveryFullRewritePlanner {
         if (!wasReadThisTurn(state, path)) return false;
         if (!hasSmallTextExtension(path)) return false;
         if (recoverySourceBody(state, path) == null) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         return contract != null && contract.mutationAllowed();
     }
 

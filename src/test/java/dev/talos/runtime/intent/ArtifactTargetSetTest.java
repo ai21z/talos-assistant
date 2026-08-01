@@ -31,9 +31,35 @@ class ArtifactTargetSetTest {
         assertEquals(TargetSource.USER_REQUEST, stored.derivation().source());
         assertEquals("explicit mutation target", stored.derivation().reason());
         assertEquals(13, stored.derivation().startOffset());
+        assertEquals(
+                IntentDerivation.UNKNOWN_OFFSET,
+                stored.derivation().authorityEndOffset());
         assertEquals(30, stored.derivation().endOffset());
         assertEquals("styles\\main.css", stored.derivation().sourceText());
         assertEquals(0.91, stored.derivation().confidence());
+    }
+
+    @Test
+    void preservesIndependentAuthorityEndInsideTheExactSourceSpan() {
+        IntentDerivation derivation = new IntentDerivation(
+                TargetSource.USER_REQUEST,
+                "coordinated mutation tail",
+                13,
+                13 + "update style.css".length(),
+                30,
+                "update style.css.",
+                1.0);
+
+        TargetRef stored = ArtifactTargetSet.of(
+                        new TargetRef("style.css", TargetRole.MUST_MUTATE, derivation))
+                .find("style.css")
+                .orElseThrow();
+
+        assertEquals(13, stored.derivation().startOffset());
+        assertEquals(
+                13 + "update style.css".length(),
+                stored.derivation().authorityEndOffset());
+        assertEquals(30, stored.derivation().endOffset());
     }
 
     @Test
@@ -161,6 +187,36 @@ class ArtifactTargetSetTest {
                 () -> TargetRef.of("   ", TargetRole.MENTIONED_ONLY));
         assertThrows(IllegalArgumentException.class,
                 () -> new IntentDerivation(TargetSource.USER_REQUEST, "bad", 0, 3, "bad", 1.2));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "authority without span",
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        3,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        "bad",
+                        1.0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "empty authority",
+                        3,
+                        3,
+                        8,
+                        "bad",
+                        1.0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "authority beyond span",
+                        3,
+                        9,
+                        8,
+                        "bad",
+                        1.0));
     }
 
     @Test

@@ -10,7 +10,11 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.intent.IntentDerivation;
+import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.TaskIntentEvidence;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.slf4j.Logger;
@@ -160,6 +164,9 @@ public final class JsonSessionStore implements SessionStore {
     }
 
     private void writeTurn(String sessionId, TurnRecord record) throws IOException {
+        requireStoredUserRequestCoordinates(
+                record.userInput(),
+                record.policyTrace());
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("turnNumber", record.turnNumber());
         row.put("timestamp", record.timestamp().toString());
@@ -239,6 +246,7 @@ public final class JsonSessionStore implements SessionStore {
         String traceSummary = str(row, "retrievalTraceSummary");
         String status = str(row, "status");
         TurnPolicyTrace policyTrace = policyTraceFrom(row.get("policyTrace"));
+        requireStoredUserRequestCoordinates(userInput, policyTrace);
         String traceId = str(row, "traceId");
 
         @SuppressWarnings("unchecked")
@@ -399,9 +407,23 @@ public final class JsonSessionStore implements SessionStore {
     }
 
     private void writeTrace(String sessionId, LocalTurnTrace trace) throws IOException {
+        writeTrace(sessionId, trace, null);
+    }
+
+    private void writeTrace(
+            String sessionId,
+            LocalTurnTrace trace,
+            String canonicalUserRequest
+    ) throws IOException {
+        requireExactLocalTraceEvidence(
+                MAPPER.valueToTree(trace),
+                canonicalUserRequest);
+        String json = sanitizedTraceJson(trace, canonicalUserRequest);
+        requireExactLocalTraceEvidence(
+                MAPPER.readTree(json),
+                canonicalUserRequest);
         Path dir = traceDirFor(sessionId);
         Files.createDirectories(dir);
-        String json = sanitizedPrettyJson(trace);
         Files.writeString(dir.resolve(traceFileName(trace)), json);
     }
 
@@ -431,11 +453,38 @@ public final class JsonSessionStore implements SessionStore {
             return new TurnEnvelopePersistenceReceipt(
                     TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
         }
+        try {
+            requireStoredUserRequestCoordinates(
+                    record.userInput(),
+                    record.policyTrace());
+            if (trace != null) {
+                // Prove the original USER_REQUEST evidence against the original
+                // persisted request before either side is sanitized. Redaction
+                // may conservatively invalidate a proven coordinate pair, but
+                // it must never turn an originally unbound pair into an
+                // acceptable unknown-offset envelope.
+                requireExactLocalTraceEvidence(
+                        MAPPER.valueToTree(trace),
+                        record.userInput());
+                String candidateJson = sanitizedTraceJson(
+                        trace,
+                        record.userInput());
+                requireExactLocalTraceEvidence(
+                        MAPPER.readTree(candidateJson),
+                        record.userInput());
+            }
+        } catch (Exception e) {
+            LOG.warn("Rejected malformed turn envelope for {}: {}",
+                    SafeLogFormatter.value(sessionId),
+                    SafeLogFormatter.throwableMessage(e));
+            return new TurnEnvelopePersistenceReceipt(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
+        }
 
         boolean traceWritten = false;
         if (trace != null) {
             try {
-                writeTrace(sessionId, trace);
+                writeTrace(sessionId, trace, record.userInput());
                 traceWritten = true;
             } catch (Exception e) {
                 LOG.warn("Failed to save local turn trace for {}: {}",
@@ -492,11 +541,12 @@ public final class JsonSessionStore implements SessionStore {
         }
         Path dir = traceDirFor(sessionId);
         if (!Files.isDirectory(dir)) return Optional.empty();
+        Map<String, String> requestBindings = traceRequestBindings(sessionId);
         try (var stream = Files.list(dir)) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith("-" + sanitizeTraceId(traceId) + ".json"))
                     .sorted()
-                    .map(path -> readTrace(path).filter(trace ->
+                    .map(path -> readTrace(path, requestBindings).filter(trace ->
                             traceId.equals(trace.traceId())
                                     && trace.turnNumber() > 0
                                     && path.getFileName().toString().equals(
@@ -517,11 +567,12 @@ public final class JsonSessionStore implements SessionStore {
         if (sessionId == null || sessionId.isBlank()) return Optional.empty();
         Path dir = traceDirFor(sessionId);
         if (!Files.isDirectory(dir)) return Optional.empty();
+        Map<String, String> requestBindings = traceRequestBindings(sessionId);
         try (var stream = Files.list(dir)) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
                     .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
-                    .map(path -> readTrace(path).filter(trace ->
+                    .map(path -> readTrace(path, requestBindings).filter(trace ->
                             !trace.traceId().isBlank()
                                     && trace.turnNumber() > 0
                                     && path.getFileName().toString().equals(
@@ -536,9 +587,20 @@ public final class JsonSessionStore implements SessionStore {
         }
     }
 
-    private Optional<LocalTurnTrace> readTrace(Path path) {
+    private Optional<LocalTurnTrace> readTrace(
+            Path path,
+            Map<String, String> requestBindings
+    ) {
         try {
-            return Optional.of(MAPPER.readValue(Files.readString(path), LocalTurnTrace.class));
+            JsonNode root = MAPPER.readTree(Files.readString(path));
+            String traceId = root.path("traceId").isTextual()
+                    ? root.path("traceId").asText()
+                    : "";
+            String canonicalRequest = requestBindings == null
+                    ? null
+                    : requestBindings.get(traceId);
+            requireExactLocalTraceEvidence(root, canonicalRequest);
+            return Optional.of(MAPPER.treeToValue(root, LocalTurnTrace.class));
         } catch (Exception e) {
             LOG.warn("Skipping malformed local trace {}: {}",
                     SafeLogFormatter.value(path.getFileName()), SafeLogFormatter.throwableMessage(e));
@@ -548,28 +610,85 @@ public final class JsonSessionStore implements SessionStore {
 
     private static String sanitizedPrettyJson(Object value) throws IOException {
         JsonNode root = MAPPER.valueToTree(value);
-        sanitizeJsonTextNodes(root);
+        sanitizeJsonTextNodes(root, false);
         return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+    }
+
+    private static String sanitizedTraceJson(
+            LocalTurnTrace trace,
+            String canonicalUserRequest
+    ) throws IOException {
+        JsonNode root = MAPPER.valueToTree(trace);
+        sanitizeJsonTextNodes(root, false);
+        if (canonicalUserRequest != null
+                && !ProtectedContentPolicy.sanitizeText(canonicalUserRequest)
+                .equals(canonicalUserRequest)) {
+            invalidateLocalUserRequestCoordinates(root);
+        }
+        return MAPPER.writerWithDefaultPrettyPrinter()
+                .writeValueAsString(root);
+    }
+
+    private static void invalidateLocalUserRequestCoordinates(JsonNode root) {
+        JsonNode targets = root == null
+                ? null
+                : root.path("taskContract").path("rolefulTargets");
+        if (targets == null || !targets.isArray()) return;
+        for (JsonNode target : targets) {
+            if (target instanceof ObjectNode objectTarget
+                    && TargetSource.USER_REQUEST.name().equals(
+                            objectTarget.path("source").asText())) {
+                invalidateCoordinateFields(objectTarget);
+            }
+        }
     }
 
     private static String sanitizedCompactJson(Object value) throws IOException {
         JsonNode root = MAPPER.valueToTree(value);
-        sanitizeJsonTextNodes(root);
+        sanitizeJsonTextNodes(root, false);
         return MAPPER.writeValueAsString(root);
     }
 
-    private static void sanitizeJsonTextNodes(JsonNode node) {
+    private static void sanitizeJsonTextNodes(
+            JsonNode node,
+            boolean inheritedCoordinateInvalidation
+    ) {
         if (node == null) return;
         if (node instanceof ObjectNode objectNode) {
+            boolean invalidateDescendantCoordinates =
+                    inheritedCoordinateInvalidation;
+            boolean invalidateOwnCoordinates =
+                    inheritedCoordinateInvalidation;
             var fields = objectNode.fields();
+            List<Map.Entry<String, JsonNode>> children =
+                    new java.util.ArrayList<>();
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> field = fields.next();
                 JsonNode child = field.getValue();
                 if (child != null && child.isTextual()) {
-                    objectNode.put(field.getKey(), ProtectedContentPolicy.sanitizeText(child.asText()));
+                    String original = child.asText();
+                    String sanitized =
+                            ProtectedContentPolicy.sanitizeText(original);
+                    objectNode.put(field.getKey(), sanitized);
+                    if (!sanitized.equals(original)) {
+                        if ("userInput".equals(field.getKey())) {
+                            invalidateDescendantCoordinates = true;
+                        }
+                        if ("sourceText".equals(field.getKey())) {
+                            invalidateOwnCoordinates = true;
+                        }
+                    }
                 } else {
-                    sanitizeJsonTextNodes(child);
+                    children.add(Map.entry(field.getKey(), child));
                 }
+            }
+            if (invalidateOwnCoordinates) {
+                invalidateCoordinateFields(objectNode);
+            }
+            for (Map.Entry<String, JsonNode> child : children) {
+                sanitizeJsonTextNodes(
+                        child.getValue(),
+                        invalidateDescendantCoordinates);
             }
             return;
         }
@@ -580,9 +699,207 @@ public final class JsonSessionStore implements SessionStore {
                     arrayNode.set(i, MAPPER.getNodeFactory().textNode(
                             ProtectedContentPolicy.sanitizeText(child.asText())));
                 } else {
-                    sanitizeJsonTextNodes(child);
+                    sanitizeJsonTextNodes(
+                            child,
+                            inheritedCoordinateInvalidation);
                 }
             }
+        }
+    }
+
+    private Map<String, String> traceRequestBindings(String sessionId) {
+        LinkedHashMap<String, String> bindings = new LinkedHashMap<>();
+        java.util.HashSet<String> conflicts = new java.util.HashSet<>();
+        for (TurnRecord record : loadTurns(sessionId)) {
+            String traceId = record.traceId();
+            if (traceId == null || traceId.isBlank() || conflicts.contains(traceId)) {
+                continue;
+            }
+            String canonical = record.userInput() == null
+                    ? ""
+                    : record.userInput().strip();
+            String previous = bindings.putIfAbsent(traceId, canonical);
+            if (previous != null && !previous.equals(canonical)) {
+                bindings.remove(traceId);
+                conflicts.add(traceId);
+            }
+        }
+        return Map.copyOf(bindings);
+    }
+
+    private static void invalidateCoordinateFields(ObjectNode objectNode) {
+        if (objectNode == null
+                || !objectNode.has("startOffset")
+                && !objectNode.has("authorityEndOffset")
+                && !objectNode.has("endOffset")) {
+            return;
+        }
+        objectNode.put("startOffset", -1);
+        objectNode.put("authorityEndOffset", -1);
+        objectNode.put("endOffset", -1);
+    }
+
+    private static void requireExactLocalTraceEvidence(
+            JsonNode root,
+            String canonicalUserRequest
+    ) {
+        JsonNode targets = root == null
+                ? null
+                : root.path("taskContract").path("rolefulTargets");
+        if (targets == null || targets.isMissingNode() || targets.isNull()) {
+            return;
+        }
+        if (!targets.isArray()) {
+            throw new IllegalArgumentException(
+                    "local trace rolefulTargets must be an array");
+        }
+        for (JsonNode target : targets) {
+            if (target == null || !target.isObject()) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target must be an object");
+            }
+            JsonNode pathNode = target.get("path");
+            if (pathNode == null
+                    || !pathNode.isTextual()
+                    || pathNode.asText().isBlank()) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target path must be a string");
+            }
+            String path = TargetRef.normalizePath(pathNode.asText());
+            JsonNode sourceNode = target.get("source");
+            if (sourceNode == null
+                    || !sourceNode.isTextual()
+                    || sourceNode.asText().isBlank()) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target source must be a named string");
+            }
+            String source = sourceNode.asText();
+            try {
+                TargetSource.valueOf(source);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target source must be a named TargetSource",
+                        e);
+            }
+            JsonNode confidenceNode = target.get("confidence");
+            if (confidenceNode == null || !confidenceNode.isNumber()) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target confidence must be numeric");
+            }
+            double confidence = confidenceNode.doubleValue();
+            if (!Double.isFinite(confidence)
+                    || confidence < 0.0
+                    || confidence > 1.0) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target confidence must be finite "
+                                + "and between 0.0 and 1.0");
+            }
+            JsonNode sourceTextNode = target.get("sourceText");
+            if (sourceTextNode == null || !sourceTextNode.isTextual()) {
+                throw new IllegalArgumentException(
+                        "local trace roleful target sourceText must be a string");
+            }
+            String sourceText = sourceTextNode.asText();
+            boolean hasStart = target.has("startOffset");
+            boolean hasAuthorityEnd = target.has("authorityEndOffset");
+            boolean hasEnd = target.has("endOffset");
+            if (!hasStart && !hasAuthorityEnd && !hasEnd) {
+                TaskIntentEvidence.requireDurableShape(
+                        path,
+                        source,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        sourceText,
+                        confidence);
+                if (target instanceof ObjectNode objectTarget) {
+                    objectTarget.put(
+                            "startOffset",
+                            IntentDerivation.UNKNOWN_OFFSET);
+                    objectTarget.put(
+                            "authorityEndOffset",
+                            IntentDerivation.UNKNOWN_OFFSET);
+                    objectTarget.put(
+                            "endOffset",
+                            IntentDerivation.UNKNOWN_OFFSET);
+                }
+                continue;
+            }
+            if (hasStart != hasEnd || hasAuthorityEnd && !hasStart) {
+                throw new IllegalArgumentException(
+                        "local trace source offsets must have a complete outer span");
+            }
+            int start = exactJsonInt(target.get("startOffset"), "startOffset");
+            int authorityEnd = hasAuthorityEnd
+                    ? exactJsonInt(
+                            target.get("authorityEndOffset"),
+                            "authorityEndOffset")
+                    : IntentDerivation.UNKNOWN_OFFSET;
+            int end = exactJsonInt(target.get("endOffset"), "endOffset");
+            if (!hasAuthorityEnd && target instanceof ObjectNode objectTarget) {
+                objectTarget.put(
+                        "authorityEndOffset",
+                        IntentDerivation.UNKNOWN_OFFSET);
+            }
+            TaskIntentEvidence.requireDurableShape(
+                    path,
+                    source,
+                    start,
+                    authorityEnd,
+                    end,
+                    sourceText,
+                    confidence);
+            if (start >= 0) {
+                if (canonicalUserRequest == null) {
+                    throw new IllegalArgumentException(
+                            "local trace USER_REQUEST coordinates require a "
+                                    + "matching persisted turn");
+                }
+                TaskIntentEvidence.requireCanonicalDurableSpan(
+                        canonicalUserRequest,
+                        path,
+                        source,
+                        start,
+                        authorityEnd,
+                        end,
+                        sourceText);
+            }
+        }
+    }
+
+    private static int exactJsonInt(JsonNode value, String field) {
+        if (value == null
+                || !value.isIntegralNumber()
+                || !value.canConvertToInt()) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON 32-bit integer");
+        }
+        return value.intValue();
+    }
+
+    private static void requireStoredUserRequestCoordinates(
+            String userInput,
+            TurnPolicyTrace policyTrace
+    ) {
+        if (policyTrace == null || policyTrace.rolefulTargets().isEmpty()) return;
+        String canonical = userInput == null ? "" : userInput.strip();
+        for (TurnPolicyTrace.RolefulTarget target : policyTrace.rolefulTargets()) {
+            TaskIntentEvidence.requireDurableShape(
+                    target.path(),
+                    target.source(),
+                    target.startOffset(),
+                    target.authorityEndOffset(),
+                    target.endOffset(),
+                    target.sourceText(),
+                    target.confidence());
+            TaskIntentEvidence.requireCanonicalDurableSpan(
+                    canonical,
+                    target.path(),
+                    target.source(),
+                    target.startOffset(),
+                    target.authorityEndOffset(),
+                    target.endOffset(),
+                    target.sourceText());
         }
     }
 
@@ -609,6 +926,9 @@ public final class JsonSessionStore implements SessionStore {
             row.put("reason", target.reason());
             row.put("sourceText", target.sourceText());
             row.put("confidence", target.confidence());
+            row.put("startOffset", target.startOffset());
+            row.put("authorityEndOffset", target.authorityEndOffset());
+            row.put("endOffset", target.endOffset());
             rolefulTargets.add(row);
         }
         out.put("rolefulTargets", rolefulTargets);
@@ -647,13 +967,67 @@ public final class JsonSessionStore implements SessionStore {
                 throw new IllegalArgumentException("roleful target role must be a named string");
             }
             TargetRole.valueOf(role);
+            Object rawSource = map.get("source");
+            if (!(rawSource instanceof String source) || source.isBlank()) {
+                throw new IllegalArgumentException(
+                        "roleful target source must be a named string");
+            }
+            TargetSource.valueOf(source);
+            Object rawConfidence = map.get("confidence");
+            if (!(rawConfidence instanceof Number number)) {
+                throw new IllegalArgumentException(
+                        "roleful target confidence must be numeric");
+            }
+            double confidence = number.doubleValue();
+            if (!Double.isFinite(confidence)
+                    || confidence < 0.0
+                    || confidence > 1.0) {
+                throw new IllegalArgumentException(
+                        "roleful target confidence must be finite and "
+                                + "between 0.0 and 1.0");
+            }
+            Object rawSourceText = map.get("sourceText");
+            if (!(rawSourceText instanceof String sourceText)) {
+                throw new IllegalArgumentException(
+                        "roleful target sourceText must be a string");
+            }
+            boolean hasStart = map.containsKey("startOffset");
+            boolean hasAuthorityEnd = map.containsKey("authorityEndOffset");
+            boolean hasEnd = map.containsKey("endOffset");
+            if (hasStart != hasEnd || hasAuthorityEnd && !hasStart) {
+                throw new IllegalArgumentException(
+                        "roleful target source offsets must have a complete outer span");
+            }
+            int start = hasStart
+                    ? exactInt(map.get("startOffset"), "startOffset")
+                    : IntentDerivation.UNKNOWN_OFFSET;
+            int end = hasEnd
+                    ? exactInt(map.get("endOffset"), "endOffset")
+                    : IntentDerivation.UNKNOWN_OFFSET;
+            int authorityEnd = hasAuthorityEnd
+                    ? exactInt(
+                            map.get("authorityEndOffset"),
+                            "authorityEndOffset")
+                    : IntentDerivation.UNKNOWN_OFFSET;
+            String path = stringVal(map, "path", "");
+            TaskIntentEvidence.requireDurableShape(
+                    path,
+                    source,
+                    start,
+                    authorityEnd,
+                    end,
+                    sourceText,
+                    confidence);
             out.add(new TurnPolicyTrace.RolefulTarget(
-                    stringVal(map, "path", ""),
+                    path,
                     role,
-                    stringVal(map, "source", ""),
+                    source,
                     stringVal(map, "reason", ""),
-                    stringVal(map, "sourceText", ""),
-                    doubleVal(map, "confidence")));
+                    sourceText,
+                    confidence,
+                    start,
+                    authorityEnd,
+                    end));
         }
         return out;
     }
@@ -668,18 +1042,24 @@ public final class JsonSessionStore implements SessionStore {
         return value instanceof Boolean b && b;
     }
 
-    private static double doubleVal(Map<?, ?> map, String key) {
-        Object value = map.get(key);
-        if (value instanceof Number n) return n.doubleValue();
-        try { return Double.parseDouble(String.valueOf(value)); }
-        catch (Exception e) { return 0.0; }
-    }
-
     private static int intValLoose(Map<?, ?> map, String key) {
         Object value = map.get(key);
         if (value instanceof Number n) return n.intValue();
         try { return Integer.parseInt(String.valueOf(value)); }
         catch (Exception e) { return 0; }
+    }
+
+    private static int exactInt(Object value, String key) {
+        if (!(value instanceof Number)) {
+            throw new IllegalArgumentException(key + " must be an exact integer");
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException malformed) {
+            throw new IllegalArgumentException(
+                    key + " must be an exact 32-bit integer",
+                    malformed);
+        }
     }
 
     private static <E extends Enum<E>> E enumValOrNull(Class<E> enumType, Map<?, ?> map, String key) {

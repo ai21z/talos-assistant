@@ -254,6 +254,52 @@ class PromptInspectorTest {
     }
 
     @Test
+    void renderNextDoesNotAdvertiseMutationForNonAuthoritativeTail() {
+        for (String request : List.of(
+                "Review index.html so maybe update style.css.",
+                "Inspect index.html so should I update style.css?",
+                "Review index.html so the guide says update style.css.")) {
+            PromptRender render = PromptInspector.renderNext(
+                    "auto",
+                    request,
+                    Path.of(".").toAbsolutePath().normalize(),
+                    fullToolContext(new Config()));
+
+            assertFalse(
+                    render.tools().contains("talos.write_file"),
+                    request + " " + render.tools());
+            assertFalse(
+                    render.tools().contains("talos.edit_file"),
+                    request + " " + render.tools());
+            assertFalse(
+                    render.tools().contains("talos.delete_path"),
+                    request + " " + render.tools());
+            String frame = render.messages().stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(content -> content.startsWith(
+                            "[CurrentTurnCapability]"))
+                    .findFirst()
+                    .orElseThrow();
+            assertTrue(
+                    frame.contains("obligation: NONE"),
+                    request + "\n" + frame);
+        }
+
+        String mixed =
+                "Edit index.html so it works, then rm style.css.";
+        PromptRender mixedRender = PromptInspector.renderNext(
+                "auto",
+                mixed,
+                Path.of(".").toAbsolutePath().normalize(),
+                fullToolContext(new Config()));
+        assertFalse(
+                mixedRender.tools().contains("talos.delete_path"),
+                mixed + " " + mixedRender.tools());
+    }
+
+    @Test
     void renderNextAskMutationPreviewShowsReadOnlyToolSurface() {
         PromptRender render = PromptInspector.renderNext(
                 "ask",

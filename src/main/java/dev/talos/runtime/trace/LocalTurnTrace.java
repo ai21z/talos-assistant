@@ -2,6 +2,7 @@ package dev.talos.runtime.trace;
 
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TargetRef;
+import dev.talos.runtime.intent.TaskIntentEvidence;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnSettlement;
@@ -279,7 +280,10 @@ public record LocalTurnTrace(
                     target.source(),
                     target.reason(),
                     target.sourceText(),
-                    target.confidence());
+                    target.confidence(),
+                    target.startOffset(),
+                    target.authorityEndOffset(),
+                    target.endOffset());
         }
     }
 
@@ -289,8 +293,53 @@ public record LocalTurnTrace(
             String source,
             String reason,
             String sourceText,
-            double confidence
+            double confidence,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset
     ) {
+        public RolefulTargetSummary(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                    confidence,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET);
+        }
+
+        public RolefulTargetSummary(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence,
+                int startOffset,
+                int endOffset
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                    confidence,
+                    startOffset,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    endOffset);
+        }
+
         public RolefulTargetSummary {
             path = TargetRef.normalizePath(path);
             if (role == null || role.isBlank()) {
@@ -304,12 +353,16 @@ public record LocalTurnTrace(
                         "Unknown roleful target summary role: " + role,
                         e);
             }
-            source = safe(source);
+            TaskIntentEvidence.requireDurableShape(
+                    path,
+                    source,
+                    startOffset,
+                    authorityEndOffset,
+                    endOffset,
+                    sourceText,
+                    confidence);
             reason = safe(reason);
             sourceText = sourceText == null ? "" : sourceText;
-            if (Double.isNaN(confidence) || confidence < 0.0 || confidence > 1.0) {
-                confidence = 0.0;
-            }
         }
     }
 

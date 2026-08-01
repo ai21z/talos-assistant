@@ -195,7 +195,9 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
     }
 
     @Test
-    void resolvedToolLoopAnswerDoesNotInheritFirstGenerationOutputLimitNotice(@TempDir Path workspace) throws Exception {
+    void lengthLimitedToolProposalIsRejectedWithoutFollowUp(
+            @TempDir Path workspace
+    ) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "PROJECT_MARKER = T989-NOTICE\n");
         ToolRegistry registry = registryWith(new ReadFileTool());
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
@@ -211,10 +213,11 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        assertTrue(out.text().contains("T989-NOTICE"), out.text());
-        assertFalse(out.text().contains("output limit"),
-                "a resolved tool-loop answer must not inherit the first generation's output-limit notice: "
-                        + out.text());
+        assertTrue(out.text().contains("[Evidence incomplete:"), out.text());
+        assertTrue(out.text().contains("notes.md"), out.text());
+        assertFalse(out.text().contains("T989-NOTICE"), out.text());
+        assertEquals(1, recorded.requests().size(),
+                "a truncated proposal must not execute or dispatch a follow-up");
     }
 
     private static ToolRegistry registryWith(dev.talos.tools.TalosTool... tools) {

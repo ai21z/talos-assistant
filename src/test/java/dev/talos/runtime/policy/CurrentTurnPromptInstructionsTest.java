@@ -129,10 +129,15 @@ class CurrentTurnPromptInstructionsTest {
         assertEquals(3, messages.size());
         assertEquals("system", messages.get(1).role());
         String instruction = messages.get(1).content();
+        assertTrue(instruction.contains("[CurrentTurnCapability]"));
         assertTrue(instruction.contains("[TaskContract]"));
+        assertTrue(instruction.contains("type: DIAGNOSE_ONLY"));
         assertTrue(instruction.contains("mutationAllowed: false"));
-        assertTrue(instruction.contains("Do not call talos.write_file or talos.edit_file"));
+        assertTrue(instruction.contains("obligation: INSPECT_REQUIRED"));
+        assertTrue(instruction.contains("Do not call mutating tools"));
         assertTrue(instruction.contains("wait for an explicit change request"));
+        assertFalse(instruction.contains("talos.write_file"));
+        assertFalse(instruction.contains("talos.edit_file"));
     }
 
     @Test

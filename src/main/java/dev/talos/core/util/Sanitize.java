@@ -14,7 +14,7 @@ public final class Sanitize {
 
     // ANSI escape sequences
     private static final Pattern ANSI = Pattern.compile("\u001B\\[[;\\d]*m");
-    // Control chars & nulls (TAB and LF/CR are kept for readability)
+    // Control chars & nulls (TAB and LF are kept; CR is removed)
     private static final Pattern CTRL = Pattern.compile("[\u0000-\u0008\u000B-\u001F\u007F]");
     // Hidden chain-of-thought blocks (e.g., <think>...</think>)
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");

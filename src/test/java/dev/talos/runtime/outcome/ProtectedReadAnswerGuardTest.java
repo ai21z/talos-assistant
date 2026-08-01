@@ -1,17 +1,22 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,6 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProtectedReadAnswerGuardTest {
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearTaskCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void approvedProtectedReadRefusalIsReplacedWithCurrentEvidenceAndTraced() throws Exception {
@@ -270,6 +280,70 @@ class ProtectedReadAnswerGuardTest {
         assertEquals(answer, result.answer());
     }
 
+    @Test
+    void protectedContainmentUsesCapturedOriginalInsteadOfSyntheticTail() {
+        String original =
+                "Does the document contain ALPHA MARKER?";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.fromUserRequest(original));
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user(original),
+                ChatMessage.user(
+                        "Synthesis retry: Does the approved document contain "
+                                + "BETA SECRET?"));
+
+        ProtectedReadAnswerGuard.PostconditionResult result =
+                ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                        "I cannot provide that.",
+                        loopResultWithBody(
+                                readOutcome(
+                                        "talos.read_file",
+                                        ".env",
+                                        "approved private document was read"),
+                                ".env",
+                                "BETA SECRET\n"),
+                        workspace,
+                        messages);
+
+        assertFalse(result.answer().contains("Yes. BETA SECRET"), result.answer());
+        assertFalse(
+                result.answer().contains(
+                        "contains the requested phrase `BETA SECRET`"),
+                result.answer());
+    }
+
+    @Test
+    void protectedContainmentIgnoresSyntheticContradictionWhenOriginalMatches() {
+        String original =
+                "Does the document contain BETA SECRET?";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.fromUserRequest(original));
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user(original),
+                ChatMessage.user(
+                        "Synthesis retry: Does the approved document contain "
+                                + "ALPHA MARKER?"));
+
+        ProtectedReadAnswerGuard.PostconditionResult result =
+                ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                        "I cannot provide that.",
+                        loopResultWithBody(
+                                readOutcome(
+                                        "talos.read_file",
+                                        ".env",
+                                        "approved private document was read"),
+                                ".env",
+                                "BETA SECRET\n"),
+                        workspace,
+                        messages);
+
+        assertTrue(
+                result.answer().contains(
+                        "Yes. The document contains BETA SECRET"),
+                result.answer());
+        assertFalse(result.answer().contains("ALPHA MARKER"), result.answer());
+    }
+
     private static ToolCallLoop.ToolOutcome readOutcome(String toolName, String pathHint, String summary) {
         return new ToolCallLoop.ToolOutcome(
                 toolName,
@@ -316,5 +390,30 @@ class ProtectedReadAnswerGuardTest {
                 0,
                 0,
                 List.of(outcomes));
+    }
+
+    private static ToolCallLoop.LoopResult loopResultWithBody(
+            ToolCallLoop.ToolOutcome outcome,
+            String path,
+            String body
+    ) {
+        return new ToolCallLoop.LoopResult(
+                "model answer",
+                1,
+                1,
+                List.of("talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of(path),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.continueLoop(),
+                List.of(outcome),
+                Map.of(path, body));
     }
 }

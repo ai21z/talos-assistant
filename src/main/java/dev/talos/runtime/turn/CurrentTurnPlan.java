@@ -15,6 +15,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.core.Config;
 
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** Immutable runtime-owned current-turn facts captured before retries can drift. */
@@ -76,6 +77,15 @@ public record CurrentTurnPlan(
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
         artifactGoal = artifactGoal == null ? NONE_OR_NOT_DERIVED : artifactGoal;
         verifierProfile = verifierProfile == null ? NONE_OR_NOT_DERIVED : verifierProfile;
+    }
+
+    /** Exact provider-visible authority across native and text-tool surfaces. */
+    public List<String> visibleTools() {
+        LinkedHashSet<String> visible = new LinkedHashSet<>();
+        visible.addAll(nativeTools);
+        visible.addAll(promptTools);
+        visible.removeAll(blockedTools);
+        return List.copyOf(visible);
     }
 
     /**
@@ -152,6 +162,44 @@ public record CurrentTurnPlan(
                 NONE_OR_NOT_DERIVED,
                 derivedVerifierProfile(contract),
                 cfg);
+    }
+
+    public static CurrentTurnPlan createWithActionObligation(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            ActionObligation actionObligation,
+            Config cfg
+    ) {
+        TaskContract safeContract =
+                contract == null ? TaskContract.unknown("") : contract;
+        List<TaskExpectation> expectations =
+                TaskExpectationResolver.resolve(safeContract);
+        return new CurrentTurnPlan(
+                safeContract,
+                safeContract.originalUserRequest(),
+                phase,
+                null,
+                actionObligation,
+                expectations,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                EvidenceObligationPolicy.derive(
+                        safeContract,
+                        phase,
+                        Path.of("").toAbsolutePath(),
+                        cfg).name(),
+                NOT_DERIVED,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                null);
     }
 
     public static CurrentTurnPlan create(

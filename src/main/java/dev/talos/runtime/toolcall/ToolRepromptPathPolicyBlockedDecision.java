@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import org.slf4j.Logger;
@@ -26,7 +27,8 @@ final class ToolRepromptPathPolicyBlockedDecision {
                 ExpectedTargetScopeRepairPlanner.nextPlan(
                         state,
                         ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                        ToolCallSupport.latestUserRequestIn(state.messages));
+                        TurnTaskContractCapture.originalUserRequestOrResolve(
+                                state.messages));
         if (expectedTargetRepair.isPresent()) {
             ExpectedTargetScopeRepairPlanner.Plan repair = expectedTargetRepair.get();
             state.failureDecision = FailureDecision.continueLoop();

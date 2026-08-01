@@ -3,7 +3,15 @@ package dev.talos.runtime.toolcall;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.PromptToolDescriptor;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -11,6 +19,7 @@ import dev.talos.spi.types.ToolSpec;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 
 import java.net.ConnectException;
 import java.nio.file.Files;
@@ -21,6 +30,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ToolRepromptOverlayContinuationTest {
+
+    @AfterEach
+    void clearTurnCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void overlayContinuationOwnsOverlayExecutionAndRetryMechanics() throws Exception {
@@ -48,13 +62,21 @@ class ToolRepromptOverlayContinuationTest {
                 List.of("scripts.js"),
                 "Create index.html, styles.css, and scripts.js.",
                 false,
-                tools());
+                mutationTools());
 
         assertTrue(continueLoop);
         assertEquals("Reprompt answer.", state.currentText);
         assertEquals(1, recorded.requests().size());
         ChatRequest request = recorded.requests().getFirst();
         String payload = messageContents(request);
+        assertEquals(
+                List.of("talos.write_file", "talos.edit_file"),
+                request.tools.stream().map(ToolSpec::name).toList());
+        assertFalse(payload.contains("talos.read_file"), payload);
+        assertTrue(payload.contains("talos.write_file"), payload);
+        assertTrue(payload.contains("talos.edit_file"), payload);
+        assertTrue(payload.contains(
+                "visibleTools: talos.write_file, talos.edit_file"), payload);
         assertTrue(payload.contains("[Expected target progress]"), payload);
         assertTrue(payload.contains("[Current task - stay focused on this]"), payload);
         assertTrue(request.messages.stream()
@@ -75,6 +97,81 @@ class ToolRepromptOverlayContinuationTest {
                         .anyMatch(content -> content.startsWith("[Expected target progress]")
                                 || content.startsWith("[Current task")),
                 "temporary overlay messages must be removed from durable loop history");
+        assertTrue(
+                messageContents(state.messages).contains("talos.read_file"),
+                "the bounded request copy must not mutate durable history");
+    }
+
+    @Test
+    void missingRequiredRetryToolFailsBeforeProviderDispatch() {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "must not be dispatched",
+                        List.of())),
+                16_384);
+        LoopState state = state(recorded.client());
+        state.setPendingActionObligation(
+                PendingActionObligation.expectedTargets(
+                        List.of("scripts.js")));
+
+        boolean continueLoop = ToolRepromptOverlayContinuation.execute(
+                state,
+                List.of(),
+                List.of("scripts.js"),
+                "Create scripts.js.",
+                false,
+                List.of());
+
+        assertFalse(continueLoop);
+        assertTrue(recorded.requests().isEmpty());
+        assertTrue(state.failureDecision.shouldStop());
+        assertFalse(state.hasPendingActionObligation());
+        assertTrue(
+                state.failureDecision.reason().contains(
+                        "required retry tool is unavailable"),
+                state.failureDecision.reason());
+    }
+
+    @Test
+    void missingCapturedResolutionFailsBeforeProviderDispatchOrStageMutation() {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "must not be dispatched",
+                        List.of())),
+                16_384);
+        LoopState state = state(recorded.client());
+        TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.begin(
+                "trace-missing-captured-resolution",
+                "sid",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Create scripts.js.");
+        try {
+            LocalTurnTraceCapture.enterExecutionStage(
+                    TurnExecutionStage.VERIFICATION);
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> ToolRepromptOverlayContinuation.execute(
+                            state,
+                            List.of(),
+                            List.of("scripts.js"),
+                            "Create scripts.js.",
+                            false,
+                            mutationTools()));
+
+            assertTrue(recorded.requests().isEmpty());
+            assertEquals(
+                    TurnExecutionStage.VERIFICATION,
+                    LocalTurnTraceCapture.currentExecutionStage());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
@@ -148,12 +245,27 @@ class ToolRepromptOverlayContinuationTest {
                 .llm(llm)
                 .nativeToolSpecs(tools)
                 .build();
+        String userRequest =
+                "Create index.html, styles.css, and scripts.js.";
+        var resolution =
+                TaskContractResolver.resolveFromUserRequest(userRequest);
+        TurnTaskContractCapture.set(resolution);
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                resolution.contract(),
+                ExecutionPhase.APPLY,
+                tools.stream().map(ToolSpec::name).toList(),
+                tools.stream().map(ToolSpec::name).toList(),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system(systemPrompt(tools)),
+                ChatMessage.user(userRequest)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
         return new LoopState(
                 "",
                 List.of(),
-                new ArrayList<>(List.of(
-                        ChatMessage.system("sys"),
-                        ChatMessage.user("Create index.html, styles.css, and scripts.js."))),
+                messages,
                 Path.of("."),
                 ctx,
                 null,
@@ -168,6 +280,12 @@ class ToolRepromptOverlayContinuationTest {
                 tool("talos.edit_file"));
     }
 
+    private static List<ToolSpec> mutationTools() {
+        return List.of(
+                tool("talos.write_file"),
+                tool("talos.edit_file"));
+    }
+
     private static ToolSpec tool(String name) {
         return new ToolSpec(name, name, "{}");
     }
@@ -178,5 +296,27 @@ class ToolRepromptOverlayContinuationTest {
                 .map(ChatMessage::content)
                 .filter(content -> content != null)
                 .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    private static String messageContents(List<ChatMessage> messages) {
+        return messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    private static String systemPrompt(List<ToolSpec> tools) {
+        return SystemPromptBuilder.forUnified()
+                .withNativeTools(true)
+                .withPromptTools(tools.stream()
+                        .map(tool -> new PromptToolDescriptor(
+                                tool.name(),
+                                tool.description(),
+                                tool.parametersSchemaJson(),
+                                false))
+                        .toList())
+                .withVisibleToolNames(
+                        tools.stream().map(ToolSpec::name).toList())
+                .build();
     }
 }

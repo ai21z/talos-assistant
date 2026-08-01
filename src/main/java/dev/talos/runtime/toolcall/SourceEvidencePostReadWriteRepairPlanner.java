@@ -1,7 +1,7 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -37,7 +37,8 @@ final class SourceEvidencePostReadWriteRepairPlanner {
         if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || contract.sourceEvidenceTargets().isEmpty()) {
             return Optional.empty();
         }
@@ -99,7 +100,10 @@ final class SourceEvidencePostReadWriteRepairPlanner {
         return targets + "->" + sources;
     }
 
-    private static List<ToolSpec> repairToolSpecs(List<ToolSpec> baseTools, List<String> remainingTargets) {
+    static List<ToolSpec> repairToolSpecs(
+            List<ToolSpec> baseTools,
+            List<String> remainingTargets
+    ) {
         List<ToolSpec> base = baseTools == null ? List.of() : baseTools;
         List<ToolSpec> writeTools = base.stream()
                 .filter(spec -> spec != null && "talos.write_file".equals(spec.name()))

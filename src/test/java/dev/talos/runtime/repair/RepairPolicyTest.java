@@ -140,6 +140,49 @@ class RepairPolicyTest {
     }
 
     @Test
+    void caseDistinctExpectedRepairTargetSurvivesExactForbiddenFiltering() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Repair A.html but do not edit a.html."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - A.html: markup remains invalid.; a.html: must remain unchanged.]
+
+                Remaining static verification problems:
+                - A.html: markup remains invalid.
+                - a.html: must remain unchanged.
+                """));
+        messages.add(ChatMessage.user(
+                "Fix the remaining static verification problems now."));
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("A.html"),
+                Set.of(),
+                Set.of("a.html"),
+                "Fix the remaining static verification problems now.",
+                "test-case-distinct-static-repair");
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(
+                        messages,
+                        contract)
+                .plan()
+                .orElseThrow();
+
+        assertTrue(plan.steps().stream()
+                        .anyMatch(step -> "A.html".equals(step.targetPath())),
+                plan.instruction());
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "a.html".equals(step.targetPath())),
+                plan.instruction());
+        assertTrue(
+                plan.instruction().contains(
+                        "Full-file replacement targets: A.html"),
+                plan.instruction());
+    }
+
+    @Test
     void staticRepairPlanMapsForbiddenTailwindCssArtifactToWritableSiteTargets() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

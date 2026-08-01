@@ -24,4 +24,8 @@ public interface RuntimeTurnContext {
     ExecutionPhaseState executionPhaseState();
 
     List<ToolSpec> nativeToolSpecs();
+
+    default boolean hasNativeToolSpecOverride() {
+        return nativeToolSpecs() != null;
+    }
 }

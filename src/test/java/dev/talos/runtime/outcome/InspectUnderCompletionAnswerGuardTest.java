@@ -1,7 +1,10 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InspectUnderCompletionAnswerGuardTest {
+
+    @AfterEach
+    void clearTaskCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     private static String longAnswer() {
         return "a".repeat(InspectUnderCompletionAnswerGuard.INSPECT_MIN_CHARS + 50);
@@ -92,5 +100,44 @@ class InspectUnderCompletionAnswerGuardTest {
                 "What is the capital of France?"));
         assertEquals(3, InspectUnderCompletionAnswerGuard.readOnlyToolCount(loopWithTools(
                 "talos.read_file", "talos.edit_file", "list_dir", "talos.grep")));
+    }
+
+    @Test
+    void capturedInspectRequestCannotBeDisabledBySyntheticRetryText() {
+        String request = "Read the relevant files first, then summarize.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        List<ChatMessage> messages = new ArrayList<>(messagesWith(request));
+        messages.add(ChatMessage.user(
+                "Synthetic retry: answer without inspecting files."));
+
+        String shaped =
+                InspectUnderCompletionAnswerGuard
+                        .annotateIfInspectUnderCompletion(
+                                longAnswer(),
+                                messages,
+                                loopWithTools("talos.read_file"));
+
+        assertTrue(shaped.startsWith(
+                InspectUnderCompletionAnswerGuard
+                        .UNDER_INSPECTION_ANNOTATION));
+    }
+
+    @Test
+    void syntheticInspectTextCannotEnableGuardForCapturedOrdinaryRequest() {
+        String request = "What is the capital of France?";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        List<ChatMessage> messages = new ArrayList<>(messagesWith(request));
+        messages.add(ChatMessage.user(
+                "Synthetic retry: read the relevant files first."));
+
+        assertEquals(
+                longAnswer(),
+                InspectUnderCompletionAnswerGuard
+                        .annotateIfInspectUnderCompletion(
+                                longAnswer(),
+                                messages,
+                                loopWithTools("talos.read_file")));
     }
 }

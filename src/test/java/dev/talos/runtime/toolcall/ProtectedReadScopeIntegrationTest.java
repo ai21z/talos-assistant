@@ -14,6 +14,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -83,6 +84,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages,
@@ -117,6 +119,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages,
@@ -154,6 +157,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         loop.run("{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages, workspace, ctx);
 
@@ -187,6 +191,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -227,6 +232,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read family-budget.xlsx and tell me the bill amount."));
 
+        captureResolution(messages);
         loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-budget.xlsx\"}}",
                 messages,
@@ -259,6 +265,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read lease.pdf and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"lease.pdf\"}}",
                 messages,
@@ -292,6 +299,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read family-budget.xls and tell me the bill amount."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-budget.xls\"}}",
                 messages,
@@ -539,6 +547,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -575,6 +584,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -618,6 +628,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
         beginTrace("Read medical-notes.docx and summarize it.");
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -677,6 +688,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
         beginTrace("Read medical-notes.docx and summarize it.");
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -729,6 +741,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         loop.run("{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages, workspace, ctx);
 
@@ -824,6 +837,13 @@ class ProtectedReadScopeIntegrationTest {
                 "test",
                 "model",
                 request);
+    }
+
+    private static void captureResolution(List<ChatMessage> messages) {
+        TurnTaskContractCapture.clear();
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
     }
 
     private static boolean hasTraceEvent(LocalTurnTrace trace, String eventType) {

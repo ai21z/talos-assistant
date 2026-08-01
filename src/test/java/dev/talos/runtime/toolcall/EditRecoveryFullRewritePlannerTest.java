@@ -7,9 +7,14 @@ import dev.talos.runtime.RuntimeTurnContext;
 import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,6 +42,11 @@ class EditRecoveryFullRewritePlannerTest {
     private static final String MUTATION_REQUEST =
             "Append a short Contributing section to README.md that says: "
                     + "Contributions welcome via pull request.";
+
+    @AfterEach
+    void clearProviderResponseCapture() {
+        ProviderResponseCapture.clear();
+    }
 
     // ---------------------------------------------------------------
     // Complete-read eligibility (reopened T1003, review finding P1-1)
@@ -534,12 +544,65 @@ class EditRecoveryFullRewritePlannerTest {
         return new LoopState(
                 "",
                 List.of(),
+                boundForegroundProviderReceipt(nativeToolSpecs),
                 messages,
                 workspace.toAbsolutePath().normalize(),
                 ctxWithNativeSurface(nativeToolSpecs),
                 null,
                 10,
                 0);
+    }
+
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> nativeToolSpecs
+    ) {
+        List<String> selectedToolNames =
+                nativeToolSpecs.stream().map(ToolSpec::name).toList();
+        if (selectedToolNames.isEmpty()) {
+            return ProviderResponseCapture.Receipt.none();
+        }
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "edit-recovery-full-rewrite-planner");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "a".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    List.of(new ChatMessage.NativeToolCall(
+                                            "fixture-prior-call",
+                                            selectedToolNames.getFirst(),
+                                            Map.of())),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
     }
 
     private static RuntimeTurnContext ctxWithNativeSurface(List<ToolSpec> nativeToolSpecs) {

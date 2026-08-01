@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
@@ -37,7 +38,8 @@ final class SourceEvidenceExactRepairPlanner {
         if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || contract.sourceEvidenceTargets().isEmpty()) return Optional.empty();
         List<SourceDerivedEvidenceGuard.SourceReadback> sourceReadbacks =
                 SourceDerivedEvidenceGuard.sourceReadbacks(state, contract);

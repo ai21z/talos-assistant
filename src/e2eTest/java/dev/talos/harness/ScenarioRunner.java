@@ -15,6 +15,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.*;
@@ -157,11 +158,15 @@ public final class ScenarioRunner {
                 .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
                 .build();
         ToolCallLoop.LoopResult loopResult;
+        var taskResolution = TaskContractResolver.resolveFromMessages(messages);
+        TurnTaskContractCapture.set(
+                taskResolution, messages);
         TurnUserRequestCapture.set(userPrompt);
         try {
             loopResult = loop.run(scenario.scriptedResponse(), messages,
                     workspace.path(), ctx);
         } finally {
+            TurnTaskContractCapture.clear();
             TurnUserRequestCapture.clear();
         }
 

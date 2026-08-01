@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.core.Config;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 
@@ -29,6 +30,19 @@ public final class NativeToolSpecPolicy {
     ) {
         return ToolSurfacePlanner.plan(
                 contract,
+                phase,
+                registry,
+                ToolCapabilityAvailability.fromConfig(cfg)).nativeToolSpecs();
+    }
+
+    public static List<ToolSpec> select(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            Config cfg
+    ) {
+        return ToolSurfacePlanner.plan(
+                resolution,
                 phase,
                 registry,
                 ToolCapabilityAvailability.fromConfig(cfg)).nativeToolSpecs();

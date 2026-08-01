@@ -1,12 +1,18 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligationPolicy;
+import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -27,14 +33,14 @@ final class ToolRepromptRequestBuilder {
         if (base == null || base.isEmpty()) return base;
         if (staticRepairProgress) {
             List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file"));
-            return narrowed.isEmpty() ? base : narrowed;
+            return narrowed;
         }
         if (expectedTargetProgress) {
             List<String> allowed = staticWebExpectedTargetProgressPrefersWriteFile(state)
                     ? List.of("talos.write_file")
                     : List.of("talos.write_file", "talos.edit_file");
             List<ToolSpec> narrowed = filterTools(base, allowed);
-            return narrowed.isEmpty() ? base : narrowed;
+            return narrowed;
         }
         return base;
     }
@@ -42,7 +48,7 @@ final class ToolRepromptRequestBuilder {
     private static boolean staticWebExpectedTargetProgressPrefersWriteFile(LoopState state) {
         if (state == null || state.messages == null) return false;
         TaskContract contract = WorkspaceTargetReconciler.reconcile(
-                TaskContractResolver.fromMessages(state.messages),
+                TurnTaskContractCapture.currentOrResolve(state.messages),
                 state.workspace);
         return StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract);
     }
@@ -53,8 +59,76 @@ final class ToolRepromptRequestBuilder {
             List<String> remainingRepairTargets,
             String userTask
     ) {
+        return messages(
+                state,
+                staticRepairObligationActive,
+                remainingRepairTargets,
+                userTask,
+                currentNativeToolSpecs(state));
+    }
+
+    static List<ChatMessage> messages(
+            LoopState state,
+            boolean staticRepairObligationActive,
+            List<String> remainingRepairTargets,
+            String userTask,
+            List<ToolSpec> repromptToolSpecs
+    ) {
         if (!staticRepairObligationActive) {
-            return state == null ? List.of() : state.messages;
+            if (state == null) return List.of();
+            var resolution = TurnTaskContractCapture.getResolution();
+            if (resolution == null) {
+                throw new IllegalStateException(
+                        "captured current-turn task resolution is required "
+                                + "before provider reprompt assembly");
+            }
+            List<ToolSpec> selected = repromptToolSpecs == null
+                    ? List.of()
+                    : List.copyOf(repromptToolSpecs);
+            ProviderResponseCapture.ToolAuthorityMode authorityMode =
+                    state.ctx == null || state.ctx.llm() == null
+                            ? ProviderResponseCapture.ToolAuthorityMode.NONE
+                            : state.ctx.llm()
+                                    .toolAuthorityModeForToolSurface(selected);
+            List<String> names = selected.stream()
+                    .map(ToolSpec::name)
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            ExecutionPhase phase =
+                    state.ctx != null
+                                    && state.ctx.executionPhaseState() != null
+                            ? state.ctx.executionPhaseState().phase()
+                            : CurrentTurnPlan.defaultPhaseFor(
+                                    resolution.contract());
+            List<String> nativeNames =
+                    authorityMode
+                                    == ProviderResponseCapture
+                                            .ToolAuthorityMode
+                                            .PROVIDER_NATIVE
+                            ? names
+                            : List.of();
+            CurrentTurnPlan plan =
+                    CurrentTurnPlan.createWithActionObligation(
+                            resolution.contract(),
+                            phase,
+                            nativeNames,
+                            names,
+                            List.of(),
+                            CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                            CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                            CurrentTurnPlan.derivedVerifierProfile(
+                                    resolution.contract()),
+                            ActionObligationPolicy.derive(
+                                    resolution,
+                                    phase),
+                            state.ctx == null ? null : state.ctx.cfg());
+            List<ChatMessage> out =
+                    new ArrayList<>(state.messages);
+            ProviderPromptSurfaceReconciler.reconcile(
+                    out,
+                    plan,
+                    selected);
+            return List.copyOf(out);
         }
         List<ChatMessage> out = new ArrayList<>();
         out.add(ChatMessage.system("""
@@ -98,13 +172,27 @@ final class ToolRepromptRequestBuilder {
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
         if (state == null || state.ctx == null) return List.of();
-        if (state.ctx.nativeToolSpecs() != null) {
-            return state.ctx.nativeToolSpecs();
+        List<ToolSpec> available;
+        if (state.ctx.hasNativeToolSpecOverride()) {
+            available = state.ctx.nativeToolSpecs();
+        } else if (state.ctx.llm() != null) {
+            available = state.ctx.llm().getToolSpecs();
+        } else {
+            available = List.of();
         }
-        if (state.ctx.llm() != null) {
-            return state.ctx.llm().getToolSpecs();
+        ProviderResponseCapture.Receipt receipt =
+                state.currentResponseReceipt;
+        if (receipt == null || !receipt.providerToolCallEligible()) {
+            return List.of();
         }
-        return List.of();
+        ProviderResponseCapture.ToolAuthorityContract authority =
+                receipt.toolAuthorityContract();
+        if (authority == null || !authority.bound()) {
+            return List.of();
+        }
+        return selectToolsInAuthorityOrder(
+                available,
+                authority.selectedToolNames());
     }
 
     static ChatRequestControls controls(LoopState state) {
@@ -174,6 +262,31 @@ final class ToolRepromptRequestBuilder {
         return specs.stream()
                 .filter(spec -> spec != null && allowedNames.contains(spec.name()))
                 .toList();
+    }
+
+    private static List<ToolSpec> selectToolsInAuthorityOrder(
+            List<ToolSpec> specs,
+            List<String> selectedNames
+    ) {
+        if (specs == null
+                || specs.isEmpty()
+                || selectedNames == null
+                || selectedNames.isEmpty()) {
+            return List.of();
+        }
+        java.util.Map<String, ToolSpec> byName =
+                new java.util.LinkedHashMap<>();
+        for (ToolSpec spec : specs) {
+            if (spec != null && spec.name() != null) {
+                byName.putIfAbsent(spec.name(), spec);
+            }
+        }
+        List<ToolSpec> selected = new ArrayList<>();
+        for (String name : selectedNames) {
+            ToolSpec spec = byName.get(name);
+            if (spec != null) selected.add(spec);
+        }
+        return List.copyOf(selected);
     }
 
     private static boolean hasMutatingTool(List<ToolSpec> specs) {

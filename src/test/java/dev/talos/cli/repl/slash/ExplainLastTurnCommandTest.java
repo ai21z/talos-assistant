@@ -804,7 +804,7 @@ class ExplainLastTurnCommandTest {
 
         assertTrue(text.contains(
                 "style.css = MUST_MUTATE_AFTER_SOURCE_EVIDENCE "
-                        + "(active-contract-projection)"), text);
+                        + "(explicit-mutation-target)"), text);
         assertEquals(
                 1,
                 text.split("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", -1).length - 1,

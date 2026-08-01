@@ -1,6 +1,10 @@
 package dev.talos.runtime.task;
 
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -23,6 +27,27 @@ public final class WorkspaceTargetReconciler {
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
 
     private WorkspaceTargetReconciler() {}
+
+    public static TaskResolution reconcile(
+            TaskResolution resolution,
+            Path workspace
+    ) {
+        if (resolution == null) return null;
+        TaskContract contract = reconcile(resolution.contract(), workspace);
+        if (contract == null || contract.equals(resolution.contract())) {
+            return resolution;
+        }
+        TaskIntent intent = TaskIntentProjector.project(
+                resolution.intent(),
+                contract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
+        return new TaskResolution(
+                contract,
+                intent,
+                resolution.projectedMutationTailPlan(intent),
+                resolution.provenance());
+    }
 
     public static TaskContract reconcile(TaskContract contract, Path workspace) {
         if (contract == null || workspace == null) {

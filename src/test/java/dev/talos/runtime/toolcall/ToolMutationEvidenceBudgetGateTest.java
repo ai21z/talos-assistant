@@ -7,6 +7,10 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
@@ -102,7 +106,10 @@ class ToolMutationEvidenceBudgetGateTest {
     void overBudgetMutationReadOnlyEvidenceContinuesWithCompactMutationToolCall() throws Exception {
         Files.writeString(workspace.resolve("script.js"), "document.querySelector('.missing-button');\n");
         var recorded = compactContinuationReturningTool();
-        LoopState state = readOnlyEvidenceState(mutationRequest(), 6, recorded.client());
+        LoopState state = providerBackedReadOnlyEvidenceState(
+                mutationRequest(),
+                6,
+                recorded.client());
 
         Optional<Boolean> result = ToolMutationEvidenceBudgetGate.tryContinueOrStop(state, 6);
 
@@ -124,7 +131,10 @@ class ToolMutationEvidenceBudgetGateTest {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(new LlmClient.StreamResult("I will update it now.", List.of())),
                 16_384);
-        LoopState state = readOnlyEvidenceState(mutationRequest(), 6, recorded.client());
+        LoopState state = providerBackedReadOnlyEvidenceState(
+                mutationRequest(),
+                6,
+                recorded.client());
 
         Optional<Boolean> result = ToolMutationEvidenceBudgetGate.tryContinueOrStop(state, 6);
 
@@ -146,6 +156,31 @@ class ToolMutationEvidenceBudgetGateTest {
         assertFalse(source.contains("private static boolean mutationReadOnlyBudgetExceeded"), source);
         assertFalse(source.contains("private static int readOnlyInspectionAttemptCount"), source);
         assertFalse(source.contains("private static boolean readOnlyProgressOnly"), source);
+    }
+
+    @Test
+    void overBudgetMutationWithoutBoundProviderToolAuthorityFailsClosed() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.missing-button');\n");
+        var recorded = compactContinuationReturningTool();
+        LoopState state = readOnlyEvidenceState(mutationRequest(), 6, recorded.client());
+
+        Optional<Boolean> result = ToolMutationEvidenceBudgetGate.tryContinueOrStop(state, 6);
+
+        assertTrue(result.isEmpty());
+        assertTrue(recorded.requests().isEmpty());
+        assertFalse(state.failureDecision.shouldStop());
+    }
+
+    private LoopState providerBackedReadOnlyEvidenceState(
+            String request,
+            int readOnlyAttempts,
+            LlmClient llm
+    ) {
+        LoopState state =
+                readOnlyEvidenceState(request, readOnlyAttempts, llm);
+        state.currentResponseReceipt =
+                boundForegroundProviderReceipt(baseTools());
+        return state;
     }
 
     private LoopState readOnlyEvidenceState(String request, int readOnlyAttempts, LlmClient llm) {
@@ -176,6 +211,55 @@ class ToolMutationEvidenceBudgetGateTest {
                 "script.js",
                 ToolResult.ok("1 | document.querySelector('.missing-button');\n"));
         return state;
+    }
+
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> tools
+    ) {
+        List<String> selectedToolNames =
+                tools.stream().map(ToolSpec::name).toList();
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "tool-mutation-evidence-budget-gate");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "e".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    List.of(new ChatMessage.NativeToolCall(
+                                            "fixture-prior-call",
+                                            selectedToolNames.getFirst(),
+                                            Map.of())),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
     }
 
     private static ScriptedNativeLlmClient.RecordedClient compactContinuationReturningTool() {

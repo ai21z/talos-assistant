@@ -9,7 +9,6 @@ import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.safety.SafeLogFormatter;
@@ -249,7 +248,7 @@ final class ReadEvidenceHandoff {
 
     private static CurrentTurnPlan safePlan(CurrentTurnPlan plan, List<ChatMessage> messages) {
         if (plan != null) return plan;
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = TurnTaskContractCapture.currentOrResolve(messages);
         return CurrentTurnPlan.compatibility(contract, ExecutionPhase.INSPECT, List.of(), List.of(), List.of());
     }
 }

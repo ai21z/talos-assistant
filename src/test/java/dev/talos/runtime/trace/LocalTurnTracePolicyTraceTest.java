@@ -119,6 +119,39 @@ class LocalTurnTracePolicyTraceTest {
     }
 
     @Test
+    void recordsTheSameIndependentAuthorityBoundaryResolvedFromTheRequest() {
+        beginTrace();
+        String request =
+                "Edit index.html so it works, and update style.css too.";
+        var resolution = TaskContractResolver.resolveFromUserRequest(request);
+        var decision = resolution.mutationTailPlan()
+                .decision("style.css")
+                .orElseThrow();
+
+        LocalTurnTraceCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                resolution.contract(),
+                resolution.intent(),
+                "APPLY",
+                List.of("talos.edit_file"),
+                List.of("tool_use:edit_file")));
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        var recorded = trace.taskContract().rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        int expectedAuthorityEnd =
+                request.lastIndexOf("style.css") + "style.css".length();
+
+        assertEquals(expectedAuthorityEnd, decision.authorityEndOffset());
+        assertTrue(decision.authorityEndOffset() < decision.endOffset());
+        assertEquals(decision.startOffset(), recorded.startOffset());
+        assertEquals(decision.authorityEndOffset(), recorded.authorityEndOffset());
+        assertEquals(decision.endOffset(), recorded.endOffset());
+        assertEquals(decision.sourceText(), recorded.sourceText());
+    }
+
+    @Test
     void overlappingEffectiveContractEmitsOneRequiredPostReadMutationRole() {
         beginTrace();
         TaskContract contract = new TaskContract(
@@ -144,8 +177,8 @@ class LocalTurnTracePolicyTraceTest {
                 .toList();
         assertEquals(1, styleTargets.size());
         assertEquals("MUST_MUTATE_AFTER_SOURCE_EVIDENCE", styleTargets.getFirst().role());
-        assertEquals("RUNTIME_DEFAULT", styleTargets.getFirst().source());
-        assertEquals("active-contract-projection", styleTargets.getFirst().reason());
+        assertEquals("USER_REQUEST", styleTargets.getFirst().source());
+        assertEquals("explicit-mutation-target", styleTargets.getFirst().reason());
     }
 
     @Test

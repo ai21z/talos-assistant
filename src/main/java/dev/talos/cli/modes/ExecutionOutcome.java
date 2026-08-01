@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.CommandOutputTruthfulnessGuard;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
@@ -27,7 +28,6 @@ import dev.talos.runtime.policy.ActionObligationFailureAssessment;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationAssessment;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -212,7 +212,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                current, messages, loopResult, workspace);
+                current, safePlan, messages, loopResult, workspace);
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 
@@ -222,7 +222,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
-                current, messages, loopResult, workspace);
+                current, safePlan, messages, loopResult, workspace);
         boolean selectorGroundedOverride = staticSelectorSearchGroundedOverride
                 || !Objects.equals(current, shaped);
         current = shaped;
@@ -551,7 +551,7 @@ record ExecutionOutcome(
             Context ctx,
             boolean streamed
     ) {
-        return fromNoTool(answer, compatibilityPlan(messages), messages, ctx, streamed, false);
+        return fromNoTool(answer, null, messages, ctx, streamed, false);
     }
 
     static ExecutionOutcome fromNoTool(
@@ -573,7 +573,10 @@ record ExecutionOutcome(
             boolean failedActionObligation
     ) {
         String shaped = answer == null ? "" : answer;
-        CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
+        boolean capturedPlanPresent = plan != null;
+        CurrentTurnPlan safePlan = capturedPlanPresent
+                ? plan
+                : compatibilityPlan(messages);
         boolean noToolMutationReplaced = false;
         boolean malformedProtocolDebrisReplaced = false;
         boolean localAccessCapabilityCorrected = false;
@@ -613,7 +616,7 @@ record ExecutionOutcome(
                     noToolMutationReplaced =
                             NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
                     shaped = replaced;
-                } else {
+                } else if (capturedPlanPresent) {
                     shaped = AssistantTurnExecutor.groundingRetryIfNeeded(
                             shaped, safePlan, messages, ctx);
                 }
@@ -746,7 +749,8 @@ record ExecutionOutcome(
     }
 
     private static CurrentTurnPlan compatibilityPlan(List<ChatMessage> messages) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(messages);
         ExecutionPhase phase = CurrentTurnPlan.defaultPhaseFor(contract);
         return CurrentTurnPlan.compatibility(contract, phase, List.of(), List.of(), List.of());
     }

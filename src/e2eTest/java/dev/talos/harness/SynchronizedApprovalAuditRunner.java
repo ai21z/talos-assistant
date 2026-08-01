@@ -15,6 +15,7 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnEnvelopePersistenceReceipt;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
@@ -266,6 +267,8 @@ public final class SynchronizedApprovalAuditRunner {
         if (artifactRoot == null) throw new IllegalArgumentException("artifactRoot is required");
         if (request == null) throw new IllegalArgumentException("request is required");
         if (result == null) throw new IllegalArgumentException("result is required");
+        String sessionId = JsonSessionStore.sessionIdFor(request.workspace());
+        requireExpectedTraceSession(sessionId, result.trace());
 
         Path root = artifactRoot.toAbsolutePath().normalize().resolve(safeFileName(request.name()));
         deleteScenarioArtifactRoot(artifactRoot.toAbsolutePath().normalize(), root);
@@ -287,7 +290,6 @@ public final class SynchronizedApprovalAuditRunner {
         Path traceText = traceDir.resolve("last-trace.txt");
         Path promptDebugMarkdown = promptDebugDir.resolve("prompt-debug.md");
         Path providerBodyJson = providerDir.resolve("provider-body.json");
-        String sessionId = JsonSessionStore.sessionIdFor(request.workspace());
         Path sessionSnapshot = sessionDir.resolve(sessionId + ".json");
         Path turnJsonl = sessionDir.resolve(sessionId + ".turns.jsonl");
         Path transcriptJson = root.resolve("audit-transcript.json");
@@ -299,10 +301,11 @@ public final class SynchronizedApprovalAuditRunner {
         writeSafe(finalAnswer, finalAnswerForArtifacts);
         writeSafe(modelTranscript, modelTranscriptForArtifacts(request, result));
         writeApprovals(approvalsJsonl, result.approvals());
-        writeTraceJson(traceJson, result.trace());
+        byte[] persistedTraceJson =
+                writeSessionArtifacts(sessionDir, sessionId, request, result, finalAnswerForArtifacts);
+        writeTraceJson(traceJson, result.trace(), persistedTraceJson);
         writeSafe(traceText, result.traceText());
         writePromptDebug(promptDebugMarkdown, providerBodyJson);
-        writeSessionArtifacts(sessionDir, sessionId, request, result, finalAnswerForArtifacts);
         writeAuditTranscript(transcriptJson, request, result, root);
         writeSafe(workspaceStatus, workspaceStatus(request.workspace()));
         writeSafe(workspaceDiff, workspaceDiff(request, result));
@@ -327,6 +330,19 @@ public final class SynchronizedApprovalAuditRunner {
                 workspaceDiff);
     }
 
+    static void requireExpectedTraceSession(
+            String expectedSessionId,
+            LocalTurnTrace trace
+    ) throws IOException {
+        if (trace == null) return;
+        if (expectedSessionId == null
+                || expectedSessionId.isBlank()
+                || !expectedSessionId.equals(trace.sessionId())) {
+            throw new IOException(
+                    "audit trace session identity does not match the workspace");
+        }
+    }
+
     private static void writeApprovals(Path path, List<ScriptedApprovalGate.Event> approvals) throws IOException {
         StringBuilder out = new StringBuilder();
         for (ScriptedApprovalGate.Event event : approvals == null ? List.<ScriptedApprovalGate.Event>of() : approvals) {
@@ -335,12 +351,20 @@ public final class SynchronizedApprovalAuditRunner {
         Files.writeString(path, out.toString(), StandardCharsets.UTF_8);
     }
 
-    private static void writeTraceJson(Path path, LocalTurnTrace trace) throws IOException {
+    private static void writeTraceJson(
+            Path path,
+            LocalTurnTrace trace,
+            byte[] persistedTraceJson
+    ) throws IOException {
         if (trace == null) {
             writeSafe(path, "{\"status\":\"not-captured\"}\n");
             return;
         }
-        writeSafe(path, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(trace));
+        if (persistedTraceJson == null || persistedTraceJson.length == 0) {
+            throw new IOException(
+                    "coordinate-aware persisted session trace is unavailable");
+        }
+        Files.write(path, persistedTraceJson);
     }
 
     private static void writePromptDebug(Path markdownPath, Path providerBodyPath) throws IOException {
@@ -373,16 +397,18 @@ public final class SynchronizedApprovalAuditRunner {
         }
     }
 
-    private static void writeSessionArtifacts(
+    private static byte[] writeSessionArtifacts(
             Path sessionDir,
             String sessionId,
             Request request,
             Result result,
-            String finalAnswerForArtifacts) {
+            String finalAnswerForArtifacts
+    ) throws IOException {
         JsonSessionStore store = new JsonSessionStore(sessionDir);
         Instant now = Instant.now();
         String model = result.trace() == null ? "" : result.trace().model().model();
         String assistantText = finalAnswerForArtifacts == null ? "" : finalAnswerForArtifacts;
+        int turnNumber = result.trace() == null ? 1 : result.trace().turnNumber();
         store.save(new SessionData(
                 sessionId,
                 request.workspace().toAbsolutePath().normalize().toString(),
@@ -393,8 +419,8 @@ public final class SynchronizedApprovalAuditRunner {
                         new SessionData.Turn("user", request.userPrompt(), "ok"),
                         new SessionData.Turn("assistant", assistantText, "ok")),
                 model));
-        store.appendTurn(sessionId, new TurnRecord(
-                1,
+        TurnRecord turnRecord = new TurnRecord(
+                turnNumber,
                 now,
                 0L,
                 request.userPrompt(),
@@ -405,11 +431,85 @@ public final class SynchronizedApprovalAuditRunner {
                 (int) result.approvals().stream().filter(event -> !event.response().isApproved()).count(),
                 "",
                 "ok",
-                TurnPolicyTrace.empty(),
-                result.trace() == null ? "" : result.trace().traceId()));
-        if (result.trace() != null) {
-            store.saveTrace(sessionId, result.trace());
+                policyTraceFrom(result.trace()),
+                result.trace() == null ? "" : result.trace().traceId());
+        // This observes the bounded in-process row/trace envelope only.
+        // Cross-process transactional publication remains owned by T1192.
+        TurnEnvelopePersistenceReceipt receipt =
+                store.persistTurnEnvelope(sessionId, turnRecord, result.trace());
+        requireCompleteAuditEnvelope(receipt, result.trace() != null);
+        if (result.trace() == null) return null;
+        Path persistedTrace = persistedTracePath(
+                sessionDir,
+                sessionId,
+                result.trace());
+        if (!Files.isRegularFile(persistedTrace)) {
+            throw new IOException(
+                    "coordinate-aware persisted session trace is missing: "
+                            + persistedTrace);
         }
+        return Files.readAllBytes(persistedTrace);
+    }
+
+    static void requireCompleteAuditEnvelope(
+            TurnEnvelopePersistenceReceipt receipt,
+            boolean traceExpected
+    ) throws IOException {
+        TurnEnvelopePersistenceReceipt.State expected = traceExpected
+                ? TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED
+                : TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY;
+        TurnEnvelopePersistenceReceipt.State observed = receipt == null
+                ? TurnEnvelopePersistenceReceipt.State.UNOBSERVED
+                : receipt.state();
+        if (observed != expected) {
+            throw new IOException(
+                    "audit turn envelope was not fully persisted: expected "
+                            + expected + ", observed " + observed);
+        }
+    }
+
+    private static TurnPolicyTrace policyTraceFrom(LocalTurnTrace trace) {
+        if (trace == null) return TurnPolicyTrace.empty();
+        LocalTurnTrace.TaskContractSummary contract = trace.taskContract();
+        return new TurnPolicyTrace(
+                contract.type(),
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                contract.expectedTargets(),
+                contract.forbiddenTargets(),
+                "unknown",
+                "unknown",
+                trace.toolSurface().nativeTools(),
+                trace.toolSurface().promptTools(),
+                List.of(),
+                contract.classificationReason(),
+                contract.rolefulTargets().stream()
+                        .map(target -> new TurnPolicyTrace.RolefulTarget(
+                                target.path(),
+                                target.role(),
+                                target.source(),
+                                target.reason(),
+                                target.sourceText(),
+                                target.confidence(),
+                                target.startOffset(),
+                                target.authorityEndOffset(),
+                                target.endOffset()))
+                        .toList());
+    }
+
+    private static Path persistedTracePath(
+            Path sessionDir,
+            String sessionId,
+            LocalTurnTrace trace
+    ) {
+        String safeTraceId = trace.traceId()
+                .replaceAll("[^A-Za-z0-9._-]", "_");
+        return sessionDir
+                .resolve("traces")
+                .resolve(sessionId)
+                .resolve("%06d-%s.json".formatted(
+                        trace.turnNumber(),
+                        safeTraceId));
     }
 
     private static void writeAuditTranscript(
@@ -670,7 +770,7 @@ public final class SynchronizedApprovalAuditRunner {
         TurnAuditCapture.begin();
         LocalTurnTraceCapture.begin(
                 "trc-sync-approval-" + request.name().replaceAll("[^A-Za-z0-9._-]", "_"),
-                "sync-approval-audit",
+                JsonSessionStore.sessionIdFor(request.workspace()),
                 1,
                 Instant.now().toString(),
                 "workspace:" + Integer.toHexString(request.workspace().toString().hashCode()),

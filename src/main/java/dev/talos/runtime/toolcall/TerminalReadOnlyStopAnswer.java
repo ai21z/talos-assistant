@@ -1,7 +1,7 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
@@ -73,7 +73,8 @@ public final class TerminalReadOnlyStopAnswer {
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
         if (state == null || outcome == null) return null;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return null;
         String target = contract.expectedTargets().iterator().next();
         String normalizedTarget = ToolCallSupport.normalizePath(target);
@@ -141,7 +142,8 @@ public final class TerminalReadOnlyStopAnswer {
                 || outcome.mutationsThisIteration() > 0) {
             return null;
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() < 2) {
             return null;
         }
@@ -171,7 +173,8 @@ public final class TerminalReadOnlyStopAnswer {
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
         if (state == null || outcome == null || outcome.successesThisIteration() <= 0) return null;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.DIRECTORY_LISTING) return null;
         String body = DirectoryListingEvidence.selectedBody(
                 state.messages,
@@ -246,7 +249,9 @@ public final class TerminalReadOnlyStopAnswer {
 
     private static boolean userNamedConvertedFallback(LoopState state, List<String> unsupportedPaths) {
         if (state == null || unsupportedPaths == null || unsupportedPaths.isEmpty()) return false;
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) return false;
         String lower = userTask.toLowerCase(Locale.ROOT);
         for (String path : unsupportedPaths) {
@@ -277,10 +282,14 @@ public final class TerminalReadOnlyStopAnswer {
         if (state.totalToolsInvoked <= 0) return null;
         if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
 
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
+        if (contract == null || contract.type() == TaskType.WORKSPACE_EXPLAIN) {
+            return null;
+        }
+        String userTask = contract.originalUserRequest();
         String retryTaskType = ToolCallSupport.embeddedRetryTaskType(userTask);
         if ("WORKSPACE_EXPLAIN".equals(retryTaskType)) return null;
-        if (declaresTaskType(state.messages, "WORKSPACE_EXPLAIN")) return null;
         String intentUserTask = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(userTask);
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(intentUserTask)) return null;
         if (!readStaticWebDiagnosticSurface(state)) return null;
@@ -305,13 +314,4 @@ public final class TerminalReadOnlyStopAnswer {
         return readHtml && readScript;
     }
 
-    private static boolean declaresTaskType(List<ChatMessage> messages, String taskType) {
-        if (messages == null || taskType == null || taskType.isBlank()) return false;
-        String marker = "Task type: " + taskType;
-        for (ChatMessage message : messages) {
-            if (message == null || message.content() == null) continue;
-            if (message.content().contains(marker)) return true;
-        }
-        return false;
-    }
 }

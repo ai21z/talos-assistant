@@ -109,6 +109,38 @@ class CompactMutationContinuationPlannerTest {
     }
 
     @Test
+    void staticWriteOnlyContinuationDoesNotAdvertiseEditFile() {
+        String request =
+                "Repair README.md using a complete file replacement.";
+        LoopState state = state(request);
+        state.messages.add(1, ChatMessage.system("""
+                [Static verification repair context]
+                Expected targets: README.md
+                Full-file replacement targets: README.md
+                """));
+        state.toolOutcomes.add(readOutcome("README.md"));
+        addReadback(
+                state,
+                "README.md",
+                "1 | # Existing\n2 | Old content.");
+
+        CompactMutationContinuationPlanner.Plan plan =
+                CompactMutationContinuationPlanner.planForContextBudget(
+                                state,
+                                baseTools(),
+                                "static repair continuation")
+                        .orElseThrow();
+
+        assertEquals(
+                List.of("talos.write_file"),
+                toolNames(plan.tools()));
+        String payload = prompt(plan.messages());
+        assertTrue(payload.contains("Call talos.write_file now."), payload);
+        assertFalse(payload.contains("talos.edit_file"), payload);
+        assertFalse(payload.contains("write/edit"), payload);
+    }
+
+    @Test
     void planDoesNotRunAfterMutationProgressOrPendingObligation() {
         LoopState alreadyMutated = state("Rewrite README.md with a short project note.");
         alreadyMutated.toolOutcomes.add(readOutcome("README.md"));

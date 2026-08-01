@@ -3,15 +3,21 @@ package dev.talos.core.llm;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -25,6 +31,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallRepromptStageToolSurfaceTest {
+
+    @AfterEach
+    void clearTurnCapture() {
+        TurnTaskContractCapture.clear();
+        ProviderResponseCapture.clear();
+    }
 
     @Test
     void staticWebExpectedTargetProgressRepromptUsesOnlyWriteFileTool() {
@@ -40,15 +52,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "index.html"));
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "styles.css"));
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -82,15 +86,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "index.html"));
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "styles.css"));
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -130,15 +126,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "index.html"));
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "styles.css"));
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -186,15 +174,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                         """),
                 ChatMessage.user("Fix the remaining static verification problems.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(mutatingOutcome("talos.write_file", "index.html"));
         var outcome = new ToolCallExecutionStage.IterationOutcome(
                 1,
@@ -238,15 +218,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                         """),
                 ChatMessage.user("Review the BMI calculator you just created and fix any obvious issue.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(readOnlyOutcome("talos.list_dir", ""));
         state.toolNames.add("talos.list_dir");
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -294,15 +266,7 @@ class ToolCallRepromptStageToolSurfaceTest {
                         """),
                 ChatMessage.user("Review the BMI calculator you just created and fix any obvious issue.")
         ));
-        LoopState state = new LoopState(
-                "",
-                List.of(),
-                messages,
-                Path.of("."),
-                ctx,
-                null,
-                10,
-                0);
+        LoopState state = providerBackedState(messages, ctx, broadTools);
         state.toolOutcomes.add(readOnlyOutcome("talos.list_dir", ""));
         state.toolNames.add("talos.list_dir");
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -352,6 +316,71 @@ class ToolCallRepromptStageToolSurfaceTest {
                 false,
                 "mutation applied",
                 "");
+    }
+
+    private static LoopState providerBackedState(
+            List<ChatMessage> messages,
+            Context ctx,
+            List<ToolSpec> tools
+    ) {
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        return new LoopState(
+                "",
+                List.of(),
+                boundForegroundProviderReceipt(tools),
+                messages,
+                Path.of("."),
+                ctx,
+                null,
+                10,
+                0);
+    }
+
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> tools
+    ) {
+        List<String> selectedToolNames =
+                tools.stream().map(ToolSpec::name).toList();
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "tool-call-reprompt-stage-tool-surface");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "c".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    1,
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
     }
 
     private static List<ToolSpec> broadToolSurface() {

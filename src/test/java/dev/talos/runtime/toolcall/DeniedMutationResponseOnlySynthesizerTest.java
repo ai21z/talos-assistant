@@ -8,6 +8,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
@@ -32,6 +34,7 @@ class DeniedMutationResponseOnlySynthesizerTest {
     @AfterEach
     void clearTrace() {
         LocalTurnTraceCapture.clear();
+        TurnTaskContractCapture.clear();
     }
 
     @Test
@@ -61,6 +64,8 @@ class DeniedMutationResponseOnlySynthesizerTest {
         LoopState state = state(recorded.client());
         beginTrace();
         int initialMessages = state.messages.size();
+        List<ChatMessage> originalMessages =
+                List.copyOf(state.messages);
 
         DeniedMutationResponseOnlySynthesizer.Result answer =
                 DeniedMutationResponseOnlySynthesizer.synthesize(state);
@@ -70,6 +75,7 @@ class DeniedMutationResponseOnlySynthesizerTest {
         assertEquals(ProviderResponseCapture.Source.FOREGROUND_PROVIDER, answer.receipt().source());
         assertTrue(answer.receipt().providerTerminalEligible());
         assertEquals(initialMessages, state.messages.size());
+        assertEquals(originalMessages, state.messages);
         assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
         assertEquals(1, recorded.requests().size());
         String prompt = recorded.requests().getFirst().messages.stream()
@@ -77,6 +83,15 @@ class DeniedMutationResponseOnlySynthesizerTest {
                 .reduce("", (left, right) -> left + "\n" + right);
         assertTrue(prompt.contains("[Tool policy stop]"), prompt);
         assertTrue(prompt.contains("Do not call any more tools in this turn."), prompt);
+        assertFalse(prompt.contains("talos.write_file"), prompt);
+        assertTrue(prompt.contains("visibleTools: (none)"), prompt);
+        assertTrue(recorded.requests().getFirst().tools.isEmpty());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                recorded.requests().getFirst().controls.toolAuthorityMode());
+        assertTrue(
+                answer.receipt().toolAuthorityContract()
+                        .selectedToolNames().isEmpty());
     }
 
     @Test
@@ -266,12 +281,16 @@ class DeniedMutationResponseOnlySynthesizerTest {
         if (llm != null) {
             builder.llm(llm);
         }
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Try to write README.md.")));
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
         return new LoopState(
                 "",
                 List.of(),
-                new ArrayList<>(List.of(
-                        ChatMessage.system("sys"),
-                        ChatMessage.user("Try to write README.md."))),
+                messages,
                 Path.of("."),
                 builder.build(),
                 null,

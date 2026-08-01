@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ActionObligation;
@@ -25,7 +26,8 @@ final class ToolRepairInspectionBudgetGate {
             return Optional.empty();
         }
 
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
                 .noChangeAnswerIfCurrentWorkspacePasses(
                         contract,
@@ -58,7 +60,8 @@ final class ToolRepairInspectionBudgetGate {
 
     private static boolean repairReadOnlyBudgetExceeded(LoopState state, int readOnlyToolBudget) {
         if (state == null || state.toolNames.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         boolean staticRepairMutation = hasStaticRepairContext(state)
                 && contract != null
                 && contract.mutationAllowed()

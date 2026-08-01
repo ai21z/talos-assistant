@@ -8,9 +8,12 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.ChatMessage;
@@ -410,8 +413,43 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void noResultSurvivesEarlierAssertionErrorAndSkipsLegacyListeners(@TempDir Path dir)
             throws Exception {
+        String privatePath = "T1196_NO_RESULT_PRIVATE_PATH/secret.css";
+        String privateClause = "update " + privatePath + " too.";
+        String privateRequest =
+                "Edit index.html so it works, and " + privateClause;
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> Optional.empty());
+        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> {
+            var resolution = TaskContractResolver.resolveFromUserRequest(raw);
+            var exactTarget = resolution.intent().targets()
+                    .find(privatePath)
+                    .orElseThrow();
+            assertEquals(TargetRole.MUST_MUTATE, exactTarget.role());
+            assertEquals(TargetSource.USER_REQUEST, exactTarget.derivation().source());
+            assertTrue(exactTarget.derivation().startOffset() >= 0);
+            assertEquals(
+                    raw.indexOf(privatePath) + privatePath.length(),
+                    exactTarget.derivation().authorityEndOffset());
+            assertTrue(exactTarget.derivation().authorityEndOffset()
+                    < exactTarget.derivation().endOffset());
+            assertTrue(exactTarget.derivation().endOffset()
+                    > exactTarget.derivation().startOffset());
+            assertEquals(
+                    exactTarget.derivation().sourceText(),
+                    raw.substring(
+                            exactTarget.derivation().startOffset(),
+                            exactTarget.derivation().endOffset()));
+            assertEquals(privateClause, exactTarget.derivation().sourceText());
+            TurnTaskContractCapture.set(resolution);
+            TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                    resolution.contract(),
+                    resolution.intent(),
+                    "PLAN",
+                    List.of("talos.write_file"),
+                    List.of()));
+            LocalTurnTraceCapture.warning(
+                    "T1196_NO_RESULT_PRIVATE_WARNING", privateClause);
+            return Optional.empty();
+        });
         AtomicInteger legacyCalls = new AtomicInteger();
         processor.addListener(new SessionListener() {
             @Override
@@ -429,7 +467,8 @@ class TurnProcessorFailedTurnPersistenceTest {
         });
         processor.addListener(new JsonTurnLogAppender(store, "no-result"));
 
-        TurnResult returned = processor.process(session(dir), "unhandled", context());
+        TurnResult returned = processor.process(
+                session(dir), privateRequest, context());
 
         assertNull(returned);
         assertEquals(0, legacyCalls.get());
@@ -439,8 +478,13 @@ class TurnProcessorFailedTurnPersistenceTest {
         assertEquals("no_result", row.status());
         assertEquals("", row.userInput());
         assertEquals("", row.assistantText());
+        assertEquals(List.of(), row.toolCalls());
+        assertEquals(TurnPolicyTrace.empty(), row.policyTrace());
         LocalTurnTrace trace = store.loadTrace("no-result", row.traceId()).orElseThrow();
         assertEquals("NO_RESULT", terminal(trace).data().get("settlementKind"));
+        assertEquals(List.of(), trace.taskContract().expectedTargets());
+        assertEquals(List.of(), trace.taskContract().rolefulTargets());
+        assertEquals(List.of(), trace.warnings());
         assertEquals(1, trace.events().stream()
                 .filter(event -> "TURN_SETTLED".equals(event.type()))
                 .count());
@@ -452,7 +496,12 @@ class TurnProcessorFailedTurnPersistenceTest {
         assertEquals(List.of(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION),
                 health.reasons());
         assertEquals(List.of(AssertionError.class.getName()), health.exceptionClasses());
-        assertFalse(persistedText(dir).contains("T1190_LISTENER_ASSERTION_CANARY"));
+        String persisted = persistedText(dir);
+        assertFalse(persisted.contains("T1190_LISTENER_ASSERTION_CANARY"));
+        assertFalse(persisted.contains(privatePath));
+        assertFalse(persisted.contains(privateClause));
+        assertFalse(persisted.contains(privateRequest));
+        assertFalse(persisted.contains("T1196_NO_RESULT_PRIVATE_WARNING"));
     }
 
     @Test
@@ -512,24 +561,71 @@ class TurnProcessorFailedTurnPersistenceTest {
     }
 
     @Test
-    void cancellationWinsOneBoundedTerminalSettlement(@TempDir Path dir) {
+    void cancellationWinsOneBoundedTerminalSettlement(@TempDir Path dir)
+            throws Exception {
+        String privatePath = "T1196_CANCEL_PRIVATE_PATH/secret.js";
+        String privateClause = "update " + privatePath + " too.";
+        String privateRequest =
+                "Edit index.html so it works, and " + privateClause;
         JsonSessionStore store = new JsonSessionStore(dir);
         TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            var resolution = TaskContractResolver.resolveFromUserRequest(raw);
+            var exactTarget = resolution.intent().targets()
+                    .find(privatePath)
+                    .orElseThrow();
+            assertEquals(TargetRole.MUST_MUTATE, exactTarget.role());
+            assertEquals(TargetSource.USER_REQUEST, exactTarget.derivation().source());
+            assertTrue(exactTarget.derivation().startOffset() >= 0);
+            assertEquals(
+                    raw.indexOf(privatePath) + privatePath.length(),
+                    exactTarget.derivation().authorityEndOffset());
+            assertTrue(exactTarget.derivation().authorityEndOffset()
+                    < exactTarget.derivation().endOffset());
+            assertTrue(exactTarget.derivation().endOffset()
+                    > exactTarget.derivation().startOffset());
+            assertEquals(
+                    exactTarget.derivation().sourceText(),
+                    raw.substring(
+                            exactTarget.derivation().startOffset(),
+                            exactTarget.derivation().endOffset()));
+            assertEquals(privateClause, exactTarget.derivation().sourceText());
+            TurnTaskContractCapture.set(resolution);
+            TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                    resolution.contract(),
+                    resolution.intent(),
+                    "PLAN",
+                    List.of("talos.write_file"),
+                    List.of()));
+            LocalTurnTraceCapture.warning(
+                    "T1196_CANCEL_PRIVATE_WARNING", privateClause);
             throw new CancellationException("operator cancelled");
         }, store, "cancelled");
 
         assertThrows(CancellationException.class,
-                () -> processor.process(session(dir), "stop", context()));
+                () -> processor.process(session(dir), privateRequest, context()));
 
         List<TurnRecord> rows = store.loadTurns("cancelled");
         assertEquals(1, rows.size());
-        assertEquals("cancelled", rows.getFirst().status());
+        TurnRecord row = rows.getFirst();
+        assertEquals("cancelled", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        assertEquals(List.of(), row.toolCalls());
+        assertEquals(TurnPolicyTrace.empty(), row.policyTrace());
         LocalTurnTrace trace = store.loadTrace(
-                "cancelled", rows.getFirst().traceId()).orElseThrow();
+                "cancelled", row.traceId()).orElseThrow();
+        assertEquals(List.of(), trace.taskContract().expectedTargets());
+        assertEquals(List.of(), trace.taskContract().rolefulTargets());
+        assertEquals(List.of(), trace.warnings());
         assertEquals(1, trace.events().stream()
                 .filter(event -> "TURN_SETTLED".equals(event.type())).count());
         assertEquals("CANCELLED", terminal(trace).data().get("settlementKind"));
         assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+        String persisted = persistedText(dir);
+        assertFalse(persisted.contains(privatePath));
+        assertFalse(persisted.contains(privateClause));
+        assertFalse(persisted.contains(privateRequest));
+        assertFalse(persisted.contains("T1196_CANCEL_PRIVATE_WARNING"));
     }
 
     @Test
@@ -586,30 +682,36 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void abnormalEnvelopeAndFilesOmitOrdinaryPolicyToolAndRetrievalProse(@TempDir Path dir)
             throws Exception {
-        String privatePath = "C:/Users/alice/T1190_PRIVATE_PATH/secret.txt";
-        String privateClause = "T1190_RAW_CLAUSE_CANARY";
+        String privatePath = "T1190_PRIVATE_PATH/secret.css";
+        String privateClause = "update " + privatePath + " too.";
+        String privateRequest =
+                "Edit index.html so it works, and " + privateClause;
         String privateReason = "T1190_TOOL_REASON_CANARY";
         JsonSessionStore store = new JsonSessionStore(dir);
         TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> {
-            TurnAuditCapture.recordPolicyTrace(new TurnPolicyTrace(
-                    "READ_ONLY",
-                    false,
-                    true,
-                    List.of(privatePath),
-                    List.of(),
-                    "PLAN",
+            var resolution =
+                    TaskContractResolver.resolveFromUserRequest(raw);
+            var exactTarget = resolution.intent().targets()
+                    .find(privatePath)
+                    .orElseThrow();
+            assertTrue(exactTarget.derivation().startOffset() >= 0);
+            assertEquals(
+                    raw.indexOf(privatePath) + privatePath.length(),
+                    exactTarget.derivation().authorityEndOffset());
+            assertTrue(exactTarget.derivation().authorityEndOffset()
+                    < exactTarget.derivation().endOffset());
+            assertEquals(
+                    exactTarget.derivation().sourceText(),
+                    raw.substring(
+                            exactTarget.derivation().startOffset(),
+                            exactTarget.derivation().endOffset()));
+            TurnTaskContractCapture.set(resolution);
+            TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                    resolution.contract(),
+                    resolution.intent(),
                     "PLAN",
                     List.of("talos.read_file"),
-                    List.of(),
-                    List.of(privateReason),
-                    privateClause,
-                    List.of(new TurnPolicyTrace.RolefulTarget(
-                            privatePath,
-                            "MUST_READ",
-                            "USER_PROMPT",
-                            privateReason,
-                            privateClause,
-                            1.0))));
+                    List.of()));
             TurnAuditCapture.recordToolCall(
                     "talos.read_file", privatePath, false, privateReason);
             LocalTurnTraceCapture.warning("T1190_WARNING", privateClause);
@@ -633,7 +735,7 @@ class TurnProcessorFailedTurnPersistenceTest {
         processor.addListener(new JsonTurnLogAppender(store, "safe-abnormal"));
 
         assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), privateClause, context()));
+                () -> processor.process(session(dir), privateRequest, context()));
 
         TurnRecord row = store.loadTurns("safe-abnormal").getFirst();
         assertEquals("", listenerInput.get());
@@ -649,6 +751,7 @@ class TurnProcessorFailedTurnPersistenceTest {
         String persisted = persistedText(dir);
         assertFalse(persisted.contains(privatePath));
         assertFalse(persisted.contains(privateClause));
+        assertFalse(persisted.contains(privateRequest));
         assertFalse(persisted.contains(privateReason));
         assertFalse(persisted.contains("T1190_EXCEPTION_CANARY"));
     }

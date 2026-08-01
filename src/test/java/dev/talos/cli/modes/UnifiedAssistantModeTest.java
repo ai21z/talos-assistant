@@ -1,16 +1,25 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.prompt.LastPromptCapture;
+import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.runtime.SessionMemory;
+import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.util.Sanitize;
+import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 import dev.talos.runtime.command.RunCommandTool;
@@ -20,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -416,6 +426,372 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void pureBlockedWorkspaceTailsExposeNoMutationAuthorityToProvider(
+            @TempDir Path workspace
+    ) throws Exception {
+        for (String request : List.of(
+                "Make it work so create a directory named generated.",
+                "Make it work so create docs and assets, "
+                        + "then copy style.css to docs/style.css.",
+                "Make it work so create .config and assets, "
+                        + "then copy style.css to .config/style.css.",
+                "Make it work so create docs.v1 and assets, "
+                        + "then copy style.css to docs.v1/style.css.",
+                "Make it work so create index.html and style.css, "
+                        + "then copy style.css to backup.css.",
+                "Make it work so copy style.css to script.js.",
+                "Make it work so delete style.css.",
+                "Make it work so touch config.env.")) {
+            LastPromptCapture.clear();
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "That workspace operation is not available yet.",
+                            List.of())),
+                    4096);
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            registry.register(new MakeDirectoryTool());
+            registry.register(new CopyPathTool());
+            registry.register(new DeletePathTool());
+            Context context = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .toolRegistry(registry)
+                    .llm(recorded.client())
+                    .build();
+
+            new UnifiedAssistantMode().handle(request, workspace, context);
+
+            assertFalse(
+                    recorded.requests().isEmpty(),
+                    "provider request missing: " + request);
+            ChatRequest providerRequest = recorded.requests().getFirst();
+            assertTrue(providerRequest.tools.isEmpty(), request);
+            String providerBody = providerRequest.messages.stream()
+                    .map(message -> message.content() == null
+                            ? ""
+                            : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            for (String forbidden : List.of(
+                    "talos.write_file",
+                    "talos.edit_file",
+                    "talos.mkdir",
+                    "talos.copy_path",
+                    "talos.delete_path",
+                    "You CAN create files")) {
+                assertFalse(
+                        providerBody.contains(forbidden),
+                        request + " -> " + forbidden + "\n" + providerBody);
+            }
+            var render = LastPromptCapture.latest().orElseThrow();
+            assertTrue(render.tools().isEmpty(), request);
+            assertFalse(
+                    render.systemPrompt().contains("Available Tools"),
+                    request + "\n" + render.systemPrompt());
+        }
+    }
+
+    @Test
+    void nonAuthoritativeContentTailsExposeNoMutationAuthorityToProvider(
+            @TempDir Path workspace
+    ) throws Exception {
+        for (String request : List.of(
+                "Review index.html so maybe update style.css.",
+                "Review index.html so possibly update style.css.",
+                "Review index.html so potentially update style.css.",
+                "Review index.html so update style.css where appropriate.",
+                "Review index.html so update style.css where needed.",
+                "Review index.html so update style.css only when necessary.",
+                "Inspect index.html so should I update style.css?",
+                "Review index.html so the guide says update style.css.",
+                "Review index.html so the report requires you to update style.css.",
+                "Review index.html so I suggest update style.css.",
+                "Review index.html so per the report, update style.css.",
+                "Review index.html so you could update style.css.",
+                "Review index.html so you can update style.css.",
+                "Review index.html so the report says update style.css, "
+                        + "also update script.js.",
+                "Review index.html so the report says update style.css, "
+                        + "update script.js.",
+                "Review index.html so the report says update style.css: "
+                        + "update script.js.",
+                "Review index.html so the report says update style.css \u2013 "
+                        + "update script.js.",
+                "Review index.html so the report says update style.css \u2014 "
+                        + "update script.js.",
+                "Review index.html so the report says update style.css\n"
+                        + "update script.js.",
+                "Review index.html so the report says:\n"
+                        + "- update style.css\n"
+                        + "- update script.js.",
+                "Review index.html so maybe update style.css, "
+                        + "also update script.js.",
+                "Review index.html so, as an option, update style.css.",
+                "Review index.html so the report asks you to update style.css.",
+                "Review index.html so the ticket instructs us to update style.css.",
+                "Review index.html so the guide tells you to update style.css.",
+                "Review index.html so the note requests: update style.css.",
+                "Review index.html so according to the report, update style.css.")) {
+            LastPromptCapture.clear();
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "I inspected the request without changing files.",
+                            List.of())),
+                    4096);
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            registry.register(new MakeDirectoryTool());
+            registry.register(new CopyPathTool());
+            registry.register(new DeletePathTool());
+            Context context = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .toolRegistry(registry)
+                    .llm(recorded.client())
+                    .build();
+
+            new UnifiedAssistantMode().handle(request, workspace, context);
+
+            assertFalse(
+                    recorded.requests().isEmpty(),
+                    "provider request missing: " + request);
+            ChatRequest providerRequest = recorded.requests().getFirst();
+            List<String> tools = providerRequest.tools.stream()
+                    .map(tool -> tool.name())
+                    .toList();
+            for (String forbidden : List.of(
+                    "talos.write_file",
+                    "talos.edit_file",
+                    "talos.mkdir",
+                    "talos.copy_path",
+                    "talos.delete_path")) {
+                assertFalse(tools.contains(forbidden), request + " -> " + tools);
+            }
+            String providerBody = providerRequest.messages.stream()
+                    .map(message -> message.content() == null
+                            ? ""
+                            : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(providerBody.contains("[CurrentTurnCapability]"), providerBody);
+            assertTrue(providerBody.contains("obligation: NONE"), providerBody);
+            var render = LastPromptCapture.latest().orElseThrow();
+            assertEquals(
+                    soleCapabilityFrame(providerRequest.messages),
+                    soleCapabilityFrame(render.messages()),
+                    request);
+            for (String forbidden : List.of(
+                    "talos.write_file",
+                    "talos.edit_file",
+                    "talos.mkdir",
+                    "talos.copy_path",
+                    "talos.delete_path",
+                    "You CAN create files")) {
+                assertFalse(
+                        providerBody.contains(forbidden),
+                        request + " -> " + forbidden + "\n" + providerBody);
+            }
+        }
+    }
+
+    @Test
+    void promptPreviewAndProviderRequestShareExactToolsFrameAndObligation(
+            @TempDir Path workspace
+    ) throws Exception {
+        String request = "What files are in this folder?";
+        LastPromptCapture.clear();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "No entries were returned.",
+                        List.of())),
+                16_384);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ListDirTool());
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        Context context = Context.builder(new Config())
+                .memory(new SessionMemory())
+                .toolRegistry(registry)
+                .llm(recorded.client())
+                .build();
+
+        var preview = PromptInspector.renderNext(
+                "auto",
+                request,
+                workspace,
+                context);
+        new UnifiedAssistantMode().handle(
+                request,
+                workspace,
+                context);
+
+        ChatRequest actual = recorded.requests().getFirst();
+        assertEquals(
+                preview.messages(),
+                actual.messages,
+                request);
+        assertNormalizedLf(preview.messages());
+        assertNormalizedLf(actual.messages);
+        assertEquals(
+                preview.tools(),
+                actual.tools.stream().map(tool -> tool.name()).toList());
+        String previewFrame = soleCapabilityFrame(preview.messages());
+        String providerFrame = soleCapabilityFrame(actual.messages);
+        assertEquals(previewFrame, providerFrame);
+        String obligation = capabilityValue(
+                previewFrame,
+                "obligation: ");
+        assertEquals("LIST_DIR_ONLY", obligation);
+        assertEquals(
+                List.of("action-obligation:" + obligation),
+                actual.controls.debugTags().stream()
+                        .filter(tag -> tag.startsWith(
+                                "action-obligation:"))
+                        .toList());
+    }
+
+    @Test
+    void promptPreviewCaptureAndProviderRequestShareCanonicalControlBytes(
+            @TempDir Path workspace
+    ) throws Exception {
+        for (String request : List.of(
+                "What files are in this folder?\nAnswer briefly.",
+                "What files are in this folder?\r\nAnswer briefly.",
+                "Edit index.html so ma\rybe, update style.css.",
+                "Edit index.html so ma\u0000ybe, update style.css.",
+                "Edit index.html so ma\u001b[31mybe, update style.css.")) {
+            LastPromptCapture.clear();
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(
+                            new LlmClient.StreamResult("No changes were made.", List.of()),
+                            new LlmClient.StreamResult("No changes were made.", List.of()),
+                            new LlmClient.StreamResult("No changes were made.", List.of())),
+                    16_384);
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new ListDirTool());
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            Context context = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .toolRegistry(registry)
+                    .llm(recorded.client())
+                    .build();
+
+            var preview = PromptInspector.renderNext(
+                    "auto",
+                    request,
+                    workspace,
+                    context);
+            new UnifiedAssistantMode().handle(request, workspace, context);
+
+            ChatRequest actual = recorded.requests().getFirst();
+            var captured = LastPromptCapture.latest().orElseThrow();
+            List<String> actualTools = actual.tools.stream()
+                    .map(tool -> tool.name())
+                    .toList();
+            assertEquals(preview.messages(), actual.messages, request);
+            assertEquals(preview.tools(), actualTools, request);
+            assertEquals(captured.messages(), actual.messages, request);
+            assertEquals(captured.tools(), actualTools, request);
+            assertEquals(
+                    soleCapabilityFrame(preview.messages()),
+                    soleCapabilityFrame(actual.messages),
+                    request);
+            assertEquals(
+                    soleCapabilityFrame(captured.messages()),
+                    soleCapabilityFrame(actual.messages),
+                    request);
+            assertTrue(actual.messages.stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .anyMatch(Sanitize.sanitizeMessageContent(request)::equals),
+                    request);
+            assertTrue(actual.messages.stream()
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .noneMatch(content -> content.indexOf('\r') >= 0
+                            || content.indexOf('\u0000') >= 0
+                            || content.indexOf('\u001b') >= 0),
+                    request);
+        }
+    }
+
+    @Test
+    void historyDependentPreviewMatchesProviderForRepairEllipsisAndActiveTask(
+            @TempDir Path workspace
+    ) throws Exception {
+        SessionMemory repairMemory = new SessionMemory();
+        repairMemory.update(
+                "Create index.html, styles.css, and scripts.js.",
+                """
+                [Task incomplete: Static verification failed.]
+                Remaining static verification problems:
+                - scripts.js was expected but was not created.
+                """);
+        assertHistoryDependentPreviewParity(
+                "nothing changed... try one more time",
+                repairMemory,
+                workspace);
+
+        SessionMemory activeMemory = new SessionMemory();
+        activeMemory.update(
+                "Review README.md and propose the required correction.",
+                "I propose updating README.md with the corrected command.");
+        activeMemory.setActiveTaskContext(
+                ActiveTaskContext.proposedChanges(
+                        1,
+                        "trace-active-preview",
+                        List.of("README.md"),
+                        "Update README.md with the corrected command."));
+        assertHistoryDependentPreviewParity(
+                "yes, apply that change now",
+                activeMemory,
+                workspace);
+    }
+
+    @Test
+    void mixedContentAndBlockedWorkspaceTailKeepsOnlyContentAuthority(
+            @TempDir Path workspace
+    ) throws Exception {
+        LastPromptCapture.clear();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "The requested edit remains incomplete.",
+                        List.of())),
+                4096);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new DeletePathTool());
+        Context context = Context.builder(new Config())
+                .memory(new SessionMemory())
+                .toolRegistry(registry)
+                .llm(recorded.client())
+                .build();
+
+        new UnifiedAssistantMode().handle(
+                "Edit index.html so it works, then delete style.css.",
+                workspace,
+                context);
+
+        ChatRequest providerRequest = recorded.requests().getFirst();
+        List<String> tools = providerRequest.tools.stream()
+                .map(tool -> tool.name())
+                .toList();
+        assertTrue(tools.contains("talos.write_file"), tools.toString());
+        assertTrue(tools.contains("talos.edit_file"), tools.toString());
+        assertFalse(tools.contains("talos.delete_path"), tools.toString());
+        String providerBody = providerRequest.messages.stream()
+                .map(message -> message.content() == null
+                        ? ""
+                        : message.content())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertFalse(providerBody.contains("talos.delete_path"), providerBody);
+    }
+
+    @Test
     void privateModeMutationPromptOmitsRetrieveFromPromptSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();
@@ -671,6 +1047,111 @@ class UnifiedAssistantModeTest {
         privacy.put("rag", rag);
         cfg.data.put("privacy", privacy);
         return cfg;
+    }
+
+    private static void assertHistoryDependentPreviewParity(
+            String request,
+            SessionMemory memory,
+            Path workspace
+    ) throws Exception {
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(
+                                new LlmClient.StreamResult(
+                                        "The requested work remains incomplete.",
+                                        List.of()),
+                                new LlmClient.StreamResult(
+                                        "No mutation completed.",
+                                        List.of())),
+                        16_384);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new ListDirTool());
+        registry.register(new GrepTool());
+        registry.register(new RetrieveTool(null));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        Context context = Context.builder(new Config())
+                .memory(memory)
+                .toolRegistry(registry)
+                .llm(recorded.client())
+                .build();
+
+        var preview = PromptInspector.renderNext(
+                "auto",
+                request,
+                workspace,
+                context);
+        new UnifiedAssistantMode().handle(
+                request,
+                workspace,
+                context);
+
+        ChatRequest actual = recorded.requests().getFirst();
+        assertEquals(
+                preview.tools(),
+                actual.tools.stream().map(tool -> tool.name()).toList(),
+                request);
+        assertEquals(
+                preview.messages(),
+                actual.messages,
+                request);
+        assertNormalizedLf(preview.messages());
+        assertNormalizedLf(actual.messages);
+        assertEquals(
+                soleCapabilityFrame(preview.messages()),
+                soleCapabilityFrame(actual.messages),
+                request);
+        String obligation = capabilityValue(
+                soleCapabilityFrame(preview.messages()),
+                "obligation: ");
+        List<String> expectedActionTags = "NONE".equals(obligation)
+                ? List.of()
+                : List.of("action-obligation:" + obligation);
+        assertEquals(
+                expectedActionTags,
+                actual.controls.debugTags().stream()
+                        .filter(tag -> tag.startsWith(
+                                "action-obligation:"))
+                        .toList(),
+                request);
+    }
+
+    private static String soleCapabilityFrame(
+            List<ChatMessage> messages
+    ) {
+        List<String> frames = messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(ChatMessage::content)
+                .filter(java.util.Objects::nonNull)
+                .filter(content -> content.startsWith(
+                        "[CurrentTurnCapability]"))
+                .toList();
+        assertEquals(1, frames.size(), frames.toString());
+        return frames.getFirst();
+    }
+
+    private static String capabilityValue(
+            String frame,
+            String prefix
+    ) {
+        List<String> values = frame.lines()
+                .filter(line -> line.startsWith(prefix))
+                .map(line -> line.substring(prefix.length()))
+                .toList();
+        assertEquals(1, values.size(), frame);
+        return values.getFirst();
+    }
+
+    private static void assertNormalizedLf(
+            List<ChatMessage> messages
+    ) {
+        for (ChatMessage message : messages) {
+            if (message == null || message.content() == null) continue;
+            assertFalse(
+                    message.content().contains("\r"),
+                    message.toString());
+        }
     }
 
     private static Context contextWithCommandTool(String response) {

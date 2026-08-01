@@ -6,7 +6,9 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.Capabilities;
@@ -53,6 +55,7 @@ final class DispatchedToolSurfaceAuthorityTest {
 
     @AfterEach
     void clearCaptures() {
+        TurnTaskContractCapture.clear();
         LocalTurnTraceCapture.clear();
         ProviderResponseCapture.clear();
     }
@@ -161,15 +164,24 @@ final class DispatchedToolSurfaceAuthorityTest {
                     gate,
                     registry,
                     ApprovalPolicy.ALWAYS_ASK);
-            ToolCallLoop.LoopResult loop = new ToolCallLoop(processor, 2).run(
-                    first.text(),
-                    first.toolCalls(),
-                    first.provenance(),
-                    new ArrayList<>(List.of(
-                            ChatMessage.system("system"),
-                            ChatMessage.user("Use only the authorized tool."))),
-                    workspace,
-                    context);
+            List<ChatMessage> loopMessages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("Use only the authorized tool.")));
+            TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromMessages(loopMessages),
+                    loopMessages);
+            ToolCallLoop.LoopResult loop;
+            try {
+                loop = new ToolCallLoop(processor, 2).run(
+                        first.text(),
+                        first.toolCalls(),
+                        first.provenance(),
+                        loopMessages,
+                        workspace,
+                        context);
+            } finally {
+                TurnTaskContractCapture.clear();
+            }
             return new ProbeOutcome(
                     resolver.firstRequest(),
                     first.provenance(),
@@ -237,13 +249,23 @@ final class DispatchedToolSurfaceAuthorityTest {
                     gate,
                     registry,
                     ApprovalPolicy.ALWAYS_ASK);
-            ToolCallLoop.LoopResult loop = new ToolCallLoop(processor, 2).run(
-                    first.text(),
-                    first.toolCalls(),
-                    first.provenance(),
-                    new ArrayList<>(messages),
-                    workspace,
-                    context);
+            List<ChatMessage> loopMessages =
+                    new ArrayList<>(messages);
+            TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromMessages(loopMessages),
+                    loopMessages);
+            ToolCallLoop.LoopResult loop;
+            try {
+                loop = new ToolCallLoop(processor, 2).run(
+                        first.text(),
+                        first.toolCalls(),
+                        first.provenance(),
+                        loopMessages,
+                        workspace,
+                        context);
+            } finally {
+                TurnTaskContractCapture.clear();
+            }
             return new ProbeOutcome(
                     resolver.firstRequest(),
                     first.provenance(),

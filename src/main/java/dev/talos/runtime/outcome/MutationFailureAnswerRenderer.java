@@ -2,9 +2,9 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.PendingActionObligation;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -448,13 +448,12 @@ public final class MutationFailureAnswerRenderer {
     private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages);
         TaskContract contract = safePlan.taskContract();
-        return contract.mutationRequested()
-                || TaskContractResolver.fromUserRequest(safePlan.originalUserRequest()).mutationRequested();
+        return contract.mutationRequested();
     }
 
     private static CurrentTurnPlan safePlanFromMessages(CurrentTurnPlan plan, List<ChatMessage> messages) {
         if (plan != null) return plan;
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = TurnTaskContractCapture.currentOrResolve(messages);
         return CurrentTurnPlan.compatibility(
                 contract,
                 CurrentTurnPlan.defaultPhaseFor(contract),

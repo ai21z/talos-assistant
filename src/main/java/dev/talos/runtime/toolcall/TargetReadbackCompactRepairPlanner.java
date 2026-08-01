@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.expectation.AppendLineExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
@@ -53,7 +54,8 @@ final class TargetReadbackCompactRepairPlanner {
         Set<String> remaining = remainingExpectedTargets.stream()
                 .map(ExpectedTargetProgressAccounting::normalizeExpectedTargetKey)
                 .collect(Collectors.toSet());
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (outcome == null || !outcome.appendLinePreservationFailure()) continue;

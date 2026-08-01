@@ -14,11 +14,17 @@ import dev.talos.runtime.context.ProjectMemoryLimits;
 import dev.talos.runtime.context.ProjectMemoryLoader;
 import dev.talos.runtime.context.ProjectMemoryRequest;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.CanonicalToolDescriptors;
@@ -37,7 +43,20 @@ final class AssistantTurnPreparation {
 
     private AssistantTurnPreparation() {}
 
-    record PreparedTurn(Context ctx, CurrentTurnPlan plan) {}
+    record PreparedTurn(
+            Context ctx,
+            CurrentTurnPlan plan,
+            TaskResolution taskResolution
+    ) {
+        PreparedTurn {
+            Objects.requireNonNull(plan, "plan");
+            Objects.requireNonNull(taskResolution, "taskResolution");
+            if (!plan.taskContract().equals(taskResolution.contract())) {
+                throw new IllegalArgumentException(
+                        "prepared turn plan and task resolution must share one contract");
+            }
+        }
+    }
 
     /**
      * Ordered, side-effectful preparation for a single assistant turn.
@@ -67,33 +86,70 @@ final class AssistantTurnPreparation {
             boolean workspaceBoundaryReplayedRequest,
             CapabilityPosture capabilityPosture
     ) {
+        TaskResolution initialResolution =
+                TaskContractResolver.resolveFromMessages(messages);
+        if (workspaceBoundaryReplayedRequest) {
+            initialResolution = TaskResolution.confirmedReplay(
+                    initialResolution);
+        }
         TaskContract rawTaskContract = WorkspaceTargetReconciler.reconcile(
-                TaskContractResolver.fromMessages(messages),
+                initialResolution.contract(),
                 workspace);
+        TaskIntent rawTaskIntent = TaskIntentProjector.project(
+                initialResolution.intent(),
+                rawTaskContract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
         ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
                 AssistantTurnExecutor.latestUserRequest(messages), rawTaskContract, ctx);
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 activeDecision.taskContract(),
                 workspace);
+        TaskIntent taskIntent = TaskIntentProjector.project(
+                rawTaskIntent,
+                taskContract,
+                TargetSource.REPAIR_CONTEXT,
+                "active-task-context-projection");
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(capabilityPosture, taskContract);
         TaskContract effectiveTaskContract = WorkspaceTargetReconciler.reconcile(
                 effectiveTurn.taskContract(),
                 workspace);
+        TaskIntent effectiveTaskIntent = TaskIntentProjector.project(
+                taskIntent,
+                effectiveTurn.taskContract(),
+                TargetSource.RUNTIME_DEFAULT,
+                "capability-posture-projection");
+        effectiveTaskIntent = TaskIntentProjector.project(
+                effectiveTaskIntent,
+                effectiveTaskContract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
+        TaskResolution effectiveResolution = new TaskResolution(
+                effectiveTaskContract,
+                effectiveTaskIntent,
+                initialResolution.projectedMutationTailPlan(
+                        effectiveTaskIntent),
+                initialResolution.provenance());
         boolean activeDecisionUpdatesTurnSurface =
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
         initializeExecutionPhaseForTurn(effectiveTurn.phase(), ctx);
         Context turnContext = withNativeToolSurface(
                 ctx,
-                effectiveTaskContract,
+                effectiveResolution,
                 activeDecisionUpdatesTurnSurface
                         || workspaceBoundaryReplayedRequest
                         || effectiveTurn.forceNativeSurfaceRecompute());
-        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(effectiveTaskContract, turnContext, activeDecision);
-        recordPolicyTrace(currentTurnPlan, turnContext);
-        LocalTurnTraceCapture.recordMutationRequestDecision(MutationIntent.classifyShape(
-                AssistantTurnExecutor.latestUserRequest(messages)));
+        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(
+                effectiveResolution,
+                turnContext,
+                activeDecision);
+        recordPolicyTrace(currentTurnPlan, effectiveTaskIntent, turnContext);
+        LocalTurnTraceCapture.recordMutationRequestDecision(
+                MutationIntent.classifyShape(
+                        AssistantTurnExecutor.latestUserRequest(messages)),
+                effectiveResolution.provenance());
         ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
         CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, projectMemory);
         CurrentTurnPromptInstructions.replaceTaskContractInstruction(messages, currentTurnPlan);
@@ -101,9 +157,9 @@ final class AssistantTurnPreparation {
                 messages, currentTurnPlan.taskContract(), workspace);
         recordProjectMemoryDiagnostics(projectMemory);
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, turnContext, projectMemory);
-        recordPromptDebugDiagnostics(promptAudit);
+        recordPromptDebugDiagnostics(promptAudit, currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, turnContext);
-        return new PreparedTurn(turnContext, currentTurnPlan);
+        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution);
     }
 
     private static void initializeExecutionPhaseForTurn(ExecutionPhase phase, Context ctx) {
@@ -112,27 +168,48 @@ final class AssistantTurnPreparation {
         ctx.executionPhaseState().moveTo(initial);
     }
 
-    private static Context withNativeToolSurface(Context ctx, TaskContract contract, boolean forceRecompute) {
+    private static Context withNativeToolSurface(
+            Context ctx,
+            TaskResolution resolution,
+            boolean forceRecompute
+    ) {
+        TaskContract contract = resolution == null
+                ? TaskContract.unknown("")
+                : resolution.contract();
         boolean contractRemovesToolAuthority = contract != null && contract.type() == TaskType.SMALL_TALK;
-        if (ctx == null
-                || (ctx.hasNativeToolSpecOverride() && !forceRecompute && !contractRemovesToolAuthority)) {
+        boolean blocksWorkspaceOperations =
+                resolution != null && resolution.blocksWorkspaceOperations();
+        if (ctx == null) {
+            return ctx;
+        }
+        if (ctx.hasNativeToolSpecOverride()
+                && !forceRecompute
+                && !contractRemovesToolAuthority
+                && !blocksWorkspaceOperations) {
             return ctx;
         }
         ExecutionPhase phase = ctx.executionPhaseState() == null
                 ? ExecutionPhase.APPLY
                 : ctx.executionPhaseState().phase();
         return ctx.withNativeToolSpecs(
-                NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry(), ctx.cfg()));
+                NativeToolSpecPolicy.select(
+                        resolution,
+                        phase,
+                        ctx.toolRegistry(),
+                        ctx.cfg()));
     }
 
     private static CurrentTurnPlan buildCurrentTurnPlan(
-            TaskContract taskContract,
+            TaskResolution resolution,
             Context ctx,
             ActiveTaskContextPolicy.Decision activeDecision
     ) {
+        TaskContract taskContract = resolution == null
+                ? TaskContract.unknown("")
+                : resolution.contract();
         ExecutionPhase phase = currentExecutionPhase(ctx, taskContract);
         List<String> promptTools = ctx == null
-                ? defaultVisibleToolNames(taskContract, phase)
+                ? defaultVisibleToolNames(resolution, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         boolean nativeEnabled = ctx == null
                 || ctx.llm() == null
@@ -140,7 +217,7 @@ final class AssistantTurnPreparation {
         List<String> nativeTools = nativeEnabled ? promptTools : List.of();
         String activeTaskContext = renderActiveTaskContextForPlan(activeDecision);
         String artifactGoal = renderArtifactGoalForPlan(activeDecision);
-        return CurrentTurnPlan.create(
+        return CurrentTurnPlan.createWithActionObligation(
                 taskContract,
                 phase,
                 nativeTools,
@@ -149,7 +226,22 @@ final class AssistantTurnPreparation {
                 activeTaskContext,
                 artifactGoal,
                 CurrentTurnPlan.derivedVerifierProfile(taskContract),
+                ActionObligationPolicy.derive(resolution, phase),
                 ctx == null ? null : ctx.cfg());
+    }
+
+    private static List<String> defaultVisibleToolNames(
+            TaskResolution resolution,
+            ExecutionPhase phase
+    ) {
+        if (resolution == null) return List.of();
+        return dev.talos.runtime.toolcall.ToolSurfacePlanner.plan(
+                resolution,
+                phase,
+                CanonicalToolDescriptors.registry(),
+                dev.talos.runtime.toolcall.ToolCapabilityAvailability
+                        .allEnabled())
+                .nativeToolNames();
     }
 
     private static String renderActiveTaskContextForPlan(ActiveTaskContextPolicy.Decision activeDecision) {
@@ -249,7 +341,11 @@ final class AssistantTurnPreparation {
                 : ExecutionPhase.INSPECT;
     }
 
-    private static void recordPolicyTrace(CurrentTurnPlan plan, Context ctx) {
+    private static void recordPolicyTrace(
+            CurrentTurnPlan plan,
+            TaskIntent taskIntent,
+            Context ctx
+    ) {
         if (plan != null && plan.requestObligation() != null) {
             PromptDebugCapture.putTurnDiagnostic(
                     "requestObligation.redactedProjectionJson",
@@ -262,18 +358,26 @@ final class AssistantTurnPreparation {
         if (plan == null) return;
         TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
                 plan.taskContract(),
+                taskIntent,
                 plan.phaseInitial().name(),
                 plan.nativeTools(),
                 plan.promptTools());
         String targetRoles = policyTrace.rolefulTargets().stream()
                 .sorted(java.util.Comparator
                         .comparing(TurnPolicyTrace.RolefulTarget::path)
-                        .thenComparing(TurnPolicyTrace.RolefulTarget::role))
+                .thenComparing(TurnPolicyTrace.RolefulTarget::role))
                 .map(target -> {
                     String rendered = target.path() + " = " + target.role();
-                    return target.reason().isBlank()
+                    rendered = target.reason().isBlank()
                             ? rendered
                             : rendered + " (" + target.reason() + ")";
+                    return rendered + " [sourceSpan="
+                            + renderOffset(target.startOffset())
+                            + ":"
+                            + renderOffset(target.authorityEndOffset())
+                            + ":"
+                            + renderOffset(target.endOffset())
+                            + "]";
                 })
                 .collect(java.util.stream.Collectors.joining(", "));
         if (targetRoles.isBlank()) {
@@ -282,8 +386,12 @@ final class AssistantTurnPreparation {
         PromptDebugCapture.putTurnDiagnostic(
                 PromptDebugCapture.TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC,
                 targetRoles);
-        if (ctx == null || !TurnAuditCapture.isActive()) return;
-        TurnAuditCapture.recordPolicyTrace(policyTrace);
+        if (ctx == null) return;
+        if (TurnAuditCapture.isActive()) {
+            TurnAuditCapture.recordPolicyTrace(policyTrace);
+        } else {
+            LocalTurnTraceCapture.recordPolicyTrace(policyTrace);
+        }
         LocalTurnTraceCapture.recordActionObligation(
                 plan.actionObligation().name(),
                 "SELECTED",
@@ -308,8 +416,39 @@ final class AssistantTurnPreparation {
         return snapshot;
     }
 
-    private static void recordPromptDebugDiagnostics(PromptAuditSnapshot snapshot) {
+    private static void recordPromptDebugDiagnostics(
+            PromptAuditSnapshot snapshot,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (snapshot == null) return;
+        if (plan != null && plan.taskContract() != null) {
+            TaskContract contract = plan.taskContract();
+            PromptDebugCapture.putTurnDiagnostic(
+                    PromptDebugCapture.TASK_CONTRACT_SUMMARY_DIAGNOSTIC,
+                    contract.type()
+                            + ", mutationAllowed="
+                            + contract.mutationAllowed()
+                            + ", verificationRequired="
+                            + contract.verificationRequired());
+            PromptDebugCapture.putTurnDiagnostic(
+                    PromptDebugCapture.TASK_CONTRACT_TARGET_LABEL_DIAGNOSTIC,
+                    contract.mutationAllowed()
+                            ? "Expected targets"
+                            : "Evidence target hints");
+            PromptDebugCapture.putTurnDiagnostic(
+                    PromptDebugCapture.TASK_CONTRACT_TARGETS_DIAGNOSTIC,
+                    orderedExpectedTargets(contract));
+            PromptDebugCapture.putTurnDiagnostic(
+                    PromptDebugCapture
+                            .TASK_CONTRACT_TARGET_COVERAGE_LABEL_DIAGNOSTIC,
+                    contract.mutationAllowed()
+                            ? "Expected-target coverage"
+                            : "Evidence-target frame coverage");
+            PromptDebugCapture.putTurnDiagnostic(
+                    PromptDebugCapture.TASK_CONTRACT_TARGET_COVERAGE_DIAGNOSTIC,
+                    expectedTargetCoverage(contract, currentTurnFrame(messages)));
+        }
         if (!snapshot.compactionStatus().isBlank()
                 && !PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
             PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
@@ -320,6 +459,66 @@ final class AssistantTurnPreparation {
         }
     }
 
+    private static String orderedExpectedTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) {
+            return "(none)";
+        }
+        String request = Objects.toString(
+                contract.originalUserRequest(), "").toLowerCase(java.util.Locale.ROOT);
+        return contract.expectedTargets().stream()
+                .sorted(java.util.Comparator
+                        .comparingInt((String target) ->
+                                targetIndex(request, target))
+                        .thenComparing(java.util.Comparator.naturalOrder()))
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static int targetIndex(String request, String target) {
+        if (request == null || request.isBlank() || target == null) {
+            return Integer.MAX_VALUE;
+        }
+        int index = request.indexOf(target.toLowerCase(java.util.Locale.ROOT));
+        return index < 0 ? Integer.MAX_VALUE : index;
+    }
+
+    private static String currentTurnFrame(List<ChatMessage> messages) {
+        if (messages == null) return "";
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            ChatMessage message = messages.get(index);
+            String content =
+                    message == null ? "" : Objects.toString(message.content(), "");
+            if (message != null
+                    && "system".equals(message.role())
+                    && content.contains("[CurrentTurnCapability]")) {
+                return content;
+            }
+        }
+        return "";
+    }
+
+    private static String expectedTargetCoverage(
+            TaskContract contract,
+            String frame
+    ) {
+        if (contract == null || contract.expectedTargets().isEmpty()) {
+            return "N/A";
+        }
+        if (!contract.mutationAllowed()) {
+            return "N/A (read-only task)";
+        }
+        if (frame == null
+                || frame.isBlank()
+                || !frame.contains("[ExpectedTargets]")) {
+            return "MISSING";
+        }
+        for (String target : contract.expectedTargets()) {
+            if (!frame.contains(target)) {
+                return "MISSING";
+            }
+        }
+        return "OK";
+    }
+
     private static String memoryRetentionStatus(Context ctx) {
         if (ctx == null || ctx.memory() == null) return PromptAuditSnapshot.NOT_DERIVED;
         SessionMemory.RetentionEvictionStats stats = ctx.memory().retentionEvictionStats();
@@ -328,6 +527,10 @@ final class AssistantTurnPreparation {
         }
         return "rawTurnMessagesEvictedWithoutSketch=" + stats.rawTurnMessagesEvictedWithoutSketch()
                 + " toolEvidenceEntriesEvicted=" + stats.toolEvidenceEntriesEvicted();
+    }
+
+    private static String renderOffset(int offset) {
+        return offset < 0 ? "unknown" : Integer.toString(offset);
     }
 
     private static void recordProjectMemoryDiagnostics(ProjectMemoryContext projectMemory) {
@@ -343,14 +546,6 @@ final class AssistantTurnPreparation {
         if (snapshot == null || ctx == null || ctx.streamSink() == null || ctx.session() == null) return;
         if (ctx.session().getDebugLevel() != DebugLevel.PROMPT) return;
         ctx.streamSink().accept("\n" + snapshot.renderCompact() + "\n");
-    }
-
-    private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
-        return NativeToolSpecPolicy.names(NativeToolSpecPolicy.select(
-                contract,
-                phase,
-                CanonicalToolDescriptors.registry(),
-                null));
     }
 
     private static ProjectMemoryContext loadProjectMemory(Path workspace, TaskContract contract) {

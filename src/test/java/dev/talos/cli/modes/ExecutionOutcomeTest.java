@@ -1,6 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
@@ -20,6 +21,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -35,6 +37,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionOutcomeTest {
+
+    @AfterEach
+    void clearTurnAuthorityCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void toolLoopDeniedMutationIsClassifiedAsBlocked() {
@@ -2218,6 +2225,15 @@ class ExecutionOutcomeTest {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
+            var plan = CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                            messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.read_file"),
+                    List.of("talos.read_file"),
+                    List.of());
+            messages.add(ChatMessage.user(
+                    "Synthesis retry: provide a concise final answer."));
 
             var loopResult = new ToolCallLoop.LoopResult(
                     "unused", 4, 4,
@@ -2226,7 +2242,12 @@ class ExecutionOutcomeTest {
                     0, 0, 0, 0);
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "There are no mismatches.", messages, loopResult, ws, 0);
+                    "There are no mismatches.",
+                    plan,
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
             assertTrue(outcome.selectorGroundedOverride());
@@ -2241,6 +2262,205 @@ class ExecutionOutcomeTest {
                 });
             }
         }
+    }
+
+    @Test
+    void syntheticSelectorTailCannotRelabelCapturedNonSelectorOrMutationTask(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(
+                workspace.resolve("index.html"),
+                "<main class=\"real\"></main>\n");
+        Files.writeString(
+                workspace.resolve("style.css"),
+                ".missing {}\n");
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing');\n");
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                3,
+                3,
+                List.of(
+                        "talos.read_file",
+                        "talos.read_file",
+                        "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "style.css", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        for (String original : List.of(
+                "Explain this workspace.",
+                "Fix the selector mismatch in index.html.")) {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(original));
+            var plan = CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                            messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.read_file"),
+                    List.of("talos.read_file"),
+                    List.of());
+            messages.add(ChatMessage.user(
+                    "Check whether this website has selector mismatches."));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "plain answer",
+                    plan,
+                    messages,
+                    loopResult,
+                    workspace,
+                    0);
+
+            assertFalse(outcome.selectorGroundedOverride(), original);
+            assertFalse(
+                    outcome.finalAnswer().contains("Mismatches found:"),
+                    outcome.finalAnswer());
+        }
+    }
+
+    @Test
+    void webDiagnosticFinalizerUsesCapturedPlanAcrossSyntheticTails(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <button class="real-button">Run</button>
+                <script src="script.js"></script>
+                """);
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n");
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                2,
+                2,
+                List.of("talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        var diagnosticMessages = new ArrayList<ChatMessage>();
+        diagnosticMessages.add(ChatMessage.system("sys"));
+        diagnosticMessages.add(ChatMessage.user(
+                "Inspect this static website and identify why it is broken. "
+                        + "Do not change anything."));
+        var diagnosticPlan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                        diagnosticMessages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+        diagnosticMessages.add(ChatMessage.user(
+                "Synthesis retry: provide a concise answer."));
+
+        ExecutionOutcome diagnostic = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                diagnosticPlan,
+                diagnosticMessages,
+                loopResult,
+                workspace,
+                0);
+
+        assertTrue(diagnostic.webDiagnosticGroundedOverride());
+        assertTrue(
+                diagnostic.finalAnswer().contains(
+                        "Static web diagnostics found:"),
+                diagnostic.finalAnswer());
+
+        var explainMessages = new ArrayList<ChatMessage>();
+        explainMessages.add(ChatMessage.system("sys"));
+        explainMessages.add(ChatMessage.user("Explain this workspace."));
+        var explainPlan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                        explainMessages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+        explainMessages.add(ChatMessage.user(
+                "Inspect this static website and identify why it is broken."));
+
+        ExecutionOutcome explain = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                explainPlan,
+                explainMessages,
+                loopResult,
+                workspace,
+                0);
+
+        assertFalse(explain.webDiagnosticGroundedOverride());
+        assertFalse(
+                explain.finalAnswer().contains(
+                        "Static web diagnostics found:"),
+                explain.finalAnswer());
+    }
+
+    @Test
+    void compatibilityFinalizerFallbackUsesCapturedOriginalRequest(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <button class="real-button">Run</button>
+                <script src="script.js"></script>
+                """);
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n");
+        var messages = new ArrayList<ChatMessage>();
+        String original =
+                "Inspect this static website and identify why it is broken. "
+                        + "Do not change anything.";
+        messages.add(ChatMessage.user(original));
+        TurnTaskContractCapture.set(
+                dev.talos.runtime.task.TaskContractResolver
+                        .resolveFromUserRequest(original));
+        messages.add(ChatMessage.user(
+                "Synthesis retry: explain this workspace instead."));
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                2,
+                2,
+                List.of("talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                messages,
+                loopResult,
+                workspace,
+                0);
+
+        assertTrue(outcome.webDiagnosticGroundedOverride());
+        assertTrue(
+                outcome.finalAnswer().contains("Static web diagnostics found:"),
+                outcome.finalAnswer());
     }
 
     @Test

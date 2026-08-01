@@ -37,10 +37,63 @@ public final class PromptDebugInspector {
             return "No prompt debug capture is available.\n";
         }
 
-        TaskContract contract = TaskContractResolver.fromMessages(snapshot.messages());
+        String authoritativeContractSummary = safeDiagnostic(
+                snapshot.diagnostics().get(
+                        PromptDebugCapture.TASK_CONTRACT_SUMMARY_DIAGNOSTIC));
+        boolean retryCapture = snapshot.controls().debugTags().stream()
+                .anyMatch(tag -> tag != null
+                        && tag.startsWith("retry-purpose:"));
+        boolean retryAuthorityUnavailable =
+                retryCapture
+                        && !hasCompleteAuthoritativeContractDiagnostics(
+                                snapshot.diagnostics());
+        boolean authoritativeContract =
+                !retryAuthorityUnavailable
+                        && !authoritativeContractSummary.isBlank();
+        TaskContract contract = authoritativeContract
+                        || retryAuthorityUnavailable
+                ? null
+                : TaskContractResolver.fromMessages(snapshot.messages());
         String frame = currentTurnFrame(snapshot.messages());
-        String expectedCoverage = expectedTargetCoverage(contract, frame);
-        String exactCoverage = exactLiteralCoverage(frame);
+        String targetLabel = retryAuthorityUnavailable
+                ? "Expected targets"
+                : authoritativeContract
+                ? diagnosticOrDefault(
+                        snapshot.diagnostics(),
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_LABEL_DIAGNOSTIC,
+                        "Expected targets")
+                : targetLabel(contract);
+        String expectedTargets = retryAuthorityUnavailable
+                ? "NOT_DERIVED"
+                : authoritativeContract
+                ? safeTargetRoleDiagnostic(snapshot.diagnostics().get(
+                        PromptDebugCapture.TASK_CONTRACT_TARGETS_DIAGNOSTIC))
+                : joinOrNone(contract);
+        if (expectedTargets.isBlank()) {
+            expectedTargets = "(none)";
+        }
+        String targetCoverageLabel = retryAuthorityUnavailable
+                ? "Expected-target coverage"
+                : authoritativeContract
+                ? diagnosticOrDefault(
+                        snapshot.diagnostics(),
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_COVERAGE_LABEL_DIAGNOSTIC,
+                        "Expected-target coverage")
+                : targetCoverageLabel(contract);
+        String expectedCoverage = retryAuthorityUnavailable
+                ? "NOT_DERIVED"
+                : authoritativeContract
+                ? diagnosticOrDefault(
+                        snapshot.diagnostics(),
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_COVERAGE_DIAGNOSTIC,
+                        "NOT_DERIVED")
+                : expectedTargetCoverage(contract, frame);
+        String exactCoverage = retryAuthorityUnavailable
+                ? "NOT_DERIVED"
+                : exactLiteralCoverage(frame);
 
         StringBuilder out = new StringBuilder();
         out.append("# Talos Prompt Debug\n\n");
@@ -73,12 +126,27 @@ public final class PromptDebugInspector {
                 .append(" system, ").append(countRole(snapshot.messages(), "user"))
                 .append(" user\n");
         out.append("- Tools: ").append(toolNames(snapshot.tools())).append('\n');
-        out.append("- Task contract: ").append(contract.type())
-                .append(", mutationAllowed=").append(contract.mutationAllowed())
-                .append(", verificationRequired=").append(contract.verificationRequired()).append('\n');
-        out.append("- ").append(targetLabel(contract)).append(": ").append(joinOrNone(contract)).append('\n');
-        out.append("- Target roles: ").append(targetRoles(snapshot, contract)).append('\n');
-        out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
+        out.append("- Task contract: ");
+        if (retryAuthorityUnavailable) {
+            out.append(
+                    "NOT_DERIVED (authoritative retry diagnostics missing)");
+        } else if (authoritativeContract) {
+            out.append(authoritativeContractSummary);
+        } else {
+            out.append(contract.type())
+                    .append(", mutationAllowed=")
+                    .append(contract.mutationAllowed())
+                    .append(", verificationRequired=")
+                    .append(contract.verificationRequired());
+        }
+        out.append('\n');
+        out.append("- ").append(targetLabel).append(": ").append(expectedTargets).append('\n');
+        out.append("- Target roles: ")
+                .append(retryAuthorityUnavailable
+                        ? "NOT_DERIVED"
+                        : targetRoles(snapshot, contract))
+                .append('\n');
+        out.append("- ").append(targetCoverageLabel).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
         appendModelIdentity(out, snapshot.diagnostics());
         appendContextLedger(out);
@@ -214,6 +282,17 @@ public final class PromptDebugInspector {
         return clean.length() <= 240 ? clean : clean.substring(0, 240);
     }
 
+    private static String diagnosticOrDefault(
+            Map<String, String> diagnostics,
+            String key,
+            String fallback
+    ) {
+        String value = diagnostics == null
+                ? ""
+                : safeDiagnostic(diagnostics.get(key));
+        return value.isBlank() ? fallback : value;
+    }
+
     private static void appendContextLedger(StringBuilder out) {
         ContextLedgerSnapshot ledger = ContextLedgerCapture.snapshot();
         if (ledger == null || ledger.summary().totalItems() <= 0) {
@@ -332,7 +411,17 @@ public final class PromptDebugInspector {
         if (!target.reason().isBlank()) {
             rendered += " (" + target.reason() + ")";
         }
-        return rendered;
+        return rendered + " [sourceSpan="
+                + renderOffset(target.startOffset())
+                + ":"
+                + renderOffset(target.authorityEndOffset())
+                + ":"
+                + renderOffset(target.endOffset())
+                + "]";
+    }
+
+    private static String renderOffset(int offset) {
+        return offset < 0 ? "unknown" : Integer.toString(offset);
     }
 
     private static String safeTargetRoleDiagnostic(String raw) {
@@ -345,6 +434,25 @@ public final class PromptDebugInspector {
                 + " exceeds "
                 + MAX_TARGET_ROLE_DIAGNOSTIC_CHARS
                 + " characters]";
+    }
+
+    private static boolean hasCompleteAuthoritativeContractDiagnostics(
+            Map<String, String> diagnostics
+    ) {
+        if (diagnostics == null || diagnostics.isEmpty()) return false;
+        return List.of(
+                        PromptDebugCapture.TASK_CONTRACT_SUMMARY_DIAGNOSTIC,
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_LABEL_DIAGNOSTIC,
+                        PromptDebugCapture.TASK_CONTRACT_TARGETS_DIAGNOSTIC,
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_COVERAGE_LABEL_DIAGNOSTIC,
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_COVERAGE_DIAGNOSTIC,
+                        PromptDebugCapture
+                                .TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC)
+                .stream()
+                .allMatch(key -> !safeDiagnostic(diagnostics.get(key)).isBlank());
     }
 
     private static int targetIndex(String requestLower, String target) {

@@ -1,6 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -133,6 +134,39 @@ class MutationFailureAnswerRendererTest {
         assertTrue(out.contains("approval was denied"));
         assertTrue(out.contains("index.html: approval denied"));
         assertFalse(out.contains("manual replacement prose"));
+    }
+
+    @Test
+    void nullPlanFailureRenderingUsesCapturedContractBeforeSyntheticTail() {
+        String original = "Explain the current status without changing files.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(original));
+        var messages = messages(original);
+        messages.add(ChatMessage.user("Edit index.html now."));
+        var denied = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.edit_file",
+                "index.html",
+                false,
+                true,
+                true,
+                "",
+                "policy denied",
+                null,
+                ToolError.DENIED)));
+        try {
+            String out =
+                    MutationFailureAnswerRenderer
+                            .summarizeDeniedMutationOutcomesIfNeeded(
+                                    "captured read-only answer",
+                                    null,
+                                    messages,
+                                    denied,
+                                    0);
+
+            assertEquals("captured read-only answer", out);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     @Test

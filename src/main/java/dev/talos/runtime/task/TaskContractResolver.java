@@ -3,7 +3,11 @@ package dev.talos.runtime.task;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
+import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
 import dev.talos.runtime.intent.TaskIntentResolver;
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -248,6 +252,10 @@ public final class TaskContractResolver {
     // rather than a MUST_MUTATE obligation that falsely blocks the turn.
     private static final Pattern READ_CLAUSE_BEFORE_MUTATION = Pattern.compile(
             "(?i)\\b(?:read|open)\\s+(.{0,120}?)\\b(?:and|then)\\b");
+    private static final Pattern DIRECT_CURRENT_READ_OR_VERIFY = Pattern.compile(
+            "(?i)(?:^|[.!?;]\\s+|\\b(?:and|but|then)\\s+)"
+                    + "(?:please\\s+)?"
+                    + "(?:read|open|inspect|review|examine|check|verify)\\b");
 
     // T896: distinguish a leading EDIT verb from a CREATE verb so an explicit edit of an existing
     // named file ("Edit index.html to add a Contact section") classifies FILE_EDIT even though
@@ -307,43 +315,117 @@ public final class TaskContractResolver {
     private TaskContractResolver() {}
 
     public static TaskContract fromMessages(List<ChatMessage> messages) {
+        return resolveFromMessages(messages).contract();
+    }
+
+    public static TaskResolution resolveFromMessages(List<ChatMessage> messages) {
         String latest = latestUserRequest(messages);
-        TaskContract current = fromUserRequest(latest);
+        TaskResolution currentResolution = resolveFromUserRequest(latest);
+        TaskContract current = currentResolution.contract();
         if (current.type() == TaskType.VERIFY_ONLY
                 || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
-            return current;
+            return currentResolution;
         }
         if (!current.mutationRequested() && looksLikeConfirmationFollowUp(latest)) {
             TaskContract inherited = inheritedAssistantPlanContract(messages, latest, current);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        withContextualStaticWebTargets(messages, latest, inherited),
+                        TargetSource.MESSAGE_HISTORY,
+                        "assistant-plan-confirmation-projection");
+            }
         }
         if (looksLikeRepairFollowUp(latest)) {
-            TaskContract inherited = inheritedRepairContract(messages, latest, current);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            TaskContract inherited =
+                    inheritedRepairContract(
+                            messages,
+                            latest,
+                            currentResolution);
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        withContextualStaticWebTargets(messages, latest, inherited),
+                        TargetSource.REPAIR_CONTEXT,
+                        "repair-follow-up-projection");
+            }
         }
         if (!current.mutationRequested() && looksLikeCorrectionFollowUp(latest)) {
-            TaskContract inherited = inheritedCorrectionContract(messages, latest);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            TaskContract inherited = inheritedCorrectionContract(
+                    messages,
+                    latest,
+                    currentResolution);
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        withContextualStaticWebTargets(messages, latest, inherited),
+                        TargetSource.REPAIR_CONTEXT,
+                        "correction-follow-up-projection");
+            }
         }
         if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
             TaskContract inherited = inheritedReadOnlyWorkspaceContract(messages, latest);
-            if (inherited != null) return inherited;
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        inherited,
+                        TargetSource.MESSAGE_HISTORY,
+                        "deictic-follow-up-projection");
+            }
         }
-        return withContextualStaticWebTargets(messages, latest, current);
+        return projectResolution(
+                currentResolution,
+                withContextualStaticWebTargets(messages, latest, current),
+                TargetSource.WORKSPACE_EVIDENCE,
+                "contextual-static-web-projection");
     }
 
     public static TaskIntent intentFromMessages(List<ChatMessage> messages) {
-        return intentFromUserRequest(latestUserRequest(messages));
+        return resolveFromMessages(messages).intent();
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
+        return resolveFromUserRequest(userRequest).contract();
+    }
+
+    public static TaskResolution resolveFromUserRequest(String userRequest) {
         TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
-        return TaskContractCompiler.compile(TaskIntentResolver.fromUserRequest(userRequest, legacy));
+        TaskIntentResolver.IntentResolution intentResolution =
+                TaskIntentResolver.resolve(legacy.originalUserRequest(), legacy);
+        TaskIntent intent = intentResolution.intent();
+        return new TaskResolution(
+                TaskContractCompiler.compile(intent),
+                intent,
+                intentResolution.mutationTailPlan());
     }
 
     public static TaskIntent intentFromUserRequest(String userRequest) {
-        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
-        return TaskIntentResolver.fromUserRequest(userRequest, legacy);
+        return resolveFromUserRequest(userRequest).intent();
+    }
+
+    private static TaskResolution projectResolution(
+            TaskResolution prior,
+            TaskContract effective,
+            TargetSource source,
+            String reason
+    ) {
+        TaskContract contract = effective == null ? TaskContract.unknown("") : effective;
+        if (prior != null && Objects.equals(prior.contract(), contract)) return prior;
+        TaskIntent projected = TaskIntentProjector.project(
+                prior == null ? null : prior.intent(),
+                contract,
+                source,
+                reason);
+        return new TaskResolution(
+                contract,
+                projected,
+                prior == null
+                        ? CoordinatedMutationTailPlan.empty(
+                                projected.originalUserRequest())
+                        : prior.projectedMutationTailPlan(projected),
+                prior == null
+                        ? TaskResolution.Provenance.CURRENT_USER_REQUEST
+                        : prior.provenance());
     }
 
     static TaskContract resolveLegacyFromUserRequest(String userRequest) {
@@ -443,7 +525,7 @@ public final class TaskContractResolver {
         } else if (mutationRequested && looksNaturalBatchWorkspaceOperation(original)) {
             Set<String> batchSources = extractBatchWorkspaceSourceTargets(original);
             if (!batchSources.isEmpty()) {
-                expectedTargets = withoutForbiddenTargets(expectedTargets, batchSources);
+                expectedTargets = withoutSourceTargets(expectedTargets, batchSources);
             }
             Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
             if (!batchTargets.isEmpty()) {
@@ -453,13 +535,25 @@ public final class TaskContractResolver {
             }
         }
         if (mutationAllowed) {
-            Set<String> lexicalSourceTargets = extractLexicalSourceEvidenceTargets(original);
+            TaskIntentResolver.DirectSourceAuthority directSourceAuthority =
+                    TaskIntentResolver.authoritativeDirectSourceAuthority(
+                            original);
+            Set<String> lexicalSourceTargets =
+                    extractLexicalSourceEvidenceTargets(
+                            original,
+                            directSourceAuthority.sourceTargets());
             if (!lexicalSourceTargets.isEmpty()) {
                 LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
                 mergedSources.addAll(lexicalSourceTargets);
                 sourceEvidenceTargets = Set.copyOf(mergedSources);
                 if (!readEvidenceTargetsAreAlsoMutationTargets(original)) {
-                    expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+                    LinkedHashSet<String> sourceOnlyTargets =
+                            new LinkedHashSet<>(sourceEvidenceTargets);
+                    sourceOnlyTargets.removeAll(
+                            directSourceAuthority.outputTargets());
+                    expectedTargets = withoutSourceTargets(
+                            expectedTargets,
+                            sourceOnlyTargets);
                 }
             }
             // T895: "read X and create/write Y" names X as a READ source, not a mutation target.
@@ -624,23 +718,47 @@ public final class TaskContractResolver {
         return EXPLICIT_TARGET_ACTION_BEFORE.matcher(tail).find();
     }
 
-    private static Set<String> extractLexicalSourceEvidenceTargets(String userRequest) {
+    private static Set<String> extractLexicalSourceEvidenceTargets(
+            String userRequest,
+            Set<String> authoritativeDirectSources
+    ) {
         if (userRequest == null || userRequest.isBlank()) return Set.of();
         LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (authoritativeDirectSources != null) {
+            out.addAll(authoritativeDirectSources);
+        }
         Matcher spanMatcher = SOURCE_EVIDENCE_SPAN.matcher(userRequest);
         while (spanMatcher.find()) {
             String marker = spanMatcher.group(1);
+            boolean directSourceConnector =
+                    marker.regionMatches(
+                                    true,
+                                    0,
+                                    "according",
+                                    0,
+                                    "according".length())
+                            || marker.regionMatches(
+                                    true,
+                                    0,
+                                     "based",
+                                     0,
+                                     "based".length());
+            if (directSourceConnector) continue;
             String span = sourceEvidenceFragment(marker, spanMatcher.group(2));
             if (span.isBlank()) continue;
             Matcher targetMatcher = TARGET_FILE.matcher(span);
             while (targetMatcher.find()) {
                 String target = normalizeTarget(targetMatcher.group(1));
-                if (!target.isBlank()) out.add(target);
+                if (!target.isBlank()) {
+                    out.add(target);
+                }
             }
             Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(span);
             while (extensionlessMatcher.find()) {
                 String target = normalizeTarget(extensionlessMatcher.group(1));
-                if (!target.isBlank()) out.add(target);
+                if (!target.isBlank()) {
+                    out.add(target);
+                }
             }
         }
         return Set.copyOf(out);
@@ -1378,7 +1496,9 @@ public final class TaskContractResolver {
                 .replaceAll("[.!?]+$", "");
         return lower.equals("yes")
                 || lower.equals("yes proceed")
+                || lower.equals("yes, proceed")
                 || lower.equals("yes proceed please")
+                || lower.equals("yes, proceed please")
                 || lower.equals("proceed")
                 || lower.equals("proceed please")
                 || lower.equals("go ahead")
@@ -1632,9 +1752,12 @@ public final class TaskContractResolver {
     private static TaskContract inheritedRepairContract(
             List<ChatMessage> messages,
             String latestUserRequest,
-            TaskContract current
+            TaskResolution currentResolution
     ) {
         if (messages == null || messages.isEmpty()) return null;
+        TaskContract current = currentResolution == null
+                ? TaskContract.unknown(latestUserRequest)
+                : currentResolution.contract();
         String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
         if (!looksLikeIncompleteOutcome(previousAssistant)) return null;
         String previousUser = previousUserRequest(messages, latestUserRequest);
@@ -1645,26 +1768,99 @@ public final class TaskContractResolver {
         if (current != null && current.mutationRequested() && !current.expectedTargets().isEmpty()) {
             return current;
         }
+        if (currentTurnConstrainsInheritedAuthority(
+                currentResolution,
+                prior.expectedTargets())) {
+            return current;
+        }
         return new TaskContract(
                 prior.type(),
                 true,
                 true,
                 true,
                 prior.expectedTargets(),
+                prior.sourceEvidenceTargets(),
                 prior.forbiddenTargets(),
                 inheritedRepairOriginalRequest(previousUser, latestUserRequest),
                 "repair-follow-up-inherits-previous-mutation-contract");
     }
 
+    private static boolean currentTurnConstrainsInheritedAuthority(
+            TaskResolution currentResolution,
+            Set<String> inheritedTargets
+    ) {
+        if (currentResolution == null) return false;
+        TaskContract current = currentResolution.contract();
+        Set<String> inherited = inheritedTargets == null
+                ? Set.of()
+                : inheritedTargets;
+        boolean directReadOrVerify =
+                DIRECT_CURRENT_READ_OR_VERIFY.matcher(
+                                current.originalUserRequest())
+                        .find();
+        // "Review ... and fix ..." carries its own mutation authority; the
+        // inherited target set supplies its scope. Typed prohibitions,
+        // source dependencies, workspace operations, and non-required tails
+        // below remain stronger fail-closed constraints.
+        boolean currentExplicitlyAuthorizesMutation =
+                current.mutationRequested() && current.mutationAllowed();
+        if ("global-read-only-negation".equals(
+                        current.classificationReason())
+                || current.type() == TaskType.VERIFY_ONLY
+                || !current.forbiddenTargets().isEmpty()
+                || !current.sourceEvidenceTargets().isEmpty()
+                || currentResolution.blocksWorkspaceOperations()
+                || (directReadOrVerify
+                        && !currentExplicitlyAuthorizesMutation)) {
+            return true;
+        }
+        for (var decision : currentResolution.mutationTailPlan().decisions()) {
+            if (decision.authority()
+                    != CoordinatedMutationTailPlan.Authority.REQUIRED) {
+                return true;
+            }
+        }
+        for (var target : currentResolution.intent().targets().targets()) {
+            if (target.role() == TargetRole.MENTIONED_ONLY) {
+                if (inherited.contains(target.path())) continue;
+                return true;
+            }
+            if (target.role() == TargetRole.MUST_MUTATE
+                    && "active-contract-projection".equals(
+                            target.derivation().reason())
+                    && !current.mutationRequested()
+                    && inherited.contains(target.path())) {
+                // A read-only correction can name the artifact whose prior
+                // mutation was incomplete. The legacy target extractor
+                // projects that mention as MUST_MUTATE even though no current
+                // mutation clause authorized it. When it names an existing
+                // inherited target, that passive projection is evidence for
+                // the correction, not a new limitation.
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
     private static TaskContract inheritedCorrectionContract(
             List<ChatMessage> messages,
-            String latestUserRequest
+            String latestUserRequest,
+            TaskResolution currentResolution
     ) {
+        TaskContract current = currentResolution == null
+                ? TaskContract.unknown(latestUserRequest)
+                : currentResolution.contract();
         String previousUser = previousUserRequest(messages, latestUserRequest);
         if (previousUser == null || previousUser.isBlank()) return null;
 
         TaskContract prior = fromUserRequest(previousUser);
         if (!prior.mutationRequested() || !prior.mutationAllowed()) return null;
+        if (currentTurnConstrainsInheritedAuthority(
+                currentResolution,
+                prior.expectedTargets())) {
+            return current;
+        }
         return new TaskContract(
                 prior.type(),
                 true,
@@ -1746,11 +1942,32 @@ public final class TaskContractResolver {
         }
         Set<String> forbidden = new LinkedHashSet<>();
         for (String target : forbiddenTargets) {
-            forbidden.add(normalizeTargetForComparison(target));
+            forbidden.add(normalizeTarget(target));
         }
         Set<String> out = new LinkedHashSet<>();
         for (String target : expectedTargets) {
-            if (!forbidden.contains(normalizeTargetForComparison(target))) {
+            if (!forbidden.contains(normalizeTarget(target))) {
+                out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static Set<String> withoutSourceTargets(
+            Set<String> expectedTargets,
+            Set<String> sourceTargets
+    ) {
+        if (expectedTargets == null || expectedTargets.isEmpty()
+                || sourceTargets == null || sourceTargets.isEmpty()) {
+            return expectedTargets == null ? Set.of() : expectedTargets;
+        }
+        Set<String> sources = new LinkedHashSet<>();
+        for (String target : sourceTargets) {
+            sources.add(normalizeTarget(target));
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            if (!sources.contains(normalizeTarget(target))) {
                 out.add(target);
             }
         }
@@ -1828,10 +2045,6 @@ public final class TaskContractResolver {
             normalized = normalized.substring(2);
         }
         return normalized;
-    }
-
-    private static String normalizeTargetForComparison(String raw) {
-        return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
 
     private record FrameworkArtifactFamily(String name, List<String> artifactTargets) {}

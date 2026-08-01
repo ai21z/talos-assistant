@@ -6,16 +6,19 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.ActiveToolAuthorityTraceTest;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -29,6 +32,11 @@ import java.util.concurrent.CancellationException;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
+
+    @AfterEach
+    void clearTaskResolutionCapture() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void handoffReadsNonProtectedEvidenceTargetThroughToolLoop(@TempDir Path workspace) throws Exception {
@@ -45,6 +53,7 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
                         Set.of(),
                         "Read README.md and summarize it."),
                 EvidenceObligation.READ_TARGET_REQUIRED);
+        captureResolution(messages);
 
         ReadEvidenceHandoff.Result result = ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
                 "unverified answer",
@@ -57,6 +66,36 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
         assertEquals("README summary after deterministic handoff.", result.answer());
         assertEquals(List.of("README.md"), result.loopResult().readPaths());
         assertTrue(result.extraSummary().contains("talos.read_file"), result.extraSummary());
+    }
+
+    @Test
+    void nullPlanCompatibilityUsesCapturedContractBeforeSyntheticTail(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(
+                workspace.resolve("README.md"),
+                "synthetic tail must not trigger this read\n");
+        String original = "Explain Talos without inspecting files.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(original));
+        List<ChatMessage> messages = messages(original);
+        messages.add(ChatMessage.user(
+                "Read README.md and summarize it now."));
+        try {
+            ReadEvidenceHandoff.Result result =
+                    ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
+                            "captured direct answer",
+                            messages,
+                            null,
+                            workspace,
+                            context(workspace, "must not be used"));
+
+            assertEquals("captured direct answer", result.answer());
+            assertNull(result.loopResult());
+            assertNull(result.extraSummary());
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     @Test
@@ -76,11 +115,13 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
         RuntimeException wrapped = new RuntimeException(
                 new CancellationException("cancel read-evidence handoff"));
         Context ctx = context(workspace, LlmClient.scriptedFailure(wrapped));
+        List<ChatMessage> messages = messages(request);
+        captureResolution(messages);
 
         RuntimeException thrown = assertThrows(RuntimeException.class, () ->
                 ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
                         "unverified answer",
-                        messages(request),
+                        messages,
                         plan,
                         workspace,
                         ctx));
@@ -212,6 +253,7 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
                         Set.of(),
                         "Check whether scripts.js exists and whether script.js exists. Do not change anything."),
                 EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED);
+        captureResolution(messages);
         ToolCallLoop.LoopResult irrelevantRead = new ToolCallLoop.LoopResult(
                 "scripts.js does not exist.",
                 1,
@@ -288,5 +330,12 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
         messages.add(ChatMessage.system("You are Talos."));
         messages.add(ChatMessage.user(request));
         return messages;
+    }
+
+    private static void captureResolution(List<ChatMessage> messages) {
+        TurnTaskContractCapture.clear();
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
     }
 }

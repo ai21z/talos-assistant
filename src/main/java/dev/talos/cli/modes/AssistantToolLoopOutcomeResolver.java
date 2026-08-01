@@ -16,11 +16,6 @@ final class AssistantToolLoopOutcomeResolver {
     }
 
     @FunctionalInterface
-    interface RetryPlanResolver {
-        CurrentTurnPlan resolve(List<ChatMessage> messages);
-    }
-
-    @FunctionalInterface
     interface PhaseTransition {
         void moveToVerify(ToolCallLoop.LoopResult loopResult, int extraMutationSuccesses);
     }
@@ -41,20 +36,24 @@ final class AssistantToolLoopOutcomeResolver {
             ToolCallLoop.LoopResult loopResult,
             Path workspace,
             Context ctx,
-            RetryPlanResolver retryPlanResolver,
             PhaseTransition phaseTransition,
             AnswerShaper answerShaper
     ) {
+        if (plan == null) {
+            throw new IllegalArgumentException(
+                    "captured retry plan is required");
+        }
+        CurrentTurnPlan safePlan = plan;
         answer = PostToolSynthesisRetry.synthesizeIfNeeded(
                 answer,
                 loopResult.toolsInvoked(),
                 messages,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        retryPlanResolver.resolve(retryMessages)));
+                        safePlan,
+                        RetryDispatchPurpose.POST_TOOL_SYNTHESIS));
 
-        CurrentTurnPlan safePlan = plan == null ? retryPlanResolver.resolve(messages) : plan;
         MissingMutationRetry.Result mutationRetry = MissingMutationRetry.retryIfNeeded(
                 answer,
                 messages,
@@ -67,7 +66,8 @@ final class AssistantToolLoopOutcomeResolver {
                                 ctx,
                                 retryMessages,
                                 retryPlan,
-                                retryToolSpecs));
+                                retryToolSpecs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
         answer = mutationRetry.answer();
 
         InspectCompletenessRetry.Result inspectRetry = InspectCompletenessRetry.retryIfNeeded(
@@ -77,10 +77,11 @@ final class AssistantToolLoopOutcomeResolver {
                 loopResult,
                 workspace,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        retryPlanResolver.resolve(retryMessages)));
+                        safePlan,
+                        RetryDispatchPurpose.INSPECT_COMPLETENESS));
         answer = inspectRetry.answer();
 
         ToolCallLoop.LoopResult outcomeLoopResult = mutationRetry.retryLoopResult() != null

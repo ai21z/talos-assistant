@@ -165,6 +165,165 @@ class JsonSessionStoreTurnsTest {
     }
 
     @Test
+    void exactPolicyTraceOffsetsRoundTripAndLegacyMissingOffsetsRemainUnknown(
+            @TempDir Path dir
+    ) throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String canonicalRequest =
+                "Edit index.html so the selector matches, and update style.css too.";
+        String request = " \r\n" + canonicalRequest + "\r\n ";
+        var resolution =
+                dev.talos.runtime.task.TaskContractResolver.resolveFromUserRequest(request);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                resolution.contract(),
+                resolution.intent(),
+                "APPLY",
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"));
+        TurnPolicyTrace.RolefulTarget expected = trace.rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(
+                canonicalRequest.lastIndexOf("style.css")
+                        + "style.css".length(),
+                expected.authorityEndOffset());
+        assertTrue(expected.authorityEndOffset() < expected.endOffset());
+        assertEquals(
+                expected.sourceText(),
+                canonicalRequest.substring(
+                        expected.startOffset(),
+                        expected.endOffset()));
+
+        String sid = "session-policy-exact-offset";
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-04-18T10:00:00Z"),
+                10,
+                request,
+                "partial",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                trace));
+
+        TurnPolicyTrace.RolefulTarget loaded = store.loadTurns(sid)
+                .getFirst()
+                .policyTrace()
+                .rolefulTargets()
+                .stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(expected, loaded);
+
+        String legacyKnownSid = "session-policy-legacy-known-offset";
+        String persisted = Files.readString(
+                dir.resolve(sid + ".turns.jsonl"));
+        String withoutAuthorityEnd = persisted.replaceAll(
+                "\"authorityEndOffset\"\\s*:\\s*-?\\d+\\s*,",
+                "");
+        assertFalse(persisted.equals(withoutAuthorityEnd));
+        Files.writeString(
+                dir.resolve(legacyKnownSid + ".turns.jsonl"),
+                withoutAuthorityEnd);
+        TurnPolicyTrace.RolefulTarget legacyKnown = new JsonSessionStore(dir)
+                .loadTurns(legacyKnownSid)
+                .getFirst()
+                .policyTrace()
+                .rolefulTargets()
+                .stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(expected.startOffset(), legacyKnown.startOffset());
+        assertEquals(-1, legacyKnown.authorityEndOffset());
+        assertEquals(expected.endOffset(), legacyKnown.endOffset());
+        assertEquals(expected.sourceText(), legacyKnown.sourceText());
+
+        String legacySid = "session-policy-legacy-offset";
+        Files.writeString(
+                dir.resolve(legacySid + ".turns.jsonl"),
+                turnLineWithRolefulTargets("""
+                        [{"path":"style.css","role":"MUST_MUTATE",
+                          "source":"USER_REQUEST","reason":"legacy",
+                          "sourceText":"update style.css.","confidence":1.0}]
+                        """));
+        TurnPolicyTrace.RolefulTarget legacy = new JsonSessionStore(dir)
+                .loadTurns(legacySid)
+                .getFirst()
+                .policyTrace()
+                .rolefulTargets()
+                .getFirst();
+        assertEquals(-1, legacy.startOffset());
+        assertEquals(-1, legacy.authorityEndOffset());
+        assertEquals(-1, legacy.endOffset());
+    }
+
+    @Test
+    void sanitizingCanonicalInputInvalidatesPersistedExactOffsets(
+            @TempDir Path dir
+    ) throws Exception {
+        String request = "DO_NOT_LEAK_T1196_PREFIX. Edit index.html so it works, "
+                + "and update style.css too.";
+        int start = request.indexOf("update style.css");
+        String sourceText = "update style.css too.";
+        TurnPolicyTrace trace = new TurnPolicyTrace(
+                "FILE_EDIT",
+                true,
+                true,
+                List.of("style.css"),
+                List.of(),
+                "APPLY",
+                "APPLY",
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of(),
+                "sanitized-coordinate-test",
+                List.of(new TurnPolicyTrace.RolefulTarget(
+                        "style.css",
+                        "MUST_MUTATE",
+                        "USER_REQUEST",
+                        "explicit-mutation-target",
+                        sourceText,
+                        1.0,
+                        start,
+                        start + "update style.css".length(),
+                        start + sourceText.length())));
+        String sid = "session-sanitized-coordinate";
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-07-30T00:00:00Z"),
+                10,
+                request,
+                "partial",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                trace));
+
+        String raw = Files.readString(dir.resolve(sid + ".turns.jsonl"));
+        assertFalse(raw.contains("DO_NOT_LEAK_T1196_PREFIX"));
+        TurnPolicyTrace.RolefulTarget loaded = store.loadTurns(sid)
+                .getFirst()
+                .policyTrace()
+                .rolefulTargets()
+                .getFirst();
+        assertEquals(-1, loaded.startOffset());
+        assertEquals(-1, loaded.authorityEndOffset());
+        assertEquals(-1, loaded.endOffset());
+        assertEquals(sourceText, loaded.sourceText());
+    }
+
+    @Test
     void requiredPostReadMutationRoleRoundTripsWithoutCoercion(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-policy-required-post-read";
@@ -239,7 +398,92 @@ class JsonSessionStoreTurnsTest {
                 [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
                   "reason":"conflict-a","sourceText":"","confidence":1.0},
                  {"path":"style.css","role":"SOURCE_EVIDENCE","source":"RUNTIME_DEFAULT",
-                  "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                   "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"malformed-offset","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":"junk","endOffset":"junk"}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"fractional-offset","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1.5,"endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"numeric-string-offset","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":"1","endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"textual-authority-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":"16","endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"fractional-authority-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":15.5,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-without-outer-span","sourceText":"update style.css.",
+                  "confidence":1.0,"authorityEndOffset":16}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-at-start","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":0,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-after-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":18,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-before-target","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":2,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"mismatched-exact-span","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"explicit-zero-pair","sourceText":"",
+                  "confidence":1.0,"startOffset":0,"endOffset":0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"MESSAGE_HISTORY",
+                  "reason":"history-known-offset","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1,"endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"NOT_A_SOURCE",
+                  "reason":"unknown-source","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":123,
+                  "reason":"numeric-source","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"string-confidence","sourceText":"","confidence":"1.0"}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"missing-confidence","sourceText":""}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"high-confidence","sourceText":"","confidence":1.01}]
                 """);
 
         for (int i = 0; i < malformedRolefulTargets.size(); i++) {
@@ -252,6 +496,140 @@ class JsonSessionStoreTurnsTest {
                     new JsonSessionStore(dir).loadTurns(sid).isEmpty(),
                     "malformed role row must fail its turn closed: " + malformedRolefulTargets.get(i));
         }
+    }
+
+    @Test
+    void appendRejectsKnownUserRequestCoordinatesThatCannotRoundTrip(
+            @TempDir Path dir
+    ) {
+        String sid = "session-write-invalid-coordinate";
+        TurnPolicyTrace trace = new TurnPolicyTrace(
+                "FILE_EDIT",
+                true,
+                true,
+                List.of("style.css"),
+                List.of(),
+                "APPLY",
+                "APPLY",
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of(),
+                "invalid-write-coordinate",
+                List.of(new TurnPolicyTrace.RolefulTarget(
+                        "style.css",
+                        "MUST_MUTATE",
+                        "USER_REQUEST",
+                        "explicit-mutation-target",
+                        "update style.css.",
+                        1.0,
+                        0,
+                        "update style.css.".length())));
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-07-30T00:00:00Z"),
+                10,
+                "Edit index.html.",
+                "not written",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "failed",
+                trace));
+
+        assertFalse(Files.exists(dir.resolve(sid + ".turns.jsonl")));
+        assertTrue(store.loadTurns(sid).isEmpty());
+    }
+
+    @Test
+    void durableRolefulEvidenceShapeIsStrictBeforePublication() {
+        TurnPolicyTrace.RolefulTarget legacyUnknownAuthority =
+                assertDoesNotThrow(() -> new TurnPolicyTrace.RolefulTarget(
+                        "style.css",
+                        "MUST_MUTATE",
+                        "USER_REQUEST",
+                        "legacy-known-outer-span",
+                        "update style.css.",
+                        1.0,
+                        3,
+                        20));
+        assertEquals(-1, legacyUnknownAuthority.authorityEndOffset());
+        assertDoesNotThrow(() -> new TurnPolicyTrace.RolefulTarget(
+                "style.css",
+                "MUST_MUTATE",
+                "RUNTIME_DEFAULT",
+                "boundary-zero",
+                "",
+                0.0,
+                -1,
+                -1));
+        assertDoesNotThrow(() -> new TurnPolicyTrace.RolefulTarget(
+                "style.css",
+                "MUST_MUTATE",
+                "RUNTIME_DEFAULT",
+                "boundary-one",
+                "",
+                1.0,
+                -1,
+                -1));
+        assertAll(
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "NOT_A_SOURCE",
+                                "", "", 1.0, -1, -1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "RUNTIME_DEFAULT",
+                                "", "", Double.NaN, -1, -1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "RUNTIME_DEFAULT",
+                                "", "", Double.POSITIVE_INFINITY, -1, -1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "", 1.0, 0, 0)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "", 1.0, 3, 3)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "MESSAGE_HISTORY",
+                                "", "css", 1.0, 0, 3)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "update style.css.", 1.0,
+                                -1, 16, -1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "update style.css.", 1.0,
+                                3, 3, 20)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "update style.css.", 1.0,
+                                3, 21, 20)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new TurnPolicyTrace.RolefulTarget(
+                                "style.css", "MUST_MUTATE", "USER_REQUEST",
+                                "", "update style.css.", 1.0,
+                                0, 2, 17)));
     }
 
     @Test
@@ -287,7 +665,92 @@ class JsonSessionStoreTurnsTest {
                 [{"path":"./style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
                   "reason":"conflict-a","sourceText":"","confidence":1.0},
                  {"path":"style.css","role":"SOURCE_EVIDENCE","source":"RUNTIME_DEFAULT",
-                  "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                   "reason":"conflict-b","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"fractional","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1.5,"endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"numeric-string","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":"1","endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"textual-authority-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":"16","endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"fractional-authority-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":15.5,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-without-outer-span","sourceText":"update style.css.",
+                  "confidence":1.0,"authorityEndOffset":16}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-at-start","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":0,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-after-end","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":18,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"authority-before-target","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":0,
+                  "authorityEndOffset":2,"endOffset":17}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"half-known","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"explicit-zero-pair","sourceText":"",
+                  "confidence":1.0,"startOffset":0,"endOffset":0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"USER_REQUEST",
+                  "reason":"span-length-mismatch","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1,"endOffset":20}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"MESSAGE_HISTORY",
+                  "reason":"history-known-offset","sourceText":"update style.css.",
+                  "confidence":1.0,"startOffset":1,"endOffset":18}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"NOT_A_SOURCE",
+                  "reason":"unknown-source","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":123,
+                  "reason":"numeric-source","sourceText":"","confidence":1.0}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"string-confidence","sourceText":"","confidence":"1.0"}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"missing-confidence","sourceText":""}]
+                """,
+                """
+                [{"path":"style.css","role":"MUST_MUTATE","source":"RUNTIME_DEFAULT",
+                  "reason":"negative-confidence","sourceText":"","confidence":-0.01}]
                 """);
 
         JsonSessionStore store = new JsonSessionStore(dir);

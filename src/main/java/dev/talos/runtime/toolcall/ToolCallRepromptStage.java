@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
 import org.slf4j.Logger;
@@ -14,6 +16,21 @@ public final class ToolCallRepromptStage {
     private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (outcome != null
+                && outcome.executionAuthorityRejectedThisIteration()) {
+            FailureDecision decision = FailureDecision.stop(
+                    FailureAction.ASK_USER,
+                    "tool-call execution authority was rejected");
+            state.stopWithFailure(
+                    decision,
+                    "[Tool loop stopped because executable tool authority "
+                            + "was invalid. No follow-up provider request was sent.]");
+            LOG.debug(
+                    "Stopping tool-call loop after executable authority "
+                            + "rejection; not re-prompting.");
+            return false;
+        }
+
         if (outcome.approvalDeniedThisIteration()) {
             state.finishWithAnswer("[Tool loop stopped because the requested mutation was not approved.]");
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
@@ -94,7 +111,9 @@ public final class ToolCallRepromptStage {
                     state.messages, state.compactedToolResultOriginals);
         }
 
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         Optional<Boolean> sourceEvidenceRepair =
                 ToolRepromptSourceEvidenceRepairDecision.tryHandle(state, userTask);
         if (sourceEvidenceRepair.isPresent()) {

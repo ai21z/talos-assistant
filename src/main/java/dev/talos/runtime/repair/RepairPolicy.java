@@ -218,7 +218,7 @@ public final class RepairPolicy {
     ) {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
-        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
+        Set<String> forbiddenKeys = normalizedForbiddenTargets(forbiddenTargets);
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
         boolean frontendFrameworkCoherenceRepair =
                 problems.stream().anyMatch(RepairPolicy::isFrontendFrameworkCoherenceProblem);
@@ -308,18 +308,18 @@ public final class RepairPolicy {
             List<String> forbiddenTargets
     ) {
         if (targets == null || targets.isEmpty()) return Set.of();
-        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
+        Set<String> forbiddenKeys = normalizedForbiddenTargets(forbiddenTargets);
         if (forbiddenKeys.isEmpty()) return targets;
         LinkedHashSet<String> out = new LinkedHashSet<>(targets);
         removeForbiddenTargets(out, forbiddenKeys);
         return out;
     }
 
-    private static Set<String> normalizedTargetKeys(List<String> targets) {
+    private static Set<String> normalizedForbiddenTargets(List<String> targets) {
         if (targets == null || targets.isEmpty()) return Set.of();
         LinkedHashSet<String> keys = new LinkedHashSet<>();
         for (String target : targets) {
-            String key = normalizeTargetKey(target);
+            String key = normalizeTarget(target);
             if (!key.isBlank()) keys.add(key);
         }
         return keys;
@@ -330,7 +330,7 @@ public final class RepairPolicy {
                 || forbiddenKeys == null || forbiddenKeys.isEmpty()) {
             return;
         }
-        targets.removeIf(target -> forbiddenKeys.contains(normalizeTargetKey(target)));
+        targets.removeIf(target -> forbiddenKeys.contains(normalizeTarget(target)));
     }
 
     private static Set<String> verifierSpecificStructuralRepairTargets(

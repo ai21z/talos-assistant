@@ -1,7 +1,10 @@
 package dev.talos.harness;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.runtime.ApprovalResponse;
+import dev.talos.runtime.JsonSessionStore;
+import dev.talos.runtime.TurnEnvelopePersistenceReceipt;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.spi.types.PromptDebugCapture;
@@ -24,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -723,6 +727,228 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(transcriptJson.contains("\"reasonCode\" : \"PROTECTED_PATH_ASK\""), transcriptJson);
         assertTrue(transcriptJson.contains("\"traceId\" : \"trc-sync-approval-artifact_bundle_protected_read\""),
                 transcriptJson);
+    }
+
+    @Test
+    void artifact_bundle_persists_coordinated_tail_row_and_trace_as_one_exact_span_envelope(
+            @TempDir Path artifacts
+    ) throws Exception {
+        for (String lineEnding : List.of("\n", "\r\n")) {
+            String label = "\n".equals(lineEnding) ? "lf" : "crlf";
+            String requestText = " \t" + lineEnding
+                    + "Edit index.html so it works," + lineEnding
+                    + "then update style.css." + lineEnding + " ";
+            String canonicalRequest = requestText.strip();
+            String sourceText = "update style.css.";
+            int startOffset = canonicalRequest.indexOf(sourceText);
+            int authorityEndOffset =
+                    canonicalRequest.indexOf("style.css", startOffset)
+                            + "style.css".length();
+            LocalTurnTrace trace = coordinatedTailTrace(
+                    "trc-t1196-exact-span-" + label,
+                    sourceText,
+                    startOffset,
+                    authorityEndOffset,
+                    startOffset + sourceText.length());
+            SynchronizedApprovalAuditRunner.Request request =
+                    artifactRequest(
+                            "artifact bundle t1196 exact span " + label,
+                            requestText);
+
+            SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                    SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                            artifacts,
+                            request,
+                            new SynchronizedApprovalAuditRunner.Result(
+                                    "The coordinated edit is complete.",
+                                    List.of(),
+                                    "",
+                                    trace,
+                                    ""));
+
+            String sessionId = JsonSessionStore.sessionIdFor(workspace);
+            JsonSessionStore store =
+                    new JsonSessionStore(bundle.sessionSnapshot().getParent());
+            var turns = store.loadTurns(sessionId);
+            assertEquals(1, turns.size(), turns.toString());
+            var row = turns.getFirst();
+            assertEquals(trace.traceId(), row.traceId());
+            assertEquals(requestText, row.userInput());
+            var rowTarget = row.policyTrace().rolefulTargets().stream()
+                    .filter(target -> "style.css".equals(target.path()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("USER_REQUEST", rowTarget.source());
+            assertEquals(startOffset, rowTarget.startOffset());
+            assertEquals(authorityEndOffset, rowTarget.authorityEndOffset());
+            assertEquals(startOffset + sourceText.length(), rowTarget.endOffset());
+            assertEquals(
+                    rowTarget.sourceText(),
+                    row.userInput().strip().substring(
+                            rowTarget.startOffset(),
+                            rowTarget.endOffset()));
+
+            LocalTurnTrace persistedTrace =
+                    store.loadTrace(sessionId, row.traceId()).orElseThrow();
+            assertEquals(sessionId, persistedTrace.sessionId());
+            var traceTarget = rolefulTarget(persistedTrace, "style.css");
+            assertEquals("USER_REQUEST", traceTarget.source());
+            assertEquals(rowTarget.startOffset(), traceTarget.startOffset());
+            assertEquals(
+                    rowTarget.authorityEndOffset(),
+                    traceTarget.authorityEndOffset());
+            assertEquals(rowTarget.endOffset(), traceTarget.endOffset());
+            assertEquals(
+                    traceTarget.sourceText(),
+                    row.userInput().strip().substring(
+                            traceTarget.startOffset(),
+                            traceTarget.endOffset()));
+            assertArrayEquals(
+                    persistedSessionTraceBytes(bundle, sessionId),
+                    Files.readAllBytes(bundle.traceJson()),
+                    "last-trace.json must be the exact coordinate-aware session-trace bytes");
+        }
+    }
+
+    @Test
+    void artifact_bundle_invalidates_user_request_coordinates_when_a_prefix_is_redacted(
+            @TempDir Path artifacts
+    ) throws Exception {
+        String rawCanary = "USER_SUPPLIED_CANARY_T1196_PREFIX";
+        String requestText = rawCanary
+                + " Edit index.html so it works, then update style.css.";
+        String sourceText = "update style.css.";
+        int startOffset = requestText.indexOf(sourceText);
+        int authorityEndOffset = requestText.indexOf("style.css", startOffset)
+                + "style.css".length();
+        LocalTurnTrace trace = coordinatedTailTrace(
+                "trc-t1196-redacted-prefix",
+                sourceText,
+                startOffset,
+                authorityEndOffset,
+                startOffset + sourceText.length());
+        SynchronizedApprovalAuditRunner.Request request =
+                artifactRequest("artifact bundle t1196 redacted prefix", requestText);
+
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                        artifacts,
+                        request,
+                        new SynchronizedApprovalAuditRunner.Result(
+                                "The coordinated edit is complete.",
+                                List.of(),
+                                "",
+                                trace,
+                                ""));
+
+        assertByteSequenceAbsent(bundle.root(), rawCanary);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        JsonSessionStore store =
+                new JsonSessionStore(bundle.sessionSnapshot().getParent());
+        var row = store.loadTurns(sessionId).getFirst();
+        assertFalse(row.userInput().contains(rawCanary), row.userInput());
+        var rowTarget = row.policyTrace().rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("USER_REQUEST", rowTarget.source());
+        assertEquals(-1, rowTarget.startOffset());
+        assertEquals(-1, rowTarget.authorityEndOffset());
+        assertEquals(-1, rowTarget.endOffset());
+
+        LocalTurnTrace sessionTrace =
+                store.loadTrace(sessionId, row.traceId()).orElseThrow();
+        assertEquals(sessionId, sessionTrace.sessionId());
+        var sessionTarget = rolefulTarget(sessionTrace, "style.css");
+        assertEquals("USER_REQUEST", sessionTarget.source());
+        assertEquals(-1, sessionTarget.startOffset());
+        assertEquals(-1, sessionTarget.authorityEndOffset());
+        assertEquals(-1, sessionTarget.endOffset());
+
+        LocalTurnTrace lastTrace = new ObjectMapper().readValue(
+                Files.readAllBytes(bundle.traceJson()),
+                LocalTurnTrace.class);
+        var lastTraceTarget = rolefulTarget(lastTrace, "style.css");
+        assertEquals("USER_REQUEST", lastTraceTarget.source());
+        assertEquals(-1, lastTraceTarget.startOffset());
+        assertEquals(-1, lastTraceTarget.authorityEndOffset());
+        assertEquals(-1, lastTraceTarget.endOffset());
+        assertArrayEquals(
+                persistedSessionTraceBytes(bundle, sessionId),
+                Files.readAllBytes(bundle.traceJson()),
+                "redacted last-trace.json must be the exact session-trace bytes");
+    }
+
+    @Test
+    void artifact_bundle_accepts_only_complete_observed_turn_envelopes() throws Exception {
+        SynchronizedApprovalAuditRunner.requireCompleteAuditEnvelope(
+                new TurnEnvelopePersistenceReceipt(
+                        TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED),
+                true);
+        SynchronizedApprovalAuditRunner.requireCompleteAuditEnvelope(
+                new TurnEnvelopePersistenceReceipt(
+                        TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY),
+                false);
+
+        for (TurnEnvelopePersistenceReceipt.State incomplete :
+                TurnEnvelopePersistenceReceipt.State.values()) {
+            if (incomplete
+                    != TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED) {
+                assertThrows(
+                        IOException.class,
+                        () -> SynchronizedApprovalAuditRunner
+                                .requireCompleteAuditEnvelope(
+                                        new TurnEnvelopePersistenceReceipt(incomplete),
+                                        true),
+                        incomplete.name());
+            }
+            if (incomplete
+                    != TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY) {
+                assertThrows(
+                        IOException.class,
+                        () -> SynchronizedApprovalAuditRunner
+                                .requireCompleteAuditEnvelope(
+                                        new TurnEnvelopePersistenceReceipt(incomplete),
+                                        false),
+                        incomplete.name());
+            }
+        }
+        assertThrows(
+                IOException.class,
+                () -> SynchronizedApprovalAuditRunner
+                        .requireCompleteAuditEnvelope(null, true));
+    }
+
+    @Test
+    void artifact_bundle_rejects_foreign_trace_session_before_publication(
+            @TempDir Path artifacts
+    ) {
+        String scenario = "artifact-session-mismatch";
+        SynchronizedApprovalAuditRunner.Request request =
+                artifactRequest(scenario, "Inspect index.html.");
+        LocalTurnTrace foreignTrace = LocalTurnTrace.builder(
+                        "trc-t1196-foreign-session",
+                        "foreign-session-id",
+                        1,
+                        "2026-07-31T00:00:00Z")
+                .build();
+
+        IOException failure = assertThrows(
+                IOException.class,
+                () -> SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                        artifacts,
+                        request,
+                        new SynchronizedApprovalAuditRunner.Result(
+                                "Inspection complete.",
+                                List.of(),
+                                "",
+                                foreignTrace,
+                                "")));
+
+        assertTrue(failure.getMessage().contains("session identity"));
+        assertFalse(
+                Files.exists(artifacts.toAbsolutePath().normalize().resolve(scenario)),
+                "a foreign trace must be rejected before any bundle path is published");
     }
 
     @Test
@@ -1682,6 +1908,86 @@ class SynchronizedApprovalAuditRunnerTest {
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
+    }
+
+    private SynchronizedApprovalAuditRunner.Request artifactRequest(
+            String name,
+            String userPrompt
+    ) {
+        return new SynchronizedApprovalAuditRunner.Request(
+                name,
+                workspace,
+                new Config(null),
+                userPrompt,
+                List.of(),
+                List.of());
+    }
+
+    private LocalTurnTrace coordinatedTailTrace(
+            String traceId,
+            String sourceText,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset
+    ) {
+        return LocalTurnTrace
+                .builder(
+                        traceId,
+                        JsonSessionStore.sessionIdFor(workspace),
+                        1,
+                        "2026-07-31T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                        "STATIC_WEB_EDIT",
+                        true,
+                        true,
+                        true,
+                        List.of("index.html", "style.css"),
+                        List.of(),
+                        "t1196-coordinated-mutation-tail",
+                        List.of(new LocalTurnTrace.RolefulTargetSummary(
+                                "style.css",
+                                "MUST_MUTATE",
+                                "USER_REQUEST",
+                                "coordinated-tail",
+                                sourceText,
+                                1.0,
+                                startOffset,
+                                authorityEndOffset,
+                                endOffset))))
+                .outcome(
+                        "COMPLETE",
+                        "PASSED",
+                        "GRANTED_OR_NOT_REQUIRED",
+                        "SUCCEEDED",
+                        "COMPLETED_VERIFIED")
+                .build();
+    }
+
+    private static LocalTurnTrace.RolefulTargetSummary rolefulTarget(
+            LocalTurnTrace trace,
+            String path
+    ) {
+        return trace.taskContract().rolefulTargets().stream()
+                .filter(target -> path.equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static byte[] persistedSessionTraceBytes(
+            SynchronizedApprovalAuditRunner.ArtifactBundle bundle,
+            String sessionId
+    ) throws IOException {
+        Path traceDirectory = bundle.sessionSnapshot()
+                .getParent()
+                .resolve("traces")
+                .resolve(sessionId);
+        try (var traces = Files.list(traceDirectory)) {
+            var paths = traces
+                    .filter(Files::isRegularFile)
+                    .toList();
+            assertEquals(1, paths.size(), paths.toString());
+            return Files.readAllBytes(paths.getFirst());
+        }
     }
 
     private static String readAllArtifacts(Path root) throws IOException {

@@ -8,11 +8,13 @@ import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -202,18 +204,71 @@ class JsonScenarioPackTest {
 
     @Test
     @DisplayName("[json-scenario:scenarios/19-static-verifier-partial-mutation-not-verified-complete.json] 19: partial mutation is not blessed as statically verified complete")
-    void staticVerifierDoesNotBlessPartialMutationAsComplete() {
+    void staticVerifierDoesNotBlessPartialMutationAsComplete() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/19-static-verifier-partial-mutation-not-verified-complete.json");
+        var initialFiles = loaded.definition().initialFiles();
+        assertTrue(initialFiles.containsKey("index.html"), initialFiles.keySet().toString());
+        assertTrue(initialFiles.containsKey("style.css"), initialFiles.keySet().toString());
+
+        String originalIndex = initialFiles.get("index.html");
+        byte[] originalStyleBytes = initialFiles.get("style.css")
+                .getBytes(StandardCharsets.UTF_8);
+        String eol = originalIndex.contains("\r\n") ? "\r\n" : "\n";
+        String paragraph = "        <p>Dive into a world of innovation and cutting-edge design.</p>";
+        String closingDiv = "      </div>";
+        String originalBlock = paragraph + eol + closingDiv;
+        String replacementBlock = paragraph + eol
+                + "        <a class=\"cta-button\" href=\"#tickets\">Listen now</a>"
+                + eol + closingDiv;
+        int replacementStart = originalIndex.indexOf(originalBlock);
+        assertTrue(replacementStart >= 0, "fixture is missing the exact scenario 19 edit block");
+        assertEquals(
+                replacementStart,
+                originalIndex.lastIndexOf(originalBlock),
+                "fixture must contain exactly one scenario 19 edit block");
+        byte[] expectedIndexBytes = (originalIndex.substring(0, replacementStart)
+                + replacementBlock
+                + originalIndex.substring(replacementStart + originalBlock.length()))
+                .getBytes(StandardCharsets.UTF_8);
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertAnswerContains("Succeeded:")
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertLocalTraceRecorded()
+                    .assertAnswerContains("Succeeded:")
                     .assertAnswerContains("Failed:")
                     .assertAnswerContains("style.css")
+                    .assertAnswerContains("old_string not found")
+                    .assertAnswerNotContains("not one of the expected task targets")
+                    .assertAnswerNotContains("outside the current expected target set")
                     .assertAnswerNotContains("Static verification: passed")
-                    .assertFileContains("index.html", "class=\"cta-button\"");
+                    .assertFileContains("index.html", "class=\"cta-button\"")
+                    .assertFileNotContains("style.css", ".does-not-exist");
+            assertTraceExpectedTargets(result, "index.html", "style.css");
+            assertRolefulTarget(result, "index.html", "MUST_MUTATE");
+            assertRolefulTargetExactUserSpan(
+                    result,
+                    loaded.definition().userPrompt(),
+                    "style.css",
+                    "MUST_MUTATE",
+                    "update style.css too.");
+            assertSettledFailureReason(
+                    result,
+                    "talos.edit_file",
+                    "style.css",
+                    "EDIT_OLD_STRING_NOT_FOUND");
+            assertEquals("PARTIAL", result.localTrace().outcome().mutationStatus());
+            assertTraceOutcome(result, "BLOCKED", "BLOCKED_BY_POLICY");
+            assertArrayEquals(
+                    expectedIndexBytes,
+                    Files.readAllBytes(result.workspace().resolve("index.html")),
+                    "index.html must contain only the exact requested CTA insertion");
+            assertArrayEquals(
+                    originalStyleBytes,
+                    Files.readAllBytes(result.workspace().resolve("style.css")),
+                    "failed style.css edit must preserve every original byte");
         }
     }
 
@@ -1867,6 +1922,87 @@ class JsonScenarioPackTest {
                         .anyMatch(target -> path.equals(target.path()) && role.equals(target.role())),
                 "expected trace roleful target " + path + " = " + role
                         + ", actual: " + result.localTrace().taskContract().rolefulTargets());
+    }
+
+    private static void assertRolefulTargetExactUserSpan(
+            ExecutorScenarioResult result,
+            String canonicalRequest,
+            String path,
+            String role,
+            String expectedSourceText
+    ) {
+        var target = result.localTrace().taskContract().rolefulTargets().stream()
+                .filter(candidate -> path.equals(candidate.path())
+                        && role.equals(candidate.role()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "missing exact roleful target " + path + " = " + role
+                                + ": "
+                                + result.localTrace().taskContract().rolefulTargets()));
+        assertEquals("USER_REQUEST", target.source(), target.toString());
+        int expectedStart = canonicalRequest.indexOf(expectedSourceText);
+        int expectedAuthorityEnd = canonicalRequest.indexOf(path, expectedStart)
+                + path.length();
+        int expectedEnd = expectedStart + expectedSourceText.length();
+        assertTrue(expectedStart >= 0, canonicalRequest);
+        assertEquals(expectedSourceText, target.sourceText(), target.toString());
+        assertEquals(expectedStart, target.startOffset(), target.toString());
+        assertEquals(
+                expectedAuthorityEnd,
+                target.authorityEndOffset(),
+                target.toString());
+        assertEquals(expectedEnd, target.endOffset(), target.toString());
+        assertEquals(
+                expectedSourceText,
+                canonicalRequest.substring(
+                        target.startOffset(),
+                        target.endOffset()),
+                target.toString());
+    }
+
+    private static void assertSettledFailureReason(
+            ExecutorScenarioResult result,
+            String tool,
+            String path,
+            String failureReason
+    ) {
+        var events = result.localTrace().events();
+        var settledCall = events.stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type())
+                        || "TOOL_CALL_BLOCKED".equals(event.type()))
+                .filter(event -> tool.equals(event.toolName()))
+                .filter(event -> path.equals(event.data().get("pathHint"))
+                        || event.data().get("pathHints") instanceof List<?> paths
+                        && paths.contains(path))
+                .toList();
+        assertEquals(1, settledCall.size(), events.toString());
+        String toolCallId = String.valueOf(
+                settledCall.getFirst().data().getOrDefault("toolCallId", ""));
+        assertFalse(toolCallId.isBlank(), settledCall.getFirst().toString());
+        var classified = events.stream()
+                .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                .filter(event -> toolCallId.equals(
+                        String.valueOf(event.data().get("toolCallId"))))
+                .toList();
+        assertEquals(1, classified.size(), events.toString());
+        assertEquals(false, classified.getFirst().data().get("success"));
+        assertEquals(false, classified.getFirst().data().get("denied"));
+        assertEquals("INVALID_PARAMS", classified.getFirst().data().get("errorCode"));
+        assertEquals(
+                failureReason,
+                classified.getFirst().data().get("failureReason"));
+        String settlementReason = String.valueOf(
+                settledCall.getFirst().data().getOrDefault("reason", ""));
+        assertFalse(
+                settlementReason.contains("not one of the expected task targets")
+                        || settlementReason.contains(
+                                "outside the current expected target set"),
+                settledCall.getFirst().toString());
+        assertFalse(events.stream().anyMatch(event ->
+                        "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())
+                                && toolCallId.equals(String.valueOf(
+                                        event.data().get("toolCallId")))),
+                events.toString());
     }
 
     private static void assertNoRolefulTarget(ExecutorScenarioResult result, String path, String role) {

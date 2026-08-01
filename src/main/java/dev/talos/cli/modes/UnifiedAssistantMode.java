@@ -10,10 +10,12 @@ import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
@@ -102,13 +104,18 @@ public final class UnifiedAssistantMode implements Mode {
                 TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
         boolean nativeTools = ctx.llm().prepareNativeTools();
         LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
-        TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
-                TaskContractResolver.fromMessages(contractMessages),
+        TaskResolution taskResolution = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.resolveFromMessages(contractMessages),
                 workspace);
+        TaskContract taskContract = taskResolution.contract();
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
         List<ToolSpec> plannedNativeToolSpecs =
-                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry(), ctx.cfg());
+                NativeToolSpecPolicy.select(
+                        taskResolution,
+                        initialPhase,
+                        ctx.toolRegistry(),
+                        ctx.cfg());
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
@@ -130,12 +137,27 @@ public final class UnifiedAssistantMode implements Mode {
         List<ChatMessage> messages = buildMessages(system, rawLine, history,
                 renderPinnedFilesBlock(ctx.pinnedFiles()));
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
+        CurrentTurnPlan promptPlan =
+                CurrentTurnPlan.createWithActionObligation(
+                        taskContract,
+                        initialPhase,
+                        nativeTools ? plannedNativeToolNames : List.of(),
+                        plannedNativeToolNames,
+                        List.of(),
+                        CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                        CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                        CurrentTurnPlan.derivedVerifierProfile(taskContract),
+                        ActionObligationPolicy.derive(
+                                taskResolution,
+                                initialPhase),
+                        ctx.cfg());
         CurrentTurnPromptInstructions.injectTaskContractInstruction(
                 messages,
-                taskContract,
-                initialPhase,
-                NativeToolSpecPolicy.names(turnCtx.nativeToolSpecs()));
+                promptPlan);
         CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
+        // Prompt inspection returns a canonical provider-facing copy. Keep
+        // this list raw for deterministic preparation, trace coordinates,
+        // capture boundaries, and every pre-dispatch policy decision.
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "agent",

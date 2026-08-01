@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
@@ -78,7 +79,8 @@ final class ExpectedTargetScopeRepairPlanner {
             return Optional.empty();
         }
         String failureReason = state.failureDecision == null ? "" : state.failureDecision.reason();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         List<String> remainingExpectedTargets = expectedMutationTargetsForScopeRepair(state);
         if (remainingExpectedTargets.isEmpty() && looksLikeExpectedTargetScopeFailure(failureReason)) {
             remainingExpectedTargets = expectedTargetsFromScopeFailureReason(failureReason);
@@ -165,10 +167,14 @@ final class ExpectedTargetScopeRepairPlanner {
 
     private static List<String> expectedMutationTargetsForScopeRepair(LoopState state) {
         if (state == null || state.messages == null) return List.of();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || !contract.mutationAllowed()) return List.of();
         Set<String> expectedTargets = contract.expectedTargets().isEmpty()
-                ? TaskContractResolver.extractExpectedTargets(ToolCallSupport.latestUserRequestIn(state.messages))
+                && TurnTaskContractCapture.getResolution() == null
+                ? TaskContractResolver.extractExpectedTargets(
+                        TurnTaskContractCapture.originalUserRequestOrResolve(
+                                state.messages))
                 : contract.expectedTargets();
         if (expectedTargets == null || expectedTargets.isEmpty()) return List.of();
         Set<String> successfullyMutated = new java.util.HashSet<>();

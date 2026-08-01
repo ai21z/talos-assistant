@@ -174,7 +174,7 @@ public final class AssistantTurnExecutor {
      * @return the turn output (text + streamed flag)
      */
     public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
-                              Context ctx, Options opts) {
+                               Context ctx, Options opts) {
         try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
             return executeWithinPromptDebugScope(messages, workspace, ctx, opts);
         }
@@ -209,6 +209,7 @@ public final class AssistantTurnExecutor {
                 opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture());
         ctx = preparedTurn.ctx();
         CurrentTurnPlan currentTurnPlan = preparedTurn.plan();
+        var currentTaskResolution = preparedTurn.taskResolution();
         LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.ASSISTANT_EXECUTION);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(
@@ -233,7 +234,7 @@ public final class AssistantTurnExecutor {
         boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan, workspace);
 
         TurnSourceEvidenceCapture.begin();
-        TurnTaskContractCapture.set(currentTurnPlan.taskContract());
+        TurnTaskContractCapture.set(currentTaskResolution, messages);
         try {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
@@ -591,7 +592,6 @@ public final class AssistantTurnExecutor {
                 loopResult,
                 workspace,
                 ctx,
-                retryMessages -> compatibilityPlanFromMessages(retryMessages, ctx),
                 (outcomeLoopResult, extraMutationSuccesses) ->
                         moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, extraMutationSuccesses),
                 (resolvedAnswer, outcomeLoopResult, extraMutationSuccesses, actionObligationFailed) ->
@@ -622,7 +622,6 @@ public final class AssistantTurnExecutor {
                 plan,
                 workspace,
                 ctx,
-                retryMessages -> compatibilityPlanFromMessages(retryMessages, ctx),
                 (loopResult, extraMutationSuccesses) ->
                         moveToVerifyAfterSuccessfulMutation(ctx, loopResult, extraMutationSuccesses),
                 (resolvedAnswer, loopResult, extraMutationSuccesses, actionObligationFailed) ->
@@ -693,7 +692,7 @@ public final class AssistantTurnExecutor {
         return readOnlyInspectionRetryIfNeeded(
                 answer,
                 messages,
-                compatibilityPlanFromMessages(messages, ctx),
+                null,
                 workspace,
                 ctx);
     }
@@ -705,17 +704,26 @@ public final class AssistantTurnExecutor {
             Path workspace,
             Context ctx
     ) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        CurrentTurnPlan capturedPlan = requireCapturedRetryPlan(plan);
         return ReadOnlyInspectionRetry.retryIfNeeded(
                 answer,
                 messages,
-                safePlan,
+                capturedPlan,
                 workspace,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        compatibilityPlanFromMessages(retryMessages, ctx)));
+                        capturedPlan,
+                        RetryDispatchPurpose.READ_ONLY_INSPECTION));
+    }
+
+    private static CurrentTurnPlan requireCapturedRetryPlan(CurrentTurnPlan plan) {
+        if (plan == null) {
+            throw new IllegalArgumentException(
+                    "captured retry plan is required");
+        }
+        return plan;
     }
 
     private static void appendExtraSummary(StringBuilder out, String extraSummary) {
@@ -723,7 +731,8 @@ public final class AssistantTurnExecutor {
     }
 
     private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(messages);
         ExecutionPhase phase = currentExecutionPhase(ctx, contract);
         List<String> promptTools = ctx == null
                 ? ToolSurfacePlanner.defaultVisibleToolNames(contract, phase)
@@ -2148,15 +2157,28 @@ public final class AssistantTurnExecutor {
      * @return the improved answer, or the original if retry was not needed or failed
      */
     static String synthesisRetryIfNeeded(String answer, int toolsInvoked,
-                                                   List<ChatMessage> messages, Context ctx) {
+                                                    List<ChatMessage> messages, Context ctx) {
+        return synthesisRetryIfNeeded(
+                answer, toolsInvoked, null, messages, ctx);
+    }
+
+    static String synthesisRetryIfNeeded(
+            String answer,
+            int toolsInvoked,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx
+    ) {
+        CurrentTurnPlan capturedPlan = requireCapturedRetryPlan(plan);
         return PostToolSynthesisRetry.synthesizeIfNeeded(
                 answer,
                 toolsInvoked,
                 messages,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        compatibilityPlanFromMessages(retryMessages, ctx)));
+                        capturedPlan,
+                        RetryDispatchPurpose.POST_TOOL_SYNTHESIS));
     }
 
     // ── Claim-vs-action truth layer ──────────────────────────────────────
@@ -2298,7 +2320,7 @@ public final class AssistantTurnExecutor {
         return mutationRequestRetryIfNeeded(
                 answer,
                 messages,
-                compatibilityPlanFromMessages(messages, ctx),
+                null,
                 loopResult,
                 workspace,
                 ctx);
@@ -2309,11 +2331,11 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        CurrentTurnPlan capturedPlan = requireCapturedRetryPlan(plan);
         return MissingMutationRetry.retryIfNeeded(
                 answer,
                 messages,
-                safePlan,
+                capturedPlan,
                 loopResult,
                 workspace,
                 ctx,
@@ -2322,7 +2344,8 @@ public final class AssistantTurnExecutor {
                                 ctx,
                                 retryMessages,
                                 retryPlan,
-                                retryToolSpecs));
+                                retryToolSpecs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
     }
 
     static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {
@@ -2377,7 +2400,7 @@ public final class AssistantTurnExecutor {
         return inspectCompletenessRetryIfNeeded(
                 answer,
                 messages,
-                compatibilityPlanFromMessages(messages, ctx),
+                null,
                 loopResult,
                 workspace,
                 ctx);
@@ -2388,18 +2411,19 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        CurrentTurnPlan capturedPlan = requireCapturedRetryPlan(plan);
         return InspectCompletenessRetry.retryIfNeeded(
                 answer,
                 messages,
-                safePlan,
+                capturedPlan,
                 loopResult,
                 workspace,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        compatibilityPlanFromMessages(retryMessages, ctx)));
+                        capturedPlan,
+                        RetryDispatchPurpose.INSPECT_COMPLETENESS));
     }
 
     static String overrideSelectorMismatchAnalysisIfNeeded(
@@ -2407,10 +2431,34 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
+        return overrideSelectorMismatchAnalysisIfNeeded(
+                answer,
+                null,
+                messages,
+                loopResult,
+                workspace);
+    }
+
+    static String overrideSelectorMismatchAnalysisIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
         if (answer == null || answer.isBlank()) return answer;
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        String userRequest = latestUserRequest(messages);
+        TaskContract contract = plan == null
+                ? TurnTaskContractCapture.currentOrResolve(messages)
+                : plan.taskContract();
+        if (contract != null
+                && (contract.mutationRequested()
+                        || contract.mutationAllowed())) {
+            return answer;
+        }
+        String userRequest = contract == null
+                ? ""
+                : contract.originalUserRequest();
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
         String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
@@ -2445,14 +2493,39 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
+        return overrideReadOnlyWebDiagnosticsIfNeeded(
+                answer,
+                null,
+                messages,
+                loopResult,
+                workspace);
+    }
+
+    static String overrideReadOnlyWebDiagnosticsIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (declaresTaskType(messages, TaskType.WORKSPACE_EXPLAIN)) return answer;
-        String latestUserRequest = latestUserRequest(messages);
-        if ("WORKSPACE_EXPLAIN".equals(ToolCallSupport.embeddedRetryTaskType(latestUserRequest))) return answer;
-        String userRequest = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(latestUserRequest);
-        TaskContract requestContract = TaskContractResolver.fromUserRequest(userRequest);
+        TaskContract requestContract = plan == null
+                ? TurnTaskContractCapture.currentOrResolve(messages)
+                : plan.taskContract();
+        if (requestContract == null) return answer;
+        if (requestContract.mutationRequested()
+                || requestContract.mutationAllowed()) {
+            return answer;
+        }
         if (requestContract.type() == TaskType.WORKSPACE_EXPLAIN) return answer;
+        String originalUserRequest = requestContract.originalUserRequest();
+        if ("WORKSPACE_EXPLAIN".equals(
+                ToolCallSupport.embeddedRetryTaskType(originalUserRequest))) {
+            return answer;
+        }
+        String userRequest =
+                ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(
+                        originalUserRequest);
         if (StaticWebImportIntent.matches(userRequest)) return answer;
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
         if (!readStaticWebDiagnosticSurface(loopResult, workspace)) return answer;
@@ -2547,16 +2620,6 @@ public final class AssistantTurnExecutor {
         if (loopResult == null || loopResult.toolNames() == null) return false;
         for (String toolName : loopResult.toolNames()) {
             if (canonicalToolName.equals(canonicalToolName(toolName))) return true;
-        }
-        return false;
-    }
-
-    private static boolean declaresTaskType(List<ChatMessage> messages, TaskType taskType) {
-        if (messages == null || taskType == null) return false;
-        String marker = "Task type: " + taskType.name();
-        for (ChatMessage message : messages) {
-            if (message == null || message.content() == null) continue;
-            if (message.content().contains(marker)) return true;
         }
         return false;
     }
@@ -2845,7 +2908,7 @@ public final class AssistantTurnExecutor {
      * <p>Package-private for direct testing.
      */
     static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {
-        return groundingRetryIfNeeded(answer, safePlanFromMessages(null, messages, ctx), messages, ctx);
+        return groundingRetryIfNeeded(answer, null, messages, ctx);
     }
 
     static String groundingRetryIfNeeded(
@@ -2854,16 +2917,17 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             Context ctx
     ) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        CurrentTurnPlan capturedPlan = requireCapturedRetryPlan(plan);
         return NoToolGroundingRetry.retryIfNeeded(
                 answer,
-                safePlan,
+                capturedPlan,
                 messages,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        compatibilityPlanFromMessages(retryMessages, ctx)));
+                        capturedPlan,
+                        RetryDispatchPurpose.NO_TOOL_GROUNDING));
     }
 }
 

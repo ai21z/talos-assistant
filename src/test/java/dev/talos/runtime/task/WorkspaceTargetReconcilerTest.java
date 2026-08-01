@@ -1,5 +1,13 @@
 package dev.talos.runtime.task;
 
+import dev.talos.core.Config;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.DeletePathTool;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,6 +21,47 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspaceTargetReconcilerTest {
+
+    @Test
+    void aliasProjectionRetainsIndependentBlockedWorkspaceObservation(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(
+                workspace.resolve("index.html"),
+                "<link rel=\"stylesheet\" href=\"styles.css\">\n");
+        Files.writeString(workspace.resolve("styles.css"), "body {}\n");
+        Files.writeString(workspace.resolve("script.js"), "keep\n");
+        String request =
+                "Edit index.html so it works, and update style.css too, "
+                        + "then delete script.js.";
+        TaskResolution resolution = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.resolveFromUserRequest(request),
+                workspace);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new DeletePathTool());
+
+        assertEquals(
+                Set.of("index.html", "styles.css"),
+                resolution.contract().expectedTargets());
+        assertTrue(resolution.blocksWorkspaceOperations());
+        assertTrue(
+                resolution.mutationTailPlan()
+                        .workspaceOperationObservations()
+                        .stream()
+                        .anyMatch(observation ->
+                                "script.js".equals(observation.path())));
+        assertFalse(
+                NativeToolSpecPolicy.names(
+                                NativeToolSpecPolicy.select(
+                                        resolution,
+                                        ExecutionPhase.APPLY,
+                                        registry,
+                                        new Config()))
+                        .contains("talos.delete_path"));
+    }
 
     @Test
     void existingPluralScriptWinsOverUnmentionedConventionalSingular(@TempDir Path workspace)

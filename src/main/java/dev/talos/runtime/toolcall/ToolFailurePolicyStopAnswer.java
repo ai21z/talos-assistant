@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -27,7 +28,8 @@ final class ToolFailurePolicyStopAnswer {
         if (state == null || reason == null || !reason.toLowerCase(Locale.ROOT).contains("no-progress")) {
             return "";
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || contract.type() == TaskType.UNKNOWN) return "";
         StringBuilder out = new StringBuilder("Runtime context:\n");
         out.append("- task contract: ").append(contract.type()).append('\n');
