@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,11 +18,20 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class JsonTurnLogAppenderTest {
 
+    private static void withAppender(
+            JsonSessionStore store,
+            String sessionId,
+            Consumer<JsonTurnLogAppender> action
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            action.accept(new JsonTurnLogAppender(writer, sessionId));
+        }
+    }
+
     @Test
     void writesStructuredRecordWithChromeStrippedText(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-listener";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
 
         TurnAudit audit = new TurnAudit(
                 List.of(new TurnRecord.ToolCallSummary(
@@ -33,7 +43,8 @@ class JsonTurnLogAppenderTest {
                         "I updated the title.\n[Used 1 tool(s): talos.edit_file | 1 iteration(s)]", ""),
                 null, 1, Duration.ofMillis(1234), audit);
 
-        appender.onTurnComplete(tr, "rename the title");
+        withAppender(store, sid, appender ->
+                appender.onTurnComplete(tr, "rename the title"));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
@@ -56,7 +67,6 @@ class JsonTurnLogAppenderTest {
     void writesStructuredRecordWithProtectedContentRedacted(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-protected";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
 
         TurnResult tr = new TurnResult(
                 new Result.Streamed("""
@@ -71,7 +81,8 @@ class JsonTurnLogAppenderTest {
                 Duration.ofMillis(100),
                 TurnAudit.empty());
 
-        appender.onTurnComplete(tr, "Read .env and tell me the value inside.");
+        withAppender(store, sid, appender ->
+                appender.onTurnComplete(tr, "Read .env and tell me the value inside."));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
@@ -85,7 +96,6 @@ class JsonTurnLogAppenderTest {
     void writesStructuredRecordWithPrivateDocumentFactCanariesRedacted(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-private-doc";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
 
         TurnResult tr = new TurnResult(
                 new Result.Streamed("""
@@ -98,7 +108,8 @@ class JsonTurnLogAppenderTest {
                 Duration.ofMillis(100),
                 TurnAudit.empty());
 
-        appender.onTurnComplete(tr, "Read private-medical.pdf");
+        withAppender(store, sid, appender ->
+                appender.onTurnComplete(tr, "Read private-medical.pdf"));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
@@ -112,7 +123,6 @@ class JsonTurnLogAppenderTest {
     void writesStandaloneProtectedAnswerAsRedactedTurnRecord(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-protected-standalone";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
 
         TurnResult tr = new TurnResult(
                 new Result.Streamed("The value is: `must-not-leak`.", ""),
@@ -121,7 +131,8 @@ class JsonTurnLogAppenderTest {
                 Duration.ofMillis(100),
                 TurnAudit.empty());
 
-        appender.onTurnComplete(tr, "Read .env and tell me the value inside.");
+        withAppender(store, sid, appender ->
+                appender.onTurnComplete(tr, "Read .env and tell me the value inside."));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
@@ -134,7 +145,6 @@ class JsonTurnLogAppenderTest {
     void writesLocalTraceArtifactAndTraceIdWithTurnRecord(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-trace-listener";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
         LocalTurnTrace trace = LocalTurnTrace.builder(
                         "trc-listener",
                         sid,
@@ -147,9 +157,9 @@ class JsonTurnLogAppenderTest {
                 .build();
         TurnAudit audit = TurnAudit.empty().withLocalTrace(trace);
 
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Ok("done"), null, 1, Duration.ofMillis(100), audit),
-                "hello");
+                "hello"));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
@@ -161,17 +171,17 @@ class JsonTurnLogAppenderTest {
     void statusDistinguishesErroredFromSilentTurns(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-status";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        // Error turn - blank assistantText, status must say "error".
-        appender.onTurnComplete(
-                new TurnResult(new Result.Error("boom", 500), 1), "do thing");
-        // Info turn - also blank assistantText, but clearly not an error.
-        appender.onTurnComplete(
-                new TurnResult(new Result.Info("rebuilt index"), 2), "/reindex");
-        // Ok turn - non-streaming success path.
-        appender.onTurnComplete(
-                new TurnResult(new Result.Ok("done"), 3), "ping");
+        withAppender(store, sid, appender -> {
+            // Error turn - blank assistantText, status must say "error".
+            appender.onTurnComplete(
+                    new TurnResult(new Result.Error("boom", 500), 1), "do thing");
+            // Info turn - also blank assistantText, but clearly not an error.
+            appender.onTurnComplete(
+                    new TurnResult(new Result.Info("rebuilt index"), 2), "/reindex");
+            // Ok turn - non-streaming success path.
+            appender.onTurnComplete(
+                    new TurnResult(new Result.Ok("done"), 3), "ping");
+        });
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(3, recs.size());
@@ -198,14 +208,12 @@ class JsonTurnLogAppenderTest {
     void streamedTurnWithAbortMarkerIsTaggedAborted(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-aborted";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Streamed(
                         "[turn aborted: streaming chat exceeded 300s wall-clock budget - "
                                 + "model is hung or producing tokens too slowly.]", ""),
                         3),
-                "describe the repo");
+                "describe the repo"));
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
@@ -222,15 +230,13 @@ class JsonTurnLogAppenderTest {
     void streamedPartialBodyWithTrailingAbortMarkerIsTaggedAborted(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-partial-aborted";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Streamed(
                         "I refactored the parser and all tests pass.\n"
                                 + "[turn aborted: stream transport failed after partial output, "
                                 + "retry skipped to avoid duplicate output]", ""),
                         4),
-                "refactor the parser");
+                "refactor the parser"));
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
@@ -245,12 +251,10 @@ class JsonTurnLogAppenderTest {
     void okTurnWithTrailingAbortMarkerIsTaggedAborted(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-ok-aborted";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Ok(
                         "Partial explanation of the module.\n[turn aborted: interrupted]"), 2),
-                "explain the module");
+                "explain the module"));
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
@@ -266,13 +270,11 @@ class JsonTurnLogAppenderTest {
     void streamedTurnWithOrganicAbortedWordStaysOk(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-organic";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Streamed(
                         "The operation was aborted by the user earlier this week.", ""),
                         1),
-                "what happened?");
+                "what happened?"));
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
@@ -283,14 +285,15 @@ class JsonTurnLogAppenderTest {
     void streamedEngineAndModelErrorsAreNotTaggedOk(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-errors";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
-                new TurnResult(new Result.Streamed("[Engine error during tool loop: boom]", ""), 1),
-                "why failed?");
-        appender.onTurnComplete(
-                new TurnResult(new Result.Streamed("[Model 'qwen3:8b' not found. Run: ollama pull qwen3:8b]", ""), 2),
-                "try again");
+        withAppender(store, sid, appender -> {
+            appender.onTurnComplete(
+                    new TurnResult(new Result.Streamed("[Engine error during tool loop: boom]", ""), 1),
+                    "why failed?");
+            appender.onTurnComplete(
+                    new TurnResult(new Result.Streamed(
+                            "[Model 'qwen3:8b' not found. Run: ollama pull qwen3:8b]", ""), 2),
+                    "try again");
+        });
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(2, recs.size());
@@ -302,13 +305,11 @@ class JsonTurnLogAppenderTest {
     void refusalStyleStreamedReplyIsTaggedInfo(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-refusal";
-        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
-
-        appender.onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Streamed(
                         "I am an AI text-based assistant and cannot directly edit files on your system.", ""),
                         1),
-                "please edit it");
+                "please edit it"));
 
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
@@ -323,8 +324,10 @@ class JsonTurnLogAppenderTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-legacy";
         // Use the 10-arg back-compat constructor - status defaults to "".
-        store.appendTurn(sid, new TurnRecord(1, java.time.Instant.now(), 10L,
-                "u", "a", List.of(), 0, 0, 0, ""));
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, java.time.Instant.now(), 10L,
+                    "u", "a", List.of(), 0, 0, 0, ""));
+        }
         List<TurnRecord> recs = store.loadTurns(sid);
         assertEquals(1, recs.size());
         assertEquals("", recs.get(0).status(), "legacy records default to empty status");
@@ -333,7 +336,7 @@ class JsonTurnLogAppenderTest {
     @Test
     void nullResultIsIgnored(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        new JsonTurnLogAppender(store, "sid").onTurnComplete(null, "hi");
+        withAppender(store, "sid", appender -> appender.onTurnComplete(null, "hi"));
         assertTrue(store.loadTurns("sid").isEmpty());
     }
 
@@ -341,9 +344,9 @@ class JsonTurnLogAppenderTest {
     void nonTextResultStillPersistsWithEmptyAssistantText(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-info";
-        new JsonTurnLogAppender(store, sid).onTurnComplete(
+        withAppender(store, sid, appender -> appender.onTurnComplete(
                 new TurnResult(new Result.Info("rebuilt index"), 1),
-                "/reindex");
+                "/reindex"));
 
         // Info results aren't tracked in conversation memory - but we still
         // record the turn's runtime truth so the audit log is complete.

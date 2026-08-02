@@ -7,7 +7,10 @@ import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.SessionApprovalPolicy;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,6 +43,69 @@ class TalosBootstrapWiringTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
 
+    @TempDir
+    Path isolatedUserHome;
+
+    private final List<ReplRouter> openedRouters = new ArrayList<>();
+    private String previousUserHome;
+
+    @BeforeEach
+    void isolateUserHome() {
+        previousUserHome = System.getProperty("user.home");
+        System.setProperty("user.home", isolatedUserHome.toString());
+    }
+
+    @AfterEach
+    void closeRoutersAndRestoreUserHome() {
+        try {
+            for (int index = openedRouters.size() - 1; index >= 0; index--) {
+                openedRouters.get(index).getRuntimeSession().close();
+            }
+        } finally {
+            if (previousUserHome == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previousUserHome);
+            }
+        }
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace
+    ) {
+        return remember(TalosBootstrap.create(session, config, out, workspace));
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace,
+            org.jline.reader.LineReader lineReader
+    ) {
+        return remember(TalosBootstrap.create(session, config, out, workspace, lineReader));
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace,
+            org.jline.reader.LineReader lineReader,
+            java.util.function.Function<String, String> approvalReader
+    ) {
+        return remember(TalosBootstrap.create(
+                session, config, out, workspace, lineReader, approvalReader));
+    }
+
+    private ReplRouter remember(ReplRouter router) {
+        openedRouters.add(router);
+        return router;
+    }
+
     private static SessionState stubSession() {
         return new SessionState() {
             private int k = 6; private boolean dbg;
@@ -52,7 +118,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapWiresSessionApprovalPolicyIntoTurnProcessor() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);
@@ -70,7 +136,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapRegistersPerTurnListeners() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);
@@ -114,7 +180,7 @@ class TalosBootstrapWiringTest {
                 .terminal(term)
                 .build();
 
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(suppliedSink),
                 WS, reader);
@@ -147,7 +213,7 @@ class TalosBootstrapWiringTest {
     @Test
     void bootstrapFallsBackToStdoutWhenLineReaderAbsent() {
         java.io.ByteArrayOutputStream stdoutSink = new java.io.ByteArrayOutputStream();
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(stdoutSink),
                 WS); // no LineReader
@@ -164,7 +230,7 @@ class TalosBootstrapWiringTest {
     @Test
     void bootstrapUsesSuppliedApprovalReaderWhenNoLineReaderIsPresent() {
         List<String> prompts = new ArrayList<>();
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS,
@@ -181,7 +247,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapClosesLlmClientWhenRuntimeSessionCloses() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);

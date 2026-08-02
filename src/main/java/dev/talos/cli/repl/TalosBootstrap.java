@@ -23,6 +23,7 @@ import dev.talos.runtime.Session;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.SessionStore;
+import dev.talos.runtime.SessionWriterLease;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
@@ -124,6 +125,9 @@ public final class TalosBootstrap {
         NetPolicy      net      = new NetPolicy(cfg);
         Limits         limits   = Limits.fromConfig(cfg);
         SessionMemory  memory   = new SessionMemory();
+        SessionWriterLease sessionWriterLease = null;
+
+        try {
 
         // ── P2 Ctrl-C wiring ─────────────────────────────────────────────
         // JLine saves & restores the INT handler around its own readLine(),
@@ -190,22 +194,26 @@ public final class TalosBootstrap {
         // ── Session persistence ──────────────────────────────────────────
         boolean sessionPersistenceEnabled = cfg.view().session().persistence();
         boolean sessionAutoLoadEnabled = sessionPersistenceEnabled && cfg.view().session().autoLoad();
-        SessionStore sessionStore = sessionPersistenceEnabled ? new JsonSessionStore() : new NoOpSessionStore();
+        JsonSessionStore fileSessionStore = sessionPersistenceEnabled
+                ? new JsonSessionStore()
+                : null;
+        SessionStore sessionArchive = sessionPersistenceEnabled
+                ? fileSessionStore
+                : new NoOpSessionStore();
         // T799: one workspace, many sessions. The bare workspace hash keys
         // per-workspace artifacts (checkpoints, trace metadata) and is the
         // listing prefix; everything this process WRITES (close snapshot,
         // turn log, traces) goes under a fresh per-run instance id.
         String workspaceId = JsonSessionStore.sessionIdFor(workspace);
-        String sessionId = JsonSessionStore.newSessionInstanceId(workspace, java.time.Instant.now());
 
         RestoreSummary restoreSummary = new RestoreSummary(0, null, "");
         RestoreSummary savedSessionSummary = new RestoreSummary(0, null, "");
         if (sessionAutoLoadEnabled) {
-            restoreSummary = restoreSavedSession(sessionStore,
-                    latestSessionId(sessionStore, workspaceId), memory, conversationManager);
+            restoreSummary = restoreSavedSession(sessionArchive,
+                    latestSessionId(sessionArchive, workspaceId), memory, conversationManager);
         } else if (sessionPersistenceEnabled) {
-            savedSessionSummary = inspectSavedSession(sessionStore,
-                    latestSessionId(sessionStore, workspaceId));
+            savedSessionSummary = inspectSavedSession(sessionArchive,
+                    latestSessionId(sessionArchive, workspaceId));
         }
         if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
             llm.setModel(restoreSummary.model());
@@ -268,6 +276,16 @@ public final class TalosBootstrap {
         }
 
         // ── Runtime layer ────────────────────────────────────────────────
+        sessionWriterLease = sessionPersistenceEnabled
+                ? fileSessionStore.reserveNewSession(workspace, java.time.Instant.now())
+                : null;
+        SessionStore sessionStore = sessionPersistenceEnabled
+                ? sessionWriterLease
+                : sessionArchive;
+        String sessionId = sessionPersistenceEnabled
+                ? sessionWriterLease.sessionId()
+                : JsonSessionStore.newSessionInstanceId(
+                        workspace, java.time.Instant.now());
         Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
         // Session-scoped approval policy sits above the gate. Without this,
         // the REPL falls back to ALWAYS_ASK and the user's "a = yes for
@@ -322,6 +340,20 @@ public final class TalosBootstrap {
                             runtimeSession.startedAt(), turns, llm.getModel(),
                             memRef.activeTaskContext(), memRef.artifactGoal());
                     sessionStore.save(data);
+                }
+            });
+        }
+        if (sessionWriterLease != null) {
+            final SessionWriterLease leaseToClose = sessionWriterLease;
+            final PrintStream sessionOutput = out;
+            runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
+                @Override public void onSessionEnd() {
+                    try {
+                        leaseToClose.close();
+                    } catch (RuntimeException releaseFailure) {
+                        sessionOutput.println(
+                                "  session warning: durable writer release was not confirmed.");
+                    }
                 }
             });
         }
@@ -417,8 +449,24 @@ public final class TalosBootstrap {
                 sessionNotice,
                 buildSensitiveWorkspaceNotice(workspace),
                 buildWorkspaceProfilesNotice(workspaceProfilesLoaded));
-        return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
-                              registry, workspace, quit, startupNotice, templates);
+        ReplRouter router = new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
+                                           registry, workspace, quit, startupNotice, templates);
+        return router;
+        } catch (RuntimeException | Error bootstrapFailure) {
+            if (sessionWriterLease != null) {
+                try {
+                    sessionWriterLease.close();
+                } catch (RuntimeException closeFailure) {
+                    bootstrapFailure.addSuppressed(closeFailure);
+                }
+            }
+            try {
+                llm.close();
+            } catch (RuntimeException closeFailure) {
+                bootstrapFailure.addSuppressed(closeFailure);
+            }
+            throw bootstrapFailure;
+        }
     }
 
     /**

@@ -336,12 +336,14 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
                 TurnPolicyTrace.empty(),
                 evidence.trace().traceId());
         JsonSessionStore store = new JsonSessionStore(storeDirectory);
-        assertEquals(
-                TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
-                        sessionId,
-                        record,
-                        evidence.trace()).state());
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
+                    writer.persistTurnEnvelope(
+                            sessionId,
+                            record,
+                            evidence.trace()).state());
+        }
         var loaded = store.loadTrace(
                         sessionId,
                         evidence.trace().traceId())

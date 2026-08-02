@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link JsonSessionStore}.
@@ -18,6 +19,15 @@ class JsonSessionStoreTest {
     @TempDir Path tempDir;
     private JsonSessionStore store() {
         return new JsonSessionStore(tempDir);
+    }
+    private static void withWriter(
+            JsonSessionStore store,
+            String sessionId,
+            Consumer<SessionWriterLease> action
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            action.accept(writer);
+        }
     }
     private SessionData sample(String id, int turns) {
         List<SessionData.Turn> turnList = List.of(
@@ -32,7 +42,7 @@ class JsonSessionStoreTest {
         @Test void roundTrip_preservesAllFields() {
             var store = store();
             SessionData original = sample("abc123", 5);
-            store.save(original);
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
             Optional<SessionData> loaded = store.load("abc123");
             assertTrue(loaded.isPresent());
             SessionData d = loaded.get();
@@ -58,7 +68,7 @@ class JsonSessionStoreTest {
                     Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
                     context, goal);
 
-            store.save(original);
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
 
             SessionData loaded = store.load("ctx1").orElseThrow();
             assertEquals(ActiveTaskContext.State.ACTIVE, loaded.activeTaskContext().state());
@@ -86,7 +96,7 @@ class JsonSessionStoreTest {
                     Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
                     context, goal);
 
-            store.save(original);
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
 
             SessionData loaded = store.load("ctx-claim").orElseThrow();
             ActiveTaskContext loadedContext = loaded.activeTaskContext();
@@ -114,7 +124,7 @@ class JsonSessionStoreTest {
                     Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
                     context, goal);
 
-            store.save(original);
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
 
             SessionData loaded = store.load("ctx-static-req").orElseThrow();
             ActiveTaskContext loadedContext = loaded.activeTaskContext();
@@ -215,9 +225,11 @@ class JsonSessionStoreTest {
         }
         @Test void save_overwritesPrevious() {
             var store = store();
-            store.save(sample("x", 1));
-            store.save(new SessionData("x", "/new", "updated", 10,
-                    Instant.now(), List.of()));
+            withWriter(store, "x", writer -> {
+                writer.save(sample("x", 1));
+                writer.save(new SessionData("x", "/new", "updated", 10,
+                        Instant.now(), List.of()));
+            });
             SessionData d = store.load("x").orElseThrow();
             assertEquals("updated", d.sketch());
             assertEquals(10, d.turnCount());
@@ -228,13 +240,15 @@ class JsonSessionStoreTest {
     @Nested class Delete {
         @Test void delete_existing_returnsTrue() {
             var store = store();
-            store.save(sample("del1", 2));
-            assertTrue(store.delete("del1"));
+            withWriter(store, "del1", writer -> {
+                writer.save(sample("del1", 2));
+                assertTrue(writer.delete("del1"));
+            });
             assertTrue(store.load("del1").isEmpty());
         }
         @Test void delete_nonExistent_returnsFalse() {
             var store = store();
-            assertFalse(store.delete("nope"));
+            withWriter(store, "nope", writer -> assertFalse(writer.delete("nope")));
         }
         @Test void delete_null_returnsFalse() {
             var store = store();
@@ -260,7 +274,7 @@ class JsonSessionStoreTest {
     @Nested class FileFormat {
         @Test void savedFile_isReadableJson() throws Exception {
             var store = store();
-            store.save(sample("json1", 3));
+            withWriter(store, "json1", writer -> writer.save(sample("json1", 3)));
             Path file = tempDir.resolve("json1.json");
             assertTrue(Files.exists(file));
             String content = Files.readString(file);
@@ -272,10 +286,11 @@ class JsonSessionStoreTest {
 
         @Test void savedSessionRedactsPrivateDocumentFactCanaries() throws Exception {
             var store = store();
-            store.save(new SessionData("private-doc", "/tmp/ws", "Patient Name: Eleni Nikolaou", 1,
+            withWriter(store, "private-doc", writer -> writer.save(new SessionData(
+                    "private-doc", "/tmp/ws", "Patient Name: Eleni Nikolaou", 1,
                     Instant.parse("2026-05-17T10:00:00Z"),
                     List.of(new SessionData.Turn("assistant", "Diagnosis: fictional-condition-alpha")),
-                    "llama_cpp/qwen2.5-coder:14b"));
+                    "llama_cpp/qwen2.5-coder:14b")));
 
             String content = Files.readString(tempDir.resolve("private-doc.json"));
             assertFalse(content.contains("Eleni Nikolaou"), content);
@@ -286,10 +301,11 @@ class JsonSessionStoreTest {
         @Test void savedSessionRedactsBareSecretShapes() throws Exception {
             String token = "github_pat_11AAAAAAA0abcdefghijklmnopqrstuvwxyz1234567890";
             var store = store();
-            store.save(new SessionData("strong-secret", "/tmp/ws", "token " + token, 1,
+            withWriter(store, "strong-secret", writer -> writer.save(new SessionData(
+                    "strong-secret", "/tmp/ws", "token " + token, 1,
                     Instant.parse("2026-05-17T10:00:00Z"),
                     List.of(new SessionData.Turn("assistant", "leaked " + token)),
-                    "llama_cpp/qwen2.5-coder:14b"));
+                    "llama_cpp/qwen2.5-coder:14b")));
 
             String content = Files.readString(tempDir.resolve("strong-secret.json"));
             assertFalse(content.contains(token), content);
@@ -298,18 +314,19 @@ class JsonSessionStoreTest {
 
         @Test void turnJsonlRedactsPrivateDocumentFactCanaries() throws Exception {
             var store = store();
-            store.appendTurn("private-doc-turn", new dev.talos.runtime.TurnRecord(
-                    1,
-                    Instant.parse("2026-05-17T10:00:00Z"),
-                    50,
-                    "Read private-medical.pdf",
-                    "Patient Name: Eleni Nikolaou\nInvoice Total: 1837.42 EUR",
-                    List.of(),
-                    0,
-                    0,
-                    0,
-                    "",
-                    "ok"));
+            withWriter(store, "private-doc-turn", writer -> writer.appendTurn(
+                    "private-doc-turn", new dev.talos.runtime.TurnRecord(
+                            1,
+                            Instant.parse("2026-05-17T10:00:00Z"),
+                            50,
+                            "Read private-medical.pdf",
+                            "Patient Name: Eleni Nikolaou\nInvoice Total: 1837.42 EUR",
+                            List.of(),
+                            0,
+                            0,
+                            0,
+                            "",
+                            "ok")));
 
             String content = Files.readString(tempDir.resolve("private-doc-turn.turns.jsonl"));
             assertFalse(content.contains("Eleni Nikolaou"), content);
@@ -319,14 +336,15 @@ class JsonSessionStoreTest {
 
         @Test void localTraceJsonRedactsPrivateDocumentFactCanaries() throws Exception {
             var store = store();
-            store.saveTrace("private-doc-trace", dev.talos.runtime.trace.LocalTurnTrace.builder(
-                            "tr-private-doc",
-                            "private-doc-trace",
-                            1,
-                            "2026-05-17T10:00:00Z")
-                    .warning("PRIVATE_DOC_FACT", "Patient Name: Eleni Nikolaou")
-                    .outcome("OK", "NOT_RUN", "NONE", "NONE", "Invoice Total: 1837.42 EUR")
-                    .build());
+            withWriter(store, "private-doc-trace", writer -> writer.saveTrace(
+                    "private-doc-trace", dev.talos.runtime.trace.LocalTurnTrace.builder(
+                                    "tr-private-doc",
+                                    "private-doc-trace",
+                                    1,
+                                    "2026-05-17T10:00:00Z")
+                            .warning("PRIVATE_DOC_FACT", "Patient Name: Eleni Nikolaou")
+                            .outcome("OK", "NOT_RUN", "NONE", "NONE", "Invoice Total: 1837.42 EUR")
+                            .build()));
 
             Path trace = tempDir.resolve("traces")
                     .resolve("private-doc-trace")
@@ -345,7 +363,7 @@ class JsonSessionStoreTest {
         @Test void emptyTurns_roundTrip() {
             var store = store();
             SessionData data = new SessionData("empty", "/ws", "", 0, Instant.now(), List.of());
-            store.save(data);
+            withWriter(store, data.sessionId(), writer -> writer.save(data));
             SessionData loaded = store.load("empty").orElseThrow();
             assertTrue(loaded.turns().isEmpty());
             assertEquals(0, loaded.turnCount());

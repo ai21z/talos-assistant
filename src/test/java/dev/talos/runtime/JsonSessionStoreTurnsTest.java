@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,21 +26,33 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class JsonSessionStoreTurnsTest {
 
+    private static void withWriter(
+            JsonSessionStore store,
+            String sessionId,
+            Consumer<SessionWriterLease> action
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            action.accept(writer);
+        }
+    }
+
     @Test
     void appendAndLoadTurnsRoundTrip(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-abc";
 
-        store.appendTurn(sid, new TurnRecord(
-                1, Instant.parse("2026-04-18T10:00:00Z"), 250,
-                "hello", "hi there",
-                List.of(new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true)),
-                0, 0, 0, ""));
-        store.appendTurn(sid, new TurnRecord(
-                2, Instant.parse("2026-04-18T10:00:05Z"), 4800,
-                "edit title", "done",
-                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true)),
-                1, 1, 0, "3 stages, 42.1ms, final=4"));
+        withWriter(store, sid, writer -> {
+            writer.appendTurn(sid, new TurnRecord(
+                    1, Instant.parse("2026-04-18T10:00:00Z"), 250,
+                    "hello", "hi there",
+                    List.of(new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true)),
+                    0, 0, 0, ""));
+            writer.appendTurn(sid, new TurnRecord(
+                    2, Instant.parse("2026-04-18T10:00:05Z"), 4800,
+                    "edit title", "done",
+                    List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true)),
+                    1, 1, 0, "3 stages, 42.1ms, final=4"));
+        });
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(2, loaded.size(), "both turns persisted");
@@ -60,7 +73,7 @@ class JsonSessionStoreTurnsTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-canary";
 
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 250,
@@ -74,7 +87,7 @@ class JsonSessionStoreTurnsTest {
                 0,
                 0,
                 0,
-                "trace: DO_NOT_LEAK_T267_TRACE"));
+                "trace: DO_NOT_LEAK_T267_TRACE")));
 
         String rawJsonl = java.nio.file.Files.readString(dir.resolve(sid + ".turns.jsonl"));
 
@@ -99,7 +112,7 @@ class JsonSessionStoreTurnsTest {
                 List.of("talos.read_file", "talos.write_file"),
                 List.of("approval denied by user for talos.write_file"));
 
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 250,
@@ -115,7 +128,7 @@ class JsonSessionStoreTurnsTest {
                 1,
                 "",
                 "ok",
-                trace));
+                trace)));
 
         TurnRecord loaded = store.loadTurns(sid).get(0);
 
@@ -139,7 +152,7 @@ class JsonSessionStoreTurnsTest {
                 List.of("talos.write_file", "talos.edit_file"),
                 List.of("talos.write_file", "talos.edit_file"));
 
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 250,
@@ -151,7 +164,7 @@ class JsonSessionStoreTurnsTest {
                 0,
                 "",
                 "ok",
-                trace));
+                trace)));
 
         TurnRecord loaded = store.loadTurns(sid).getFirst();
 
@@ -196,7 +209,7 @@ class JsonSessionStoreTurnsTest {
                         expected.endOffset()));
 
         String sid = "session-policy-exact-offset";
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 10,
@@ -208,7 +221,7 @@ class JsonSessionStoreTurnsTest {
                 0,
                 "",
                 "ok",
-                trace));
+                trace)));
 
         TurnPolicyTrace.RolefulTarget loaded = store.loadTurns(sid)
                 .getFirst()
@@ -296,7 +309,7 @@ class JsonSessionStoreTurnsTest {
         String sid = "session-sanitized-coordinate";
         JsonSessionStore store = new JsonSessionStore(dir);
 
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-07-30T00:00:00Z"),
                 10,
@@ -308,7 +321,7 @@ class JsonSessionStoreTurnsTest {
                 0,
                 "",
                 "ok",
-                trace));
+                trace)));
 
         String raw = Files.readString(dir.resolve(sid + ".turns.jsonl"));
         assertFalse(raw.contains("DO_NOT_LEAK_T1196_PREFIX"));
@@ -342,7 +355,7 @@ class JsonSessionStoreTurnsTest {
                 List.of("talos.read_file", "talos.edit_file"),
                 List.of("talos.read_file", "talos.edit_file"));
 
-        store.appendTurn(sid, new TurnRecord(
+        withWriter(store, sid, writer -> writer.appendTurn(sid, new TurnRecord(
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 250,
@@ -354,7 +367,7 @@ class JsonSessionStoreTurnsTest {
                 0,
                 "",
                 "ok",
-                trace));
+                trace)));
 
         TurnPolicyTrace loaded = store.loadTurns(sid).getFirst().policyTrace();
         var styleTargets = loaded.rolefulTargets().stream()
@@ -526,19 +539,23 @@ class JsonSessionStoreTurnsTest {
                         "update style.css.".length())));
         JsonSessionStore store = new JsonSessionStore(dir);
 
-        store.appendTurn(sid, new TurnRecord(
-                1,
-                Instant.parse("2026-07-30T00:00:00Z"),
-                10,
-                "Edit index.html.",
-                "not written",
-                List.of(),
-                0,
-                0,
-                0,
-                "",
-                "failed",
-                trace));
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            assertThrows(IllegalArgumentException.class, () -> writer.appendTurn(
+                    sid,
+                    new TurnRecord(
+                            1,
+                            Instant.parse("2026-07-30T00:00:00Z"),
+                            10,
+                            "Edit index.html.",
+                            "not written",
+                            List.of(),
+                            0,
+                            0,
+                            0,
+                            "",
+                            "failed",
+                            trace)));
+        }
 
         assertFalse(Files.exists(dir.resolve(sid + ".turns.jsonl")));
         assertTrue(store.loadTurns(sid).isEmpty());
@@ -834,12 +851,14 @@ class JsonSessionStoreTurnsTest {
                 "my sketch", 2, Instant.now(),
                 List.of(new SessionData.Turn("user", "q"),
                         new SessionData.Turn("assistant", "a")));
-        store.save(data);
+        withWriter(store, sid, writer -> {
+            writer.save(data);
 
-        // Independently append a per-turn record.
-        store.appendTurn(sid, new TurnRecord(
-                1, Instant.now(), 100, "q", "a",
-                List.of(), 0, 0, 0, ""));
+            // Independently append a per-turn record under the same session writer.
+            writer.appendTurn(sid, new TurnRecord(
+                    1, Instant.now(), 100, "q", "a",
+                    List.of(), 0, 0, 0, ""));
+        });
 
         Optional<SessionData> reloaded = store.load(sid);
         assertTrue(reloaded.isPresent(), "snapshot still loads");
@@ -854,7 +873,7 @@ class JsonSessionStoreTurnsTest {
         String sid = "old-session";
         SessionData data = new SessionData(sid, dir.toString(),
                 "", 0, Instant.now(), List.of());
-        store.save(data);
+        withWriter(store, sid, writer -> writer.save(data));
 
         assertTrue(store.load(sid).isPresent(), "old snapshot still loads");
         assertTrue(store.loadTurns(sid).isEmpty(),
@@ -871,14 +890,16 @@ class JsonSessionStoreTurnsTest {
     void deleteRemovesBothSnapshotAndTurnsLog(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "to-delete";
-        store.save(new SessionData(sid, dir.toString(), "", 0, Instant.now(), List.of()));
-        store.appendTurn(sid, new TurnRecord(
-                1, Instant.now(), 10, "q", "a", List.of(), 0, 0, 0, ""));
+        withWriter(store, sid, writer -> {
+            writer.save(new SessionData(sid, dir.toString(), "", 0, Instant.now(), List.of()));
+            writer.appendTurn(sid, new TurnRecord(
+                    1, Instant.now(), 10, "q", "a", List.of(), 0, 0, 0, ""));
 
-        assertTrue(java.nio.file.Files.exists(dir.resolve(sid + ".json")));
-        assertTrue(java.nio.file.Files.exists(dir.resolve(sid + ".turns.jsonl")));
+            assertTrue(java.nio.file.Files.exists(dir.resolve(sid + ".json")));
+            assertTrue(java.nio.file.Files.exists(dir.resolve(sid + ".turns.jsonl")));
 
-        assertTrue(store.delete(sid));
+            assertTrue(writer.delete(sid));
+        });
         assertFalse(java.nio.file.Files.exists(dir.resolve(sid + ".json")));
         assertFalse(java.nio.file.Files.exists(dir.resolve(sid + ".turns.jsonl")));
     }
@@ -887,17 +908,19 @@ class JsonSessionStoreTurnsTest {
     void malformedLineIsSkipped(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "partial";
-        store.appendTurn(sid, new TurnRecord(
-                1, Instant.now(), 10, "q", "a", List.of(), 0, 0, 0, ""));
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(
+                    1, Instant.now(), 10, "q", "a", List.of(), 0, 0, 0, ""));
 
-        Path f = dir.resolve(sid + ".turns.jsonl");
-        java.nio.file.Files.writeString(f,
-                java.nio.file.Files.readString(f) + "not-json-at-all\n",
-                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
+            Path f = dir.resolve(sid + ".turns.jsonl");
+            java.nio.file.Files.writeString(f,
+                    java.nio.file.Files.readString(f) + "not-json-at-all\n",
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
 
-        // Append another valid line after the corrupt one.
-        store.appendTurn(sid, new TurnRecord(
-                2, Instant.now(), 20, "q2", "a2", List.of(), 0, 0, 0, ""));
+            // Append another valid line after the corrupt one.
+            writer.appendTurn(sid, new TurnRecord(
+                    2, Instant.now(), 20, "q2", "a2", List.of(), 0, 0, 0, ""));
+        }
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(2, loaded.size(), "valid lines survive a corrupt middle line");
@@ -920,24 +943,26 @@ class JsonSessionStoreTurnsTest {
         Path f = dir.resolve(sid + ".turns.jsonl");
 
         // Build a file: [good line]\n[line with malformed UTF-8]\n[good line]\n
-        store.appendTurn(sid, new TurnRecord(
-                1, Instant.parse("2026-04-18T10:00:00Z"), 10,
-                "before", "ok", List.of(), 0, 0, 0, ""));
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(
+                    1, Instant.parse("2026-04-18T10:00:00Z"), 10,
+                    "before", "ok", List.of(), 0, 0, 0, ""));
 
-        byte[] corrupt = new byte[] {
-                // Three illegal UTF-8 lead bytes - the REPLACE decoder turns
-                // them into U+FFFD each, producing a line that is not remotely
-                // valid JSON and Jackson must reject.
-                (byte) 0xFF, (byte) 0xFE, (byte) 0xFD,
-                ' ', 'g', 'a', 'r', 'b', 'a', 'g', 'e',
-                '\n'
-        };
-        java.nio.file.Files.write(f, corrupt,
-                java.nio.file.StandardOpenOption.APPEND);
+            byte[] corrupt = new byte[] {
+                    // Three illegal UTF-8 lead bytes - the REPLACE decoder turns
+                    // them into U+FFFD each, producing a line that is not remotely
+                    // valid JSON and Jackson must reject.
+                    (byte) 0xFF, (byte) 0xFE, (byte) 0xFD,
+                    ' ', 'g', 'a', 'r', 'b', 'a', 'g', 'e',
+                    '\n'
+            };
+            java.nio.file.Files.write(f, corrupt,
+                    java.nio.file.StandardOpenOption.APPEND);
 
-        store.appendTurn(sid, new TurnRecord(
-                2, Instant.parse("2026-04-18T10:00:05Z"), 20,
-                "after", "ok", List.of(), 0, 0, 0, ""));
+            writer.appendTurn(sid, new TurnRecord(
+                    2, Instant.parse("2026-04-18T10:00:05Z"), 20,
+                    "after", "ok", List.of(), 0, 0, 0, ""));
+        }
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(2, loaded.size(),
@@ -960,7 +985,7 @@ class JsonSessionStoreTurnsTest {
                  "toolCalls":[]}
                 """.formatted(rolefulTargetsJson)
                 .replace("\r", "")
-                .replace("\n", "");
+                .replace("\n", "") + "\n";
     }
 
     private static String localTraceWithRolefulTargets(

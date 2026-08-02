@@ -35,12 +35,14 @@ class TurnProcessorPreparationFailurePersistenceTest {
         assertTrue(modes.setActive("ask"));
         JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
         TurnProcessor processor = new TurnProcessor(modes);
-        processor.addListener(new JsonTurnLogAppender(store, "preparation"));
+        try (var writer = store.acquireSessionWriter("preparation")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "preparation"));
 
-        assertThrows(IllegalStateException.class, () -> processor.process(
-                new Session(dir, config),
-                "Explain the purpose of README.md.",
-                context));
+            assertThrows(IllegalStateException.class, () -> processor.process(
+                    new Session(dir, config),
+                    "Explain the purpose of README.md.",
+                    context));
+        }
 
         TurnRecord row = store.loadTurns("preparation").getFirst();
         LocalTurnTrace trace = store.loadTrace("preparation", row.traceId()).orElseThrow();

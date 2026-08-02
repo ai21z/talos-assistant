@@ -37,13 +37,14 @@ import java.util.List;
  * </ul>
  *
  * <p>T800: sessions are per-run instance files since T799
- * ({@code <ws-hash>-<UTC timestamp>}). {@code save}/{@code clear} and the
+ * ({@code <ws-hash>-<UTC timestamp>-<entropy>}; timestamp-only instance IDs
+ * remain readable). {@code save}/{@code clear} and the
  * {@code Saved file} row operate on the ACTIVE instance id injected by the
  * composition root; {@code list}/{@code resume} see every stored session
  * of the workspace, legacy bare-hash files included. Display ids are the
- * timestamp suffix (all instance ids of a workspace share the same 40-hex
- * prefix, so the hash head cannot distinguish them); the single possible
- * legacy file displays as the first hash characters.
+ * timestamp-and-entropy suffix (all instance ids of a workspace share the
+ * same 40-hex prefix, so the hash head cannot distinguish them); the single
+ * possible legacy file displays as the first hash characters.
  */
 @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
 public final class SessionCommand implements Command {
@@ -378,10 +379,11 @@ public final class SessionCommand implements Command {
 
     /** Best-effort raw copy of the per-turn JSONL beside the markdown export. */
     private String copyRawTurnLog(String sessionId, Path markdownTarget) {
-        if (!(store instanceof JsonSessionStore js)) {
+        java.util.Optional<Path> sourcePath = store.rawTurnLogPath(sessionId);
+        if (sourcePath.isEmpty()) {
             return "Raw turn log unavailable: sessions are not file-backed in this process.";
         }
-        Path source = js.sessionsDir().resolve(sessionId + ".turns.jsonl");
+        Path source = sourcePath.get();
         if (!Files.exists(source)) {
             return "No turn log exists for this session; raw copy skipped.";
         }
@@ -437,7 +439,7 @@ public final class SessionCommand implements Command {
     }
     // -- Helpers --
     /**
-     * Human-facing session id: the timestamp suffix for instance ids
+     * Human-facing session id: the timestamp/entropy suffix for instance ids
      * (the shared 40-hex hash head carries no information within one
      * workspace), the first hash characters for the legacy file.
      */
@@ -447,7 +449,7 @@ public final class SessionCommand implements Command {
         }
         return id.length() <= 8 ? id : id.substring(0, 8) + "…";
     }
-    /** A prefix matches on the display key (timestamp suffix) or the full id. */
+    /** A prefix matches on the display key (timestamp/entropy suffix) or full id. */
     private boolean matchesPrefix(String id, String prefix) {
         String key = id.startsWith(workspaceId + "-")
                 ? id.substring(workspaceId.length() + 1)

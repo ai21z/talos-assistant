@@ -4,6 +4,10 @@ import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.NoOpSessionStore;
 import dev.talos.runtime.SessionData;
+import dev.talos.runtime.SessionWriterLease;
+import dev.talos.runtime.SessionWriterUnavailableException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +33,44 @@ import static org.junit.jupiter.api.Assertions.*;
 class TalosBootstrapTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    @TempDir
+    Path isolatedUserHome;
+
+    private final List<ReplRouter> openedRouters = new ArrayList<>();
+    private String previousUserHome;
+
+    @BeforeEach
+    void isolateUserHome() {
+        previousUserHome = System.getProperty("user.home");
+        System.setProperty("user.home", isolatedUserHome.toString());
+    }
+
+    @AfterEach
+    void closeRoutersAndRestoreUserHome() {
+        try {
+            for (int index = openedRouters.size() - 1; index >= 0; index--) {
+                openedRouters.get(index).getRuntimeSession().close();
+            }
+        } finally {
+            if (previousUserHome == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previousUserHome);
+            }
+        }
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            PrintStream out,
+            Path workspace
+    ) {
+        ReplRouter router = TalosBootstrap.create(session, config, out, workspace);
+        openedRouters.add(router);
+        return router;
+    }
 
     private interface CheckedRunnable {
         void run() throws Exception;
@@ -59,11 +102,25 @@ class TalosBootstrapTest {
     private static void saveSession(Path home, Path workspace, String user, String assistant) {
         JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
-        store.save(new SessionData(sessionId, workspace.toString(), "", 1, Instant.now(),
-                List.of(
-                        new SessionData.Turn("user", user, ""),
-                        new SessionData.Turn("assistant", assistant, "ok")),
-                "ollama/qwen2.5-coder:14b"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.save(new SessionData(sessionId, workspace.toString(), "", 1, Instant.now(),
+                    List.of(
+                            new SessionData.Turn("user", user, ""),
+                            new SessionData.Turn("assistant", assistant, "ok")),
+                    "ollama/qwen2.5-coder:14b"));
+        }
+    }
+
+    private static SessionState sessionState() {
+        return new SessionState() {
+            private int k = 6;
+            private boolean debug;
+
+            @Override public int getK() { return k; }
+            @Override public void setK(int value) { k = value; }
+            @Override public boolean isDebug() { return debug; }
+            @Override public void setDebug(boolean enabled) { debug = enabled; }
+        };
     }
 
     @Test
@@ -74,7 +131,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(), System.out, WS);
+        ReplRouter router = createRouter(session, new Config(), System.out, WS);
 
         assertNotNull(router);
         assertNotNull(router.getModes());
@@ -91,7 +148,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, null, null, null);
+        ReplRouter router = createRouter(session, null, null, null);
         assertNotNull(router);
         assertFalse(router.shouldQuit());
     }
@@ -109,7 +166,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(true, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -136,7 +193,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(true, true),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -159,7 +216,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(false, true),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -167,6 +224,64 @@ class TalosBootstrapTest {
             assertFalse(router.context().conversationManager().hasHistory());
             assertInstanceOf(NoOpSessionStore.class, router.getRuntimeSession().store());
         });
+    }
+
+    @Test
+    void persistenceEnabledBindsOneLeaseAndCloseSnapshotsBeforeReleasingIt(
+            @TempDir Path home
+    ) throws Exception {
+        Path workspace = home.resolve("leased-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = createRouter(
+                    sessionState(),
+                    configWithSessionPolicy(true, false),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+            SessionWriterLease lease = assertInstanceOf(
+                    SessionWriterLease.class, router.getRuntimeSession().store());
+            String sessionId = lease.sessionId();
+            router.context().conversationManager().addTurn("leased user", "leased answer");
+
+            JsonSessionStore contender = new JsonSessionStore(
+                    home.resolve(".talos").resolve("sessions"));
+            SessionWriterUnavailableException busy = assertThrows(
+                    SessionWriterUnavailableException.class,
+                    () -> contender.acquireSessionWriter(sessionId));
+            assertEquals(SessionWriterUnavailableException.Reason.WRITER_BUSY, busy.reason());
+
+            router.getRuntimeSession().close();
+
+            assertFalse(lease.isOpen());
+            assertEquals(
+                    "leased answer",
+                    contender.load(sessionId).orElseThrow().turns().get(1).content());
+            try (SessionWriterLease reopened = contender.acquireSessionWriter(sessionId)) {
+                assertTrue(reopened.isOpen());
+            }
+        });
+    }
+
+    @Test
+    void persistenceDisabledCreatesNoSessionOwnershipArtifacts(@TempDir Path home)
+            throws Exception {
+        Path workspace = home.resolve("ephemeral-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = createRouter(
+                    sessionState(),
+                    configWithSessionPolicy(false, true),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+            assertInstanceOf(NoOpSessionStore.class, router.getRuntimeSession().store());
+            router.getRuntimeSession().close();
+        });
+
+        assertFalse(java.nio.file.Files.exists(
+                home.resolve(".talos").resolve("sessions").resolve(".ownership"),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS));
     }
 
     @Test
@@ -245,7 +360,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(), System.out, WS);
+        ReplRouter router = createRouter(session, new Config(), System.out, WS);
         // SymbolChecker is set during bootstrap
         assertNotNull(router.getModes().getSymbolChecker());
     }
@@ -258,7 +373,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(java.io.OutputStream.nullOutputStream()), WS);
 
         assertTrue(router.getRegistry().has("explain-last-turn"));
@@ -273,7 +388,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(java.io.OutputStream.nullOutputStream()), WS);
 
         // Known command should be handled
@@ -306,7 +421,7 @@ class TalosBootstrapTest {
                 public int getK() { return k; } public void setK(int v) { k = v; }
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(false, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -328,7 +443,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
         var sink = new ByteArrayOutputStream();
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(sink, true, StandardCharsets.UTF_8), WS);
 
         assertTrue(router.tryHandle("/q"));

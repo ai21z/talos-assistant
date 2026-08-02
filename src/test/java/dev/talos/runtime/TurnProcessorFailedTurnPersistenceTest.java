@@ -67,11 +67,13 @@ class TurnProcessorFailedTurnPersistenceTest {
         TurnRouter router = (raw, workspace, ctx) -> {
             throw new IllegalStateException("T1190_EXCEPTION_PROSE_MUST_NOT_PERSIST");
         };
-        TurnProcessor processor = processor(router, store, sessionId);
-
-        IllegalStateException failure = assertThrows(
-                IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect the workspace", context()));
+        IllegalStateException failure;
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            TurnProcessor processor = processor(router, writer, sessionId);
+            failure = assertThrows(
+                    IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect the workspace", context()));
+        }
 
         assertEquals("T1190_EXCEPTION_PROSE_MUST_NOT_PERSIST", failure.getMessage());
         List<TurnRecord> turns = store.loadTurns(sessionId);
@@ -111,12 +113,14 @@ class TurnProcessorFailedTurnPersistenceTest {
         String promptCanary = "T1190_RESTART_PROMPT_MUST_NOT_RENDER";
         String failureCanary = "T1190_RESTART_FAILURE_MUST_NOT_RENDER";
         JsonSessionStore writer = new JsonSessionStore(storeRoot);
-        TurnProcessor processor = processor((raw, ignoredWorkspace, ignoredContext) -> {
-            throw new IllegalStateException(failureCanary);
-        }, writer, storageSessionId);
+        try (var lease = writer.acquireSessionWriter(storageSessionId)) {
+            TurnProcessor processor = processor((raw, ignoredWorkspace, ignoredContext) -> {
+                throw new IllegalStateException(failureCanary);
+            }, lease, storageSessionId);
 
-        assertThrows(IllegalStateException.class, () ->
-                processor.process(session(workspace), promptCanary, context()));
+            assertThrows(IllegalStateException.class, () ->
+                    processor.process(session(workspace), promptCanary, context()));
+        }
 
         JsonSessionStore reader = new JsonSessionStore(storeRoot);
         TurnRecord row = reader.loadTurns(storageSessionId).getFirst();
@@ -159,18 +163,21 @@ class TurnProcessorFailedTurnPersistenceTest {
             return Optional.of(new Result.Ok("unreachable"));
         };
         AtomicInteger legacyCompletionCalls = new AtomicInteger();
-        TurnProcessor processor = processor(router, store, "provider-abort");
-        processor.addListener(new SessionListener() {
-            @Override public void onTurnComplete(TurnResult result, String userInput) {
-                legacyCompletionCalls.incrementAndGet();
-            }
-        });
+        RuntimeException failure;
+        try (var writer = store.acquireSessionWriter("provider-abort")) {
+            TurnProcessor processor = processor(router, writer, "provider-abort");
+            processor.addListener(new SessionListener() {
+                @Override public void onTurnComplete(TurnResult result, String userInput) {
+                    legacyCompletionCalls.incrementAndGet();
+                }
+            });
 
-        RuntimeException failure = assertThrows(RuntimeException.class, () ->
-                processor.process(
-                        session(dir.resolve("workspace")),
-                        "explain briefly",
-                        routeContext));
+            failure = assertThrows(RuntimeException.class, () ->
+                    processor.process(
+                            session(dir.resolve("workspace")),
+                            "explain briefly",
+                            routeContext));
+        }
 
         assertEquals("turn generation ended without a completed response", failure.getMessage());
         assertEquals(0, legacyCompletionCalls.get());
@@ -207,14 +214,16 @@ class TurnProcessorFailedTurnPersistenceTest {
                     new AssistantTurnExecutor.Options());
             return Optional.of(new Result.Ok("unreachable"));
         };
-        TurnProcessor processor = processor(router, store, "context-budget");
+        try (var writer = store.acquireSessionWriter("context-budget")) {
+            TurnProcessor processor = processor(router, writer, "context-budget");
 
-        assertSame(contextFailure, assertThrows(
-                EngineException.ContextBudgetExceeded.class,
-                () -> processor.process(
-                        session(dir.resolve("workspace")),
-                        "inspect",
-                        routeContext)));
+            assertSame(contextFailure, assertThrows(
+                    EngineException.ContextBudgetExceeded.class,
+                    () -> processor.process(
+                            session(dir.resolve("workspace")),
+                            "inspect",
+                            routeContext)));
+        }
 
         TurnRecord row = store.loadTurns("context-budget").getFirst();
         assertEquals("failed", row.status());
@@ -274,14 +283,16 @@ class TurnProcessorFailedTurnPersistenceTest {
             return Optional.of(new Result.Ok("unreachable"));
         };
         JsonSessionStore store = new JsonSessionStore(dir.resolve("store"));
-        TurnProcessor processor = processor(router, store, "post-tool-failure");
+        try (var writer = store.acquireSessionWriter("post-tool-failure")) {
+            TurnProcessor processor = processor(router, writer, "post-tool-failure");
 
-        assertSame(providerFailure, assertThrows(
-                EngineException.ConnectionFailed.class,
-                () -> processor.process(
-                        session(workspace),
-                        "Read README.md and summarize it.",
-                        routeContext)));
+            assertSame(providerFailure, assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    () -> processor.process(
+                            session(workspace),
+                            "Read README.md and summarize it.",
+                            routeContext)));
+        }
         assertEquals(1, readTool.successfulExecutions());
         assertTrue(readTool.lastSuccessfulOutput().contains("trusted workspace evidence"));
 
@@ -327,44 +338,46 @@ class TurnProcessorFailedTurnPersistenceTest {
             }
             return Optional.of(new Result.Ok("second turn"));
         };
-        TurnProcessor processor = processor(router, store, sessionId);
-        Session session = session(dir);
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            TurnProcessor processor = processor(router, writer, sessionId);
+            Session session = session(dir);
 
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session, "first", context()));
-        JsonSessionStore restarted = new JsonSessionStore(storeRoot);
-        List<TurnRecord> afterRestart = restarted.loadTurns(sessionId);
-        assertEquals(1, afterRestart.size());
-        TurnRecord failedRow = afterRestart.getFirst();
-        assertEquals("failed", failedRow.status());
-        assertEquals("0 stages, evidence=1", failedRow.retrievalTraceSummary());
-        assertTrue(failedRow.retrievalTraceSummary().length() <= 32);
-        assertFalse(failedRow.traceId().isBlank());
-        LocalTurnTrace failedTrace = restarted.loadTrace(
-                sessionId, failedRow.traceId()).orElseThrow();
-        assertEquals(failedRow.traceId(), failedTrace.traceId());
-        assertEquals("CAPTURE_OBSERVED_UNBOUND",
-                projection(failedTrace).data().get("retrieval"));
-        String persisted = persistedText(storeRoot);
-        assertFalse(persisted.contains(privatePath));
-        assertFalse(persisted.contains(privateLabel));
-        assertFalse(persisted.contains(privateNote));
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session, "first", context()));
+            JsonSessionStore restarted = new JsonSessionStore(storeRoot);
+            List<TurnRecord> afterRestart = restarted.loadTurns(sessionId);
+            assertEquals(1, afterRestart.size());
+            TurnRecord failedRow = afterRestart.getFirst();
+            assertEquals("failed", failedRow.status());
+            assertEquals("0 stages, evidence=1", failedRow.retrievalTraceSummary());
+            assertTrue(failedRow.retrievalTraceSummary().length() <= 32);
+            assertFalse(failedRow.traceId().isBlank());
+            LocalTurnTrace failedTrace = restarted.loadTrace(
+                    sessionId, failedRow.traceId()).orElseThrow();
+            assertEquals(failedRow.traceId(), failedTrace.traceId());
+            assertEquals("CAPTURE_OBSERVED_UNBOUND",
+                    projection(failedTrace).data().get("retrieval"));
+            String persisted = persistedText(storeRoot);
+            assertFalse(persisted.contains(privatePath));
+            assertFalse(persisted.contains(privateLabel));
+            assertFalse(persisted.contains(privateNote));
 
-        TurnResult second = processor.process(session, "second", context());
+            TurnResult second = processor.process(session, "second", context());
 
-        assertNotNull(second);
-        assertNull(second.trace(), "the successful turn must not consume failed-turn retrieval");
-        List<TurnRecord> turns = restarted.loadTurns(sessionId);
-        assertEquals(2, turns.size());
-        assertEquals("ok", turns.get(1).status());
-        assertEquals("", turns.get(1).retrievalTraceSummary());
-        LocalTurnTrace secondTrace = restarted.loadTrace(
-                sessionId, turns.get(1).traceId()).orElseThrow();
-        assertTrue(secondTrace.events().stream().noneMatch(event ->
-                TurnEvidenceProjectionTraceEvent.TYPE.equals(event.type())));
-        assertFalse(persistedText(storeRoot).contains(privatePath));
-        assertFalse(persistedText(storeRoot).contains(privateLabel));
-        assertFalse(persistedText(storeRoot).contains(privateNote));
+            assertNotNull(second);
+            assertNull(second.trace(), "the successful turn must not consume failed-turn retrieval");
+            List<TurnRecord> turns = restarted.loadTurns(sessionId);
+            assertEquals(2, turns.size());
+            assertEquals("ok", turns.get(1).status());
+            assertEquals("", turns.get(1).retrievalTraceSummary());
+            LocalTurnTrace secondTrace = restarted.loadTrace(
+                    sessionId, turns.get(1).traceId()).orElseThrow();
+            assertTrue(secondTrace.events().stream().noneMatch(event ->
+                    TurnEvidenceProjectionTraceEvent.TYPE.equals(event.type())));
+            assertFalse(persistedText(storeRoot).contains(privatePath));
+            assertFalse(persistedText(storeRoot).contains(privateLabel));
+            assertFalse(persistedText(storeRoot).contains(privateNote));
+        }
     }
 
     @Test
@@ -383,10 +396,12 @@ class TurnProcessorFailedTurnPersistenceTest {
             generation.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
             throw new IllegalStateException("after typed provider failure");
         };
-        TurnProcessor processor = processor(router, store, sessionId);
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            TurnProcessor processor = processor(router, writer, sessionId);
 
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "run", context()));
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "run", context()));
+        }
 
         TurnRecord turn = store.loadTurns(sessionId).getFirst();
         LocalTurnTrace trace = store.loadTrace(sessionId, turn.traceId()).orElseThrow();
@@ -465,10 +480,12 @@ class TurnProcessorFailedTurnPersistenceTest {
                 legacyCalls.incrementAndGet();
             }
         });
-        processor.addListener(new JsonTurnLogAppender(store, "no-result"));
-
-        TurnResult returned = processor.process(
-                session(dir), privateRequest, context());
+        TurnResult returned;
+        try (var writer = store.acquireSessionWriter("no-result")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "no-result"));
+            returned = processor.process(
+                    session(dir), privateRequest, context());
+        }
 
         assertNull(returned);
         assertEquals(0, legacyCalls.get());
@@ -514,9 +531,11 @@ class TurnProcessorFailedTurnPersistenceTest {
         Files.writeString(storeRoot.resolve("traces").resolve(sessionId), "blocked");
         TurnProcessor processor = new TurnProcessor(
                 (raw, workspace, ctx) -> Optional.empty());
-        processor.addListener(new JsonTurnLogAppender(store, sessionId));
-
-        assertNull(processor.process(session(dir.resolve("workspace")), "unhandled", context()));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
+            assertNull(processor.process(
+                    session(dir.resolve("workspace")), "unhandled", context()));
+        }
 
         TurnRecord row = store.loadTurns(sessionId).getFirst();
         assertEquals("no_result", row.status());
@@ -545,10 +564,12 @@ class TurnProcessorFailedTurnPersistenceTest {
                 throw new AssertionError("listener failure");
             }
         });
-        processor.addListener(new JsonTurnLogAppender(store, "listener-failure"));
-
-        IllegalStateException observed = assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        IllegalStateException observed;
+        try (var writer = store.acquireSessionWriter("listener-failure")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "listener-failure"));
+            observed = assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         assertSame(primary, observed);
         assertEquals(1, store.loadTurns("listener-failure").size());
@@ -568,7 +589,7 @@ class TurnProcessorFailedTurnPersistenceTest {
         String privateRequest =
                 "Edit index.html so it works, and " + privateClause;
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             var resolution = TaskContractResolver.resolveFromUserRequest(raw);
             var exactTarget = resolution.intent().targets()
                     .find(privatePath)
@@ -599,10 +620,13 @@ class TurnProcessorFailedTurnPersistenceTest {
             LocalTurnTraceCapture.warning(
                     "T1196_CANCEL_PRIVATE_WARNING", privateClause);
             throw new CancellationException("operator cancelled");
-        }, store, "cancelled");
+        };
 
-        assertThrows(CancellationException.class,
-                () -> processor.process(session(dir), privateRequest, context()));
+        try (var writer = store.acquireSessionWriter("cancelled")) {
+            TurnProcessor processor = processor(router, writer, "cancelled");
+            assertThrows(CancellationException.class,
+                    () -> processor.process(session(dir), privateRequest, context()));
+        }
 
         List<TurnRecord> rows = store.loadTurns("cancelled");
         assertEquals(1, rows.size());
@@ -631,7 +655,7 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void handoffAdmissionSurvivesWithoutBecomingPhysicalSendProof(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             ProviderResponseCapture.Generation generation =
                     ProviderResponseCapture.openGeneration(
                             ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
@@ -641,10 +665,13 @@ class TurnProcessorFailedTurnPersistenceTest {
                     ProviderResponseCapture.RetryReason.NONE);
             attempt.requestDispatched();
             throw new IllegalStateException("after handoff admission");
-        }, store, "handoff");
+        };
 
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("handoff")) {
+            TurnProcessor processor = processor(router, writer, "handoff");
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         TurnRecord row = store.loadTurns("handoff").getFirst();
         LocalTurnTrace trace = store.loadTrace("handoff", row.traceId()).orElseThrow();
@@ -660,14 +687,17 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void priorTaskOutcomeCannotHideLaterFailedSettlement(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             LocalTurnTraceCapture.recordOutcome(
                     "OK", "PASSED", "NOT_REQUIRED", "NONE", "EARLIER_TASK_OUTCOME");
             throw new IllegalStateException("late runtime failure");
-        }, store, "late-failure");
+        };
 
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("late-failure")) {
+            TurnProcessor processor = processor(router, writer, "late-failure");
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         TurnRecord row = store.loadTurns("late-failure").getFirst();
         assertEquals("failed", row.status());
@@ -732,10 +762,11 @@ class TurnProcessorFailedTurnPersistenceTest {
                 return TurnPublicationReceipt.complete();
             }
         });
-        processor.addListener(new JsonTurnLogAppender(store, "safe-abnormal"));
-
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), privateRequest, context()));
+        try (var writer = store.acquireSessionWriter("safe-abnormal")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "safe-abnormal"));
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), privateRequest, context()));
+        }
 
         TurnRecord row = store.loadTurns("safe-abnormal").getFirst();
         assertEquals("", listenerInput.get());
@@ -777,9 +808,10 @@ class TurnProcessorFailedTurnPersistenceTest {
                 return TurnPublicationReceipt.complete();
             }
         });
-        processor.addListener(new JsonTurnLogAppender(store, "immutable-retrieval"));
-
-        processor.process(session(dir), "inspect", context());
+        try (var writer = store.acquireSessionWriter("immutable-retrieval")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "immutable-retrieval"));
+            processor.process(session(dir), "inspect", context());
+        }
 
         TurnRecord row = store.loadTurns("immutable-retrieval").getFirst();
         assertTrue(row.retrievalTraceSummary().startsWith("1 stages,"));
@@ -802,22 +834,24 @@ class TurnProcessorFailedTurnPersistenceTest {
                     if (factoryCalls.getAndIncrement() == 0) throw factoryFailure;
                     return new TurnTerminalizer(turn, startNanos);
                 });
-        processor.addListener(new JsonTurnLogAppender(store, sessionId));
-        Session session = session(dir.resolve("workspace"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
+            Session session = session(dir.resolve("workspace"));
 
-        IllegalStateException observed = assertThrows(
-                IllegalStateException.class,
-                () -> processor.process(session, "first", context()));
+            IllegalStateException observed = assertThrows(
+                    IllegalStateException.class,
+                    () -> processor.process(session, "first", context()));
 
-        assertSame(factoryFailure, observed);
-        assertOneInitializationFailure(store, sessionId, IllegalStateException.class);
-        assertFalse(persistedText(storeRoot).contains(failureCanary));
+            assertSame(factoryFailure, observed);
+            assertOneInitializationFailure(store, sessionId, IllegalStateException.class);
+            assertFalse(persistedText(storeRoot).contains(failureCanary));
 
-        TurnResult clean = processor.process(session, "second", context());
+            TurnResult clean = processor.process(session, "second", context());
 
-        assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
-        assertCleanSecondTurn(store, sessionId);
-        assertFalse(persistedText(storeRoot).contains(failureCanary));
+            assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
+            assertCleanSecondTurn(store, sessionId);
+            assertFalse(persistedText(storeRoot).contains(failureCanary));
+        }
     }
 
     @Test
@@ -834,22 +868,24 @@ class TurnProcessorFailedTurnPersistenceTest {
                 (turn, startNanos) -> factoryCalls.getAndIncrement() == 0
                         ? null
                         : new TurnTerminalizer(turn, startNanos));
-        processor.addListener(new JsonTurnLogAppender(store, sessionId));
-        Session session = session(dir.resolve("workspace"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
+            Session session = session(dir.resolve("workspace"));
 
-        NullPointerException observed = assertThrows(
-                NullPointerException.class,
-                () -> processor.process(session, "first", context()));
+            NullPointerException observed = assertThrows(
+                    NullPointerException.class,
+                    () -> processor.process(session, "first", context()));
 
-        assertEquals(nullFailureMessage, observed.getMessage());
-        assertOneInitializationFailure(store, sessionId, NullPointerException.class);
-        assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
+            assertEquals(nullFailureMessage, observed.getMessage());
+            assertOneInitializationFailure(store, sessionId, NullPointerException.class);
+            assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
 
-        TurnResult clean = processor.process(session, "second", context());
+            TurnResult clean = processor.process(session, "second", context());
 
-        assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
-        assertCleanSecondTurn(store, sessionId);
-        assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
+            assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
+            assertCleanSecondTurn(store, sessionId);
+            assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
+        }
     }
 
     @Test
@@ -860,11 +896,13 @@ class TurnProcessorFailedTurnPersistenceTest {
         TurnProcessor processor = processorWithTerminalFreezeFailure(
                 (raw, workspace, ctx) -> Optional.of(new Result.Ok("must not be committed")),
                 terminalFailure);
-        processor.addListener(new JsonTurnLogAppender(store, "terminal-recovery"));
-
-        IllegalStateException observed = assertThrows(
-                IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        IllegalStateException observed;
+        try (var writer = store.acquireSessionWriter("terminal-recovery")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "terminal-recovery"));
+            observed = assertThrows(
+                    IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         assertSame(terminalFailure, observed);
         List<TurnRecord> rows = store.loadTurns("terminal-recovery");
@@ -901,11 +939,13 @@ class TurnProcessorFailedTurnPersistenceTest {
                     throw primary;
                 },
                 new IllegalStateException("secondary terminalization failure"));
-        processor.addListener(new JsonTurnLogAppender(store, "terminal-primary"));
-
-        IllegalArgumentException observed = assertThrows(
-                IllegalArgumentException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        IllegalArgumentException observed;
+        try (var writer = store.acquireSessionWriter("terminal-primary")) {
+            processor.addListener(new JsonTurnLogAppender(writer, "terminal-primary"));
+            observed = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         assertSame(primary, observed);
         TurnRecord row = store.loadTurns("terminal-primary").getFirst();
@@ -921,20 +961,24 @@ class TurnProcessorFailedTurnPersistenceTest {
             throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
         AtomicInteger calls = new AtomicInteger();
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             if (calls.getAndIncrement() == 0) {
                 RetrievalTrace retrieval = new RetrievalTrace();
                 retrieval.record("owned-before-finalization", 1_000, 2, 1);
                 TurnTraceCapture.capture(retrieval);
             }
             return Optional.of(new Result.Ok("answer"));
-        }, store, "post-consume");
+        };
         IllegalStateException phaseFailure =
                 new IllegalStateException("final phase unavailable");
+        TurnResult second;
+        try (var writer = store.acquireSessionWriter("post-consume")) {
+            TurnProcessor processor = processor(router, writer, "post-consume");
 
-        assertThrows(IllegalStateException.class, () -> processor.process(
-                session(dir), "first", finalPhaseFailureContext(phaseFailure)));
-        TurnResult second = processor.process(session(dir), "second", context());
+            assertThrows(IllegalStateException.class, () -> processor.process(
+                    session(dir), "first", finalPhaseFailureContext(phaseFailure)));
+            second = processor.process(session(dir), "second", context());
+        }
 
         List<TurnRecord> rows = store.loadTurns("post-consume");
         assertEquals(2, rows.size());
@@ -953,12 +997,15 @@ class TurnProcessorFailedTurnPersistenceTest {
     void failedPersistenceDoesNotStoreRawRequestOrExceptionProse(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String secret = "api_key=T1190_SUPER_SECRET";
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             throw new IllegalStateException("T1190_PRIVATE_EXCEPTION");
-        }, store, "redacted-failure");
+        };
 
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), secret, context()));
+        try (var writer = store.acquireSessionWriter("redacted-failure")) {
+            TurnProcessor processor = processor(router, writer, "redacted-failure");
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), secret, context()));
+        }
 
         TurnRecord row = store.loadTurns("redacted-failure").getFirst();
         assertEquals("", row.userInput());
@@ -974,10 +1021,12 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void nullRouterResultIsAFailedTurnRatherThanNoResult(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> null, store, "null-route");
-
-        assertThrows(NullPointerException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("null-route")) {
+            TurnProcessor processor = processor(
+                    (raw, workspace, ctx) -> null, writer, "null-route");
+            assertThrows(NullPointerException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         TurnRecord row = store.loadTurns("null-route").getFirst();
         assertEquals("failed", row.status());
@@ -1000,10 +1049,11 @@ class TurnProcessorFailedTurnPersistenceTest {
                 throw new IllegalStateException("trace mode unavailable");
             }
         };
-        TurnProcessor processor = processor(router, store, "initialization");
-
-        assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("initialization")) {
+            TurnProcessor processor = processor(router, writer, "initialization");
+            assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         TurnRecord row = store.loadTurns("initialization").getFirst();
         LocalTurnTrace trace = store.loadTrace("initialization", row.traceId()).orElseThrow();
@@ -1013,12 +1063,15 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void interruptionRemainsFailedAndCausalOwnerUnknown(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             throw new InterruptedException("cause unproven");
-        }, store, "interrupted");
+        };
 
-        assertThrows(InterruptedException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("interrupted")) {
+            TurnProcessor processor = processor(router, writer, "interrupted");
+            assertThrows(InterruptedException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+        }
 
         TurnRecord row = store.loadTurns("interrupted").getFirst();
         LocalTurnTrace trace = store.loadTrace("interrupted", row.traceId()).orElseThrow();
@@ -1030,27 +1083,30 @@ class TurnProcessorFailedTurnPersistenceTest {
     @Test
     void ownedInterruptedFlagSurvivesTerminalPublicationAndPersistence(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             Thread.currentThread().interrupt();
             throw new InterruptedException("owned interrupt");
-        }, store, "owned-interrupt");
+        };
 
-        try {
-            assertThrows(InterruptedException.class,
-                    () -> processor.process(session(dir), "inspect", context()));
+        try (var writer = store.acquireSessionWriter("owned-interrupt")) {
+            TurnProcessor processor = processor(router, writer, "owned-interrupt");
+            try {
+                assertThrows(InterruptedException.class,
+                        () -> processor.process(session(dir), "inspect", context()));
 
-            assertTrue(Thread.currentThread().isInterrupted());
-            TurnRecord row = store.loadTurns("owned-interrupt").getFirst();
-            LocalTurnTrace trace = store.loadTrace(
-                    "owned-interrupt", row.traceId()).orElseThrow();
-            assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
-            assertEquals("INTERRUPTION", terminal(trace).data().get("errorKind"));
-            assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
-            assertEquals(1, trace.events().stream()
-                    .filter(event -> "TURN_SETTLED".equals(event.type()))
-                    .count());
-        } finally {
-            Thread.interrupted();
+                assertTrue(Thread.currentThread().isInterrupted());
+                TurnRecord row = store.loadTurns("owned-interrupt").getFirst();
+                LocalTurnTrace trace = store.loadTrace(
+                        "owned-interrupt", row.traceId()).orElseThrow();
+                assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+                assertEquals("INTERRUPTION", terminal(trace).data().get("errorKind"));
+                assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+                assertEquals(1, trace.events().stream()
+                        .filter(event -> "TURN_SETTLED".equals(event.type()))
+                        .count());
+            } finally {
+                Thread.interrupted();
+            }
         }
     }
 
@@ -1062,15 +1118,20 @@ class TurnProcessorFailedTurnPersistenceTest {
         Files.createDirectory(dir.resolve("blocked.turns.jsonl"));
         JsonSessionStore store = new JsonSessionStore(dir);
         IllegalStateException primary = new IllegalStateException("primary");
-        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+        TurnRouter router = (raw, workspace, ctx) -> {
             throw primary;
-        }, store, "blocked");
+        };
 
-        IllegalStateException observed = assertThrows(IllegalStateException.class,
-                () -> processor.process(session(dir), "inspect", context()));
+        IllegalStateException observed;
+        TurnPublicationHealth health;
+        try (var writer = store.acquireSessionWriter("blocked")) {
+            TurnProcessor processor = processor(router, writer, "blocked");
+            observed = assertThrows(IllegalStateException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+            health = processor.consumePublicationHealth();
+        }
 
         assertSame(primary, observed);
-        TurnPublicationHealth health = processor.consumePublicationHealth();
         assertNotNull(health);
         assertFalse(health.healthy());
         assertTrue(health.reasons().contains(
@@ -1092,7 +1153,7 @@ class TurnProcessorFailedTurnPersistenceTest {
 
     private static TurnProcessor processor(
             TurnRouter router,
-            SessionStore store,
+            SessionWriterLease store,
             String sessionId) {
         TurnProcessor processor = new TurnProcessor(router);
         processor.addListener(new JsonTurnLogAppender(store, sessionId));
@@ -1191,8 +1252,13 @@ class TurnProcessorFailedTurnPersistenceTest {
 
     private static String persistedText(Path dir) throws IOException {
         StringBuilder out = new StringBuilder();
+        Path ownership = dir.resolve(".ownership");
         try (var paths = Files.walk(dir)) {
-            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+            for (Path path : paths
+                    .filter(path -> !path.startsWith(ownership))
+                    .filter(Files::isRegularFile)
+                    .sorted()
+                    .toList()) {
                 out.append(Files.readString(path));
             }
         }

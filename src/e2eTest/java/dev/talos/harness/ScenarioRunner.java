@@ -287,7 +287,6 @@ public final class ScenarioRunner {
             // introduce network-dependent nondeterminism into snapshots.
             llm = LlmClient.scripted(java.util.List.of(""));
             MemoryUpdateListener memoryListener = new MemoryUpdateListener(cm, llm);
-            JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sessionId);
 
             TurnResult turnResult = new TurnResult(
                     assistantResult,
@@ -301,21 +300,25 @@ public final class ScenarioRunner {
                     ? "scenario: " + scenario.name()
                     : scenario.userPrompt();
             memoryListener.onTurnComplete(turnResult, userPrompt);
-            appender.onTurnComplete(turnResult, userPrompt);
+            SessionData snapshot;
+            try (var writer = store.acquireSessionWriter(sessionId)) {
+                JsonTurnLogAppender appender = new JsonTurnLogAppender(writer, sessionId);
+                appender.onTurnComplete(turnResult, userPrompt);
 
-            SessionData snapshot = new SessionData(
-                    sessionId,
-                    base.workspace().path().toString(),
-                    cm.sketch() == null ? "" : cm.sketch(),
-                    cm.turnCount(),
-                    Instant.now(),
-                    memory.getTurns().stream()
-                            .map(m -> new SessionData.Turn(m.role(), m.content(),
-                                    "assistant".equals(m.role()) ? "ok" : ""))
-                            .toList(),
-                    llm.getModel()
-            );
-            store.save(snapshot);
+                snapshot = new SessionData(
+                        sessionId,
+                        base.workspace().path().toString(),
+                        cm.sketch() == null ? "" : cm.sketch(),
+                        cm.turnCount(),
+                        Instant.now(),
+                        memory.getTurns().stream()
+                                .map(m -> new SessionData.Turn(m.role(), m.content(),
+                                        "assistant".equals(m.role()) ? "ok" : ""))
+                                .toList(),
+                        llm.getModel()
+                );
+                writer.save(snapshot);
+            }
 
             List<TurnRecord> turnLog = store.loadTurns(sessionId);
             List<AutoCloseable> resourcesToClose = new ArrayList<>(base.resourcesToClose());
@@ -358,8 +361,10 @@ public final class ScenarioRunner {
             Path sessionsDir = java.nio.file.Files.createTempDirectory("talos-e2e-replay-");
             JsonSessionStore store = new JsonSessionStore(sessionsDir);
             String sessionId = JsonSessionStore.sessionIdFor(workspace.path());
-            for (TurnRecord record : records) {
-                store.appendTurn(sessionId, record);
+            try (var writer = store.acquireSessionWriter(sessionId)) {
+                for (TurnRecord record : records) {
+                    writer.appendTurn(sessionId, record);
+                }
             }
 
             SessionMemory memory = new SessionMemory();

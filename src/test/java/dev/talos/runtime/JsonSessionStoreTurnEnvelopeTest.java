@@ -17,14 +17,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JsonSessionStoreTurnEnvelopeTest {
 
+    private static TurnEnvelopePersistenceReceipt persist(
+            JsonSessionStore store,
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            return writer.persistTurnEnvelope(sessionId, record, trace);
+        }
+    }
+
+    private static void saveTrace(
+            JsonSessionStore store,
+            String sessionId,
+            LocalTurnTrace trace
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            writer.saveTrace(sessionId, trace);
+        }
+    }
+
     @Test
     void observedPairPersistsResolvableMatchingRowAndTrace(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         LocalTurnTrace trace = trace("trace-pair");
         TurnRecord record = record(trace.traceId());
 
-        TurnEnvelopePersistenceReceipt receipt =
-                store.persistTurnEnvelope("pair", record, trace);
+        TurnEnvelopePersistenceReceipt receipt = persist(store, "pair", record, trace);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
                 receipt.state());
@@ -40,7 +60,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         Files.writeString(dir.resolve("traces").resolve("trace-blocked"), "not a directory");
         LocalTurnTrace trace = trace("trace-write-fails");
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "trace-blocked", record(trace.traceId()), trace);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY, receipt.state());
@@ -55,7 +75,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         Files.createDirectory(dir.resolve("row-blocked.turns.jsonl"));
         LocalTurnTrace trace = trace("row-write-fails");
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "row-blocked", record(trace.traceId()), trace);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.TRACE_WRITE_ONLY, receipt.state());
@@ -71,7 +91,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         Files.createDirectory(dir.resolve("both-blocked.turns.jsonl"));
         LocalTurnTrace trace = trace("both-write-fails");
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "both-blocked", record(trace.traceId()), trace);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
@@ -83,7 +103,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     void mismatchedTraceIdentityRejectsWholeEnvelope(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "mismatch", record("different-trace"), trace("actual-trace"));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
@@ -95,7 +115,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     void mismatchedTurnNumberRejectsWholeEnvelope(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "turn-mismatch", record("shared-trace"), trace("shared-trace", 2));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
@@ -107,7 +127,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     void collisionProneTraceIdentityRejectsWholeEnvelope(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
 
-        TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+        TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "unsafe-trace", record("a/b"), trace("a/b"));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
@@ -120,10 +140,10 @@ class JsonSessionStoreTurnEnvelopeTest {
         JsonSessionStore store = new JsonSessionStore(dir);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
+                persist(store,
                         "bad-row", record("trace", 0), trace("trace", 1)).state());
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
+                persist(store,
                         "bad-trace", record("trace", 1), trace("trace", 0)).state());
         assertTrue(store.loadTurns("bad-row").isEmpty());
         assertTrue(store.loadTurns("bad-trace").isEmpty());
@@ -137,10 +157,10 @@ class JsonSessionStoreTurnEnvelopeTest {
         String overlong = "t".repeat(129);
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
+                persist(store,
                         "overlong", record(overlong), trace(overlong)).state());
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
+                persist(store,
                         "unsafe-row", record("a?b"), null).state());
         assertTrue(store.loadTurns("overlong").isEmpty());
         assertTrue(store.loadTurns("unsafe-row").isEmpty());
@@ -151,7 +171,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     @Test
     void loadTraceRejectsFilenameContentIdentityMismatch(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
-        store.saveTrace("corrupt", trace("actual-trace"));
+        saveTrace(store, "corrupt", trace("actual-trace"));
         Path traceDir = dir.resolve("traces/corrupt");
         Files.move(
                 traceDir.resolve("000001-actual-trace.json"),
@@ -164,7 +184,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     @Test
     void loadTraceRejectsFilenameTurnMismatch(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
-        store.saveTrace("corrupt-turn", trace("same-trace", 2));
+        saveTrace(store, "corrupt-turn", trace("same-trace", 2));
         Path traceDir = dir.resolve("traces/corrupt-turn");
         Files.move(
                 traceDir.resolve("000002-same-trace.json"),
@@ -183,10 +203,12 @@ class JsonSessionStoreTurnEnvelopeTest {
         LocalTurnTrace trace = trace("trace-identical");
         TurnRecord record = record(trace.traceId());
 
-        legacy.saveTrace("sid", trace);
-        legacy.appendTurn("sid", record);
+        try (SessionWriterLease writer = legacy.acquireSessionWriter("sid")) {
+            writer.saveTrace("sid", trace);
+            writer.appendTurn("sid", record);
+        }
         assertEquals(TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
-                envelope.persistTurnEnvelope("sid", record, trace).state());
+                persist(envelope, "sid", record, trace).state());
 
         assertArrayEquals(
                 Files.readAllBytes(legacyDir.resolve("sid.turns.jsonl")),

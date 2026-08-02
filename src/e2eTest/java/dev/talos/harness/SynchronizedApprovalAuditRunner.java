@@ -409,16 +409,6 @@ public final class SynchronizedApprovalAuditRunner {
         String model = result.trace() == null ? "" : result.trace().model().model();
         String assistantText = finalAnswerForArtifacts == null ? "" : finalAnswerForArtifacts;
         int turnNumber = result.trace() == null ? 1 : result.trace().turnNumber();
-        store.save(new SessionData(
-                sessionId,
-                request.workspace().toAbsolutePath().normalize().toString(),
-                "",
-                1,
-                now,
-                List.of(
-                        new SessionData.Turn("user", request.userPrompt(), "ok"),
-                        new SessionData.Turn("assistant", assistantText, "ok")),
-                model));
         TurnRecord turnRecord = new TurnRecord(
                 turnNumber,
                 now,
@@ -435,9 +425,21 @@ public final class SynchronizedApprovalAuditRunner {
                 result.trace() == null ? "" : result.trace().traceId());
         // This observes the bounded in-process row/trace envelope only.
         // Cross-process transactional publication remains owned by T1192.
-        TurnEnvelopePersistenceReceipt receipt =
-                store.persistTurnEnvelope(sessionId, turnRecord, result.trace());
-        requireCompleteAuditEnvelope(receipt, result.trace() != null);
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.save(new SessionData(
+                    sessionId,
+                    request.workspace().toAbsolutePath().normalize().toString(),
+                    "",
+                    1,
+                    now,
+                    List.of(
+                            new SessionData.Turn("user", request.userPrompt(), "ok"),
+                            new SessionData.Turn("assistant", assistantText, "ok")),
+                    model));
+            TurnEnvelopePersistenceReceipt receipt =
+                    writer.persistTurnEnvelope(sessionId, turnRecord, result.trace());
+            requireCompleteAuditEnvelope(receipt, result.trace() != null);
+        }
         if (result.trace() == null) return null;
         Path persistedTrace = persistedTracePath(
                 sessionDir,

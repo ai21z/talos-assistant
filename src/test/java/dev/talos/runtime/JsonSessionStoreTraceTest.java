@@ -9,10 +9,21 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class JsonSessionStoreTraceTest {
+
+    private static void withWriter(
+            JsonSessionStore store,
+            String sessionId,
+            Consumer<SessionWriterLease> action
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            action.accept(writer);
+        }
+    }
 
     @Test
     void savesLoadsAndDeletesPerTurnLocalTraces(@TempDir Path dir) throws Exception {
@@ -20,24 +31,26 @@ class JsonSessionStoreTraceTest {
         String sid = "session-trace";
         LocalTurnTrace trace = trace("trc-fixed", sid, 3);
 
-        store.saveTrace(sid, trace);
-
-        Optional<LocalTurnTrace> loaded = store.loadTrace(sid, "trc-fixed");
-        assertTrue(loaded.isPresent());
-        assertEquals("trc-fixed", loaded.get().traceId());
-        assertEquals(3, loaded.get().turnNumber());
-
-        Optional<LocalTurnTrace> latest = store.loadLatestTrace(sid);
-        assertTrue(latest.isPresent());
-        assertEquals("trc-fixed", latest.get().traceId());
-
         Path traceDir = dir.resolve("traces").resolve(sid);
-        assertTrue(Files.isDirectory(traceDir));
-        try (var files = Files.list(traceDir)) {
-            assertEquals(1, files.count());
-        }
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            writer.saveTrace(sid, trace);
 
-        assertTrue(store.delete(sid));
+            Optional<LocalTurnTrace> loaded = store.loadTrace(sid, "trc-fixed");
+            assertTrue(loaded.isPresent());
+            assertEquals("trc-fixed", loaded.get().traceId());
+            assertEquals(3, loaded.get().turnNumber());
+
+            Optional<LocalTurnTrace> latest = store.loadLatestTrace(sid);
+            assertTrue(latest.isPresent());
+            assertEquals("trc-fixed", latest.get().traceId());
+
+            assertTrue(Files.isDirectory(traceDir));
+            try (var files = Files.list(traceDir)) {
+                assertEquals(1, files.count());
+            }
+
+            assertTrue(writer.delete(sid));
+        }
         assertFalse(Files.exists(traceDir), "session clear/delete should remove local trace artifacts too");
     }
 
@@ -45,8 +58,10 @@ class JsonSessionStoreTraceTest {
     void latestTraceChoosesNewestTurnThenNewestFile(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-trace-latest";
-        store.saveTrace(sid, trace("trc-older", sid, 1));
-        store.saveTrace(sid, trace("trc-newer", sid, 2));
+        withWriter(store, sid, writer -> {
+            writer.saveTrace(sid, trace("trc-older", sid, 1));
+            writer.saveTrace(sid, trace("trc-newer", sid, 2));
+        });
 
         Optional<LocalTurnTrace> latest = store.loadLatestTrace(sid);
 
@@ -107,9 +122,11 @@ class JsonSessionStoreTraceTest {
                 "ok",
                 TurnPolicyTrace.empty(),
                 trace.traceId());
-        assertEquals(
-                TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
-                store.persistTurnEnvelope(sid, record, trace).state());
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
+                    writer.persistTurnEnvelope(sid, record, trace).state());
+        }
 
         LocalTurnTrace loaded = store.loadTrace(sid, trace.traceId()).orElseThrow();
         assertEquals(trace, loaded);
@@ -184,10 +201,6 @@ class JsonSessionStoreTraceTest {
                         List.of(target)))
                 .build();
 
-        store.saveTrace("session-unbound-roleful", trace);
-        assertFalse(Files.exists(
-                dir.resolve("traces").resolve("session-unbound-roleful")));
-
         TurnRecord mismatched = new TurnRecord(
                 1,
                 Instant.parse("2026-07-30T00:00:00Z"),
@@ -202,12 +215,18 @@ class JsonSessionStoreTraceTest {
                 "failed",
                 TurnPolicyTrace.empty(),
                 trace.traceId());
-        assertEquals(
-                TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                store.persistTurnEnvelope(
-                        "session-unbound-roleful",
-                        mismatched,
-                        trace).state());
+        withWriter(store, "session-unbound-roleful", writer -> {
+            writer.saveTrace("session-unbound-roleful", trace);
+            assertFalse(Files.exists(
+                    dir.resolve("traces").resolve("session-unbound-roleful")));
+
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
+                    writer.persistTurnEnvelope(
+                            "session-unbound-roleful",
+                            mismatched,
+                            trace).state());
+        });
         assertFalse(Files.exists(
                 dir.resolve("session-unbound-roleful.turns.jsonl")));
         assertFalse(Files.exists(
@@ -263,9 +282,11 @@ class JsonSessionStoreTraceTest {
                 TurnPolicyTrace.empty(),
                 trace.traceId());
 
-        assertEquals(
-                TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
-                store.persistTurnEnvelope(sid, record, trace).state());
+        try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
+                    writer.persistTurnEnvelope(sid, record, trace).state());
+        }
         assertFalse(store.loadTurns(sid).getFirst().userInput()
                 .contains("DO_NOT_LEAK_T1196_TRACE"));
         LocalTurnTrace.RolefulTargetSummary loaded = store
@@ -311,12 +332,13 @@ class JsonSessionStoreTraceTest {
                     TurnPolicyTrace.empty(),
                     traceId);
 
-            assertEquals(
-                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
-                    new JsonSessionStore(dir)
-                            .persistTurnEnvelope(sid, record, trace)
-                            .state(),
-                    label);
+            JsonSessionStore store = new JsonSessionStore(dir);
+            try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+                assertEquals(
+                        TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
+                        writer.persistTurnEnvelope(sid, record, trace).state(),
+                        label);
+            }
             assertFalse(Files.exists(dir.resolve(sid + ".turns.jsonl")), label);
             assertFalse(Files.exists(dir.resolve("traces").resolve(sid)), label);
         }
@@ -359,10 +381,12 @@ class JsonSessionStoreTraceTest {
                     traceId);
             JsonSessionStore store = new JsonSessionStore(dir);
 
-            assertEquals(
-                    TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
-                    store.persistTurnEnvelope(sid, record, trace).state(),
-                    label);
+            try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
+                assertEquals(
+                        TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
+                        writer.persistTurnEnvelope(sid, record, trace).state(),
+                        label);
+            }
             LocalTurnTrace.RolefulTargetSummary loaded = store
                     .loadTrace(sid, traceId)
                     .orElseThrow()
@@ -464,7 +488,7 @@ class JsonSessionStoreTraceTest {
                         List.of(target)))
                 .build();
 
-        store.saveTrace(sid, trace);
+        withWriter(store, sid, writer -> writer.saveTrace(sid, trace));
 
         Path traceDir = dir.resolve("traces").resolve(sid);
         assertFalse(

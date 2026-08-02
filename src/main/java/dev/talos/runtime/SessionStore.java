@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.trace.LocalTurnTrace;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -101,11 +102,17 @@ public interface SessionStore {
     /**
      * List stored sessions for a workspace, newest first. Covers the
      * legacy bare-hash file, instance files
-     * ({@code <ws-hash>-<UTC timestamp>}), and orphan per-turn crash
+     * ({@code <ws-hash>-<UTC timestamp>-<32-hex entropy>}, plus legacy
+     * timestamp-only forms), and orphan per-turn crash
      * logs that never got a snapshot. Default implementation returns
      * empty.
      */
     default List<SessionSummary> listSessions(String workspaceId) {
         return List.of();
+    }
+
+    /** Read-only location of a raw turn log when the store is file-backed. */
+    default Optional<Path> rawTurnLogPath(String sessionId) {
+        return Optional.empty();
     }
 }

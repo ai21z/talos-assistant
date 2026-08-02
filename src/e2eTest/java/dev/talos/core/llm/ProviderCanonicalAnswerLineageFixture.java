@@ -38,10 +38,11 @@ public final class ProviderCanonicalAnswerLineageFixture {
             throw new IllegalStateException("ask mode was not selectable");
         }
 
-        try (LlmClient llm = new LlmClient(config, new FixedProviderResolver())) {
+        try (var writer = store.acquireSessionWriter(durableSessionId);
+             LlmClient llm = new LlmClient(config, new FixedProviderResolver())) {
             Context context = Context.builder(config).llm(llm).build();
             TurnProcessor processor = new TurnProcessor(modes);
-            processor.addListener(new JsonTurnLogAppender(store, durableSessionId));
+            processor.addListener(new JsonTurnLogAppender(writer, durableSessionId));
 
             TurnResult result = processor.process(
                     new Session(workspace, config),

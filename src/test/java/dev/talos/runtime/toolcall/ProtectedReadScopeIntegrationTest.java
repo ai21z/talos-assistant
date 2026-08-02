@@ -748,21 +748,23 @@ class ProtectedReadScopeIntegrationTest {
         assertTrue(messages.toString().contains("FILE_DISCOVERED_CANARY_SCOPE_ENV"), messages.toString());
 
         JsonSessionStore store = new JsonSessionStore(workspace.resolve("sessions"));
-        store.appendTurn("sid-scope", new TurnRecord(
-                1,
-                Instant.parse("2026-05-15T00:00:00Z"),
-                100,
-                "Read .env",
-                "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV",
-                List.of(new TurnRecord.ToolCallSummary(
-                        "talos.read_file",
-                        ".env",
-                        true,
-                        "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV")),
-                1,
-                1,
-                0,
-                "trace FILE_DISCOVERED_CANARY_SCOPE_ENV"));
+        try (var writer = store.acquireSessionWriter("sid-scope")) {
+            writer.appendTurn("sid-scope", new TurnRecord(
+                    1,
+                    Instant.parse("2026-05-15T00:00:00Z"),
+                    100,
+                    "Read .env",
+                    "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV",
+                    List.of(new TurnRecord.ToolCallSummary(
+                            "talos.read_file",
+                            ".env",
+                            true,
+                            "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV")),
+                    1,
+                    1,
+                    0,
+                    "trace FILE_DISCOVERED_CANARY_SCOPE_ENV"));
+        }
 
         String jsonl = Files.readString(workspace.resolve("sessions").resolve("sid-scope.turns.jsonl"));
         assertFalse(jsonl.contains("FILE_DISCOVERED_CANARY_SCOPE_ENV"), jsonl);

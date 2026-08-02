@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -24,6 +25,16 @@ class JsonSessionStoreListTest {
         return new JsonSessionStore(dir.resolve("sessions"));
     }
 
+    private static void withWriter(
+            JsonSessionStore store,
+            String sessionId,
+            Consumer<SessionWriterLease> action
+    ) {
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            action.accept(writer);
+        }
+    }
+
     private static SessionData snapshot(String id, Instant createdAt, int turnCount, String model) {
         return new SessionData(id, "/ws", "", turnCount, createdAt,
                 List.of(new SessionData.Turn("user", "u", ""),
@@ -32,14 +43,17 @@ class JsonSessionStoreListTest {
     }
 
     @Test
-    void instanceIdIsWorkspaceHashPlusUtcTimestamp() {
+    void instanceIdIsWorkspaceHashPlusUtcTimestampAndEntropy() {
         Path ws = Path.of("/project/demo");
         Instant clock = Instant.parse("2026-06-12T08:30:05Z");
 
         String id = JsonSessionStore.newSessionInstanceId(ws, clock);
 
-        assertEquals(JsonSessionStore.sessionIdFor(ws) + "-20260612083005", id);
-        assertEquals(40 + 1 + 14, id.length(), "40-hex hash, dash, 14-digit UTC stamp");
+        String prefix = JsonSessionStore.sessionIdFor(ws) + "-20260612083005-";
+        assertTrue(id.startsWith(prefix), id);
+        assertTrue(id.substring(prefix.length()).matches("[0-9a-f]{32}"), id);
+        assertEquals(40 + 1 + 14 + 1 + 32, id.length(),
+                "40-hex hash, UTC stamp, and 128-bit entropy");
     }
 
     @Test
@@ -50,9 +64,12 @@ class JsonSessionStoreListTest {
         String older = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-10T10:00:00Z"));
         String newer = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-11T10:00:00Z"));
 
-        store.save(snapshot(workspaceId, Instant.parse("2026-06-09T10:00:00Z"), 1, "legacy-model"));
-        store.save(snapshot(older, Instant.parse("2026-06-10T10:00:00Z"), 2, "older-model"));
-        store.save(snapshot(newer, Instant.parse("2026-06-11T10:00:00Z"), 3, "newer-model"));
+        withWriter(store, workspaceId, writer -> writer.save(snapshot(
+                workspaceId, Instant.parse("2026-06-09T10:00:00Z"), 1, "legacy-model")));
+        withWriter(store, older, writer -> writer.save(snapshot(
+                older, Instant.parse("2026-06-10T10:00:00Z"), 2, "older-model")));
+        withWriter(store, newer, writer -> writer.save(snapshot(
+                newer, Instant.parse("2026-06-11T10:00:00Z"), 3, "newer-model")));
 
         List<SessionSummary> sessions = store.listSessions(workspaceId);
 
@@ -76,10 +93,12 @@ class JsonSessionStoreListTest {
         String crashed = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-12T09:00:00Z"));
         Instant first = Instant.parse("2026-06-12T09:01:00Z");
 
-        store.appendTurn(crashed, new TurnRecord(1, first, 0L,
-                "q1", "a1", List.of(), 0, 0, 0, ""));
-        store.appendTurn(crashed, new TurnRecord(2, first.plusSeconds(60), 0L,
-                "q2", "a2", List.of(), 0, 0, 0, ""));
+        withWriter(store, crashed, writer -> {
+            writer.appendTurn(crashed, new TurnRecord(1, first, 0L,
+                    "q1", "a1", List.of(), 0, 0, 0, ""));
+            writer.appendTurn(crashed, new TurnRecord(2, first.plusSeconds(60), 0L,
+                    "q2", "a2", List.of(), 0, 0, 0, ""));
+        });
 
         List<SessionSummary> sessions = store.listSessions(workspaceId);
 
@@ -99,9 +118,11 @@ class JsonSessionStoreListTest {
         String workspaceId = JsonSessionStore.sessionIdFor(ws);
         String id = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-12T09:00:00Z"));
 
-        store.save(snapshot(id, Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
-        store.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
-                "q", "a", List.of(), 0, 0, 0, ""));
+        withWriter(store, id, writer -> {
+            writer.save(snapshot(id, Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
+            writer.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
+                    "q", "a", List.of(), 0, 0, 0, ""));
+        });
 
         List<SessionSummary> sessions = store.listSessions(workspaceId);
 
@@ -116,10 +137,13 @@ class JsonSessionStoreListTest {
         Path mine = dir.resolve("mine");
         Path theirs = dir.resolve("theirs");
 
-        store.save(snapshot(JsonSessionStore.sessionIdFor(theirs),
-                Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
-        store.save(snapshot(JsonSessionStore.newSessionInstanceId(theirs, Instant.parse("2026-06-12T09:00:00Z")),
-                Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
+        String legacyId = JsonSessionStore.sessionIdFor(theirs);
+        String instanceId = JsonSessionStore.newSessionInstanceId(
+                theirs, Instant.parse("2026-06-12T09:00:00Z"));
+        withWriter(store, legacyId, writer -> writer.save(snapshot(
+                legacyId, Instant.parse("2026-06-12T09:00:00Z"), 1, "m")));
+        withWriter(store, instanceId, writer -> writer.save(snapshot(
+                instanceId, Instant.parse("2026-06-12T09:00:00Z"), 1, "m")));
 
         assertTrue(store.listSessions(JsonSessionStore.sessionIdFor(mine)).isEmpty());
     }
@@ -132,7 +156,8 @@ class JsonSessionStoreListTest {
         String good = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-12T09:00:00Z"));
         String corrupt = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-12T10:00:00Z"));
 
-        store.save(snapshot(good, Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
+        withWriter(store, good, writer -> writer.save(snapshot(
+                good, Instant.parse("2026-06-12T09:00:00Z"), 1, "m")));
         Files.writeString(store.sessionsDir().resolve(corrupt + ".json"), "{not json");
 
         List<SessionSummary> sessions = store.listSessions(workspaceId);
@@ -144,15 +169,39 @@ class JsonSessionStoreListTest {
     }
 
     @Test
+    void unsafeOrdinaryFilenameStemsCannotBecomePhantomSessions() throws Exception {
+        JsonSessionStore store = store();
+        Path ws = dir.resolve("unsafe-name-ws");
+        String workspaceId = JsonSessionStore.sessionIdFor(ws);
+        String legitimate = JsonSessionStore.newSessionInstanceId(
+                ws, Instant.parse("2026-06-12T09:00:00Z"));
+        withWriter(store, legitimate, writer -> writer.save(snapshot(
+                legitimate, Instant.parse("2026-06-12T09:00:00Z"), 1, "m")));
+
+        String punctuation = workspaceId + "-newer!";
+        String overlong = workspaceId + "-" + "a".repeat(201);
+        Files.writeString(store.sessionsDir().resolve(punctuation + ".json"), "{}");
+        Files.writeString(store.sessionsDir().resolve(overlong + ".turns.jsonl"), "");
+
+        assertEquals(
+                List.of(legitimate),
+                store.listSessions(workspaceId).stream()
+                        .map(SessionSummary::sessionId)
+                        .toList(),
+                "ordinary files outside the loadable session-id grammar must not enter startup selection");
+    }
+
+    @Test
     void instanceFilesLoadAndDeleteThroughTheExistingContract() {
         JsonSessionStore store = store();
         Path ws = dir.resolve("roundtrip-ws");
         String id = JsonSessionStore.newSessionInstanceId(ws, Instant.parse("2026-06-12T09:00:00Z"));
 
-        store.save(snapshot(id, Instant.parse("2026-06-12T09:00:00Z"), 1, "m"));
+        withWriter(store, id, writer -> writer.save(snapshot(
+                id, Instant.parse("2026-06-12T09:00:00Z"), 1, "m")));
 
         assertEquals(id, store.load(id).orElseThrow().sessionId());
-        assertTrue(store.delete(id));
+        withWriter(store, id, writer -> assertTrue(writer.delete(id)));
         assertTrue(store.listSessions(JsonSessionStore.sessionIdFor(ws)).isEmpty());
     }
 

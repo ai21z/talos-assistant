@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.io.AtomicFileWriter;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.Hash;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.safety.SafeLogFormatter;
@@ -21,34 +23,68 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
  * File-backed {@link SessionStore} that persists session state as JSON
- * under {@code ~/.talos/sessions/<workspace-hash>.json}.
+ * under {@code ~/.talos/sessions/}.
  *
- * <p>Each workspace gets a single session file keyed by the SHA-1 hash
- * of its absolute normalized path. Save is fire-and-forget (errors are
- * logged but never thrown). Load returns empty on any I/O or parse failure.
+ * <p>Each run reserves an entropy-bearing instance ID below the workspace's
+ * SHA-1 prefix. Legacy bare-hash and timestamp-only records remain readable.
+ * Snapshot write errors remain nonfatal to the user turn and are logged;
+ * ownership and reservation failures fail visibly before mutation. Load
+ * returns empty on any I/O or parse failure.
  *
- * <p>Thread-safe: each method is self-contained with no shared mutable state.
+ * <p>Read methods are self-contained. Mutations require a
+ * {@link SessionWriterLease}; the lease serializes this JVM and holds the
+ * stable cross-process sidecar lock for its complete lifetime.
  */
-public final class JsonSessionStore implements SessionStore {
+public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(JsonSessionStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern OBSERVED_TRACE_ID =
             Pattern.compile("[A-Za-z0-9._-]{1,128}");
+    private static final Pattern SAFE_SESSION_ID =
+            Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,199}");
+    private static final Pattern WINDOWS_DEVICE_SESSION_ID = Pattern.compile(
+            "(?i)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?");
+    private static final SecureRandom SESSION_RANDOM = new SecureRandom();
+    private static final int SESSION_ENTROPY_BYTES = 16;
+    private static final int MAX_RESERVATION_ATTEMPTS = 32;
+    private static final String OWNERSHIP_DIRECTORY = ".ownership";
+    private static final String RESERVATION_SUFFIX = ".session.reserve";
+    private static final String WRITER_LOCK_SUFFIX = ".session.writer.lock";
+    private static final Object JVM_LOCK_MUTEX = new Object();
+    private static final Map<Path, SessionWriterLease> JVM_ACTIVE_LEASES =
+            new java.util.HashMap<>();
 
     private final Path sessionsDir;
+    private final AtomicFileWriter atomicFileWriter;
+    private final Supplier<byte[]> entropySource;
+    private final Map<String, SessionWriterLease> activeLeases = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /** Default location: {@code ~/.talos/sessions/}. */
     public JsonSessionStore() {
@@ -57,9 +93,22 @@ public final class JsonSessionStore implements SessionStore {
 
     /** Custom directory (useful for testing with {@code @TempDir}). */
     public JsonSessionStore(Path sessionsDir) {
-        this.sessionsDir = sessionsDir;
+        this(sessionsDir, new AtomicFileWriter(), JsonSessionStore::secureEntropy);
+    }
+
+    JsonSessionStore(
+            Path sessionsDir,
+            AtomicFileWriter atomicFileWriter,
+            Supplier<byte[]> entropySource
+    ) {
+        this.sessionsDir = java.util.Objects.requireNonNull(
+                sessionsDir, "sessionsDir").toAbsolutePath().normalize();
+        this.atomicFileWriter = java.util.Objects.requireNonNull(
+                atomicFileWriter, "atomicFileWriter");
+        this.entropySource = java.util.Objects.requireNonNull(
+                entropySource, "entropySource");
         try {
-            Files.createDirectories(sessionsDir);
+            NoFollowPathPolicy.createUnlinkedDirectories(sessionsDir);
         } catch (IOException e) {
             LOG.warn("Could not create sessions directory {}: {}",
                     SafeLogFormatter.value(sessionsDir), SafeLogFormatter.throwableMessage(e));
@@ -71,6 +120,19 @@ public final class JsonSessionStore implements SessionStore {
     @Override
     public void save(SessionData data) {
         if (data == null || data.sessionId().isBlank()) return;
+        requireSafeSessionId(data.sessionId());
+        throw leaseRequired(data.sessionId());
+    }
+
+    void save(SessionWriterLease lease, SessionData data) {
+        if (data == null || data.sessionId().isBlank()) return;
+        lease.underLock(this, data.sessionId(), () -> {
+            writeSnapshot(data);
+            return null;
+        });
+    }
+
+    private void writeSnapshot(SessionData data) {
         try {
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("sessionId", data.sessionId());
@@ -86,8 +148,8 @@ public final class JsonSessionStore implements SessionStore {
                     .toList());
 
             String json = sanitizedPrettyJson(root);
-            Path file = fileFor(data.sessionId());
-            Files.writeString(file, json);
+            Path file = mutationGuard().requireRegularFileTarget(fileFor(data.sessionId()));
+            atomicFileWriter.replaceCurrent(file, json.getBytes(StandardCharsets.UTF_8));
             LOG.debug("Session saved: {} ({} turns)", SafeLogFormatter.value(file.getFileName()), data.turnCount());
         } catch (Exception e) {
             LOG.warn("Failed to save session {}: {}",
@@ -97,13 +159,14 @@ public final class JsonSessionStore implements SessionStore {
 
     @Override
     public Optional<SessionData> load(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) return Optional.empty();
+        if (!safeSessionId(sessionId)) return Optional.empty();
         Path file = fileFor(sessionId);
-        if (!Files.exists(file)) return Optional.empty();
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
 
         try {
             Map<String, Object> root = MAPPER.readValue(
-                    Files.readString(file), new TypeReference<>() {});
+                    NoFollowPathPolicy.readString(file, StandardCharsets.UTF_8),
+                    new TypeReference<>() {});
 
             String sid       = str(root, "sessionId");
             String workspace = str(root, "workspace");
@@ -137,11 +200,32 @@ public final class JsonSessionStore implements SessionStore {
     @Override
     public boolean delete(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) return false;
+        requireSafeSessionId(sessionId);
+        throw leaseRequired(sessionId);
+    }
+
+    boolean delete(SessionWriterLease lease, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return false;
+        return lease.underLock(this, sessionId, () -> deleteOwnedSession(sessionId));
+    }
+
+    private boolean deleteOwnedSession(String sessionId) {
         try {
-            boolean snap = Files.deleteIfExists(fileFor(sessionId));
-            // Also remove the companion per-turn log, if any.
-            boolean turns = Files.deleteIfExists(turnsFileFor(sessionId));
-            boolean traces = deleteTraceDirectory(sessionId);
+            NoFollowPathPolicy.GuardedRoot guard = mutationGuard();
+            // Authenticate the entire delete set before removing any entry. A
+            // linked trace descendant must not erase a valid snapshot/log and
+            // only then report failure.
+            Path snapshot = regularIfPresent(guard, fileFor(sessionId));
+            Path turnLog = regularIfPresent(guard, turnsFileFor(sessionId));
+            List<NoFollowPathPolicy.TreeEntry> traceEntries =
+                    traceEntriesIfPresent(guard, sessionId);
+
+            boolean snap = snapshot != null && Files.deleteIfExists(snapshot);
+            boolean turns = turnLog != null && Files.deleteIfExists(turnLog);
+            boolean traces = false;
+            for (int index = traceEntries.size() - 1; index >= 0; index--) {
+                traces |= Files.deleteIfExists(traceEntries.get(index).path());
+            }
             return snap || turns || traces;
         } catch (IOException e) {
             LOG.warn("Failed to delete session {}: {}",
@@ -155,15 +239,38 @@ public final class JsonSessionStore implements SessionStore {
     @Override
     public void appendTurn(String sessionId, TurnRecord record) {
         if (sessionId == null || sessionId.isBlank() || record == null) return;
+        requireSafeSessionId(sessionId);
+        throw leaseRequired(sessionId);
+    }
+
+    void appendTurn(SessionWriterLease lease, String sessionId, TurnRecord record) {
+        if (sessionId == null || sessionId.isBlank() || record == null) return;
+        lease.underLock(this, sessionId, () -> {
+            appendOwnedTurn(lease, sessionId, record);
+            return null;
+        });
+    }
+
+    private void appendOwnedTurn(
+            SessionWriterLease lease,
+            String sessionId,
+            TurnRecord record
+    ) {
         try {
-            writeTurn(sessionId, record);
-        } catch (Exception e) {
-            LOG.warn("Failed to append turn record for {}: {}",
-                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
+            writeTurn(lease, sessionId, record);
+        } catch (IOException failure) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.PERSISTENCE_IO,
+                    "Session turn log append failed",
+                    failure);
         }
     }
 
-    private void writeTurn(String sessionId, TurnRecord record) throws IOException {
+    private void writeTurn(
+            SessionWriterLease lease,
+            String sessionId,
+            TurnRecord record
+    ) throws IOException {
         requireStoredUserRequestCoordinates(
                 record.userInput(),
                 record.policyTrace());
@@ -191,17 +298,64 @@ public final class JsonSessionStore implements SessionStore {
         }
         row.put("toolCalls", calls);
 
-        String line = sanitizedCompactJson(row) + System.lineSeparator();
-        Files.writeString(turnsFileFor(sessionId), line,
-                java.nio.file.StandardOpenOption.CREATE,
-                java.nio.file.StandardOpenOption.APPEND);
+        byte[] line = (sanitizedCompactJson(row) + "\n").getBytes(StandardCharsets.UTF_8);
+        try {
+            Path target = mutationGuard().requireRegularFileTarget(turnsFileFor(sessionId));
+            requireCompleteTurnLogTail(lease, target);
+            try (FileChannel channel = FileChannel.open(
+                    target,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.APPEND,
+                    LinkOption.NOFOLLOW_LINKS)) {
+            ByteBuffer source = ByteBuffer.wrap(line);
+            while (source.hasRemaining()) {
+                int written = channel.write(source);
+                if (written <= 0) throw new IOException("Turn log append made no progress");
+            }
+            channel.force(true);
+            }
+        } catch (SessionWriterUnavailableException failure) {
+            throw failure;
+        } catch (IOException failure) {
+            lease.poison();
+            throw failure;
+        }
+    }
+
+    /**
+     * A crash may leave a final JSON fragment without its canonical LF commit
+     * marker. Never append a newly acknowledged row behind that fragment: it
+     * would make the new row unreadable too. T1163 owns any later recovery or
+     * truncation policy; this boundary only detects the condition and stops.
+     */
+    private static void requireCompleteTurnLogTail(
+            SessionWriterLease lease,
+            Path target
+    ) throws IOException {
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return;
+        try (FileChannel existing = FileChannel.open(
+                target,
+                StandardOpenOption.READ,
+                LinkOption.NOFOLLOW_LINKS)) {
+            long size = existing.size();
+            if (size == 0L) return;
+            ByteBuffer last = ByteBuffer.allocate(1);
+            existing.position(size - 1L);
+            if (existing.read(last) != 1 || last.array()[0] != (byte) '\n') {
+                lease.poison();
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason.INCOMPLETE_TURN_LOG,
+                        "Session turn log ends with an incomplete record");
+            }
+        }
     }
 
     @Override
     public List<TurnRecord> loadTurns(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) return List.of();
+        if (!safeSessionId(sessionId)) return List.of();
         Path file = turnsFileFor(sessionId);
-        if (!Files.exists(file)) return List.of();
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return List.of();
         List<TurnRecord> out = new java.util.ArrayList<>();
         // Lenient UTF-8 decoding: a single malformed byte (e.g. a partial
         // multi-byte character from a power-loss mid-write) must only affect
@@ -214,10 +368,21 @@ public final class JsonSessionStore implements SessionStore {
         java.nio.charset.CharsetDecoder decoder = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE);
-        try (var in = Files.newInputStream(file);
-             var reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, decoder))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
+        try {
+            byte[] bytes = NoFollowPathPolicy.readAllBytes(file);
+            int completeLength = 0;
+            for (int index = bytes.length - 1; index >= 0; index--) {
+                if (bytes[index] == (byte) '\n') {
+                    completeLength = index + 1;
+                    break;
+                }
+            }
+            if (completeLength == 0) return List.of();
+            String complete = decoder.decode(ByteBuffer.wrap(bytes, 0, completeLength)).toString();
+            for (String rawLine : complete.split("\n", -1)) {
+                String line = rawLine.endsWith("\r")
+                        ? rawLine.substring(0, rawLine.length() - 1)
+                        : rawLine;
                 if (line.isBlank()) continue;
                 try {
                     Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
@@ -398,6 +563,24 @@ public final class JsonSessionStore implements SessionStore {
     @Override
     public void saveTrace(String sessionId, LocalTurnTrace trace) {
         if (sessionId == null || sessionId.isBlank() || trace == null || trace.traceId().isBlank()) return;
+        requireSafeSessionId(sessionId);
+        throw leaseRequired(sessionId);
+    }
+
+    void saveTrace(
+            SessionWriterLease lease,
+            String sessionId,
+            LocalTurnTrace trace
+    ) {
+        if (sessionId == null || sessionId.isBlank()
+                || trace == null || trace.traceId().isBlank()) return;
+        lease.underLock(this, sessionId, () -> {
+            saveOwnedTrace(sessionId, trace);
+            return null;
+        });
+    }
+
+    private void saveOwnedTrace(String sessionId, LocalTurnTrace trace) {
         try {
             writeTrace(sessionId, trace);
         } catch (Exception e) {
@@ -423,8 +606,10 @@ public final class JsonSessionStore implements SessionStore {
                 MAPPER.readTree(json),
                 canonicalUserRequest);
         Path dir = traceDirFor(sessionId);
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve(traceFileName(trace)), json);
+        NoFollowPathPolicy.GuardedRoot guard = mutationGuard();
+        guard.createDirectories(dir);
+        Path target = guard.requireRegularFileTarget(dir.resolve(traceFileName(trace)));
+        atomicFileWriter.replaceCurrent(target, json.getBytes(StandardCharsets.UTF_8));
     }
 
     @Override
@@ -437,6 +622,32 @@ public final class JsonSessionStore implements SessionStore {
             return new TurnEnvelopePersistenceReceipt(
                     TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
         }
+        requireSafeSessionId(sessionId);
+        throw leaseRequired(sessionId);
+    }
+
+    TurnEnvelopePersistenceReceipt persistTurnEnvelope(
+            SessionWriterLease lease,
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
+        if (sessionId == null || sessionId.isBlank() || record == null) {
+            return new TurnEnvelopePersistenceReceipt(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
+        }
+        return lease.underLock(
+                this,
+                sessionId,
+                () -> persistOwnedTurnEnvelope(lease, sessionId, record, trace));
+    }
+
+    private TurnEnvelopePersistenceReceipt persistOwnedTurnEnvelope(
+            SessionWriterLease lease,
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
         String recordTraceId = record.traceId();
         boolean invalidIdentity = record.turnNumber() <= 0
                 || (!recordTraceId.isBlank()
@@ -497,7 +708,7 @@ public final class JsonSessionStore implements SessionStore {
                 : withTraceId(record, "");
         boolean turnWritten = false;
         try {
-            writeTurn(sessionId, row);
+            writeTurn(lease, sessionId, row);
             turnWritten = true;
         } catch (Exception e) {
             LOG.warn("Failed to append turn record for {}: {}",
@@ -536,13 +747,13 @@ public final class JsonSessionStore implements SessionStore {
 
     @Override
     public Optional<LocalTurnTrace> loadTrace(String sessionId, String traceId) {
-        if (sessionId == null || sessionId.isBlank() || traceId == null || traceId.isBlank()) {
+        if (!safeSessionId(sessionId) || traceId == null || traceId.isBlank()) {
             return Optional.empty();
         }
         Path dir = traceDirFor(sessionId);
-        if (!Files.isDirectory(dir)) return Optional.empty();
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
         Map<String, String> requestBindings = traceRequestBindings(sessionId);
-        try (var stream = Files.list(dir)) {
+        try (var stream = Files.list(NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith("-" + sanitizeTraceId(traceId) + ".json"))
                     .sorted()
@@ -564,11 +775,11 @@ public final class JsonSessionStore implements SessionStore {
 
     @Override
     public Optional<LocalTurnTrace> loadLatestTrace(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) return Optional.empty();
+        if (!safeSessionId(sessionId)) return Optional.empty();
         Path dir = traceDirFor(sessionId);
-        if (!Files.isDirectory(dir)) return Optional.empty();
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
         Map<String, String> requestBindings = traceRequestBindings(sessionId);
-        try (var stream = Files.list(dir)) {
+        try (var stream = Files.list(NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
                     .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
@@ -592,7 +803,8 @@ public final class JsonSessionStore implements SessionStore {
             Map<String, String> requestBindings
     ) {
         try {
-            JsonNode root = MAPPER.readTree(Files.readString(path));
+            JsonNode root = MAPPER.readTree(
+                    NoFollowPathPolicy.readString(path, StandardCharsets.UTF_8));
             String traceId = root.path("traceId").isTextual()
                     ? root.path("traceId").asText()
                     : "";
@@ -1077,6 +1289,364 @@ public final class JsonSessionStore implements SessionStore {
                 .toList();
     }
 
+    // ── Session allocation and writer ownership ──────────────────────
+
+    /**
+     * Atomically reserves a fresh storage identity and acquires its exclusive
+     * writer lock. Reservation artifacts are permanent collision tombstones;
+     * they are never treated as user sessions.
+     */
+    public SessionWriterLease reserveNewSession(Path workspace, Instant createdAt) {
+        if (workspace == null || createdAt == null) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.INVALID_SESSION_ID,
+                    "Workspace and creation time are required for session allocation");
+        }
+        synchronized (JVM_LOCK_MUTEX) {
+            requireStoreOpen();
+            NoFollowPathPolicy.GuardedRoot guard;
+            try {
+                guard = mutationGuard();
+            } catch (IOException failure) {
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                        "Session namespace is unavailable",
+                        failure);
+            }
+            for (int attempt = 0; attempt < MAX_RESERVATION_ATTEMPTS; attempt++) {
+                byte[] entropy = requireEntropy(entropySource.get());
+                String candidate = candidateSessionInstanceId(workspace, createdAt, entropy);
+                requireSafeSessionId(candidate);
+                try {
+                    Path reservation = createReservation(guard, candidate);
+                    return acquireSessionWriterLocked(candidate, reservation);
+                } catch (FileAlreadyExistsException collision) {
+                    // A permanent reservation already owns this exact identity.
+                } catch (SessionWriterUnavailableException failure) {
+                    throw failure;
+                } catch (IOException failure) {
+                    throw new SessionWriterUnavailableException(
+                            SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                            "Session reservation failed",
+                            failure);
+                }
+            }
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.RESERVATION_EXHAUSTED,
+                    "Session reservation collision limit was exhausted");
+        }
+    }
+
+    /**
+     * Acquire the sole writer capability for an explicit ID. The first open
+     * atomically reserves that exact safe filename; later opens authenticate
+     * the retained marker before taking its stable writer lock. This also
+     * gives legacy IDs the same cross-process ownership boundary without
+     * rewriting their payload files.
+     */
+    public SessionWriterLease acquireSessionWriter(String sessionId) {
+        requireSafeSessionId(sessionId);
+        synchronized (JVM_LOCK_MUTEX) {
+            requireStoreOpen();
+            try {
+                NoFollowPathPolicy.GuardedRoot guard = mutationGuard();
+                Path reservation = ensureExplicitReservation(guard, sessionId);
+                return acquireSessionWriterLocked(sessionId, reservation);
+            } catch (SessionWriterUnavailableException failure) {
+                throw failure;
+            } catch (IOException failure) {
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                        "Explicit session reservation failed",
+                        failure);
+            }
+        }
+    }
+
+    private SessionWriterLease acquireSessionWriterLocked(
+            String sessionId,
+            Path reservationPath
+    ) {
+        requireSafeSessionId(sessionId);
+        requireStoreOpen();
+        requireReservationMarker(reservationPath, sessionId);
+        if (activeLeases.containsKey(sessionId)) throw writerBusy();
+
+        Path lockPath;
+        FileChannel channel = null;
+        FileLock lock = null;
+        try {
+            NoFollowPathPolicy.GuardedRoot guard = mutationGuard();
+            lockPath = guard.requireRegularFileTarget(writerLockPathFor(sessionId));
+            lockPath = lockPath.getParent().toRealPath()
+                    .resolve(lockPath.getFileName()).normalize();
+            if (JVM_ACTIVE_LEASES.containsKey(lockPath)) throw writerBusy();
+            channel = FileChannel.open(
+                    lockPath,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE,
+                    LinkOption.NOFOLLOW_LINKS);
+            try {
+                lock = channel.tryLock(0L, 1L, false);
+            } catch (OverlappingFileLockException overlapping) {
+                throw writerBusy();
+            }
+            if (lock == null) throw writerBusy();
+
+            SessionWriterLease lease = new SessionWriterLease(
+                    this, sessionId, reservationPath, lockPath, channel, lock);
+            activeLeases.put(sessionId, lease);
+            JVM_ACTIVE_LEASES.put(lockPath, lease);
+            return lease;
+        } catch (SessionWriterUnavailableException failure) {
+            closeAcquisition(channel, lock);
+            throw failure;
+        } catch (IOException failure) {
+            closeAcquisition(channel, lock);
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.LOCK_IO,
+                    "Session writer lock could not be acquired",
+                    failure);
+        }
+    }
+
+    void requireMatchingLease(SessionWriterLease lease, String sessionId) {
+        if (closed.get()) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.STORE_CLOSED,
+                    "Session store is closed");
+        }
+        if (lease == null) throw leaseRequired(sessionId);
+        if (!lease.belongsTo(this)) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.FOREIGN_LEASE,
+                    "Session writer lease belongs to another store");
+        }
+        if (!lease.owns(sessionId)) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.WRONG_SESSION,
+                    "Session writer lease does not own the requested session");
+        }
+        if (lease.closed()) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.LEASE_CLOSED,
+                    "Session writer lease is closed");
+        }
+        if (lease.poisoned()) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.LEASE_POISONED,
+                    "Session writer lease is poisoned after an uncertain write");
+        }
+        if (!lease.lockValid() || activeLeases.get(sessionId) != lease) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.LEASE_CLOSED,
+                    "Session writer lease is no longer active");
+        }
+    }
+
+    void release(SessionWriterLease lease) {
+        if (lease == null) return;
+        synchronized (JVM_LOCK_MUTEX) {
+            IOException failure = null;
+            try {
+                lease.releaseResources();
+            } catch (IOException releaseFailure) {
+                failure = releaseFailure;
+            } finally {
+                activeLeases.remove(lease.sessionId(), lease);
+                JVM_ACTIVE_LEASES.remove(lease.lockPath(), lease);
+            }
+            if (failure != null) {
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason.LOCK_IO,
+                        "Failed to release the session writer lease",
+                        failure);
+            }
+        }
+    }
+
+    @Override
+    public void close() {
+        List<SessionWriterLease> leases;
+        synchronized (JVM_LOCK_MUTEX) {
+            if (!closed.compareAndSet(false, true)) return;
+            leases = List.copyOf(activeLeases.values());
+        }
+        RuntimeException failure = null;
+        for (SessionWriterLease lease : leases) {
+            try {
+                lease.close();
+            } catch (RuntimeException closeFailure) {
+                if (failure == null) failure = closeFailure;
+                else failure.addSuppressed(closeFailure);
+            }
+        }
+        if (failure != null) throw failure;
+    }
+
+    private void requireStoreOpen() {
+        if (closed.get()) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.STORE_CLOSED,
+                    "Session store is closed");
+        }
+    }
+
+    @Override
+    public Optional<Path> rawTurnLogPath(String sessionId) {
+        if (!safeSessionId(sessionId)) return Optional.empty();
+        Path path = turnsFileFor(sessionId);
+        try {
+            return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+                    ? Optional.of(NoFollowPathPolicy.requireUnlinkedRegularFile(path))
+                    : Optional.of(path);
+        } catch (IOException unsafe) {
+            return Optional.empty();
+        }
+    }
+
+    private NoFollowPathPolicy.GuardedRoot mutationGuard() throws IOException {
+        Path root = NoFollowPathPolicy.createUnlinkedDirectories(sessionsDir);
+        NoFollowPathPolicy.GuardedRoot guard = NoFollowPathPolicy.bindExistingDirectory(root);
+        guard.createDirectories(ownershipDir());
+        return guard;
+    }
+
+    private Path ownershipDir() {
+        return sessionsDir.resolve(OWNERSHIP_DIRECTORY);
+    }
+
+    private Path reservationPathFor(String sessionId) {
+        return ownershipDir().resolve(sessionId + RESERVATION_SUFFIX);
+    }
+
+    private Path writerLockPathFor(String sessionId) {
+        return ownershipDir().resolve(sessionId + WRITER_LOCK_SUFFIX);
+    }
+
+    private Path createReservation(
+            NoFollowPathPolicy.GuardedRoot guard,
+            String sessionId
+    ) throws IOException {
+        Path reservation = guard.requireRegularFileTarget(reservationPathFor(sessionId));
+        byte[] marker = reservationMarker(sessionId);
+        try (FileChannel channel = FileChannel.open(
+                reservation,
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE,
+                LinkOption.NOFOLLOW_LINKS)) {
+            ByteBuffer source = ByteBuffer.wrap(marker);
+            while (source.hasRemaining()) {
+                int written = channel.write(source);
+                if (written <= 0) {
+                    throw new IOException("Session reservation made no progress");
+                }
+            }
+            channel.force(true);
+        }
+        AtomicFileWriter.synchronizeDirectory(reservation.getParent());
+        requireReservationMarker(reservation, sessionId);
+        return reservation;
+    }
+
+    private Path ensureExplicitReservation(
+            NoFollowPathPolicy.GuardedRoot guard,
+            String sessionId
+    ) throws IOException {
+        Path reservation = guard.requireRegularFileTarget(reservationPathFor(sessionId));
+        if (Files.exists(reservation, LinkOption.NOFOLLOW_LINKS)) {
+            requireReservationMarker(reservation, sessionId);
+            return reservation;
+        }
+        try {
+            return createReservation(guard, sessionId);
+        } catch (FileAlreadyExistsException raced) {
+            requireReservationMarker(reservation, sessionId);
+            return reservation;
+        }
+    }
+
+    private static void requireReservationMarker(Path reservation, String sessionId) {
+        if (reservation == null) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                    "Session reservation marker is missing");
+        }
+        try {
+            byte[] observed = NoFollowPathPolicy.readAllBytes(reservation);
+            if (!java.util.Arrays.equals(observed, reservationMarker(sessionId))) {
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                        "Session reservation marker does not match its identity");
+            }
+        } catch (SessionWriterUnavailableException failure) {
+            throw failure;
+        } catch (IOException failure) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.RESERVATION_IO,
+                    "Session reservation marker could not be authenticated",
+                    failure);
+        }
+    }
+
+    private static byte[] reservationMarker(String sessionId) {
+        return ("talos-session-reservation-v1\n" + sessionId + "\n")
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void closeAcquisition(FileChannel channel, FileLock lock) {
+        if (lock != null) {
+            try { if (lock.isValid()) lock.release(); }
+            catch (IOException ignored) { }
+        }
+        if (channel != null) {
+            try { channel.close(); }
+            catch (IOException ignored) { }
+        }
+    }
+
+    private static SessionWriterUnavailableException writerBusy() {
+        return new SessionWriterUnavailableException(
+                SessionWriterUnavailableException.Reason.WRITER_BUSY,
+                "Session is already owned by another writer");
+    }
+
+    private static SessionWriterUnavailableException leaseRequired(String sessionId) {
+        return new SessionWriterUnavailableException(
+                SessionWriterUnavailableException.Reason.LEASE_REQUIRED,
+                "Session mutation requires its active writer lease");
+    }
+
+    private static void requireSafeSessionId(String sessionId) {
+        if (!safeSessionId(sessionId)) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.INVALID_SESSION_ID,
+                    "Session ID must be one bounded local filename");
+        }
+    }
+
+    private static boolean safeSessionId(String sessionId) {
+        return sessionId != null
+                && SAFE_SESSION_ID.matcher(sessionId).matches()
+                && !sessionId.endsWith(".")
+                && !WINDOWS_DEVICE_SESSION_ID.matcher(sessionId).matches();
+    }
+
+    private static byte[] requireEntropy(byte[] candidate) {
+        if (candidate == null || candidate.length != SESSION_ENTROPY_BYTES) {
+            throw new SessionWriterUnavailableException(
+                    SessionWriterUnavailableException.Reason.INVALID_ENTROPY,
+                    "Session entropy source must return exactly 16 bytes");
+        }
+        return candidate.clone();
+    }
+
+    private static byte[] secureEntropy() {
+        byte[] bytes = new byte[SESSION_ENTROPY_BYTES];
+        SESSION_RANDOM.nextBytes(bytes);
+        return bytes;
+    }
+
     // ── Utility ───────────────────────────────────────────────────────
 
     /**
@@ -1099,31 +1669,60 @@ public final class JsonSessionStore implements SessionStore {
 
     /**
      * Mint the storage id for a new session of this workspace:
-     * {@code <ws-hash>-<UTC yyyyMMddHHmmss>}. The clock is a parameter so
-     * tests stay deterministic. The hash prefix is fixed-length 40-hex
-     * (no {@code -}), so prefix matching against {@link #sessionIdFor}
-     * is unambiguous across workspaces.
+     * {@code <ws-hash>-<UTC yyyyMMddHHmmss>-<32-hex-entropy>}. This method
+     * formats a candidate only; production allocation must use
+     * {@link #reserveNewSession(Path, Instant)} so the identity is atomically
+     * reserved before use. The hash prefix is fixed-length 40-hex (no
+     * {@code -}), so prefix matching against {@link #sessionIdFor} is
+     * unambiguous across workspaces.
      */
     public static String newSessionInstanceId(Path workspace, Instant createdAt) {
-        return sessionIdFor(workspace) + "-" + INSTANCE_ID_TIMESTAMP.format(createdAt);
+        return candidateSessionInstanceId(workspace, createdAt, secureEntropy());
+    }
+
+    private static String candidateSessionInstanceId(
+            Path workspace,
+            Instant createdAt,
+            byte[] entropy
+    ) {
+        return sessionIdFor(workspace)
+                + "-" + INSTANCE_ID_TIMESTAMP.format(createdAt)
+                + "-" + HexFormat.of().formatHex(requireEntropy(entropy));
     }
 
     @Override
     public List<SessionSummary> listSessions(String workspaceId) {
-        if (workspaceId == null || workspaceId.isBlank()) return List.of();
-        if (!Files.isDirectory(sessionsDir)) return List.of();
+        if (!safeSessionId(workspaceId)) return List.of();
+        if (!Files.exists(sessionsDir, LinkOption.NOFOLLOW_LINKS)) return List.of();
 
         java.util.Set<String> snapshotIds = new java.util.LinkedHashSet<>();
         java.util.Set<String> turnLogIds = new java.util.LinkedHashSet<>();
-        try (var stream = Files.list(sessionsDir)) {
-            for (Path path : (Iterable<Path>) stream::iterator) {
-                String name = path.getFileName().toString();
-                if (name.endsWith(TURNS_SUFFIX)) {
-                    String id = name.substring(0, name.length() - TURNS_SUFFIX.length());
-                    if (belongsTo(id, workspaceId)) turnLogIds.add(id);
-                } else if (name.endsWith(".json")) {
-                    String id = name.substring(0, name.length() - ".json".length());
-                    if (belongsTo(id, workspaceId)) snapshotIds.add(id);
+        try {
+            Path root = NoFollowPathPolicy.requireUnlinkedDirectory(sessionsDir);
+            NoFollowPathPolicy.GuardedRoot guard =
+                    NoFollowPathPolicy.bindExistingDirectory(root);
+            try (var stream = Files.list(root)) {
+                for (Path path : (Iterable<Path>) stream::iterator) {
+                    try {
+                        if (guard.inspect(path)
+                                != NoFollowPathPolicy.EntryType.REGULAR_FILE) continue;
+                    } catch (IOException unsafeEntry) {
+                        LOG.warn("Skipping unsafe session-list entry: {}",
+                                SafeLogFormatter.throwableMessage(unsafeEntry));
+                        continue;
+                    }
+                    String name = path.getFileName().toString();
+                    if (name.endsWith(TURNS_SUFFIX)) {
+                        String id = name.substring(0, name.length() - TURNS_SUFFIX.length());
+                        if (safeSessionId(id) && belongsTo(id, workspaceId)) {
+                            turnLogIds.add(id);
+                        }
+                    } else if (name.endsWith(".json")) {
+                        String id = name.substring(0, name.length() - ".json".length());
+                        if (safeSessionId(id) && belongsTo(id, workspaceId)) {
+                            snapshotIds.add(id);
+                        }
+                    }
                 }
             }
         } catch (IOException e) {
@@ -1155,7 +1754,9 @@ public final class JsonSessionStore implements SessionStore {
         String model = "";
         try {
             Map<String, Object> root = MAPPER.readValue(
-                    Files.readString(fileFor(sessionId)), new TypeReference<>() {});
+                    NoFollowPathPolicy.readString(
+                            fileFor(sessionId), StandardCharsets.UTF_8),
+                    new TypeReference<>() {});
             created = parseInstantOrEpoch(root.get("createdAt"));
             turnCount = intVal(root, "turnCount");
             model = str(root, "model");
@@ -1185,7 +1786,7 @@ public final class JsonSessionStore implements SessionStore {
     }
 
     /** The directory where session files are stored. */
-    public Path sessionsDir() {
+    Path sessionsDir() {
         return sessionsDir;
     }
 
@@ -1215,20 +1816,25 @@ public final class JsonSessionStore implements SessionStore {
         return traceId.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
-    private boolean deleteTraceDirectory(String sessionId) throws IOException {
+    private static Path regularIfPresent(
+            NoFollowPathPolicy.GuardedRoot guard,
+            Path path
+    ) throws IOException {
+        NoFollowPathPolicy.EntryType type = guard.inspect(path);
+        return type == NoFollowPathPolicy.EntryType.MISSING
+                ? null
+                : guard.requireRegularFile(path);
+    }
+
+    private List<NoFollowPathPolicy.TreeEntry> traceEntriesIfPresent(
+            NoFollowPathPolicy.GuardedRoot guard,
+            String sessionId
+    ) throws IOException {
         Path dir = traceDirFor(sessionId);
-        if (!Files.exists(dir)) return false;
-        try (var paths = Files.walk(dir)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException e) {
-                    LOG.warn("Failed to delete trace artifact {}: {}",
-                            SafeLogFormatter.value(path), SafeLogFormatter.throwableMessage(e));
-                }
-            });
-        }
-        return true;
+        NoFollowPathPolicy.EntryType type = guard.inspect(dir);
+        return type == NoFollowPathPolicy.EntryType.MISSING
+                ? List.of()
+                : guard.walk(dir);
     }
 
     private static String str(Map<String, Object> map, String key) {

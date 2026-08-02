@@ -36,18 +36,21 @@ class ExplainLastTurnCommandTest {
         Path workspace = Path.of("/project/read-only").toAbsolutePath().normalize();
         var store = new JsonSessionStore(tempDir);
         var cmd = new ExplainLastTurnCommand(workspace, store);
-        store.appendTurn(JsonSessionStore.sessionIdFor(workspace), record(
-                1,
-                "Check selectors",
-                "Mismatches found",
-                List.of(
-                        new TurnRecord.ToolCallSummary("talos.list_dir", ".", true),
-                        new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true),
-                        new TurnRecord.ToolCallSummary("talos.grep", ".cta-button", true)),
-                0,
-                0,
-                0,
-                "ok"));
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, record(
+                    1,
+                    "Check selectors",
+                    "Mismatches found",
+                    List.of(
+                            new TurnRecord.ToolCallSummary("talos.list_dir", ".", true),
+                            new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true),
+                            new TurnRecord.ToolCallSummary("talos.grep", ".cta-button", true)),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+        }
 
         Result result = cmd.execute("", minimalCtx());
 
@@ -71,12 +74,17 @@ class ExplainLastTurnCommandTest {
         var store = new JsonSessionStore(tempDir);
         String instanceId = JsonSessionStore.newSessionInstanceId(
                 workspace, Instant.parse("2026-06-12T08:00:00Z"));
-        store.appendTurn(instanceId, record(
-                1, "Active-session question", "Active-session answer",
-                List.of(), 0, 0, 0, "ok"));
-        store.appendTurn(JsonSessionStore.sessionIdFor(workspace), record(
-                9, "Legacy question", "Legacy answer",
-                List.of(), 0, 0, 0, "ok"));
+        try (var writer = store.acquireSessionWriter(instanceId)) {
+            writer.appendTurn(instanceId, record(
+                    1, "Active-session question", "Active-session answer",
+                    List.of(), 0, 0, 0, "ok"));
+        }
+        String legacyId = JsonSessionStore.sessionIdFor(workspace);
+        try (var writer = store.acquireSessionWriter(legacyId)) {
+            writer.appendTurn(legacyId, record(
+                    9, "Legacy question", "Legacy answer",
+                    List.of(), 0, 0, 0, "ok"));
+        }
 
         var cmd = new ExplainLastTurnCommand(workspace, store, null, instanceId);
         Result result = cmd.execute("", minimalCtx());
@@ -165,15 +173,18 @@ class ExplainLastTurnCommandTest {
         Path workspace = Path.of("/project/verbose").toAbsolutePath().normalize();
         var store = new JsonSessionStore(tempDir);
         var cmd = new ExplainLastTurnCommand(workspace, store);
-        store.appendTurn(JsonSessionStore.sessionIdFor(workspace), record(
-                1,
-                "Inspect files",
-                "Done.",
-                List.of(new TurnRecord.ToolCallSummary("talos.list_dir", ".", true)),
-                0,
-                0,
-                0,
-                "ok"));
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, record(
+                    1,
+                    "Inspect files",
+                    "Done.",
+                    List.of(new TurnRecord.ToolCallSummary("talos.list_dir", ".", true)),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+        }
 
         Result result = cmd.execute("--verbose", minimalCtx());
 
@@ -189,26 +200,28 @@ class ExplainLastTurnCommandTest {
         var store = new JsonSessionStore(tempDir);
         var cmd = new ExplainLastTurnCommand(workspace, store);
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
-        store.appendTurn(sessionId, recordAt(
-                11,
-                Instant.parse("2026-04-26T08:00:00Z"),
-                "Old saved request",
-                "Old saved answer",
-                List.of(),
-                0,
-                0,
-                0,
-                "ok"));
-        store.appendTurn(sessionId, recordAt(
-                1,
-                Instant.parse("2026-04-26T20:00:00Z"),
-                "hello",
-                "Hi.",
-                List.of(),
-                0,
-                0,
-                0,
-                "ok"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, recordAt(
+                    11,
+                    Instant.parse("2026-04-26T08:00:00Z"),
+                    "Old saved request",
+                    "Old saved answer",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+            writer.appendTurn(sessionId, recordAt(
+                    1,
+                    Instant.parse("2026-04-26T20:00:00Z"),
+                    "hello",
+                    "Hi.",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+        }
 
         Result result = cmd.execute("", minimalCtx());
 
@@ -223,26 +236,28 @@ class ExplainLastTurnCommandTest {
         Path workspace = Path.of("/project/active-last").toAbsolutePath().normalize();
         var store = new JsonSessionStore(tempDir);
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
-        store.appendTurn(sessionId, recordAt(
-                12,
-                Instant.parse("2026-04-26T08:00:00Z"),
-                "old saved request",
-                "old saved answer",
-                List.of(),
-                0,
-                0,
-                0,
-                "ok"));
-        store.appendTurn(sessionId, recordAt(
-                1,
-                Instant.parse("2026-04-26T12:05:00Z"),
-                "hello",
-                "Hi.",
-                List.of(),
-                0,
-                0,
-                0,
-                "ok"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, recordAt(
+                    12,
+                    Instant.parse("2026-04-26T08:00:00Z"),
+                    "old saved request",
+                    "old saved answer",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+            writer.appendTurn(sessionId, recordAt(
+                    1,
+                    Instant.parse("2026-04-26T12:05:00Z"),
+                    "hello",
+                    "Hi.",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+        }
         var cmd = new ExplainLastTurnCommand(
                 workspace, store, Instant.parse("2026-04-26T12:00:00Z"));
 
@@ -259,16 +274,18 @@ class ExplainLastTurnCommandTest {
         Path workspace = Path.of("/project/saved-only-last").toAbsolutePath().normalize();
         var store = new JsonSessionStore(tempDir);
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
-        store.appendTurn(sessionId, recordAt(
-                12,
-                Instant.parse("2026-04-26T08:00:00Z"),
-                "old saved request",
-                "old saved answer",
-                List.of(),
-                0,
-                0,
-                0,
-                "ok"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, recordAt(
+                    12,
+                    Instant.parse("2026-04-26T08:00:00Z"),
+                    "old saved request",
+                    "old saved answer",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "ok"));
+        }
         var cmd = new ExplainLastTurnCommand(
                 workspace, store, Instant.parse("2026-04-26T12:00:00Z"));
 
@@ -428,21 +445,23 @@ class ExplainLastTurnCommandTest {
                 .verification("FAILED", "Static verification failed", List.of("scripts.js missing"))
                 .outcome("FAILED", "FAILED", "UNKNOWN", "PARTIAL", "TASK_INCOMPLETE")
                 .build();
-        store.saveTrace(sessionId, trace);
-        store.appendTurn(sessionId, new TurnRecord(
-                1,
-                Instant.parse("2026-04-28T12:00:01Z"),
-                1200,
-                "create bmi app",
-                "Static verification failed.",
-                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true)),
-                1,
-                1,
-                0,
-                "",
-                "ok",
-                TurnPolicyTrace.empty(),
-                "trc-local"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.saveTrace(sessionId, trace);
+            writer.appendTurn(sessionId, new TurnRecord(
+                    1,
+                    Instant.parse("2026-04-28T12:00:01Z"),
+                    1200,
+                    "create bmi app",
+                    "Static verification failed.",
+                    List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true)),
+                    1,
+                    1,
+                    0,
+                    "",
+                    "ok",
+                    TurnPolicyTrace.empty(),
+                    "trc-local"));
+        }
 
         Result result = cmd.execute("trace", minimalCtx());
 

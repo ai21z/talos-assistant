@@ -280,8 +280,10 @@ class ExplainLastTurnFailedSettlementTest {
         String sessionId = "missing-trace-session";
         String traceId = "trc-missing-trace";
         JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
-        store.appendTurn(
-                sessionId, hostileRow(traceId, "RETRIEVAL_FREE_FORM_CANARY"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(
+                    sessionId, hostileRow(traceId, "RETRIEVAL_FREE_FORM_CANARY"));
+        }
 
         for (String view : VIEWS) {
             String text = execute(dir, store, sessionId, view);
@@ -297,20 +299,22 @@ class ExplainLastTurnFailedSettlementTest {
     void noResultRowWithoutTraceStillUsesTerminalFailClosedRenderer(@TempDir Path dir) {
         String sessionId = "no-result-partial";
         JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
-        store.appendTurn(sessionId, new TurnRecord(
-                1,
-                Instant.parse("2026-07-21T00:00:02Z"),
-                12,
-                "",
-                "",
-                List.of(),
-                0,
-                0,
-                0,
-                "",
-                "no_result",
-                TurnPolicyTrace.empty(),
-                ""));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, new TurnRecord(
+                    1,
+                    Instant.parse("2026-07-21T00:00:02Z"),
+                    12,
+                    "",
+                    "",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "",
+                    "no_result",
+                    TurnPolicyTrace.empty(),
+                    ""));
+        }
 
         for (String view : VIEWS) {
             String text = execute(dir, store, sessionId, view);
@@ -389,8 +393,10 @@ class ExplainLastTurnFailedSettlementTest {
             TurnRecord row,
             LocalTurnTrace trace
     ) {
-        JsonSessionStore writer = new JsonSessionStore(dir.resolve("sessions"));
-        writer.persistTurnEnvelope(sessionId, row, trace);
+        JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.persistTurnEnvelope(sessionId, row, trace);
+        }
         return new JsonSessionStore(dir.resolve("sessions"));
     }
 
@@ -400,8 +406,10 @@ class ExplainLastTurnFailedSettlementTest {
             TurnResult result,
             String userInput
     ) {
-        JsonSessionStore writer = new JsonSessionStore(dir.resolve("sessions"));
-        new JsonTurnLogAppender(writer, sessionId).onTurnComplete(result, userInput);
+        JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            new JsonTurnLogAppender(writer, sessionId).onTurnComplete(result, userInput);
+        }
         return new JsonSessionStore(dir.resolve("sessions"));
     }
 

@@ -128,10 +128,12 @@ class TurnSettlementContractTest {
         TurnSettlement settlement = TurnSettlement.abnormal(
                 TurnExecutionStage.GENERATION_COORDINATION, result, failure);
         JsonSessionStore store = new JsonSessionStore(dir);
-        assertEquals(TurnPublicationReceipt.Status.COMPLETE,
-                new JsonTurnLogAppender(store, "hostile")
-                        .onTurnSettled(settlement, "raw user input")
-                        .status());
+        try (var writer = store.acquireSessionWriter("hostile")) {
+            assertEquals(TurnPublicationReceipt.Status.COMPLETE,
+                    new JsonTurnLogAppender(writer, "hostile")
+                            .onTurnSettled(settlement, "raw user input")
+                            .status());
+        }
         TurnRecord row = store.loadTurns("hostile").getFirst();
         LocalTurnTrace projected = store.loadTrace(
                 "hostile", row.traceId()).orElseThrow();

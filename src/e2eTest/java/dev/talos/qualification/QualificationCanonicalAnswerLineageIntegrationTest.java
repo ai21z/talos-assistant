@@ -85,13 +85,16 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             }
         });
         assertTrue(modes.setActive("ask"));
-        TurnProcessor processor = new TurnProcessor(modes);
-        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+        TurnResult result;
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            TurnProcessor processor = new TurnProcessor(modes);
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
 
-        TurnResult result = processor.process(
-                new Session(temp.resolve("deterministic-workspace"), config),
-                "Inspect the page and report when ready.",
-                Context.builder(config).build());
+            result = processor.process(
+                    new Session(temp.resolve("deterministic-workspace"), config),
+                    "Inspect the page and report when ready.",
+                    Context.builder(config).build());
+        }
         List<TurnRecord> records = store.loadTurns(sessionId);
 
         assertEquals(1, records.size());
@@ -139,13 +142,16 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             }
         });
         assertTrue(modes.setActive("ask"));
-        TurnProcessor processor = new TurnProcessor(modes);
-        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+        TurnResult result;
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            TurnProcessor processor = new TurnProcessor(modes);
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
 
-        TurnResult result = processor.process(
-                new Session(temp.resolve("operator-workspace"), config),
-                "Create cancellation.txt, then interrupt before approval.",
-                Context.builder(config).build());
+            result = processor.process(
+                    new Session(temp.resolve("operator-workspace"), config),
+                    "Create cancellation.txt, then interrupt before approval.",
+                    Context.builder(config).build());
+        }
         List<TurnRecord> records = store.loadTurns(sessionId);
 
         assertEquals(1, records.size());
