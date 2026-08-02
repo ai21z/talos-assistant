@@ -61,14 +61,35 @@ public final class TaskIntentResolver {
     }
 
     public static IntentResolution resolve(String userRequest, TaskContract legacyContract) {
-        TaskIntent parityIntent = fromLegacyContract(legacyContract);
+        return resolveInternal(
+                userRequest,
+                legacyContract,
+                new MutableResolverWork()).resolution();
+    }
+
+    static MeasuredIntentResolution resolveMeasured(
+            String userRequest,
+            TaskContract legacyContract
+    ) {
+        MutableResolverWork work = new MutableResolverWork();
+        return resolveInternal(userRequest, legacyContract, work);
+    }
+
+    private static MeasuredIntentResolution resolveInternal(
+            String userRequest,
+            TaskContract legacyContract,
+            MutableResolverWork work
+    ) {
         if (legacyContract == null) {
-            return new IntentResolution(
-                    parityIntent,
-                    CoordinatedMutationTailPlan.empty(
-                            userRequest == null ? "" : userRequest.strip()));
+            String canonical = userRequest == null ? "" : userRequest.strip();
+            return measured(new IntentResolution(
+                            fromLegacyContract(null, work),
+                            CoordinatedMutationTailPlan.empty(canonical),
+                            SequentialMutationClausePlan.empty(canonical)),
+                    work);
         }
         String canonicalRequest = legacyContract.originalUserRequest();
+        work.inputCharacters = canonicalRequest.length();
         LinkedHashSet<String> tailCandidates = new LinkedHashSet<>();
         tailCandidates.addAll(normalizedPaths(legacyContract.expectedTargets()));
         tailCandidates.addAll(normalizedPaths(legacyContract.sourceEvidenceTargets()));
@@ -78,26 +99,91 @@ public final class TaskIntentResolver {
         tailCandidates.addAll(normalizedPaths(
                 CoordinatedMutationTailParser.discoverDirectTargets(
                         canonicalRequest)));
+        tailCandidates.addAll(normalizedPaths(
+                CoordinatedMutationTailParser.discoverAllDirectTargets(
+                        canonicalRequest)));
         CoordinatedMutationTailPlan mutationTailPlan =
                 CoordinatedMutationTailParser.parse(canonicalRequest, tailCandidates);
+        List<SequentialMutationClausePlan.SourceSpan> excludedSequentialSpans =
+                mutationTailPlan.present()
+                        ? List.of(new SequentialMutationClausePlan.SourceSpan(
+                                mutationTailPlan.constraintStart(),
+                                mutationTailPlan.tailEnd()))
+                        : List.of();
+        SequentialMutationClausePlan sequentialMutationPlan =
+                SequentialMutationClauseParser.parse(
+                        canonicalRequest,
+                        tailCandidates,
+                        excludedSequentialSpans);
+        boolean parserLimit = sequentialMutationPlan.authorityLimitExceeded();
+        boolean rowOverflow = MutationPlanSelection.evidenceRowCount(
+                mutationTailPlan,
+                sequentialMutationPlan)
+                > SequentialMutationClausePlan.MAX_EVIDENCE_ROWS;
+        boolean characterOverflow = !parserLimit
+                && MutationPlanSelection.exceedsEvidenceCharacters(
+                        mutationTailPlan,
+                        sequentialMutationPlan);
+        boolean projectedRolefulOverflow = !parserLimit
+                && MutationPlanSelection
+                        .exceedsProjectedRolefulSourceCharacters(
+                                mutationTailPlan,
+                                sequentialMutationPlan);
+        if (parserLimit || rowOverflow || characterOverflow
+                || projectedRolefulOverflow) {
+            SequentialMutationClausePlan.RegionKind limitKind = parserLimit
+                    ? sequentialMutationPlan.authorityLimit().kind()
+                    : SequentialMutationClausePlan.RegionKind
+                            .LEXICAL_EVIDENCE_LIMIT_QUARANTINE;
+            mutationTailPlan = CoordinatedMutationTailPlan.empty(
+                    canonicalRequest);
+            sequentialMutationPlan = SequentialMutationClausePlan.authorityLimit(
+                    canonicalRequest,
+                    List.of(),
+                    limitKind);
+        }
+        if (sequentialMutationPlan.authorityLimitExceeded()) {
+            return failClosedAuthorityLimit(
+                    canonicalRequest,
+                    legacyContract,
+                    mutationTailPlan,
+                    sequentialMutationPlan,
+                    work);
+        }
         TaskContract authorityContract = authorityContract(
                 canonicalRequest,
                 legacyContract,
-                mutationTailPlan);
+                mutationTailPlan,
+                sequentialMutationPlan);
+        LegacyMutationScan legacyScan = legacyMutationScan(
+                canonicalRequest,
+                mutationTailPlan,
+                sequentialMutationPlan,
+                work);
         Set<String> sourceEvidenceTargets = effectiveSourceEvidenceTargets(
                 canonicalRequest,
                 authorityContract,
-                mutationTailPlan);
+                mutationTailPlan,
+                sequentialMutationPlan);
         Set<String> mutationTargets =
                 normalizedPaths(explicitMutationTargets(
                         canonicalRequest,
                         authorityContract,
-                        mutationTailPlan));
+                         mutationTailPlan,
+                         sequentialMutationPlan,
+                         legacyScan,
+                         work));
+        if (isGlobalReadOnly(legacyContract)
+                && isGlobalReadOnly(authorityContract)) {
+            mutationTargets = Set.of();
+        }
         Set<String> optionalMutationTargets =
                 normalizedPaths(explicitOptionalMutationTargets(
                         canonicalRequest,
                         authorityContract,
-                        mutationTailPlan));
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        legacyScan));
         if (hasExactStaticWebFileList(canonicalRequest)
                 || readThenRewriteExistingFiles(canonicalRequest)) {
             optionalMutationTargets = Set.of();
@@ -143,12 +229,24 @@ public final class TaskIntentResolver {
                 : mutationTailPlan.decisions()) {
             effectiveVerifyOnlyTargets.remove(decision.path());
         }
+        for (SequentialMutationClausePlan.ClauseDecision decision
+                : sequentialMutationPlan.effectiveDecisions()) {
+            if (decision.authority()
+                            == SequentialMutationClausePlan.Authority.REQUIRED
+                    || decision.authority()
+                            == SequentialMutationClausePlan.Authority
+                                    .FORBIDDEN) {
+                effectiveVerifyOnlyTargets.remove(decision.path());
+            }
+        }
         verifyOnlyTargets = normalizedPaths(effectiveVerifyOnlyTargets);
         Set<String> forbiddenTargets =
                 normalizedPaths(explicitForbiddenTargets(
                         canonicalRequest,
                         authorityContract,
-                        mutationTailPlan));
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        legacyScan));
         LinkedHashSet<String> mentionedOnlyTargets = new LinkedHashSet<>();
         mentionedOnlyTargets.addAll(mutationTailPlan.pathsWithAuthority(
                 CoordinatedMutationTailPlan.Authority.OPTIONAL));
@@ -156,7 +254,14 @@ public final class TaskIntentResolver {
                 CoordinatedMutationTailPlan.Authority.NON_AUTHORITATIVE));
         mentionedOnlyTargets.addAll(mutationTailPlan.pathsWithAuthority(
                 CoordinatedMutationTailPlan.Authority.WORKSPACE_OPERATION_BLOCKED));
+        mentionedOnlyTargets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                SequentialMutationClausePlan.Authority.OPTIONAL));
+        mentionedOnlyTargets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE));
+        mentionedOnlyTargets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                SequentialMutationClausePlan.Authority.WORKSPACE_OPERATION_BLOCKED));
         boolean requiresTypedProjection = !mutationTailPlan.decisions().isEmpty()
+                || sequentialMutationPlan.present()
                 || hasNonLiteralQuotedExpectedTarget(
                         canonicalRequest,
                         normalizedPaths(legacyContract.expectedTargets()));
@@ -167,8 +272,12 @@ public final class TaskIntentResolver {
                 && (!requiresTypedProjection
                 || mutationTargets.equals(normalizedPaths(
                         authorityContract.expectedTargets())))
-                && mutationTailPlan.decisions().isEmpty()) {
-            return new IntentResolution(parityIntent, mutationTailPlan);
+                && mutationTailPlan.decisions().isEmpty()
+                && !sequentialMutationPlan.present()) {
+            return measured(new IntentResolution(
+                    fromLegacyContract(legacyContract, work),
+                    mutationTailPlan,
+                    sequentialMutationPlan), work);
         }
         TaskIntent intent = rolefulIntent(
                 authorityContract.type(),
@@ -183,22 +292,142 @@ public final class TaskIntentResolver {
                 normalizedPaths(mentionedOnlyTargets),
                 canonicalRequest,
                 authorityContract.classificationReason(),
-                mutationTailPlan.decisionDerivations());
-        return new IntentResolution(
+                combinedDecisionSelections(
+                        mutationTailPlan,
+                        sequentialMutationPlan),
+                work);
+        return measured(new IntentResolution(
                 intent,
                 projectSupersededNonAuthorityDecisions(
                         mutationTailPlan,
-                        intent));
+                        sequentialMutationPlan,
+                        intent),
+                sequentialMutationPlan), work);
+    }
+
+    /**
+     * Incomplete bounded lexical analysis is an authority ceiling for the
+     * whole turn. The oversized partial plans are replaced by one bounded
+     * status; legacy negative/read obligations remain available, but no
+     * positive mutation target may be selected from an incomplete request.
+     */
+    private static MeasuredIntentResolution failClosedAuthorityLimit(
+            String canonicalRequest,
+            TaskContract legacyContract,
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            MutableResolverWork work
+    ) {
+        Set<String> sourceEvidenceTargets = normalizedPaths(
+                legacyContract.sourceEvidenceTargets());
+
+        LinkedHashSet<String> forbiddenTargets = new LinkedHashSet<>();
+        forbiddenTargets.addAll(normalizedPaths(
+                legacyContract.forbiddenTargets()));
+        forbiddenTargets.addAll(mutationTailPlan.pathsWithAuthority(
+                CoordinatedMutationTailPlan.Authority.FORBIDDEN));
+        forbiddenTargets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                SequentialMutationClausePlan.Authority.FORBIDDEN));
+        Set<String> normalizedForbidden = normalizedPaths(forbiddenTargets);
+
+        TaskIntent intent = authorityLimitIntent(
+                legacyContract.type(),
+                legacyContract.mutationRequested(),
+                legacyContract.verificationRequired(),
+                normalizedForbidden,
+                sourceEvidenceTargets,
+                canonicalRequest,
+                sequentialMutationPlan.authorityLimitReason(),
+                work);
+        return measured(new IntentResolution(
+                intent,
+                mutationTailPlan,
+                sequentialMutationPlan), work);
+    }
+
+    private static TaskIntent authorityLimitIntent(
+            TaskType type,
+            boolean mutationRequested,
+            boolean verificationRequired,
+            Set<String> forbiddenTargets,
+            Set<String> sourceEvidenceTargets,
+            String originalUserRequest,
+            String classificationReason,
+            MutableResolverWork work
+    ) {
+        List<TargetRef> targets = new ArrayList<>();
+        for (String target : sourceEvidenceTargets) {
+            targets.add(authorityLimitTarget(
+                    target,
+                    TargetRole.SOURCE_EVIDENCE,
+                    "authority-limit-source-obligation"));
+            recordTargetAccumulatorWrite(work);
+        }
+        for (String target : forbiddenTargets) {
+            targets.add(authorityLimitTarget(
+                    target,
+                    TargetRole.FORBIDDEN,
+                    "authority-limit-forbidden-obligation"));
+            recordTargetAccumulatorWrite(work);
+        }
+        return new TaskIntent(
+                type,
+                mutationRequested,
+                false,
+                verificationRequired,
+                new ArtifactTargetSet(targets),
+                originalUserRequest,
+                classificationReason);
+    }
+
+    private static TargetRef authorityLimitTarget(
+            String path,
+            TargetRole role,
+            String reason
+    ) {
+        return new TargetRef(
+                path,
+                role,
+                new IntentDerivation(
+                        TargetSource.RUNTIME_DEFAULT,
+                        reason,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        "",
+                        1.0));
     }
 
     private static CoordinatedMutationTailPlan
             projectSupersededNonAuthorityDecisions(
                     CoordinatedMutationTailPlan plan,
+                    SequentialMutationClausePlan sequentialPlan,
                     TaskIntent intent
             ) {
         if (plan == null || intent == null || !plan.present()) return plan;
+        Set<String> sequentialPaths = sequentialPlan == null
+                ? Set.of()
+                : sequentialPlan.effectiveDecisions().stream()
+                        .map(SequentialMutationClausePlan.ClauseDecision::path)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Map<String, MutationPlanSelection.SelectedDecision> selected =
+                MutationPlanSelection.selected(plan, sequentialPlan);
+        Set<String> overlappingPaths = plan.decisions().stream()
+                .map(CoordinatedMutationTailPlan.TargetDecision::path)
+                .filter(sequentialPaths::contains)
+                .filter(path -> intent.targets().find(path)
+                        .map(target -> MutationPlanSelection
+                                .derivationMatches(
+                                        target.derivation(),
+                                        selected.get(path).derivation(),
+                                        false))
+                        .orElse(false))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         CoordinatedMutationTailPlan projected =
-                plan.projectOnto(intent, false);
+                plan.projectOntoExcluding(
+                        intent,
+                        overlappingPaths,
+                        false);
         for (CoordinatedMutationTailPlan.TargetDecision decision
                 : plan.decisions()) {
             if (projected.decision(decision.path()).isPresent()) continue;
@@ -215,33 +444,44 @@ public final class TaskIntentResolver {
     private static TaskContract authorityContract(
             String canonicalRequest,
             TaskContract legacyContract,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan
     ) {
-        if (legacyContract == null
-                || mutationTailPlan == null
-                || !mutationTailPlan.present()
-                || !"global-read-only-negation".equals(
-                        legacyContract.classificationReason())
-                || mutationTailPlan.pathsWithAuthority(
+        boolean tailHasForbidden = mutationTailPlan != null
+                && mutationTailPlan.present()
+                && !mutationTailPlan.pathsWithAuthority(
                         CoordinatedMutationTailPlan.Authority.FORBIDDEN)
-                        .isEmpty()) {
+                        .isEmpty();
+        boolean sequentialHasForbidden = sequentialMutationPlan != null
+                && sequentialMutationPlan.present()
+                && !sequentialMutationPlan.pathsWithAuthority(
+                        SequentialMutationClausePlan.Authority.FORBIDDEN)
+                        .isEmpty();
+        if (legacyContract == null
+                || !tailHasForbidden && !sequentialHasForbidden
+                || !"global-read-only-negation".equals(
+                        legacyContract.classificationReason())) {
             return legacyContract;
         }
-        boolean everyProhibitionIsClosedAndTargetLocal =
-                mutationTailPlan.decisions().stream()
+        if (sequentialHasForbidden) {
+            return legacyContract;
+        }
+        boolean everyTailProhibitionIsClosedAndTargetLocal =
+                mutationTailPlan == null || mutationTailPlan.decisions().stream()
                         .filter(decision -> decision.authority()
                                 == CoordinatedMutationTailPlan.Authority
                                         .FORBIDDEN)
                         .allMatch(decision -> punctuationOrWhitespaceOnly(
                                 canonicalRequest,
-                                decision.authorityEndOffset(),
-                                decision.endOffset()));
-        if (!everyProhibitionIsClosedAndTargetLocal) {
+                                 decision.authorityEndOffset(),
+                                 decision.endOffset()));
+        if (!everyTailProhibitionIsClosedAndTargetLocal) {
             return legacyContract;
         }
         String outsideForbiddenDecisions = requestWithoutForbiddenDecisionSpans(
                 canonicalRequest,
-                mutationTailPlan);
+                mutationTailPlan,
+                sequentialMutationPlan);
         TaskContract primary = TaskContractResolver.fromUserRequest(
                 outsideForbiddenDecisions);
         if (!primary.mutationAllowed()
@@ -263,12 +503,19 @@ public final class TaskIntentResolver {
     private static Set<String> effectiveSourceEvidenceTargets(
             String canonicalRequest,
             TaskContract authorityContract,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan
     ) {
         Set<String> sourceTargets = authorityContract == null
                 ? Set.of()
                 : normalizedPaths(authorityContract.sourceEvidenceTargets());
         LinkedHashSet<String> effective = new LinkedHashSet<>(sourceTargets);
+        if (sequentialMutationPlan != null
+                && sequentialMutationPlan.present()) {
+            effective.addAll(
+                    authoritativeRequiredSourceEvidenceTargets(
+                            canonicalRequest));
+        }
         if (mutationTailPlan == null
                 || mutationTailPlan.decisions().isEmpty()) {
             return normalizedPaths(effective);
@@ -688,14 +935,14 @@ public final class TaskIntentResolver {
                 mutationTailPlan.decision(target).orElse(null);
         if (decision == null
                 || decision.authority()
-                        == CoordinatedMutationTailPlan.Authority.FORBIDDEN) {
+                        == CoordinatedMutationTailPlan.Authority.FORBIDDEN
+                || decision.actionFamily()
+                        != CoordinatedMutationTailPlan.ActionFamily
+                                .CONTENT_MUTATION) {
             return false;
         }
 
-        RequestLexicalView view = RequestLexicalView.of(canonicalRequest);
-        int mutationActionStart =
-                decisionActionStart(view, decision);
-        if (mutationActionStart < 0) return false;
+        int mutationActionStart = decision.actionStartOffset();
         int scopeStart = Math.max(
                 0,
                 mutationTailPlan.constraintStart());
@@ -704,30 +951,6 @@ public final class TaskIntentResolver {
                                 scopeStart,
                                 mutationActionStart))
                 .contains(TargetRef.normalizePath(target));
-    }
-
-    private static int decisionActionStart(
-            RequestLexicalView view,
-            CoordinatedMutationTailPlan.TargetDecision decision
-    ) {
-        if (view == null || decision == null) return -1;
-        int end = Math.min(
-                view.request().length(),
-                Math.max(decision.startOffset(), decision.authorityEndOffset()));
-        return CanonicalMutationClauseMatcher.actions(
-                        view,
-                        decision.startOffset(),
-                        end)
-                .stream()
-                .filter(action -> action.family()
-                        == CanonicalMutationClauseMatcher.Family
-                                .CONTENT_MUTATION)
-                .filter(action -> action.verb().equalsIgnoreCase(
-                        decision.action()))
-                .mapToInt(
-                        CanonicalMutationClauseMatcher.Action::start)
-                .max()
-                .orElse(-1);
     }
 
     private static boolean directSourceEvidenceAction(
@@ -790,30 +1013,55 @@ public final class TaskIntentResolver {
 
     private static String requestWithoutForbiddenDecisionSpans(
             String userRequest,
-            CoordinatedMutationTailPlan plan
+            CoordinatedMutationTailPlan plan,
+            SequentialMutationClausePlan sequentialPlan
     ) {
-        if (userRequest == null || plan == null || !plan.present()) {
+        if (userRequest == null) {
             return userRequest;
         }
         StringBuilder out = new StringBuilder(userRequest);
-        for (CoordinatedMutationTailPlan.TargetDecision decision
-                : plan.decisions()) {
-            if (decision.authority()
-                    != CoordinatedMutationTailPlan.Authority.FORBIDDEN) {
-                continue;
-            }
-            int start = Math.max(0, decision.startOffset());
-            int end = Math.min(
-                    out.length(),
-                    decision.authorityEndOffset());
-            for (int i = start; i < end; i++) {
-                char value = out.charAt(i);
-                if (value != '\n' && value != '\r') {
-                    out.setCharAt(i, ' ');
+        if (plan != null) {
+            for (CoordinatedMutationTailPlan.TargetDecision decision
+                    : plan.decisions()) {
+                if (decision.authority()
+                        != CoordinatedMutationTailPlan.Authority.FORBIDDEN) {
+                    continue;
                 }
+                maskRequestSpan(
+                        out,
+                        decision.startOffset(),
+                        decision.authorityEndOffset());
+            }
+        }
+        if (sequentialPlan != null) {
+            for (SequentialMutationClausePlan.ClauseDecision decision
+                    : sequentialPlan.occurrenceDecisions()) {
+                if (decision.authority()
+                        != SequentialMutationClausePlan.Authority.FORBIDDEN) {
+                    continue;
+                }
+                maskRequestSpan(
+                        out,
+                        decision.startOffset(),
+                        decision.endOffset());
             }
         }
         return out.toString();
+    }
+
+    private static void maskRequestSpan(
+            StringBuilder out,
+            int rawStart,
+            int rawEnd
+    ) {
+        int start = Math.max(0, rawStart);
+        int end = Math.min(out.length(), Math.max(start, rawEnd));
+        for (int index = start; index < end; index++) {
+            char value = out.charAt(index);
+            if (value != '\n' && value != '\r') {
+                out.setCharAt(index, ' ');
+            }
+        }
     }
 
     private static boolean punctuationOrWhitespaceOnly(
@@ -838,13 +1086,21 @@ public final class TaskIntentResolver {
     }
 
     public static TaskIntent fromLegacyContract(TaskContract contract) {
+        return fromLegacyContract(contract, null);
+    }
+
+    private static TaskIntent fromLegacyContract(
+            TaskContract contract,
+            MutableResolverWork work
+    ) {
+        if (work != null) work.legacyIntentBuilds++;
         if (contract == null) {
             return new TaskIntent(null, false, false, false, ArtifactTargetSet.empty(), "", "");
         }
         Set<String> expectedTargets = normalizedPaths(contract.expectedTargets());
         Set<String> sourceEvidenceTargets = normalizedPaths(contract.sourceEvidenceTargets());
         Set<String> forbiddenTargets = normalizedPaths(contract.forbiddenTargets());
-        ArtifactTargetSet targets = ArtifactTargetSet.empty();
+        List<TargetRef> targets = new ArrayList<>();
         for (String target : expectedTargets) {
             TargetRole role;
             if (!contract.mutationAllowed()) {
@@ -856,23 +1112,32 @@ public final class TaskIntentResolver {
                         ? TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
                         : TargetRole.MUST_MUTATE;
             }
-            targets = targets.with(targetRef(contract.originalUserRequest(), target, role));
+            targets.add(targetRef(contract.originalUserRequest(), target, role));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : sourceEvidenceTargets) {
             if (expectedTargets.contains(target)) {
                 continue;
             }
-            targets = targets.with(targetRef(contract.originalUserRequest(), target, TargetRole.SOURCE_EVIDENCE));
+            targets.add(targetRef(
+                    contract.originalUserRequest(),
+                    target,
+                    TargetRole.SOURCE_EVIDENCE));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : forbiddenTargets) {
-            targets = targets.with(targetRef(contract.originalUserRequest(), target, TargetRole.FORBIDDEN));
+            targets.add(targetRef(
+                    contract.originalUserRequest(),
+                    target,
+                    TargetRole.FORBIDDEN));
+            recordTargetAccumulatorWrite(work);
         }
         return new TaskIntent(
                 contract.type(),
                 contract.mutationRequested(),
                 contract.mutationAllowed(),
                 contract.verificationRequired(),
-                targets,
+                new ArtifactTargetSet(targets),
                 contract.originalUserRequest(),
                 contract.classificationReason());
     }
@@ -890,67 +1155,74 @@ public final class TaskIntentResolver {
             Set<String> mentionedOnlyTargets,
             String originalUserRequest,
             String classificationReason,
-            Map<String, IntentDerivation> decisionDerivations
+            Map<String, MutationPlanSelection.SelectedDecision>
+                    decisionSelections,
+            MutableResolverWork work
     ) {
-        ArtifactTargetSet targets = ArtifactTargetSet.empty();
+        List<TargetRef> targets = new ArrayList<>();
         for (String target : mutationTargets) {
             TargetRole role = sourceEvidenceTargets.contains(target)
                     ? TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
                     : TargetRole.MUST_MUTATE;
-            IntentDerivation derivation = decisionDerivations == null
-                    ? null
-                    : decisionDerivations.get(target);
-            if (derivation != null
-                    && !"explicit-mutation-target".equals(
-                            derivation.reason())) {
-                derivation = null;
-            }
-            targets = targets.with(derivation == null
+            IntentDerivation derivation = selectedDerivationForRole(
+                    decisionSelections,
+                    target,
+                    role);
+            targets.add(derivation == null
                     ? targetRef(originalUserRequest, target, role)
                     : new TargetRef(target, role, derivation));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : optionalMutationTargets) {
             if (!sourceEvidenceTargets.contains(target)) {
-                targets = targets.with(targetRef(
+                targets.add(targetRef(
                         originalUserRequest,
                         target,
                         TargetRole.MAY_MUTATE,
-                        decisionDerivations));
+                        decisionSelections));
+                recordTargetAccumulatorWrite(work);
             }
         }
         for (String target : verifyOnlyTargets) {
-            targets = targets.with(targetRef(
+            targets.add(targetRef(
                     originalUserRequest,
                     target,
                     TargetRole.VERIFY_ONLY,
-                    decisionDerivations));
+                    decisionSelections));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : sourceEvidenceTargets) {
             if (mutationTargets.contains(target)) {
                 continue;
             }
-            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.SOURCE_EVIDENCE));
+            targets.add(targetRef(
+                    originalUserRequest,
+                    target,
+                    TargetRole.SOURCE_EVIDENCE));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : forbiddenTargets) {
-            targets = targets.with(targetRef(
+            targets.add(targetRef(
                     originalUserRequest,
                     target,
                     TargetRole.FORBIDDEN,
-                    decisionDerivations));
+                    decisionSelections));
+            recordTargetAccumulatorWrite(work);
         }
         for (String target : mentionedOnlyTargets) {
-            targets = targets.with(targetRef(
+            targets.add(targetRef(
                     originalUserRequest,
                     target,
                     TargetRole.MENTIONED_ONLY,
-                    decisionDerivations));
+                    decisionSelections));
+            recordTargetAccumulatorWrite(work);
         }
         return new TaskIntent(
                 type,
                 mutationRequested,
                 mutationAllowed,
                 verificationRequired,
-                targets,
+                new ArtifactTargetSet(targets),
                 originalUserRequest,
                 classificationReason);
     }
@@ -963,14 +1235,29 @@ public final class TaskIntentResolver {
             String userRequest,
             String target,
             TargetRole role,
-            Map<String, IntentDerivation> decisionDerivations
+            Map<String, MutationPlanSelection.SelectedDecision>
+                    decisionSelections
     ) {
-        IntentDerivation derivation = decisionDerivations == null
-                ? null
-                : decisionDerivations.get(target);
+        IntentDerivation derivation = selectedDerivationForRole(
+                decisionSelections,
+                target,
+                role);
         return derivation == null
                 ? targetRef(userRequest, target, role)
                 : new TargetRef(target, role, derivation);
+    }
+
+    private static IntentDerivation selectedDerivationForRole(
+            Map<String, MutationPlanSelection.SelectedDecision> selections,
+            String target,
+            TargetRole role
+    ) {
+        MutationPlanSelection.SelectedDecision decision = selections == null
+                ? null
+                : selections.get(target);
+        return MutationPlanSelection.roleMatches(decision, role)
+                ? decision.derivation()
+                : null;
     }
 
     private static IntentDerivation derivationForTarget(String userRequest, String target, TargetRole role) {
@@ -1024,10 +1311,20 @@ public final class TaskIntentResolver {
                 && !forbiddenTargets.equals(normalizedPaths(legacyContract.forbiddenTargets()));
     }
 
+    private static boolean isGlobalReadOnly(TaskContract contract) {
+        return contract != null
+                && !contract.mutationAllowed()
+                && "global-read-only-negation".equals(
+                        contract.classificationReason());
+    }
+
     private static Set<String> explicitMutationTargets(
             String userRequest,
             TaskContract legacyContract,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            LegacyMutationScan legacyScan,
+            MutableResolverWork work
     ) {
         if (userRequest == null || userRequest.isBlank()
                 || legacyContract == null) {
@@ -1036,9 +1333,16 @@ public final class TaskIntentResolver {
         Set<String> expectedTargets = normalizedPaths(legacyContract.expectedTargets());
         Set<String> forbiddenTargets = normalizedPaths(legacyContract.forbiddenTargets());
         LinkedHashSet<String> targets = new LinkedHashSet<>();
-        String legacyScanRequest = requestOutsideOwnedTail(userRequest, mutationTailPlan);
-        for (String clause : clauses(legacyScanRequest)) {
-            String mutationFragment = mutationFragment(clause);
+        for (String clause : legacyScan.clauses()) {
+            work.legacyClauseVisits++;
+            /*
+             * Typed tail/sequential spans are already blanked in legacyScan.
+             * Inspect the complete remaining clause so an ordinary legacy
+             * target after a non-owning token such as replacement "with" is
+             * not discarded merely because a different sequential clause
+             * caused typed projection.
+             */
+            String mutationFragment = clause;
             String lowerClause = visibleClause(mutationFragment).toLowerCase(Locale.ROOT);
             if (isNegatedClause(lowerClause)
                     || isAdvisoryClause(lowerClause)
@@ -1051,14 +1355,16 @@ public final class TaskIntentResolver {
                 }
             }
         }
-        if (mutationTailPlan != null && mutationTailPlan.present()) {
-            for (String target : expectedTargets) {
-                if (!forbiddenTargets.contains(target)
-                        && CanonicalMutationClauseMatcher.directlyBindsContentTarget(
-                                legacyScanRequest,
-                                target)) {
-                    targets.add(target);
-                }
+        Set<String> independentlyRequired = Set.of();
+        if (mutationTailPlan != null && mutationTailPlan.present()
+                || sequentialMutationPlan != null
+                        && sequentialMutationPlan.present()) {
+            independentlyRequired = independentlyRequiredContentTargets(
+                    legacyScan,
+                    expectedTargets,
+                    work);
+            for (String target : independentlyRequired) {
+                if (!forbiddenTargets.contains(target)) targets.add(target);
             }
         }
         if (mutationTailPlan != null) {
@@ -1070,51 +1376,83 @@ public final class TaskIntentResolver {
                     CoordinatedMutationTailPlan.Authority.FORBIDDEN));
             for (String target : mutationTailPlan.pathsWithAuthority(
                     CoordinatedMutationTailPlan.Authority.OPTIONAL)) {
-                if (!hasIndependentRequiredContentBinding(
-                        legacyScanRequest,
-                        target)) {
+                work.authorityTargetVisits++;
+                if (!independentlyRequired.contains(target)) {
                     targets.remove(target);
                 }
             }
             for (String target : mutationTailPlan.pathsWithAuthority(
                     CoordinatedMutationTailPlan.Authority.NON_AUTHORITATIVE)) {
-                if (!hasIndependentRequiredContentBinding(
-                        legacyScanRequest,
-                        target)) {
+                work.authorityTargetVisits++;
+                if (!independentlyRequired.contains(target)) {
                     targets.remove(target);
                 }
             }
             targets.removeAll(mutationTailPlan.pathsWithAuthority(
                     CoordinatedMutationTailPlan.Authority.WORKSPACE_OPERATION_BLOCKED));
         }
+        if (sequentialMutationPlan != null) {
+            targets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                    SequentialMutationClausePlan.Authority.REQUIRED));
+            targets.removeAll(sequentialMutationPlan.pathsWithAuthority(
+                    SequentialMutationClausePlan.Authority.FORBIDDEN));
+            for (SequentialMutationClausePlan.Authority authority : List.of(
+                    SequentialMutationClausePlan.Authority.OPTIONAL,
+                    SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE,
+                    SequentialMutationClausePlan.Authority
+                            .WORKSPACE_OPERATION_BLOCKED)) {
+                for (String target : sequentialMutationPlan
+                        .pathsWithAuthority(authority)) {
+                    work.authorityTargetVisits++;
+                    boolean tailRequired = mutationTailPlan != null
+                            && mutationTailPlan.pathsWithAuthority(
+                                    CoordinatedMutationTailPlan.Authority
+                                            .REQUIRED)
+                                    .contains(target);
+                    if (!tailRequired
+                            && !independentlyRequired.contains(target)) {
+                        targets.remove(target);
+                    }
+                }
+            }
+        }
         return normalizedPaths(targets);
     }
 
-    private static boolean hasIndependentRequiredContentBinding(
-            String request,
-            String target
+    private static Set<String> independentlyRequiredContentTargets(
+            LegacyMutationScan legacyScan,
+            Set<String> candidates,
+            MutableResolverWork work
     ) {
-        if (request == null || request.isBlank()
-                || target == null || target.isBlank()) {
-            return false;
+        if (legacyScan == null
+                || legacyScan.request().isBlank()
+                || candidates == null
+                || candidates.isEmpty()) {
+            return Set.of();
         }
-        String normalizedTarget = TargetRef.normalizePath(target);
-        RequestLexicalView view = RequestLexicalView.of(request);
-        return CoordinatedMutationTailParser
-                .requiredLocalContentActionBindings(
-                        view,
-                        Set.of(normalizedTarget),
+        work.requiredBindingBatchBuilds++;
+        work.requiredBindingCandidateCount += candidates.size();
+        var measured = CoordinatedMutationTailParser
+                .requiredLocalContentActionBindingsWithWork(
+                        legacyScan.view(),
+                        candidates,
                         0,
-                        request.length())
-                .stream()
-                .anyMatch(binding ->
-                        binding.outputPaths().contains(normalizedTarget));
+                        legacyScan.request().length());
+        work.requiredBindingWork = measured.work();
+        LinkedHashSet<String> required = new LinkedHashSet<>();
+        for (var binding : measured.bindings()) {
+            work.requiredBindingVisits++;
+            required.addAll(binding.outputPaths());
+        }
+        return Collections.unmodifiableSet(required);
     }
 
     private static Set<String> explicitOptionalMutationTargets(
             String userRequest,
             TaskContract legacyContract,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            LegacyMutationScan legacyScan
     ) {
         if (userRequest == null || userRequest.isBlank()
                 || legacyContract == null) {
@@ -1123,9 +1461,8 @@ public final class TaskIntentResolver {
         Set<String> expectedTargets = normalizedPaths(legacyContract.expectedTargets());
         Set<String> forbiddenTargets = normalizedPaths(legacyContract.forbiddenTargets());
         LinkedHashSet<String> targets = new LinkedHashSet<>();
-        String legacyScanRequest = requestOutsideOwnedTail(userRequest, mutationTailPlan);
-        for (String clause : clauses(legacyScanRequest)) {
-            String mutationFragment = mutationFragment(clause);
+        for (String clause : legacyScan.clauses()) {
+            String mutationFragment = clause;
             String visibleMutationFragment = visibleClause(mutationFragment);
             String lowerClause = visibleMutationFragment.toLowerCase(Locale.ROOT);
             if (isNegatedClause(lowerClause)
@@ -1170,7 +1507,9 @@ public final class TaskIntentResolver {
     private static Set<String> explicitForbiddenTargets(
             String userRequest,
             TaskContract legacyContract,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            LegacyMutationScan legacyScan
     ) {
         if (userRequest == null || userRequest.isBlank()
                 || legacyContract == null) {
@@ -1181,14 +1520,19 @@ public final class TaskIntentResolver {
         Set<String> expectedTargets = normalizedPaths(legacyContract.expectedTargets());
         Set<String> legacyForbidden =
                 normalizedPaths(legacyContract.forbiddenTargets());
-        Set<String> planPaths = mutationTailPlan == null
-                ? Set.of()
-                : mutationTailPlan.decisions().stream()
-                        .map(CoordinatedMutationTailPlan.TargetDecision::path)
-                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        String outsideTail = requestOutsideOwnedTail(userRequest, mutationTailPlan);
+        LinkedHashSet<String> planPaths = new LinkedHashSet<>();
+        if (mutationTailPlan != null) {
+            mutationTailPlan.decisions().stream()
+                    .map(CoordinatedMutationTailPlan.TargetDecision::path)
+                    .forEach(planPaths::add);
+        }
+        if (sequentialMutationPlan != null) {
+            sequentialMutationPlan.effectiveDecisions().stream()
+                    .map(SequentialMutationClausePlan.ClauseDecision::path)
+                    .forEach(planPaths::add);
+        }
         LinkedHashSet<String> outsideForbidden = new LinkedHashSet<>();
-        for (String clause : clauses(outsideTail)) {
+        for (String clause : legacyScan.clauses()) {
             String visible = visibleClause(clause);
             String lowerClause = visible.toLowerCase(Locale.ROOT);
             if (!isNegatedClause(lowerClause)) continue;
@@ -1209,6 +1553,10 @@ public final class TaskIntentResolver {
             targets.addAll(mutationTailPlan.pathsWithAuthority(
                     CoordinatedMutationTailPlan.Authority.FORBIDDEN));
         }
+        if (sequentialMutationPlan != null) {
+            targets.addAll(sequentialMutationPlan.pathsWithAuthority(
+                    SequentialMutationClausePlan.Authority.FORBIDDEN));
+        }
         return normalizedPaths(targets);
     }
 
@@ -1223,7 +1571,18 @@ public final class TaskIntentResolver {
 
     private static String[] clauses(String userRequest) {
         if (userRequest == null || userRequest.isEmpty()) return new String[] {""};
-        RequestLexicalView view = RequestLexicalView.of(userRequest);
+        return clauses(userRequest, RequestLexicalView.of(userRequest));
+    }
+
+    private static String[] clauses(
+            String userRequest,
+            RequestLexicalView view
+    ) {
+        if (userRequest == null || userRequest.isEmpty()) return new String[] {""};
+        if (view == null || !view.request().equals(userRequest)) {
+            throw new IllegalArgumentException(
+                    "clause splitting requires the matching lexical view");
+        }
         java.util.ArrayList<String> out = new java.util.ArrayList<>();
         Matcher coordinatedNegation = COORDINATED_NEGATION.matcher(view.maskedLower());
         java.util.Map<Integer, Integer> negationBoundaries = new java.util.HashMap<>();
@@ -1331,8 +1690,27 @@ public final class TaskIntentResolver {
     }
 
     private static boolean containsExplicitMutationVerb(String lowerClause) {
-        return lowerClause.matches("(?s).*\\b(?:improve|edit|update|rewrite|modify|change|fix|"
-                + "adjust|tweak|restyle|redesign|polish)\\b.*");
+        if (lowerClause == null || lowerClause.isBlank()) return false;
+        RequestLexicalView view = RequestLexicalView.of(lowerClause);
+        boolean canonical = CanonicalMutationClauseMatcher.actions(
+                        view,
+                        0,
+                        lowerClause.length()).stream()
+                .anyMatch(action -> action.family()
+                                == CanonicalMutationClauseMatcher.Family
+                                        .CONTENT_MUTATION
+                        && !action.nonImperativeUse());
+        if (canonical) return true;
+        /*
+         * Preserve the legacy contract's already-authoritative primary target
+         * when unrelated typed-plan evidence forces projection. This fallback
+         * never discovers a new path; callers intersect it with legacy
+         * expected targets.
+         */
+        return lowerClause.matches(
+                "(?s).*\\b(?:improve|edit|update|rewrite|replace|overwrite|"
+                        + "modify|change|fix|adjust|tweak|restyle|redesign|"
+                        + "polish)\\b.*");
     }
 
     private static boolean hasOptionalMutationQualifier(String fragment, String target, Set<String> allTargets) {
@@ -1551,6 +1929,237 @@ public final class TaskIntentResolver {
         return out.toString();
     }
 
+    private static LegacyMutationScan legacyMutationScan(
+            String userRequest,
+            CoordinatedMutationTailPlan tailPlan,
+            SequentialMutationClausePlan sequentialPlan,
+            MutableResolverWork work
+    ) {
+        String request = requestOutsideOwnedPlans(
+                userRequest,
+                tailPlan,
+                sequentialPlan,
+                work);
+        work.legacyLexicalViewBuilds++;
+        work.legacyLexicalInputCharacters += request.length();
+        RequestLexicalView view = RequestLexicalView.of(request);
+        List<String> materializedClauses = List.of(clauses(request, view));
+        work.legacyClauseMaterializations += materializedClauses.size();
+        for (String clause : materializedClauses) {
+            work.legacyClauseCharacters += clause.length();
+        }
+        return new LegacyMutationScan(request, view, materializedClauses);
+    }
+
+    private static String requestOutsideOwnedPlans(
+            String userRequest,
+            CoordinatedMutationTailPlan tailPlan,
+            SequentialMutationClausePlan sequentialPlan,
+            MutableResolverWork work
+    ) {
+        if (userRequest == null) return null;
+        boolean hasTail = tailPlan != null
+                && tailPlan.present()
+                && tailPlan.constraintStart() >= 0
+                && tailPlan.tailEnd() <= userRequest.length();
+        List<SequentialMutationClausePlan.SourceSpan> sequentialSpans =
+                sequentialPlan == null
+                        ? List.of()
+                        : sequentialPlan.legacyMutationSpans();
+        if (!hasTail && sequentialSpans.isEmpty()) {
+            return userRequest;
+        }
+        work.ownedPlanMaterializations++;
+        work.ownedPlanMaterializedCharacters += userRequest.length();
+        StringBuilder masked = new StringBuilder(userRequest);
+        if (hasTail) {
+            maskLegacySpan(
+                    masked,
+                    tailPlan.constraintStart(),
+                    tailPlan.tailEnd(),
+                    work);
+        }
+        for (SequentialMutationClausePlan.SourceSpan span : sequentialSpans) {
+            maskLegacySpan(
+                    masked,
+                    span.startOffset(),
+                    span.endOffset(),
+                    work);
+        }
+        return masked.toString();
+    }
+
+    private static void maskLegacySpan(
+            StringBuilder masked,
+            int rawStart,
+            int rawEnd,
+            MutableResolverWork work
+    ) {
+        int start = Math.max(0, Math.min(rawStart, masked.length()));
+        int end = Math.max(start, Math.min(rawEnd, masked.length()));
+        for (int index = start; index < end; index++) {
+            work.ownedPlanMaskCharacterVisits++;
+            char value = masked.charAt(index);
+            if (value != '\n'
+                    && value != '\r'
+                    && !preserveTerminalClauseBoundary(
+                            masked,
+                            index,
+                            start,
+                            end)) {
+                masked.setCharAt(index, ' ');
+            }
+        }
+    }
+
+    private static boolean preserveTerminalClauseBoundary(
+            CharSequence request,
+            int index,
+            int spanStart,
+            int spanEnd
+    ) {
+        char value = request.charAt(index);
+        if (value != '.'
+                && value != '!'
+                && value != '?'
+                && value != '\u2026'
+                && value != ';'
+                && value != ',') {
+            return false;
+        }
+        for (int cursor = index + 1; cursor < spanEnd; cursor++) {
+            if (!Character.isWhitespace(request.charAt(cursor))) return false;
+        }
+        for (int cursor = index - 1; cursor >= spanStart; cursor--) {
+            if (!Character.isWhitespace(request.charAt(cursor))) return true;
+        }
+        return false;
+    }
+
+    private static Map<String, MutationPlanSelection.SelectedDecision>
+            combinedDecisionSelections(
+            CoordinatedMutationTailPlan tailPlan,
+            SequentialMutationClausePlan sequentialPlan
+    ) {
+        return MutationPlanSelection.selected(tailPlan, sequentialPlan);
+    }
+
+    private static MeasuredIntentResolution measured(
+            IntentResolution resolution,
+            MutableResolverWork work
+    ) {
+        return new MeasuredIntentResolution(resolution, work.snapshot());
+    }
+
+    private static void recordTargetAccumulatorWrite(MutableResolverWork work) {
+        if (work != null) work.targetAccumulatorWrites++;
+    }
+
+    private record LegacyMutationScan(
+            String request,
+            RequestLexicalView view,
+            List<String> clauses
+    ) {
+        private LegacyMutationScan {
+            request = request == null ? "" : request;
+            if (view == null || !request.equals(view.request())) {
+                throw new IllegalArgumentException(
+                        "legacy scan requires one matching lexical view");
+            }
+            clauses = clauses == null ? List.of() : List.copyOf(clauses);
+        }
+    }
+
+    record MeasuredIntentResolution(
+            IntentResolution resolution,
+            ResolverWork work
+    ) {}
+
+    record ResolverWork(
+            long inputCharacters,
+            int legacyIntentBuilds,
+            int ownedPlanMaterializations,
+            long ownedPlanMaterializedCharacters,
+            long ownedPlanMaskCharacterVisits,
+            int legacyLexicalViewBuilds,
+            long legacyLexicalInputCharacters,
+            int legacyClauseMaterializations,
+            long legacyClauseCharacters,
+            long legacyClauseVisits,
+            int requiredBindingBatchBuilds,
+            long requiredBindingCandidateCount,
+            long requiredBindingVisits,
+            long authorityTargetVisits,
+            long targetAccumulatorWrites,
+            CoordinatedMutationTailParser.ParseWork requiredBindingWork
+    ) {
+        long totalVisits() {
+            long binding = requiredBindingWork == null
+                    ? 0
+                    : requiredBindingWork.targetPatternCharacters()
+                            + requiredBindingWork.targetInputCharacters()
+                            + requiredBindingWork.targetAutomatonTransitions()
+                            + requiredBindingWork.targetFailureTransitions()
+                            + requiredBindingWork.targetOutputVisits()
+                            + requiredBindingWork.indexedOccurrenceVisits()
+                            + requiredBindingWork.actionOccurrenceVisits()
+                            + requiredBindingWork.authorityActionInputCharacters()
+                            + requiredBindingWork.authorityConnectorInputCharacters()
+                            + requiredBindingWork.authorityClauseCharacters()
+                            + requiredBindingWork.authorityFallbackCharacters()
+                            + requiredBindingWork.authorityTargetEnvelopeVisits();
+            return ownedPlanMaterializedCharacters
+                    + ownedPlanMaskCharacterVisits
+                    + legacyLexicalInputCharacters
+                    + legacyClauseCharacters
+                    + legacyClauseVisits
+                    + requiredBindingCandidateCount
+                    + requiredBindingVisits
+                    + authorityTargetVisits
+                    + targetAccumulatorWrites
+                    + binding;
+        }
+    }
+
+    private static final class MutableResolverWork {
+        private long inputCharacters;
+        private int legacyIntentBuilds;
+        private int ownedPlanMaterializations;
+        private long ownedPlanMaterializedCharacters;
+        private long ownedPlanMaskCharacterVisits;
+        private int legacyLexicalViewBuilds;
+        private long legacyLexicalInputCharacters;
+        private int legacyClauseMaterializations;
+        private long legacyClauseCharacters;
+        private long legacyClauseVisits;
+        private int requiredBindingBatchBuilds;
+        private long requiredBindingCandidateCount;
+        private long requiredBindingVisits;
+        private long authorityTargetVisits;
+        private long targetAccumulatorWrites;
+        private CoordinatedMutationTailParser.ParseWork requiredBindingWork;
+
+        private ResolverWork snapshot() {
+            return new ResolverWork(
+                    inputCharacters,
+                    legacyIntentBuilds,
+                    ownedPlanMaterializations,
+                    ownedPlanMaterializedCharacters,
+                    ownedPlanMaskCharacterVisits,
+                    legacyLexicalViewBuilds,
+                    legacyLexicalInputCharacters,
+                    legacyClauseMaterializations,
+                    legacyClauseCharacters,
+                    legacyClauseVisits,
+                    requiredBindingBatchBuilds,
+                    requiredBindingCandidateCount,
+                    requiredBindingVisits,
+                    authorityTargetVisits,
+                    targetAccumulatorWrites,
+                    requiredBindingWork);
+        }
+    }
+
     record DirectSourceBinding(
             int connectorStart,
             int connectorEnd,
@@ -1601,7 +2210,8 @@ public final class TaskIntentResolver {
 
     public record IntentResolution(
             TaskIntent intent,
-            CoordinatedMutationTailPlan mutationTailPlan
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan
     ) {
         public IntentResolution {
             intent = intent == null
@@ -1610,7 +2220,12 @@ public final class TaskIntentResolver {
             mutationTailPlan = mutationTailPlan == null
                     ? CoordinatedMutationTailPlan.empty(intent.originalUserRequest())
                     : mutationTailPlan;
+            sequentialMutationPlan = sequentialMutationPlan == null
+                    ? SequentialMutationClausePlan.empty(
+                            intent.originalUserRequest())
+                    : sequentialMutationPlan;
         }
+
     }
 
     public record DirectSourceAuthority(

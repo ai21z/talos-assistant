@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -20,6 +21,12 @@ import java.util.regex.Pattern;
  * consume the shared lexical primitives.
  */
 public final class CoordinatedMutationTailParser {
+
+    static final int MAX_TARGET_OUTPUT_VISITS = 16_384;
+    static final int MAX_INDEXED_TARGET_OCCURRENCES = 8_192;
+
+    private static final Set<String> BARE_ANAPHORA = Set.of(
+            "it", "that", "this", "them", "those");
 
     private static final List<String> CONSTRAINT_MARKERS = List.of(
             " so ",
@@ -329,14 +336,6 @@ public final class CoordinatedMutationTailParser {
                 workspaceOperationObservations = new ArrayList<>();
         List<CoordinatedMutationTailPlan.WorkspaceOperationClauseObservation>
                 workspaceOperationClauseObservations = new ArrayList<>();
-        addPersistentProhibitions(
-                view,
-                candidates,
-                constraintStart,
-                tailEnd,
-                effective,
-                occurrenceIndex);
-
         List<CanonicalMutationClauseMatcher.Action> actions =
                 mutationActions(
                         view,
@@ -344,6 +343,16 @@ public final class CoordinatedMutationTailParser {
                         constraintStart,
                         tailEnd,
                         occurrenceIndex);
+        WorkspaceActionIndex workspaceActionIndex =
+                WorkspaceActionIndex.build(actions);
+        addPersistentProhibitions(
+                view,
+                candidates,
+                constraintStart,
+                tailEnd,
+                effective,
+                occurrenceIndex,
+                workspaceActionIndex);
         AuthorityScope inheritedScope = null;
         AuthorityTransition pendingTransition = AuthorityTransition.disconnected();
         int priorBoundEnvelopeEnd = -1;
@@ -430,7 +439,10 @@ public final class CoordinatedMutationTailParser {
                         : provisionalPreposed;
                 if (!preposed.targets().isEmpty()) {
                     boundTargets = new BoundTargets(
-                            preposed.targets(),
+                            List.of(new BoundTarget(
+                                    preposed.targets().getFirst(),
+                                    preposed.envelopeStart(),
+                                    preposed.envelopeEnd())),
                             action.end(),
                             false);
                     span = view.trimmedSpan(preposed.sourceStart(), actionEnd);
@@ -531,11 +543,11 @@ public final class CoordinatedMutationTailParser {
             NaturalBatchMatch naturalBatch = naturalBatchWorkspaceCreate(
                     view,
                     candidates,
-                    actions,
-                    i,
                     action,
                     boundTargets,
-                    occurrenceIndex);
+                    occurrenceIndex,
+                    nextActionStart,
+                    workspaceActionIndex);
             boolean workspaceOperation =
                     action.family()
                                     == CanonicalMutationClauseMatcher.Family
@@ -593,19 +605,19 @@ public final class CoordinatedMutationTailParser {
                                         span.end(),
                                         sourceText));
             }
-            for (String target : boundTargets.paths()) {
+            for (BoundTarget target : boundTargets.targets()) {
                 if (workspaceOperation) {
                     workspaceOperationObservations.add(
                             new CoordinatedMutationTailPlan
                                     .WorkspaceOperationObservation(
-                                            target,
+                                            target.path(),
                                             action.verb(),
                                             span.start(),
                                             span.end(),
                                             sourceText));
                 }
                 merge(effective, new CoordinatedMutationTailPlan.TargetDecision(
-                        target,
+                        target.path(),
                         authority,
                         action.verb(),
                         workspaceOperation
@@ -613,8 +625,11 @@ public final class CoordinatedMutationTailParser {
                                         .WORKSPACE_OPERATION
                                 : CoordinatedMutationTailPlan.ActionFamily
                                         .CONTENT_MUTATION,
+                        action.start(),
+                        action.end(),
+                        target.envelopeStart(),
                         span.start(),
-                        boundTargets.lastEnvelopeEnd(),
+                        target.envelopeEnd(),
                         span.end(),
                         sourceText));
             }
@@ -678,14 +693,35 @@ public final class CoordinatedMutationTailParser {
         int constraintStart = firstUnquotedConstraintBoundary(view);
         if (constraintStart < 0) return Set.of();
         int tailEnd = boundedTailEnd(view, List.of(), constraintStart);
+        return discoverDirectTargets(view, constraintStart, tailEnd);
+    }
+
+    static Set<String> discoverAllDirectTargets(String canonicalRequest) {
+        String request = canonicalRequest == null ? "" : canonicalRequest;
+        RequestLexicalView view = RequestLexicalView.of(request);
+        return discoverDirectTargets(view, 0, request.length());
+    }
+
+    private static Set<String> discoverDirectTargets(
+            RequestLexicalView view,
+            int from,
+            int to
+    ) {
+        String request = view.request();
+        int safeFrom = Math.max(0, from);
+        int safeTo = Math.min(request.length(), Math.max(safeFrom, to));
         LinkedHashSet<String> discovered = new LinkedHashSet<>();
         List<CanonicalMutationClauseMatcher.Action> actions =
                 CanonicalMutationClauseMatcher.actions(
                         view,
-                        constraintStart,
-                        tailEnd);
-        for (CanonicalMutationClauseMatcher.Action action : actions) {
-            String remainder = request.substring(action.end(), tailEnd);
+                        safeFrom,
+                        safeTo);
+        for (int index = 0; index < actions.size(); index++) {
+            CanonicalMutationClauseMatcher.Action action = actions.get(index);
+            int actionLimit = index + 1 < actions.size()
+                    ? actions.get(index + 1).start()
+                    : safeTo;
+            String remainder = request.substring(action.end(), actionLimit);
             Pattern directPrefix =
                     action.family()
                                     == CanonicalMutationClauseMatcher.Family
@@ -695,10 +731,10 @@ public final class CoordinatedMutationTailParser {
             Matcher prefix = directPrefix.matcher(remainder);
             if (!prefix.lookingAt()) continue;
             int targetStart = action.end() + prefix.end();
-            if (targetStart >= tailEnd) continue;
+            if (targetStart >= actionLimit) continue;
 
             RequestLexicalView.Span quoted =
-                    view.exactQuotedContentStartingAt(targetStart, tailEnd);
+                    view.exactQuotedContentStartingAt(targetStart, actionLimit);
             if (quoted != null) {
                 addDiscoveredTarget(
                         discovered,
@@ -711,7 +747,7 @@ public final class CoordinatedMutationTailParser {
             }
 
             Matcher token = DISCOVERABLE_UNQUOTED_PATH.matcher(request);
-            token.region(targetStart, tailEnd);
+            token.region(targetStart, actionLimit);
             if (!token.lookingAt()) continue;
             String candidate = token.group();
             while (!candidate.isEmpty()
@@ -719,7 +755,7 @@ public final class CoordinatedMutationTailParser {
                             candidate.charAt(candidate.length() - 1)) >= 0) {
                 candidate = candidate.substring(0, candidate.length() - 1);
             }
-            String suffix = request.substring(token.end(), tailEnd);
+            String suffix = request.substring(token.end(), actionLimit);
             boolean workspaceBlockingTarget =
                     action.family()
                                     == CanonicalMutationClauseMatcher.Family
@@ -819,6 +855,10 @@ public final class CoordinatedMutationTailParser {
         } catch (IllegalArgumentException ignored) {
             return;
         }
+        if (!exactQuoted
+                && BARE_ANAPHORA.contains(normalized.toLowerCase(Locale.ROOT))) {
+            return;
+        }
         boolean pathShaped = normalized.indexOf('.') >= 0
                 || normalized.indexOf('/') >= 0
                 || normalized.indexOf('\\') >= 0;
@@ -829,12 +869,28 @@ public final class CoordinatedMutationTailParser {
     }
 
     static int firstUnquotedConstraintBoundary(RequestLexicalView view) {
+        return firstUnquotedConstraintBoundary(
+                view,
+                0,
+                view == null ? 0 : view.request().length());
+    }
+
+    static int firstUnquotedConstraintBoundary(
+            RequestLexicalView view,
+            int from,
+            int to
+    ) {
+        if (view == null) return -1;
+        int safeFrom = Math.max(0, from);
+        int safeTo = Math.min(
+                view.request().length(),
+                Math.max(safeFrom, to));
         int first = -1;
         for (String marker : CONSTRAINT_MARKERS) {
             int index = view.firstUnquotedIgnoreCase(
                     marker,
-                    0,
-                    view.request().length());
+                    safeFrom,
+                    safeTo);
             if (index >= 0 && (first < 0 || index < first)) {
                 first = index;
             }
@@ -1253,11 +1309,11 @@ public final class CoordinatedMutationTailParser {
     private static NaturalBatchMatch naturalBatchWorkspaceCreate(
             RequestLexicalView view,
             List<String> candidates,
-            List<CanonicalMutationClauseMatcher.Action> actions,
-            int actionIndex,
             CanonicalMutationClauseMatcher.Action action,
             BoundTargets boundTargets,
-            TargetOccurrenceIndex occurrenceIndex
+            TargetOccurrenceIndex occurrenceIndex,
+            int operandEnd,
+            WorkspaceActionIndex workspaceActionIndex
     ) {
         if (action == null
                 || view == null
@@ -1267,60 +1323,52 @@ public final class CoordinatedMutationTailParser {
                         && !"make".equals(action.verb()))) {
             return null;
         }
-        for (int i = actionIndex + 1; i < actions.size(); i++) {
-            CanonicalMutationClauseMatcher.Action later = actions.get(i);
-            if (later.family()
-                    != CanonicalMutationClauseMatcher.Family
-                            .WORKSPACE_OPERATION) {
-                continue;
-            }
-            List<TargetOccurrence> occurrences = occurrenceIndex.between(
-                    candidates,
-                    action.end(),
-                    actions.get(actionIndex + 1).start());
-            List<TargetOccurrence> operands = new ArrayList<>();
-            int priorEnd = action.end();
-            for (TargetOccurrence occurrence : occurrences) {
-                if (occurrence.envelopeStart() < priorEnd) continue;
-                String connector = view.masked().substring(
-                        priorEnd,
-                        occurrence.envelopeStart());
-                Pattern expectedConnector = operands.isEmpty()
-                        ? NATURAL_BATCH_FIRST_TARGET_PREFIX
-                        : NATURAL_BATCH_TARGET_CONNECTOR;
-                if (!expectedConnector.matcher(connector).matches()) {
-                    if (operands.isEmpty()) {
-                        return null;
-                    }
-                    /*
-                     * Once an exact first operand and a later workspace
-                     * continuation establish this as a create batch, unknown
-                     * words between further exact operands are ambiguity, not
-                     * permission to fall back to an ordinary content create.
-                     */
-                }
-                operands.add(occurrence);
-                priorEnd = occurrence.envelopeEnd();
-            }
-            if (operands.size() < 2) return null;
-            String operationConnector = view.masked().substring(
+        WorkspaceActionSpan later = workspaceActionIndex.nextAtOrAfter(
+                action.end());
+        if (later == null) return null;
+        List<TargetOccurrence> occurrences = occurrenceIndex.between(
+                candidates,
+                action.end(),
+                Math.min(operandEnd, later.start()));
+        List<TargetOccurrence> operands = new ArrayList<>();
+        int priorEnd = action.end();
+        for (TargetOccurrence occurrence : occurrences) {
+            if (occurrence.envelopeStart() < priorEnd) continue;
+            String connector = view.masked().substring(
                     priorEnd,
-                    later.start());
-            LinkedHashSet<String> paths = new LinkedHashSet<>();
-            for (TargetOccurrence operand : operands) {
-                paths.add(operand.path());
+                    occurrence.envelopeStart());
+            Pattern expectedConnector = operands.isEmpty()
+                    ? NATURAL_BATCH_FIRST_TARGET_PREFIX
+                    : NATURAL_BATCH_TARGET_CONNECTOR;
+            if (!expectedConnector.matcher(connector).matches()
+                    && operands.isEmpty()) {
+                return null;
             }
-            return new NaturalBatchMatch(
-                    new BoundTargets(
-                            List.copyOf(paths),
-                            operands.getLast().envelopeEnd(),
-                            DISJUNCTIVE_TARGET_GAP
-                                    .matcher(operationConnector)
-                                    .find()),
-                    action.start(),
-                    later.end());
+            operands.add(occurrence);
+            priorEnd = occurrence.envelopeEnd();
         }
-        return null;
+        if (operands.size() < 2) return null;
+        String operationConnector = view.masked().substring(
+                priorEnd,
+                later.start());
+        LinkedHashMap<String, BoundTarget> targets = new LinkedHashMap<>();
+        for (TargetOccurrence operand : operands) {
+            targets.putIfAbsent(
+                    operand.path(),
+                    new BoundTarget(
+                            operand.path(),
+                            operand.envelopeStart(),
+                            operand.envelopeEnd()));
+        }
+        return new NaturalBatchMatch(
+                new BoundTargets(
+                        List.copyOf(targets.values()),
+                        operands.getLast().envelopeEnd(),
+                        DISJUNCTIVE_TARGET_GAP
+                                .matcher(operationConnector)
+                                .find()),
+                action.start(),
+                later.end());
     }
 
     private static BoundTargets directTargets(
@@ -1352,8 +1400,9 @@ public final class CoordinatedMutationTailParser {
             return BoundTargets.empty(from);
         }
 
-        LinkedHashSet<String> selected = new LinkedHashSet<>();
-        selected.add(first.path());
+        LinkedHashMap<String, BoundTarget> selected = new LinkedHashMap<>();
+        selected.put(first.path(), new BoundTarget(
+                first.path(), first.envelopeStart(), first.envelopeEnd()));
         int priorEnd = first.envelopeEnd();
         boolean disjunctive = false;
         for (int i = 1; i < occurrences.size(); i++) {
@@ -1362,10 +1411,16 @@ public final class CoordinatedMutationTailParser {
             String gap = view.masked().substring(priorEnd, occurrence.envelopeStart());
             if (!ADJACENT_TARGET_GAP.matcher(gap).matches()) break;
             disjunctive |= DISJUNCTIVE_TARGET_GAP.matcher(gap).find();
-            selected.add(occurrence.path());
+            selected.putIfAbsent(
+                    occurrence.path(),
+                    new BoundTarget(
+                            occurrence.path(),
+                            occurrence.envelopeStart(),
+                            occurrence.envelopeEnd()));
             priorEnd = occurrence.envelopeEnd();
         }
-        return new BoundTargets(List.copyOf(selected), priorEnd, disjunctive);
+        return new BoundTargets(
+                List.copyOf(selected.values()), priorEnd, disjunctive);
     }
 
     static LocalContentActionBinding requiredLocalContentActionBinding(
@@ -1421,23 +1476,39 @@ public final class CoordinatedMutationTailParser {
             int from,
             int to
     ) {
+        return requiredLocalContentActionBindingsWithWork(
+                view,
+                candidateTargets,
+                from,
+                to).bindings();
+    }
+
+    static RequiredBindingsWorkResult requiredLocalContentActionBindingsWithWork(
+            RequestLexicalView view,
+            Set<String> candidateTargets,
+            int from,
+            int to
+    ) {
+        MutableParseWork work = new MutableParseWork();
         if (view == null
                 || candidateTargets == null
                 || candidateTargets.isEmpty()) {
-            return List.of();
+            return new RequiredBindingsWorkResult(List.of(), work.snapshot());
         }
         int safeFrom = Math.max(0, from);
         int safeTo = Math.min(
                 view.request().length(),
                 Math.max(safeFrom, to));
         List<String> candidates = normalizedCandidates(candidateTargets);
-        if (candidates.isEmpty()) return List.of();
+        if (candidates.isEmpty()) {
+            return new RequiredBindingsWorkResult(List.of(), work.snapshot());
+        }
         TargetOccurrenceIndex occurrenceIndex = TargetOccurrenceIndex.build(
                 view,
                 candidates,
                 safeFrom,
                 safeTo,
-                new MutableParseWork());
+                work);
         List<CanonicalMutationClauseMatcher.Action> actions =
                 lexicalMutationActions(
                         view,
@@ -1445,7 +1516,9 @@ public final class CoordinatedMutationTailParser {
                         safeFrom,
                         safeTo,
                         occurrenceIndex);
-        if (actions.isEmpty()) return List.of();
+        if (actions.isEmpty()) {
+            return new RequiredBindingsWorkResult(List.of(), work.snapshot());
+        }
 
         List<LocalContentActionBinding> bindings = new ArrayList<>();
         for (int i = 0; i < actions.size(); i++) {
@@ -1460,7 +1533,9 @@ public final class CoordinatedMutationTailParser {
                              occurrenceIndex);
             if (binding != null) bindings.add(binding);
         }
-        return List.copyOf(bindings);
+        return new RequiredBindingsWorkResult(
+                List.copyOf(bindings),
+                work.snapshot());
     }
 
     private static LocalContentActionBinding
@@ -1566,17 +1641,7 @@ public final class CoordinatedMutationTailParser {
             int from,
             int to
     ) {
-        int safeFrom = Math.max(0, from);
-        int safeTo = Math.min(
-                view.request().length(),
-                Math.max(safeFrom, to));
-        int boundary = safeFrom;
-        for (int offset = safeFrom; offset < safeTo; offset++) {
-            if (view.isSentenceBoundaryAt(offset)) {
-                boundary = offset + 1;
-            }
-        }
-        return boundary;
+        return view.sentenceStartBefore(from, to);
     }
 
     /**
@@ -1664,48 +1729,53 @@ public final class CoordinatedMutationTailParser {
         }
         List<CanonicalMutationClauseMatcher.Action> retained =
                 new ArrayList<>(raw.size());
+        PriorityQueue<ActiveOccurrence> expiring = new PriorityQueue<>(
+                Comparator.comparingInt(ActiveOccurrence::envelopeEnd)
+                        .thenComparingInt(ActiveOccurrence::ordinal));
+        LinkedHashMap<Integer, TargetOccurrence> active =
+                new LinkedHashMap<>();
+        int occurrenceCursor = 0;
         for (int i = 0; i < raw.size(); i++) {
             CanonicalMutationClauseMatcher.Action candidateAction = raw.get(i);
+            while (occurrenceCursor < occurrences.size()
+                    && occurrences.get(occurrenceCursor).envelopeStart()
+                            <= candidateAction.start()) {
+                TargetOccurrence occurrence = occurrences.get(occurrenceCursor);
+                active.put(occurrenceCursor, occurrence);
+                expiring.add(new ActiveOccurrence(
+                        occurrenceCursor,
+                        occurrence.envelopeEnd()));
+                occurrenceCursor++;
+            }
+            while (!expiring.isEmpty()
+                    && expiring.peek().envelopeEnd() < candidateAction.end()) {
+                active.remove(expiring.remove().ordinal());
+            }
+            occurrenceIndex.work.actionContainmentQueries++;
             boolean boundTargetBytes = false;
-            for (TargetOccurrence occurrence : occurrences) {
-                if (occurrence.envelopeStart() > candidateAction.start()
-                        || occurrence.envelopeEnd() < candidateAction.end()) {
-                    continue;
-                }
-                CanonicalMutationClauseMatcher.Action priorAction = null;
-                for (int j = retained.size() - 1; j >= 0; j--) {
-                    if (retained.get(j).end()
-                            <= occurrence.envelopeStart()) {
-                        priorAction = retained.get(j);
-                        break;
-                    }
-                }
+            for (TargetOccurrence occurrence : active.values()) {
+                occurrenceIndex.work.actionOccurrenceVisits++;
+                CanonicalMutationClauseMatcher.Action priorAction =
+                        lastActionEndingAtOrBefore(
+                                retained,
+                                occurrence.envelopeStart());
                 boolean directTarget = priorAction != null
                         && DIRECT_TARGET_PREFIX.matcher(
                                 view.masked().substring(
                                         priorAction.end(),
                                         occurrence.envelopeStart()))
                                 .matches();
-                int nextAction = -1;
-                for (int j = i + 1; j < raw.size(); j++) {
-                    if (raw.get(j).start() >= occurrence.envelopeEnd()) {
-                        nextAction = j;
-                        break;
-                    }
-                }
+                int nextAction = firstActionStartingAtOrAfter(
+                        raw,
+                        i + 1,
+                        occurrence.envelopeEnd());
                 boolean preposedTarget = false;
                 if (!directTarget && nextAction >= 0) {
-                    PreposedTargets preposed = preposedTargets(
+                    preposedTarget = exactPreposedTarget(
                             view,
-                             List.of(occurrence.path()),
-                             from,
-                             raw.get(nextAction).start(),
-                             occurrenceIndex);
-                    preposedTarget = !preposed.targets().isEmpty()
-                            && preposed.envelopeStart()
-                                    == occurrence.envelopeStart()
-                            && preposed.envelopeEnd()
-                                    == occurrence.envelopeEnd();
+                            from,
+                            raw.get(nextAction).start(),
+                            occurrence);
                 }
                 if (directTarget || preposedTarget) {
                     boundTargetBytes = true;
@@ -1717,6 +1787,58 @@ public final class CoordinatedMutationTailParser {
             }
         }
         return List.copyOf(retained);
+    }
+
+    private static CanonicalMutationClauseMatcher.Action
+            lastActionEndingAtOrBefore(
+                    List<CanonicalMutationClauseMatcher.Action> actions,
+                    int offset
+            ) {
+        int low = 0;
+        int high = actions.size();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (actions.get(middle).end() <= offset) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return low == 0 ? null : actions.get(low - 1);
+    }
+
+    private static int firstActionStartingAtOrAfter(
+            List<CanonicalMutationClauseMatcher.Action> actions,
+            int fromIndex,
+            int offset
+    ) {
+        int low = Math.max(0, fromIndex);
+        int high = actions.size();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (actions.get(middle).start() < offset) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return low < actions.size() ? low : -1;
+    }
+
+    private static boolean exactPreposedTarget(
+            RequestLexicalView view,
+            int from,
+            int actionStart,
+            TargetOccurrence occurrence
+    ) {
+        String prefix = view.masked().substring(
+                from,
+                occurrence.envelopeStart());
+        String suffix = view.masked().substring(
+                occurrence.envelopeEnd(),
+                actionStart);
+        return PREPOSED_TARGET_PREFIX_TAIL.matcher(prefix).find()
+                && PREPOSED_TARGET_SUFFIX.matcher(suffix).matches();
     }
 
     private static PreposedTargets preposedTargets(
@@ -1753,17 +1875,36 @@ public final class CoordinatedMutationTailParser {
             int from,
             int to
     ) {
+        return targetOccurrenceScan(view, candidates, from, to).occurrences();
+    }
+
+    static TargetOccurrenceScan targetOccurrenceScan(
+            RequestLexicalView view,
+            List<String> candidates,
+            int from,
+            int to
+    ) {
         int safeFrom = Math.max(0, from);
         int safeTo = Math.min(
                 view.request().length(),
                 Math.max(safeFrom, to));
+        MutableParseWork work = new MutableParseWork();
         TargetOccurrenceIndex index = TargetOccurrenceIndex.build(
                 view,
                 candidates,
                 safeFrom,
                 safeTo,
-                new MutableParseWork());
-        return index.between(candidates, safeFrom, safeTo);
+                work);
+        TargetOccurrenceScanStatus status = work.targetOutputLimitExceeded
+                ? TargetOccurrenceScanStatus.OUTPUT_VISIT_LIMIT
+                : work.targetOccurrenceLimitExceeded
+                        ? TargetOccurrenceScanStatus.OCCURRENCE_LIMIT
+                        : TargetOccurrenceScanStatus.COMPLETE;
+        return new TargetOccurrenceScan(
+                index.between(candidates, safeFrom, safeTo),
+                status,
+                work.targetOutputVisits,
+                work.indexedOccurrenceCount);
     }
 
     private static void addPersistentProhibitions(
@@ -1772,7 +1913,8 @@ public final class CoordinatedMutationTailParser {
             int constraintStart,
             int tailEnd,
             Map<String, CoordinatedMutationTailPlan.TargetDecision> effective,
-            TargetOccurrenceIndex occurrenceIndex
+            TargetOccurrenceIndex occurrenceIndex,
+            WorkspaceActionIndex workspaceActionIndex
     ) {
         int payloadStart = constraintPayloadStart(view, constraintStart);
         String tail = view.maskedLower().substring(payloadStart, tailEnd);
@@ -1817,20 +1959,66 @@ public final class CoordinatedMutationTailParser {
             if (!prefixProhibition && !suffixProhibition) {
                 continue;
             }
+            ProhibitionOperator operator = prohibitionOperator(
+                    view,
+                    span,
+                    relativeStart,
+                    relativeEnd,
+                    prefixProhibition);
+            if (operator == null) continue;
             merge(effective, new CoordinatedMutationTailPlan.TargetDecision(
                     occurrence.path(),
                     CoordinatedMutationTailPlan.Authority.FORBIDDEN,
-                    "prohibition",
+                    operator.action(),
                     prohibitionActionFamily(
-                            view,
+                            workspaceActionIndex,
                             span.start(),
                             occurrence.envelopeStart()),
+                    operator.startOffset(),
+                    operator.endOffset(),
+                    occurrence.envelopeStart(),
                     span.start(),
                     occurrence.envelopeEnd(),
                     span.end(),
                     view.substring(span)));
         }
     }
+
+    private static ProhibitionOperator prohibitionOperator(
+            RequestLexicalView view,
+            RequestLexicalView.Span span,
+            int relativeTargetStart,
+            int relativeTargetEnd,
+            boolean prefixProhibition
+    ) {
+        int relativeStart = prefixProhibition ? 0 : relativeTargetEnd;
+        int relativeEnd = prefixProhibition
+                ? relativeTargetStart
+                : span.end() - span.start();
+        String visible = view.maskedLower().substring(
+                span.start() + relativeStart,
+                span.start() + relativeEnd);
+        Matcher matcher = PERSISTENT_PROHIBITION_SIGNAL.matcher(visible);
+        if (!matcher.find()) return null;
+        int start = span.start() + relativeStart + matcher.start();
+        int end = span.start() + relativeStart + matcher.end();
+        return new ProhibitionOperator(
+                view.request().substring(start, end),
+                start,
+                end);
+    }
+
+    static boolean isCanonicalProhibitionOperator(String action) {
+        return action != null
+                && !action.isBlank()
+                && PERSISTENT_PROHIBITION_SIGNAL.matcher(action).matches();
+    }
+
+    private record ProhibitionOperator(
+            String action,
+            int startOffset,
+            int endOffset
+    ) {}
 
     private static int boundaryBeforeNextAction(
             RequestLexicalView view,
@@ -2277,18 +2465,11 @@ public final class CoordinatedMutationTailParser {
 
     private static CoordinatedMutationTailPlan.ActionFamily
             prohibitionActionFamily(
-                    RequestLexicalView view,
+                    WorkspaceActionIndex workspaceActionIndex,
                     int from,
                     int targetStart
             ) {
-        boolean workspaceOperation = CanonicalMutationClauseMatcher.actions(
-                view,
-                from,
-                targetStart).stream().anyMatch(
-                        action -> action.family()
-                                == CanonicalMutationClauseMatcher.Family
-                                        .WORKSPACE_OPERATION);
-        return workspaceOperation
+        return workspaceActionIndex.contains(from, targetStart)
                 ? CoordinatedMutationTailPlan.ActionFamily.WORKSPACE_OPERATION
                 : CoordinatedMutationTailPlan.ActionFamily.CONTENT_MUTATION;
     }
@@ -2341,13 +2522,20 @@ public final class CoordinatedMutationTailParser {
         };
     }
 
-    private static boolean targetBoundary(String value, int start, int end) {
+    private static boolean targetBoundary(
+            RequestLexicalView view,
+            String value,
+            int start,
+            int end
+    ) {
         boolean left = start == 0 || !targetCharacter(value.charAt(start - 1));
         boolean right = end == value.length()
                 || !targetCharacter(value.charAt(end))
                 || value.charAt(end) == '.'
                 && (end + 1 == value.length()
-                || Character.isWhitespace(value.charAt(end + 1)));
+                || Character.isWhitespace(value.charAt(end + 1))
+                || view.containsProviderRemovedControl(end + 1, end + 2)
+                || ")]}`".indexOf(value.charAt(end + 1)) >= 0);
         return left && right;
     }
 
@@ -2383,6 +2571,15 @@ public final class CoordinatedMutationTailParser {
             ParseWork work
     ) {}
 
+    record RequiredBindingsWorkResult(
+            List<LocalContentActionBinding> bindings,
+            ParseWork work
+    ) {
+        RequiredBindingsWorkResult {
+            bindings = bindings == null ? List.of() : List.copyOf(bindings);
+        }
+    }
+
     /**
      * Deterministic work counters for the target-occurrence index boundary.
      * These counters describe parser operations, not elapsed time.
@@ -2399,9 +2596,13 @@ public final class CoordinatedMutationTailParser {
             long targetAutomatonTransitions,
             long targetFailureTransitions,
             long targetOutputVisits,
+            boolean targetOutputLimitExceeded,
+            boolean targetOccurrenceLimitExceeded,
             long targetRangeQueries,
             long indexedOccurrenceVisits,
             long fullRangeQueries,
+            long actionContainmentQueries,
+            long actionOccurrenceVisits,
             long prohibitionFastRejectCharacters,
             int authorityActionScans,
             long authorityActionInputCharacters,
@@ -2435,9 +2636,13 @@ public final class CoordinatedMutationTailParser {
         private long targetAutomatonTransitions;
         private long targetFailureTransitions;
         private long targetOutputVisits;
+        private boolean targetOutputLimitExceeded;
+        private boolean targetOccurrenceLimitExceeded;
         private long targetRangeQueries;
         private long indexedOccurrenceVisits;
         private long fullRangeQueries;
+        private long actionContainmentQueries;
+        private long actionOccurrenceVisits;
         private long prohibitionFastRejectCharacters;
         private int authorityActionScans;
         private long authorityActionInputCharacters;
@@ -2504,9 +2709,13 @@ public final class CoordinatedMutationTailParser {
                     targetAutomatonTransitions,
                     targetFailureTransitions,
                     targetOutputVisits,
+                    targetOutputLimitExceeded,
+                    targetOccurrenceLimitExceeded,
                     targetRangeQueries,
                     indexedOccurrenceVisits,
                     fullRangeQueries,
+                    actionContainmentQueries,
+                    actionOccurrenceVisits,
                     prohibitionFastRejectCharacters,
                     authorityActionScans,
                     authorityActionInputCharacters,
@@ -2631,15 +2840,19 @@ public final class CoordinatedMutationTailParser {
                             || fallback == child
                             ? 0
                             : fallback;
-                    automaton.get(child).outputs.addAll(
-                            automaton.get(
-                                    automaton.get(child).failure).outputs);
+                    int failureState = automaton.get(child).failure;
+                    automaton.get(child).outputLink = automaton
+                                    .get(failureState).outputs.isEmpty()
+                            ? automaton.get(failureState).outputLink
+                            : failureState;
                     pending.addLast(child);
                 }
             }
 
             List<IndexedTargetOccurrence> indexed = new ArrayList<>();
             int state = 0;
+            boolean limitExceeded = false;
+            scan:
             for (int index = safeFrom; index < safeTo; index++) {
                 char value = request.charAt(index);
                 work.targetInputCharacters++;
@@ -2652,46 +2865,68 @@ public final class CoordinatedMutationTailParser {
                 Integer next = automaton.get(state).transitions.get(value);
                 state = next == null ? 0 : next;
                 work.targetAutomatonTransitions++;
-                for (TargetPattern pattern : automaton.get(state).outputs) {
-                    work.targetOutputVisits++;
-                    int targetEnd = index + 1;
-                    int offset = targetEnd - pattern.length();
-                    if (offset < safeFrom) continue;
-                    int lexicalStart = offset;
-                    while (lexicalStart >= 2
-                            && request.charAt(lexicalStart - 2) == '.'
-                            && request.charAt(lexicalStart - 1) == '/') {
-                        lexicalStart -= 2;
+                int outputState = state;
+                while (outputState >= 0) {
+                    for (TargetPattern pattern
+                            : automaton.get(outputState).outputs) {
+                        work.targetOutputVisits++;
+                        if (work.targetOutputVisits
+                                > MAX_TARGET_OUTPUT_VISITS) {
+                            work.targetOutputLimitExceeded = true;
+                            limitExceeded = true;
+                            break scan;
+                        }
+                        int targetEnd = index + 1;
+                        int offset = targetEnd - pattern.length();
+                        if (offset < safeFrom) continue;
+                        int lexicalStart = offset;
+                        while (lexicalStart >= 2
+                                && request.charAt(lexicalStart - 2) == '.'
+                                && request.charAt(lexicalStart - 1) == '/') {
+                            lexicalStart -= 2;
+                        }
+                        if (!targetBoundary(
+                                view,
+                                request,
+                                lexicalStart,
+                                targetEnd)) {
+                            continue;
+                        }
+                        RequestLexicalView.Span quotedEnvelope =
+                                view.exactQuotedEnvelope(
+                                        lexicalStart,
+                                        targetEnd);
+                        if (quotedEnvelope == null
+                                && !view.isUnquotedRange(
+                                        lexicalStart,
+                                        targetEnd)) {
+                            continue;
+                        }
+                        if (indexed.size()
+                                >= MAX_INDEXED_TARGET_OCCURRENCES) {
+                            work.targetOccurrenceLimitExceeded = true;
+                            limitExceeded = true;
+                            break scan;
+                        }
+                        TargetOccurrence occurrence = new TargetOccurrence(
+                                pattern.path(),
+                                quotedEnvelope == null
+                                        ? lexicalStart
+                                        : quotedEnvelope.start(),
+                                quotedEnvelope == null
+                                        ? targetEnd
+                                        : quotedEnvelope.end(),
+                                quotedEnvelope != null);
+                        indexed.add(new IndexedTargetOccurrence(
+                                occurrence,
+                                offset,
+                                targetEnd,
+                                pattern.ordinal()));
                     }
-                    if (!targetBoundary(request, lexicalStart, targetEnd)) {
-                        continue;
-                    }
-                    RequestLexicalView.Span quotedEnvelope =
-                            view.exactQuotedEnvelope(
-                                    lexicalStart,
-                                    targetEnd);
-                    if (quotedEnvelope == null
-                            && !view.isUnquotedRange(
-                                    lexicalStart,
-                                    targetEnd)) {
-                        continue;
-                    }
-                    TargetOccurrence occurrence = new TargetOccurrence(
-                            pattern.path(),
-                            quotedEnvelope == null
-                                    ? lexicalStart
-                                    : quotedEnvelope.start(),
-                            quotedEnvelope == null
-                                    ? targetEnd
-                                    : quotedEnvelope.end(),
-                            quotedEnvelope != null);
-                    indexed.add(new IndexedTargetOccurrence(
-                            occurrence,
-                            offset,
-                            targetEnd,
-                            pattern.ordinal()));
+                    outputState = automaton.get(outputState).outputLink;
                 }
             }
+            if (limitExceeded) indexed.clear();
             indexed.sort(Comparator
                     .comparingInt(IndexedTargetOccurrence::matchStart)
                     .thenComparingInt(IndexedTargetOccurrence::ordinal));
@@ -2768,6 +3003,7 @@ public final class CoordinatedMutationTailParser {
                 new LinkedHashMap<>();
         private final List<TargetPattern> outputs = new ArrayList<>();
         private int failure;
+        private int outputLink = -1;
     }
 
     private record TargetPattern(
@@ -2783,12 +3019,104 @@ public final class CoordinatedMutationTailParser {
             int ordinal
     ) {}
 
+    private record ActiveOccurrence(int ordinal, int envelopeEnd) {}
+
+    private record WorkspaceActionIndex(int[] starts, int[] ends) {
+        private static WorkspaceActionIndex build(
+                List<CanonicalMutationClauseMatcher.Action> actions
+        ) {
+            if (actions == null || actions.isEmpty()) {
+                return new WorkspaceActionIndex(new int[0], new int[0]);
+            }
+            List<CanonicalMutationClauseMatcher.Action> workspace = actions.stream()
+                    .filter(action -> action.family()
+                            == CanonicalMutationClauseMatcher.Family
+                                    .WORKSPACE_OPERATION)
+                    .toList();
+            return new WorkspaceActionIndex(
+                    workspace.stream()
+                            .mapToInt(CanonicalMutationClauseMatcher.Action::start)
+                            .toArray(),
+                    workspace.stream()
+                            .mapToInt(CanonicalMutationClauseMatcher.Action::end)
+                            .toArray());
+        }
+
+        private boolean contains(int from, int to) {
+            int low = 0;
+            int high = starts.length;
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (starts[middle] < from) {
+                    low = middle + 1;
+                } else {
+                    high = middle;
+                }
+            }
+            return low < starts.length && starts[low] < to;
+        }
+
+        private WorkspaceActionSpan nextAtOrAfter(int from) {
+            int low = 0;
+            int high = starts.length;
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (starts[middle] < from) {
+                    low = middle + 1;
+                } else {
+                    high = middle;
+                }
+            }
+            return low < starts.length
+                    ? new WorkspaceActionSpan(starts[low], ends[low])
+                    : null;
+        }
+    }
+
+    private record WorkspaceActionSpan(int start, int end) {}
+
     record TargetOccurrence(
             String path,
             int envelopeStart,
             int envelopeEnd,
             boolean quoted
     ) {}
+
+    enum TargetOccurrenceScanStatus {
+        COMPLETE,
+        OUTPUT_VISIT_LIMIT,
+        OCCURRENCE_LIMIT
+    }
+
+    record TargetOccurrenceScan(
+            List<TargetOccurrence> occurrences,
+            TargetOccurrenceScanStatus status,
+            long outputVisits,
+            long indexedOccurrenceCount
+    ) {
+        TargetOccurrenceScan {
+            occurrences = occurrences == null
+                    ? List.of()
+                    : List.copyOf(occurrences);
+            status = status == null
+                    ? TargetOccurrenceScanStatus.COMPLETE
+                    : status;
+            if (outputVisits < 0 || indexedOccurrenceCount < 0) {
+                throw new IllegalArgumentException(
+                        "target occurrence scan counters must be non-negative");
+            }
+            if (status != TargetOccurrenceScanStatus.COMPLETE
+                    && (!occurrences.isEmpty()
+                            || indexedOccurrenceCount != 0)) {
+                throw new IllegalArgumentException(
+                        "limited target occurrence scans cannot retain partial results");
+            }
+        }
+
+        boolean limitExceeded() {
+            return status != TargetOccurrenceScanStatus.COMPLETE;
+        }
+    }
 
     record LocalContentActionBinding(
             int actionStart,
@@ -2809,13 +3137,30 @@ public final class CoordinatedMutationTailParser {
         }
     }
 
+    private record BoundTarget(
+            String path,
+            int envelopeStart,
+            int envelopeEnd
+    ) {
+        private BoundTarget {
+            path = TargetRef.normalizePath(path);
+            if (envelopeStart < 0 || envelopeEnd <= envelopeStart) {
+                throw new IllegalArgumentException("invalid bound target span");
+            }
+        }
+    }
+
     private record BoundTargets(
-            List<String> paths,
+            List<BoundTarget> targets,
             int lastEnvelopeEnd,
             boolean disjunctive
     ) {
         private BoundTargets {
-            paths = paths == null ? List.of() : List.copyOf(paths);
+            targets = targets == null ? List.of() : List.copyOf(targets);
+        }
+
+        private List<String> paths() {
+            return targets.stream().map(BoundTarget::path).toList();
         }
 
         private static BoundTargets empty(int lastEnvelopeEnd) {

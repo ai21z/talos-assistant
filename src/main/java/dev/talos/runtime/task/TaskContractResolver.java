@@ -5,6 +5,7 @@ import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentProjector;
 import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
+import dev.talos.runtime.intent.SequentialMutationClausePlan;
 import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TargetSource;
@@ -33,7 +34,8 @@ public final class TaskContractResolver {
                     + "png|jpg|jpeg|gif|bmp|webp|tif|tiff|zip|tar|gz|tgz|7z|rar|"
                     + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
                     + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
-                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+                    + "(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]]|"
+                    + "\\.(?:$|\\s|\\u2028|\\u2029))");
     private static final Pattern INLINE_EXAMPLE_ARTIFACT_BEFORE = Pattern.compile(
             "(?is).*\\b(?:example|sample|template)\\s+$");
     private static final Pattern INLINE_EXAMPLE_ARTIFACT_AFTER = Pattern.compile(
@@ -108,7 +110,7 @@ public final class TaskContractResolver {
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
                     + "((?:[A-Za-z0-9_.\\\\/-]+/)?"
                     + "(?:README|LICENSE|NOTICE|CHANGELOG|CONTRIBUTING|AUTHORS|Makefile|Dockerfile))"
-                    + "`?(?=$|\\s|[`'\"),;:!?\\]])");
+                    + "`?(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]])");
 
     private static final Pattern BATCH_DIRECTORY_CREATION_SPAN = Pattern.compile(
             "(?i)\\b(?:create|make|mkdir)\\s+"
@@ -321,6 +323,10 @@ public final class TaskContractResolver {
     public static TaskResolution resolveFromMessages(List<ChatMessage> messages) {
         String latest = latestUserRequest(messages);
         TaskResolution currentResolution = resolveFromUserRequest(latest);
+        if (currentResolution.sequentialMutationPlan()
+                .authorityLimitExceeded()) {
+            return currentResolution;
+        }
         TaskContract current = currentResolution.contract();
         if (current.type() == TaskType.VERIFY_ONLY
                 || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
@@ -396,7 +402,8 @@ public final class TaskContractResolver {
         return new TaskResolution(
                 TaskContractCompiler.compile(intent),
                 intent,
-                intentResolution.mutationTailPlan());
+                intentResolution.mutationTailPlan(),
+                intentResolution.sequentialMutationPlan());
     }
 
     public static TaskIntent intentFromUserRequest(String userRequest) {
@@ -416,16 +423,20 @@ public final class TaskContractResolver {
                 contract,
                 source,
                 reason);
+        if (prior != null
+                && prior.intent().originalUserRequest().equals(
+                        projected.originalUserRequest())) {
+            return prior.projectOnto(contract, projected);
+        }
         return new TaskResolution(
                 contract,
                 projected,
-                prior == null
-                        ? CoordinatedMutationTailPlan.empty(
-                                projected.originalUserRequest())
-                        : prior.projectedMutationTailPlan(projected),
-                prior == null
-                        ? TaskResolution.Provenance.CURRENT_USER_REQUEST
-                        : prior.provenance());
+                CoordinatedMutationTailPlan.empty(
+                        projected.originalUserRequest()),
+                SequentialMutationClausePlan.empty(
+                        projected.originalUserRequest()),
+                Set.of(),
+                TaskResolution.Provenance.CURRENT_USER_REQUEST);
     }
 
     static TaskContract resolveLegacyFromUserRequest(String userRequest) {

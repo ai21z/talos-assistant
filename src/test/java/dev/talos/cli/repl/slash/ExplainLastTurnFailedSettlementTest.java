@@ -1,5 +1,8 @@
 package dev.talos.cli.repl.slash;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
@@ -14,6 +17,8 @@ import dev.talos.runtime.trace.TurnTraceEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -26,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExplainLastTurnFailedSettlementTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final List<String> VIEWS = List.of("", "tools", "sources", "trace");
     private static final List<String> HOSTILE_CANARIES = List.of(
             "USER_FREE_FORM_CANARY",
@@ -43,7 +49,7 @@ class ExplainLastTurnFailedSettlementTest {
             @TempDir Path dir
     ) {
         String traceWorkspaceId = JsonSessionStore.sessionIdFor(dir);
-        String sessionId = traceWorkspaceId + "-20260721T000000Z-entropy";
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-valid-terminal";
         TurnRecord row = hostileRow(traceId, "RETRIEVAL_FREE_FORM_CANARY");
         LocalTurnTrace trace = terminalTrace(
@@ -70,7 +76,7 @@ class ExplainLastTurnFailedSettlementTest {
             @TempDir Path dir
     ) {
         String traceWorkspaceId = JsonSessionStore.sessionIdFor(dir);
-        String sessionId = traceWorkspaceId + "-20260721T000001Z-entropy";
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-valid-cancelled";
         TurnRecord row = hostileRow(
                 traceId, "RETRIEVAL_FREE_FORM_CANARY", "cancelled");
@@ -167,16 +173,21 @@ class ExplainLastTurnFailedSettlementTest {
     @Test
     void matchingRowIdentityFromDifferentWorkspaceFailsClosedForEveryView(
             @TempDir Path dir
-    ) {
-        String sessionId = "different-workspace-session";
+    ) throws Exception {
+        String traceWorkspaceId = JsonSessionStore.sessionIdFor(dir);
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-different-workspace";
         TurnRecord row = hostileRow(traceId, "RETRIEVAL_FREE_FORM_CANARY");
         LocalTurnTrace trace = terminalTrace(
                 traceId,
-                "different-workspace-hash",
+                traceWorkspaceId,
                 "CAPTURE_OBSERVED_UNBOUND",
                 MarkerShape.VALID);
         JsonSessionStore store = persist(dir, sessionId, row, trace);
+        tamperTraceSession(
+                dir,
+                sessionId,
+                JsonSessionStore.sessionIdFor(dir.resolve("other-workspace")));
 
         for (String view : VIEWS) {
             String text = execute(dir, store, sessionId, view);
@@ -188,10 +199,40 @@ class ExplainLastTurnFailedSettlementTest {
     }
 
     @Test
+    void tamperedPolicyPayloadInvalidatesThePairWithoutRenderingIt(
+            @TempDir Path dir
+    ) throws Exception {
+        String sessionId = storageSessionId(dir);
+        String traceId = "trc-policy-tamper";
+        JsonSessionStore store = persist(
+                dir,
+                sessionId,
+                hostileRow(traceId, ""),
+                terminalTrace(
+                        traceId,
+                        JsonSessionStore.sessionIdFor(dir),
+                        "UNAVAILABLE",
+                        MarkerShape.VALID));
+        tamperTurnPolicyReason(
+                dir,
+                sessionId,
+                "POLICY_FREE_FORM_CANARY");
+
+        for (String view : VIEWS) {
+            String text = execute(dir, store, sessionId, view);
+            assertTrue(text.contains("Trace pair: INVALID/UNKNOWN"), text);
+            assertTrue(text.contains("Settlement: INVALID/UNKNOWN"), text);
+            assertTrue(text.contains(
+                    "Evidence projection: INVALID/UNKNOWN"), text);
+            assertNoHostileCanary(text);
+        }
+    }
+
+    @Test
     void missingProjectionCounterpartFailsClosedWithoutRowDisclosure(
             @TempDir Path dir
     ) {
-        String sessionId = "missing-marker-session";
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-missing-marker";
         JsonSessionStore store = persist(
                 dir,
@@ -216,8 +257,8 @@ class ExplainLastTurnFailedSettlementTest {
     @Test
     void invalidProjectionMarkerFailsClosedWithoutRenderingItsPayload(
             @TempDir Path dir
-    ) {
-        String sessionId = "invalid-marker-session";
+    ) throws Exception {
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-invalid-marker";
         JsonSessionStore store = persist(
                 dir,
@@ -227,7 +268,8 @@ class ExplainLastTurnFailedSettlementTest {
                         traceId,
                         JsonSessionStore.sessionIdFor(dir),
                         "UNAVAILABLE",
-                        MarkerShape.INVALID));
+                        MarkerShape.VALID));
+        tamperProjectionMarker(dir, sessionId, "INVALID_MARKER_CANARY");
 
         String text = execute(dir, store, sessionId, "trace");
 
@@ -240,14 +282,19 @@ class ExplainLastTurnFailedSettlementTest {
     @Test
     void projectionMarkerAloneForcesTerminalRendererAndInvalidSettlement(
             @TempDir Path dir
-    ) {
-        String sessionId = "projection-only-session";
+    ) throws Exception {
+        String sessionId = storageSessionId(dir);
         String traceId = "trc-projection-only";
         JsonSessionStore store = persist(
                 dir,
                 sessionId,
                 hostileRow(traceId, "", "ok"),
-                projectionOnlyTrace(traceId, JsonSessionStore.sessionIdFor(dir)));
+                terminalTrace(
+                        traceId,
+                        JsonSessionStore.sessionIdFor(dir),
+                        "UNAVAILABLE",
+                        MarkerShape.VALID));
+        tamperRemoveSettlement(dir, sessionId);
 
         for (String view : VIEWS) {
             String text = execute(dir, store, sessionId, view);
@@ -263,13 +310,11 @@ class ExplainLastTurnFailedSettlementTest {
     ) {
         assertRetrievalMismatch(
                 dir.resolve("capture-without-row"),
-                "capture-without-row",
                 "trc-capture-without-row",
                 "CAPTURE_OBSERVED_UNBOUND",
                 "");
         assertRetrievalMismatch(
                 dir.resolve("row-without-capture"),
-                "row-without-capture",
                 "trc-row-without-capture",
                 "UNAVAILABLE",
                 "RETRIEVAL_FREE_FORM_CANARY");
@@ -365,11 +410,11 @@ class ExplainLastTurnFailedSettlementTest {
 
     private static void assertRetrievalMismatch(
             Path dir,
-            String sessionId,
             String traceId,
             String markerRetrieval,
             String rowRetrieval
     ) {
+        String sessionId = storageSessionId(dir);
         TurnRecord row = hostileRow(traceId, rowRetrieval);
         LocalTurnTrace trace = terminalTrace(
                 traceId,
@@ -436,18 +481,6 @@ class ExplainLastTurnFailedSettlementTest {
             String retrievalSummary,
             String status
     ) {
-        TurnPolicyTrace policy = new TurnPolicyTrace(
-                "POLICY_FREE_FORM_CANARY",
-                true,
-                true,
-                List.of("PATH_HINT_CANARY"),
-                List.of("PATH_HINT_CANARY"),
-                "POLICY_FREE_FORM_CANARY",
-                "POLICY_FREE_FORM_CANARY",
-                List.of("TOOL_NAME_CANARY"),
-                List.of("TOOL_NAME_CANARY"),
-                List.of("POLICY_FREE_FORM_CANARY"),
-                "POLICY_FREE_FORM_CANARY");
         return new TurnRecord(
                 1,
                 Instant.parse("2026-07-21T00:00:02Z"),
@@ -464,8 +497,102 @@ class ExplainLastTurnFailedSettlementTest {
                 2,
                 retrievalSummary,
                 status,
-                policy,
+                TurnPolicyTrace.empty(),
                 traceId);
+    }
+
+    private static String storageSessionId(Path workspace) {
+        return JsonSessionStore.newSessionInstanceId(
+                workspace,
+                Instant.parse("2026-07-21T00:00:00Z"));
+    }
+
+    private static void tamperTraceSession(
+            Path root,
+            String sessionId,
+            String replacementSessionId
+    ) throws IOException {
+        ObjectNode trace = readTraceNode(root, sessionId);
+        trace.put("sessionId", replacementSessionId);
+        writeTraceNode(root, sessionId, trace);
+    }
+
+    private static void tamperTurnPolicyReason(
+            Path root,
+            String sessionId,
+            String reason
+    ) throws IOException {
+        Path turnLog = root.resolve("sessions")
+                .resolve(sessionId + ".turns.jsonl");
+        ObjectNode row = (ObjectNode) MAPPER.readTree(
+                Files.readString(turnLog));
+        ((ObjectNode) row.path("policyTrace"))
+                .put("classificationReason", reason);
+        Files.writeString(
+                turnLog,
+                MAPPER.writeValueAsString(row) + "\n");
+    }
+
+    private static void tamperProjectionMarker(
+            Path root,
+            String sessionId,
+            String canary
+    ) throws IOException {
+        ObjectNode trace = readTraceNode(root, sessionId);
+        boolean changed = false;
+        for (JsonNode event : trace.withArray("events")) {
+            if (TurnEvidenceProjectionTraceEvent.TYPE.equals(
+                    event.path("type").asText())) {
+                ((ObjectNode) event.path("data")).put("raw", canary);
+                changed = true;
+            }
+        }
+        assertTrue(changed, "projection marker fixture must exist before tampering");
+        writeTraceNode(root, sessionId, trace);
+    }
+
+    private static void tamperRemoveSettlement(
+            Path root,
+            String sessionId
+    ) throws IOException {
+        ObjectNode trace = readTraceNode(root, sessionId);
+        var events = trace.withArray("events");
+        boolean changed = false;
+        for (int index = events.size() - 1; index >= 0; index--) {
+            if ("TURN_SETTLED".equals(events.get(index).path("type").asText())) {
+                events.remove(index);
+                changed = true;
+            }
+        }
+        assertTrue(changed, "settlement fixture must exist before tampering");
+        writeTraceNode(root, sessionId, trace);
+    }
+
+    private static ObjectNode readTraceNode(
+            Path root,
+            String sessionId
+    ) throws IOException {
+        return (ObjectNode) MAPPER.readTree(Files.readString(
+                traceFile(root, sessionId)));
+    }
+
+    private static void writeTraceNode(
+            Path root,
+            String sessionId,
+            ObjectNode trace
+    ) throws IOException {
+        Files.writeString(
+                traceFile(root, sessionId),
+                MAPPER.writeValueAsString(trace));
+    }
+
+    private static Path traceFile(Path root, String sessionId)
+            throws IOException {
+        Path traceDir = root.resolve("sessions").resolve("traces")
+                .resolve(sessionId);
+        try (var paths = Files.list(traceDir)) {
+            return paths.findFirst().orElseThrow();
+        }
     }
 
     private static LocalTurnTrace terminalTrace(
@@ -530,25 +657,6 @@ class ExplainLastTurnFailedSettlementTest {
                                 "errorCode", 500,
                                 "exceptionClass", exceptionClass,
                                 "causalOwner", "UNKNOWN")))
-                .event(TurnTraceEvent.simple(
-                        "TRACE_COMPLETED", "2026-07-21T00:00:02Z", Map.of()))
-                .build();
-    }
-
-    private static LocalTurnTrace projectionOnlyTrace(
-            String traceId,
-            String sessionId
-    ) {
-        return LocalTurnTrace.builder(
-                        traceId, sessionId, 1, "2026-07-21T00:00:00Z")
-                .event(TurnTraceEvent.simple(
-                        "TRACE_STARTED",
-                        "2026-07-21T00:00:00Z",
-                        Map.of("turnNumber", 1, "redactionMode", "DEFAULT")))
-                .event(TurnTraceEvent.simple(
-                        TurnEvidenceProjectionTraceEvent.TYPE,
-                        "2026-07-21T00:00:00Z",
-                        markerData("UNAVAILABLE")))
                 .event(TurnTraceEvent.simple(
                         "TRACE_COMPLETED", "2026-07-21T00:00:02Z", Map.of()))
                 .build();

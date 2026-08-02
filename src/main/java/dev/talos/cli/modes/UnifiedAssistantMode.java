@@ -109,7 +109,9 @@ public final class UnifiedAssistantMode implements Mode {
                 workspace);
         TaskContract taskContract = taskResolution.contract();
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
-        ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
+        ExecutionPhase initialPhase = taskResolution.blocksUnscopedMutation()
+                ? ExecutionPhase.INSPECT
+                : CurrentTurnPlan.defaultPhaseFor(taskContract);
         List<ToolSpec> plannedNativeToolSpecs =
                 NativeToolSpecPolicy.select(
                         taskResolution,

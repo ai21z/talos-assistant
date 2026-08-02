@@ -3,7 +3,11 @@ package dev.talos.cli.modes;
 import dev.talos.cli.prompt.PromptDebugInspector;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.runtime.SessionMemory;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
@@ -303,6 +307,59 @@ class AssistantTurnPreparationTargetRolesTest {
                 prepared.taskResolution().hasAuthorizedContentMutation());
         assertEquals(ActionObligation.NONE, prepared.plan().actionObligation());
         assertTrue(prepared.plan().promptTools().isEmpty());
+    }
+
+    @Test
+    void incompleteTargetScanReplacesAStaleMutationSurface(
+            @TempDir Path workspace
+    ) {
+        String request = "Repair it. " + "a.txt ".repeat(8_193);
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request)));
+        ActiveTaskContext saved = ActiveTaskContext.verifierFindings(
+                1,
+                "trace-overflow-context",
+                List.of("saved.txt"),
+                List.of("saved.txt still needs repair"),
+                "FAILED");
+        SessionMemory memory = new SessionMemory();
+        memory.setActiveTaskContext(saved);
+        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(saved));
+        Context context = Context.builder(new Config())
+                .memory(memory)
+                .toolRegistry(CanonicalToolDescriptors.registry())
+                .build()
+                .withNativeToolSpecs(List.of(new ToolSpec(
+                        "talos.edit_file",
+                        "stale mutation override",
+                        "{}")));
+
+        AssistantTurnPreparation.PreparedTurn prepared =
+                AssistantTurnPreparation.prepare(
+                        messages,
+                        workspace,
+                        context,
+                        false,
+                        CapabilityPosture.AGENT);
+
+        assertTrue(prepared.taskResolution().sequentialMutationPlan()
+                .targetIndexLimitExceeded());
+        assertTrue(prepared.taskResolution().blocksUnscopedMutation());
+        assertFalse(prepared.taskResolution().hasAuthorizedContentMutation());
+        assertEquals(ExecutionPhase.INSPECT, prepared.plan().phaseInitial());
+        assertEquals(ActionObligation.NONE, prepared.plan().actionObligation());
+        assertEquals(ActiveTaskContext.NONE_OR_NOT_DERIVED,
+                prepared.plan().activeTaskContext());
+        assertEquals(ActiveTaskContext.NONE_OR_NOT_DERIVED,
+                prepared.plan().artifactGoal());
+        assertEquals(saved, memory.activeTaskContext());
+        assertFalse(prepared.plan().promptTools().contains("talos.edit_file"));
+        assertFalse(prepared.plan().promptTools().contains("talos.write_file"));
+        assertFalse(prepared.ctx().nativeToolSpecs().stream()
+                .map(ToolSpec::name)
+                .anyMatch(name -> name.equals("talos.edit_file")
+                        || name.equals("talos.write_file")));
     }
 
     @Test

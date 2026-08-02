@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 public final class PromptInspector {
     public static final String DEFAULT_INPUT_PLACEHOLDER = "<next user message>";
@@ -69,11 +70,9 @@ public final class PromptInspector {
                 contract,
                 TargetSource.RUNTIME_DEFAULT,
                 "prompt-inspector-capability-projection");
-        TaskResolution resolution = new TaskResolution(
+        TaskResolution resolution = rawResolution.projectOnto(
                 contract,
-                effectiveIntent,
-                rawResolution.projectedMutationTailPlan(effectiveIntent),
-                rawResolution.provenance());
+                effectiveIntent);
         ExecutionPhase initialPhase = effectiveTurn.phase();
         boolean directoryListing = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
@@ -197,11 +196,9 @@ public final class PromptInspector {
                 contract,
                 TargetSource.RUNTIME_DEFAULT,
                 "prompt-inspector-capability-projection");
-        TaskResolution resolution = new TaskResolution(
+        TaskResolution resolution = rawResolution.projectOnto(
                 contract,
-                effectiveIntent,
-                rawResolution.projectedMutationTailPlan(effectiveIntent),
-                rawResolution.provenance());
+                effectiveIntent);
         List<String> effectiveTools = NativeToolSpecPolicy.names(
                 effectiveToolSpecs(
                         canonicalMode,
@@ -338,7 +335,10 @@ public final class PromptInspector {
             Context ctx
     ) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
-        if (ctx.hasNativeToolSpecOverride()) {
+        if (ctx.hasNativeToolSpecOverride()
+                && (resolution == null
+                        || !resolution.blocksUnscopedMutation()
+                                && !resolution.blocksWorkspaceOperations())) {
             return ctx.nativeToolSpecs();
         }
         if (usesAssistantTaskContract(resolvePromptMode(resolvedMode))
@@ -389,7 +389,9 @@ public final class PromptInspector {
                         rawContract,
                         savedContext,
                         savedGoal,
-                        currentUserTurnNumber(ctx));
+                        currentUserTurnNumber(ctx),
+                        !initial.sequentialMutationPlan()
+                                .authorityLimitExceeded());
         TaskContract activeContract = WorkspaceTargetReconciler.reconcile(
                 activeDecision.taskContract(),
                 workspace);
@@ -413,35 +415,37 @@ public final class PromptInspector {
                 finalContract,
                 TargetSource.WORKSPACE_EVIDENCE,
                 "workspace-target-reconciliation");
-        TaskResolution finalResolution = new TaskResolution(
+        TaskResolution finalResolution = initial.projectOnto(
                 finalContract,
-                finalIntent,
-                initial.projectedMutationTailPlan(finalIntent),
-                initial.provenance());
+                finalIntent);
+        ExecutionPhase authoritativePhase = finalResolution
+                .blocksUnscopedMutation()
+                ? ExecutionPhase.INSPECT
+                : effective.phase();
         List<ToolSpec> specs = effectiveToolSpecs(
                 "agent",
                 finalResolution,
-                effective.phase(),
+                authoritativePhase,
                 ctx);
         List<String> toolNames = NativeToolSpecPolicy.names(specs);
         CurrentTurnPlan plan =
                 CurrentTurnPlan.createWithActionObligation(
-                        finalContract,
-                        effective.phase(),
+                        finalResolution.contract(),
+                        authoritativePhase,
                         nativeTools ? toolNames : List.of(),
                         toolNames,
                         List.of(),
                         renderActiveTaskContext(activeDecision),
                         renderArtifactGoal(activeDecision),
                         CurrentTurnPlan.derivedVerifierProfile(
-                                finalContract),
+                                finalResolution.contract()),
                         ActionObligationPolicy.derive(
                                 finalResolution,
-                                effective.phase()),
+                                authoritativePhase),
                         ctx == null ? null : ctx.cfg());
         return new PreviewTurn(
                 finalResolution,
-                effective.phase(),
+                authoritativePhase,
                 specs,
                 plan);
     }
@@ -489,7 +493,21 @@ public final class PromptInspector {
             ExecutionPhase phase,
             List<ToolSpec> specs,
             CurrentTurnPlan plan
-    ) {}
+    ) {
+        private PreviewTurn {
+            Objects.requireNonNull(resolution, "resolution");
+            Objects.requireNonNull(phase, "phase");
+            specs = specs == null ? List.of() : List.copyOf(specs);
+            Objects.requireNonNull(plan, "plan");
+            if (!plan.taskContract().equals(resolution.contract())
+                    || plan.phaseInitial() != phase
+                    || !NativeToolSpecPolicy.names(specs)
+                            .equals(plan.promptTools())) {
+                throw new IllegalArgumentException(
+                        "prompt preview must share one authoritative turn surface");
+            }
+        }
+    }
 
     private static CapabilityPosturePolicy.EffectiveTurn effectiveTurn(
             String resolvedMode,

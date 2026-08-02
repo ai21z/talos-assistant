@@ -11,6 +11,7 @@ import dev.talos.tools.*;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -326,7 +327,7 @@ class TurnProcessorPermissionPolicyTest {
     }
 
     @Test
-    void asNeededMutationTargetIsAllowedButNotRequired(@TempDir Path workspace) throws Exception {
+    void asNeededMutationTargetIsDeniedUntilT1202(@TempDir Path workspace) throws Exception {
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -344,9 +345,57 @@ class TurnProcessorPermissionPolicyTest {
                 new ToolCall("talos.write_file", Map.of("path", "styles.css", "content", "body { margin: 0; }\n")),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals(1, gateCalls.get(), "optional mutation target should still ask for approval before writing");
-        assertEquals("body { margin: 0; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertFalse(result.success(), result.errorMessage());
+        assertTrue(
+                result.errorMessage().contains(
+                        "outside the current expected target set"),
+                result.errorMessage());
+        assertEquals(
+                0,
+                gateCalls.get(),
+                "non-durable optional authority must block before approval");
+        assertFalse(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void incompleteTargetScanBlocksMissingAndForgedWriteSurfacesBeforeApproval(
+            @TempDir Path workspace
+    ) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(gateCalls),
+                registry);
+        String request = "Repair it. " + "a.txt ".repeat(8_193);
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        Context forgedSurface = context(workspace, config)
+                .withNativeToolSpecs(List.of(new ToolSpec(
+                        "talos.write_file",
+                        "forged stale writer",
+                        "{}")));
+
+        for (Context attemptedSurface : List.of(
+                context(workspace, config),
+                forgedSurface)) {
+            ToolResult result = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall(
+                            "talos.write_file",
+                            Map.of("path", "a.txt", "content", "forbidden")),
+                    attemptedSurface);
+
+            assertFalse(result.success());
+            assertEquals(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    result.error().reason());
+        }
+        assertEquals(0, gateCalls.get());
+        assertFalse(Files.exists(workspace.resolve("a.txt")));
     }
 
     private static TurnProcessor processor(Config config, ApprovalGate gate, TalosTool tool) {

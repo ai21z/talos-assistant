@@ -3,6 +3,7 @@ package dev.talos.runtime.task;
 import dev.talos.core.Config;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.intent.MutationPlanSelection;
 import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.intent.TargetRole;
@@ -85,6 +86,22 @@ class TaskResolutionPropagationTest {
                 TurnTaskContractCapture.originalUserRequestOrResolve(List.of(
                         ChatMessage.user(request),
                         ChatMessage.user("Retry by editing evil.txt."))));
+    }
+
+    @Test
+    void incompleteTargetScanRequiresTheFullCapturedResolution() {
+        TaskResolution resolution =
+                TaskContractResolver.resolveFromUserRequest(
+                        "Repair it. " + "a.txt ".repeat(8_193));
+
+        assertTrue(resolution.sequentialMutationPlan()
+                .targetIndexLimitExceeded());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> TurnTaskContractCapture.set(resolution.contract()));
+        TurnTaskContractCapture.set(resolution);
+        assertSame(resolution, TurnTaskContractCapture.getResolution());
+        assertFalse(TurnTaskContractCapture.get().mutationAllowed());
     }
 
     @Test
@@ -217,13 +234,64 @@ class TaskResolutionPropagationTest {
         TaskResolution resolution = new TaskResolution(
                 TaskContractCompiler.compile(intentResolution.intent()),
                 intentResolution.intent(),
-                intentResolution.mutationTailPlan());
+                intentResolution.mutationTailPlan(),
+                intentResolution.sequentialMutationPlan());
 
         assertTrue(resolution.contract().expectedTargets().contains("style.css"));
         assertTrue(resolution.contract().sourceEvidenceTargets().contains("style.css"));
         assertEquals(
                 TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE,
                 resolution.intent().targets().find("style.css").orElseThrow().role());
+    }
+
+    @Test
+    void evidenceFreeProjectionMayAdoptTypedActiveContextRequestOnly() {
+        TaskResolution deictic =
+                TaskContractResolver.resolveFromUserRequest("Apply it now.");
+        TaskResolution activeContext = TaskResolution.contractOnly(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        Set.of("README.md"),
+                        Set.of(),
+                        Set.of(),
+                        "Active task context: update README.md\n\n"
+                                + "Follow-up: Apply it now.",
+                        "active-static-web-context"));
+
+        TaskResolution projected = deictic.projectOnto(
+                activeContext.contract(),
+                activeContext.intent());
+
+        assertEquals(
+                activeContext.intent().originalUserRequest(),
+                projected.mutationTailPlan().canonicalRequest());
+        assertEquals(
+                activeContext.intent().originalUserRequest(),
+                projected.sequentialMutationPlan().canonicalRequest());
+        assertTrue(MutationPlanSelection.allDecisions(
+                projected.mutationTailPlan(),
+                projected.sequentialMutationPlan()).isEmpty());
+        assertTrue(MutationPlanSelection.allRegions(
+                projected.mutationTailPlan(),
+                projected.sequentialMutationPlan()).isEmpty());
+    }
+
+    @Test
+    void projectionCannotMoveAnyLexicalEvidenceToAnotherRequest() {
+        TaskResolution lexical =
+                TaskContractResolver.resolveFromUserRequest(
+                        "Edit index.html. Update style.css.");
+        TaskResolution different = TaskResolution.contractOnly(
+                TaskContract.unknown("Apply it now."));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> lexical.projectOnto(
+                        different.contract(),
+                        different.intent()));
     }
 
     @Test
@@ -834,14 +902,16 @@ class TaskResolutionPropagationTest {
                 () -> new TaskResolution(
                         divergentContract,
                         valid.intent(),
-                        valid.mutationTailPlan()));
+                        valid.mutationTailPlan(),
+                        valid.sequentialMutationPlan()));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new TaskResolution(
                         valid.contract(),
                         valid.intent(),
                         dev.talos.runtime.intent.CoordinatedMutationTailPlan.empty(
-                                "different request")));
+                                "different request"),
+                        valid.sequentialMutationPlan()));
 
         var originalStyle = valid.intent().targets().find("style.css").orElseThrow();
         var originalDerivation = originalStyle.derivation();
@@ -879,7 +949,8 @@ class TaskResolutionPropagationTest {
                 () -> new TaskResolution(
                         valid.contract(),
                         shiftedIntent,
-                        valid.mutationTailPlan()),
+                        valid.mutationTailPlan(),
+                        valid.sequentialMutationPlan()),
                 "a different authority end must not match the captured lexical plan");
     }
 

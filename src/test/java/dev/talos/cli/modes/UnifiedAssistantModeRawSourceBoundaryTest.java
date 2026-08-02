@@ -11,6 +11,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.TurnEnvelopePersistenceReceipt;
+import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.intent.TargetRef;
@@ -48,6 +49,7 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
         LocalTurnTraceCapture.clear();
         LastPromptCapture.clear();
         PromptDebugCapture.clear();
+        if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
     @Test
@@ -227,11 +229,15 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
                 "scripted",
                 "scripted",
                 request);
+        TurnAuditCapture.begin();
         LocalTurnTrace trace;
+        TurnPolicyTrace policyTrace;
         try {
             new UnifiedAssistantMode().handle(request, workspace, context);
             trace = LocalTurnTraceCapture.complete();
+            policyTrace = TurnAuditCapture.end().policyTrace();
         } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();
         }
 
@@ -244,6 +250,7 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
                 .toList();
         return new RunEvidence(
                 request,
+                policyTrace,
                 expectedTarget,
                 trace,
                 preview,
@@ -333,7 +340,7 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
                 0,
                 "",
                 "ok",
-                TurnPolicyTrace.empty(),
+                evidence.policyTrace(),
                 evidence.trace().traceId());
         JsonSessionStore store = new JsonSessionStore(storeDirectory);
         try (var writer = store.acquireSessionWriter(sessionId)) {
@@ -366,6 +373,7 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
 
     private record RunEvidence(
             String rawRequest,
+            TurnPolicyTrace policyTrace,
             TargetRef expectedTarget,
             LocalTurnTrace trace,
             PromptRender preview,

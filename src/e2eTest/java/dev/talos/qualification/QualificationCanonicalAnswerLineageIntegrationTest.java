@@ -19,6 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -61,7 +62,10 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             throws Exception {
         Config config = new Config();
         JsonSessionStore store = new JsonSessionStore(temp.resolve("deterministic-store"));
-        String sessionId = "canonical-deterministic-lineage";
+        Path workspace = temp.resolve("deterministic-workspace");
+        String sessionId = JsonSessionStore.newSessionInstanceId(
+                workspace,
+                Instant.parse("2026-07-21T00:00:00Z"));
         ModeController modes = new ModeController().add(new Mode() {
             @Override
             public String name() {
@@ -91,7 +95,7 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             processor.addListener(new JsonTurnLogAppender(writer, sessionId));
 
             result = processor.process(
-                    new Session(temp.resolve("deterministic-workspace"), config),
+                    new Session(workspace, config),
                     "Inspect the page and report when ready.",
                     Context.builder(config).build());
         }
@@ -115,7 +119,10 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             throws Exception {
         Config config = new Config();
         JsonSessionStore store = new JsonSessionStore(temp.resolve("operator-store"));
-        String sessionId = "canonical-operator-lineage";
+        Path workspace = temp.resolve("operator-workspace");
+        String sessionId = JsonSessionStore.newSessionInstanceId(
+                workspace,
+                Instant.parse("2026-07-21T00:00:00Z"));
         ModeController modes = new ModeController().add(new Mode() {
             @Override
             public String name() {
@@ -148,7 +155,7 @@ class QualificationCanonicalAnswerLineageIntegrationTest {
             processor.addListener(new JsonTurnLogAppender(writer, sessionId));
 
             result = processor.process(
-                    new Session(temp.resolve("operator-workspace"), config),
+                    new Session(workspace, config),
                     "Create cancellation.txt, then interrupt before approval.",
                     Context.builder(config).build());
         }

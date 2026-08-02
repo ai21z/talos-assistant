@@ -38,6 +38,9 @@ public record CoordinatedMutationTailPlan(
             Authority authority,
             String action,
             ActionFamily actionFamily,
+            int actionStartOffset,
+            int actionEndOffset,
+            int targetStartOffset,
             int startOffset,
             int authorityEndOffset,
             int endOffset,
@@ -69,6 +72,11 @@ public record CoordinatedMutationTailPlan(
             }
             sourceText = sourceText == null ? "" : sourceText;
             if (startOffset < 0
+                    || actionStartOffset < startOffset
+                    || actionEndOffset <= actionStartOffset
+                    || targetStartOffset < startOffset
+                    || targetStartOffset >= authorityEndOffset
+                    || actionEndOffset - actionStartOffset != action.length()
                     || authorityEndOffset <= startOffset
                     || endOffset < authorityEndOffset
                     || sourceText.isEmpty()) {
@@ -183,21 +191,54 @@ public record CoordinatedMutationTailPlan(
                 || tailEnd > canonicalRequest.length()) {
             throw new IllegalArgumentException("invalid constraint tail bounds");
         }
+        RequestLexicalView lexicalView = RequestLexicalView.of(canonicalRequest);
+        List<String> decisionPaths = decisions.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(TargetDecision::path)
+                .distinct()
+                .toList();
+        Set<TargetSpanIdentity> exactTargets =
+                CoordinatedMutationTailParser.targetOccurrences(
+                        lexicalView,
+                        decisionPaths,
+                        Math.max(0, constraintStart),
+                        Math.max(0, tailEnd)).stream()
+                        .map(occurrence -> new TargetSpanIdentity(
+                                occurrence.path(),
+                                occurrence.envelopeStart(),
+                                occurrence.envelopeEnd()))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Map<ActionValidationIdentity, Boolean> actionValidation =
+                new LinkedHashMap<>();
         LinkedHashSet<String> paths = new LinkedHashSet<>();
         for (TargetDecision decision : decisions) {
             if (decision.startOffset() < constraintStart
                     || decision.endOffset() > tailEnd
-                    || !containsPath(
-                            canonicalRequest.substring(
-                                    decision.startOffset(),
-                                    decision.authorityEndOffset()),
-                            decision.path())
+                    || !canonicalRequest.regionMatches(
+                            true,
+                            decision.actionStartOffset(),
+                            decision.action(),
+                            0,
+                            decision.action().length())
+                    || !exactTargets.contains(new TargetSpanIdentity(
+                            decision.path(),
+                            decision.targetStartOffset(),
+                            decision.authorityEndOffset()))
                     || !decision.sourceText().equals(canonicalRequest.substring(
                             decision.startOffset(),
                             decision.endOffset()))) {
                 throw new IllegalArgumentException(
                         "decision source span must be inside the tail and copied "
                                 + "from the canonical request");
+            }
+            if (!hasExactTypedAction(
+                    lexicalView,
+                    canonicalRequest,
+                    decision,
+                    actionValidation)) {
+                throw new IllegalArgumentException(
+                        "decision action must be exact typed request evidence: "
+                                + decision);
             }
             if (!containsPath(decision.sourceText(), decision.path())) {
                 throw new IllegalArgumentException(
@@ -309,25 +350,101 @@ public record CoordinatedMutationTailPlan(
     }
 
     public boolean matchesIntent(TaskIntent intent) {
+        return matchesIntentExcluding(intent, Set.of(), false);
+    }
+
+    private static boolean hasExactTypedAction(
+            RequestLexicalView view,
+            String canonicalRequest,
+            TargetDecision decision,
+            Map<ActionValidationIdentity, Boolean> cache
+    ) {
+        ActionValidationIdentity identity = new ActionValidationIdentity(
+                decision.action(),
+                decision.actionFamily(),
+                decision.authority(),
+                decision.actionStartOffset(),
+                decision.actionEndOffset(),
+                decision.targetStartOffset(),
+                decision.endOffset());
+        return cache.computeIfAbsent(identity, ignored -> {
+            boolean prohibitionOperator = decision.authority()
+                            == Authority.FORBIDDEN
+                    && CoordinatedMutationTailParser
+                            .isCanonicalProhibitionOperator(decision.action());
+            if (prohibitionOperator) {
+                boolean governedWorkspace =
+                        CanonicalMutationClauseMatcher.actions(
+                                view,
+                                decision.startOffset(),
+                                decision.targetStartOffset()).stream().anyMatch(
+                                action -> action.family()
+                                        == CanonicalMutationClauseMatcher.Family
+                                                .WORKSPACE_OPERATION);
+                return governedWorkspace
+                        == (decision.actionFamily()
+                                == ActionFamily.WORKSPACE_OPERATION);
+            }
+            return CanonicalMutationClauseMatcher.actions(
+                    view,
+                    decision.actionStartOffset(),
+                    decision.actionEndOffset()).stream().anyMatch(action ->
+                    action.start() == decision.actionStartOffset()
+                            && action.end() == decision.actionEndOffset()
+                            && action.verb().equalsIgnoreCase(decision.action())
+                            && CanonicalMutationClauseMatcher.actionMatchesFamily(
+                                    action,
+                                    decision.actionFamily()
+                                                    == ActionFamily
+                                                            .WORKSPACE_OPERATION
+                                            ? CanonicalMutationClauseMatcher.Family
+                                                    .WORKSPACE_OPERATION
+                                            : CanonicalMutationClauseMatcher.Family
+                                                    .CONTENT_MUTATION,
+                                    canonicalRequest.substring(
+                                            decision.actionEndOffset(),
+                                            decision.endOffset())));
+        });
+    }
+
+    private record TargetSpanIdentity(
+            String path,
+            int startOffset,
+            int endOffset
+    ) {}
+
+    private record ActionValidationIdentity(
+            String action,
+            ActionFamily family,
+            Authority authority,
+            int startOffset,
+            int endOffset,
+            int targetStartOffset,
+            int sourceEndOffset
+    ) {}
+
+    public boolean matchesIntentExcluding(
+            TaskIntent intent,
+            Set<String> pathsOwnedByAnotherPlan,
+            boolean confirmedReplay
+    ) {
         if (intent == null
                 || !canonicalRequest.equals(intent.originalUserRequest())) {
             return false;
         }
+        Set<String> excluded = normalizedPaths(pathsOwnedByAnotherPlan);
         for (TargetDecision decision : decisions) {
-            if (!decisionMatchesIntent(decision, intent, false)) return false;
+            if (excluded.contains(decision.path())) continue;
+            if (!decisionMatchesIntent(
+                    decision,
+                    intent,
+                    confirmedReplay)) return false;
         }
         return true;
     }
 
     public boolean matchesConfirmedReplayIntent(TaskIntent intent) {
-        if (intent == null
-                || !canonicalRequest.equals(intent.originalUserRequest())) {
-            return false;
-        }
-        for (TargetDecision decision : decisions) {
-            if (!decisionMatchesIntent(decision, intent, true)) return false;
-        }
-        return true;
+        return matchesIntentExcluding(intent, Set.of(), true);
     }
 
     /**
@@ -338,18 +455,25 @@ public record CoordinatedMutationTailPlan(
      * content decision. It must never erase an unrelated blocked workspace
      * operation and reopen that operation through legacy prose detection.
      */
-    public CoordinatedMutationTailPlan projectOnto(
+    CoordinatedMutationTailPlan projectOntoExcluding(
             TaskIntent intent,
+            Set<String> pathsOwnedByAnotherPlan,
             boolean confirmedReplay
     ) {
         if (intent == null
                 || !canonicalRequest.equals(intent.originalUserRequest())) {
-            return empty(intent == null ? "" : intent.originalUserRequest());
+            throw new IllegalArgumentException(
+                    "tail projection requires the identical canonical request");
         }
         if (!present()) return this;
+        Set<String> retainedOverlap = normalizedPaths(pathsOwnedByAnotherPlan);
         List<TargetDecision> retained = decisions.stream()
                 .filter(decision ->
-                        decisionMatchesIntent(decision, intent, confirmedReplay))
+                        retainedOverlap.contains(decision.path())
+                                || decisionMatchesIntent(
+                                        decision,
+                                        intent,
+                                        confirmedReplay))
                 .toList();
         if (retained.equals(decisions)) return this;
         return new CoordinatedMutationTailPlan(
@@ -415,6 +539,19 @@ public record CoordinatedMutationTailPlan(
                 || role == TargetRole.MUST_READ
                 || role == TargetRole.SOURCE_EVIDENCE
                 || role == TargetRole.VERIFY_ONLY;
+    }
+
+    private static Set<String> normalizedPaths(Set<String> raw) {
+        if (raw == null || raw.isEmpty()) return Set.of();
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String path : raw) {
+            try {
+                normalized.add(TargetRef.normalizePath(path));
+            } catch (IllegalArgumentException ignored) {
+                // Invalid exclusions cannot shadow a canonical decision.
+            }
+        }
+        return Collections.unmodifiableSet(normalized);
     }
 
     static boolean containsPath(String sourceText, String path) {

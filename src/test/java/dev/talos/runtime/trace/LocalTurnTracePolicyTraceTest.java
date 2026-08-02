@@ -64,6 +64,7 @@ class LocalTurnTracePolicyTraceTest {
                 .orElseThrow();
         assertEquals(Map.of(
                 "taskType", "FILE_EDIT",
+                "mutationRequested", true,
                 "mutationAllowed", true,
                 "verificationRequired", true,
                 "classificationReason", "explicit-file-edit"), contractEvent.data());

@@ -105,7 +105,8 @@ public final class SynchronizedApprovalAuditRunner {
             List<ScriptedApprovalGate.Event> approvals,
             String modelTranscript,
             LocalTurnTrace trace,
-            String workspaceDiff
+            String workspaceDiff,
+            TurnPolicyTrace policyTrace
     ) {
         public Result(
                 String finalAnswer,
@@ -113,7 +114,29 @@ public final class SynchronizedApprovalAuditRunner {
                 String modelTranscript,
                 LocalTurnTrace trace
         ) {
-            this(finalAnswer, approvals, modelTranscript, trace, "");
+            this(
+                    finalAnswer,
+                    approvals,
+                    modelTranscript,
+                    trace,
+                    "",
+                    TurnPolicyTrace.empty());
+        }
+
+        public Result(
+                String finalAnswer,
+                List<ScriptedApprovalGate.Event> approvals,
+                String modelTranscript,
+                LocalTurnTrace trace,
+                String workspaceDiff
+        ) {
+            this(
+                    finalAnswer,
+                    approvals,
+                    modelTranscript,
+                    trace,
+                    workspaceDiff,
+                    TurnPolicyTrace.empty());
         }
 
         public Result {
@@ -121,6 +144,9 @@ public final class SynchronizedApprovalAuditRunner {
             approvals = approvals == null ? List.of() : List.copyOf(approvals);
             modelTranscript = modelTranscript == null ? "" : modelTranscript;
             workspaceDiff = workspaceDiff == null ? "" : workspaceDiff;
+            policyTrace = policyTrace == null
+                    ? TurnPolicyTrace.empty()
+                    : policyTrace;
         }
 
         public String traceText() {
@@ -220,6 +246,7 @@ public final class SynchronizedApprovalAuditRunner {
                     "UNKNOWN",
                     "UNKNOWN",
                     "SYNCHRONIZED_APPROVAL_AUDIT");
+            TurnPolicyTrace policyTrace = TurnAuditCapture.currentPolicyTrace();
             trace = LocalTurnTraceCapture.complete();
             WorkspaceSnapshot afterWorkspace = WorkspaceSnapshot.capture(request.workspace());
             Result result = new Result(
@@ -227,7 +254,8 @@ public final class SynchronizedApprovalAuditRunner {
                     gate.events(),
                     messages.toString(),
                     trace,
-                    WorkspaceSnapshot.diff(beforeWorkspace, afterWorkspace));
+                    WorkspaceSnapshot.diff(beforeWorkspace, afterWorkspace),
+                    policyTrace);
             try {
                 gate.assertExhausted();
             } catch (AssertionError e) {
@@ -421,7 +449,9 @@ public final class SynchronizedApprovalAuditRunner {
                 (int) result.approvals().stream().filter(event -> !event.response().isApproved()).count(),
                 "",
                 "ok",
-                policyTraceFrom(result.trace()),
+                result.policyTrace().hasPolicyData()
+                        ? result.policyTrace()
+                        : policyTraceFrom(result.trace()),
                 result.trace() == null ? "" : result.trace().traceId());
         // This observes the bounded in-process row/trace envelope only.
         // Cross-process transactional publication remains owned by T1192.

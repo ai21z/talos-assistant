@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TaskIntentEvidence;
+import dev.talos.runtime.intent.MutationPlanSelection;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnSettlement;
@@ -140,7 +141,7 @@ public record LocalTurnTrace(
         return new LocalTurnTrace(
                 schemaVersion,
                 terminalToken(traceId, 128, ""),
-                terminalToken(sessionId, 128, ""),
+                terminalToken(sessionId, 200, ""),
                 turnNumber,
                 safeTimestamp,
                 terminalToken(workspaceHash, 128, ""),
@@ -254,7 +255,9 @@ public record LocalTurnTrace(
         }
 
         static TaskContractSummary empty() {
-            return new TaskContractSummary("", false, false, false, List.of(), List.of(), "", List.of());
+            return new TaskContractSummary(
+                    "", false, false, false, List.of(), List.of(), "",
+                    List.of());
         }
 
         static TaskContractSummary from(TaskContract contract) {
@@ -370,8 +373,14 @@ public record LocalTurnTrace(
             List<RolefulTargetSummary> targets
     ) {
         if (targets == null || targets.isEmpty()) return List.of();
+        if (targets.size()
+                > MutationPlanSelection.MAX_DURABLE_ROLEFUL_TARGETS) {
+            throw new IllegalArgumentException(
+                    "too many roleful target summaries");
+        }
         java.util.LinkedHashMap<String, RolefulTargetSummary> byPath =
                 new java.util.LinkedHashMap<>();
+        long retainedSourceCharacters = 0L;
         for (RolefulTargetSummary target : targets) {
             if (target == null) {
                 throw new IllegalArgumentException("Roleful target summary must not be null");
@@ -381,6 +390,14 @@ public record LocalTurnTrace(
                 throw new IllegalArgumentException(
                         "Duplicate or conflicting roleful target summary path: " + target.path());
             }
+            int length = target.sourceText().length();
+            if (length > MutationPlanSelection
+                    .MAX_PROJECTED_ROLEFUL_SOURCE_CHARACTERS
+                            - retainedSourceCharacters) {
+                throw new IllegalArgumentException(
+                        "roleful target summary evidence exceeds its durable bound");
+            }
+            retainedSourceCharacters += length;
         }
         return List.copyOf(byPath.values());
     }

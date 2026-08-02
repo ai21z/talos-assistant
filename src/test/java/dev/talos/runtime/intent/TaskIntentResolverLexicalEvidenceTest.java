@@ -311,10 +311,35 @@ class TaskIntentResolverLexicalEvidenceTest {
                             .orElseThrow()
                             .role(),
                     request);
-            assertTrue(
-                    resolution.mutationTailPlan()
-                            .decision("style.css")
-                            .isEmpty(),
+            List<SequentialMutationClausePlan.ClauseDecision> styleDecisions =
+                    resolution.sequentialMutationPlan()
+                            .decisions("style.css");
+            assertEquals(2, styleDecisions.size(), request);
+            assertEquals(
+                    SequentialMutationClausePlan.Authority.REQUIRED,
+                    styleDecisions.getFirst().authority(),
+                    request);
+            assertEquals("Update style.css",
+                    styleDecisions.getFirst().sourceText(), request);
+            assertEquals(0,
+                    styleDecisions.getFirst().startOffset(), request);
+            assertEquals(16,
+                    styleDecisions.getFirst().authorityEndOffset(), request);
+            assertEquals(16,
+                    styleDecisions.getFirst().endOffset(), request);
+            assertEquals(
+                    middle.startsWith("Maybe")
+                            ? SequentialMutationClausePlan.Authority.OPTIONAL
+                            : SequentialMutationClausePlan.Authority
+                                    .NON_AUTHORITATIVE,
+                    styleDecisions.getLast().authority(),
+                    request);
+            assertEquals(
+                    SequentialMutationClausePlan.Authority.REQUIRED,
+                    resolution.sequentialMutationPlan()
+                            .effectiveDecision("style.css")
+                            .orElseThrow()
+                            .authority(),
                     request);
         }
     }
@@ -375,8 +400,15 @@ class TaskIntentResolverLexicalEvidenceTest {
                 TaskContractResolver.resolveFromUserRequest(
                         interveningTarget);
         assertEquals(
-                Set.of("a.md", "b.md"),
+                Set.of("a.md"),
                 interveningResolution.contract().expectedTargets(),
+                interveningTarget + " resolution=" + interveningResolution);
+        assertEquals(
+                TargetRole.MENTIONED_ONLY,
+                interveningResolution.intent().targets()
+                        .find("b.md")
+                        .orElseThrow()
+                        .role(),
                 interveningTarget);
         assertEquals(
                 TargetRole.MUST_MUTATE,
@@ -1340,7 +1372,8 @@ class TaskIntentResolverLexicalEvidenceTest {
                 30,
                 resolution.contract().expectedTargets().stream()
                         .filter(path -> path.startsWith("out"))
-                        .count());
+                        .count(),
+                resolution.toString());
     }
 
     @Test

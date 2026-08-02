@@ -297,6 +297,33 @@ class WorkspaceTargetReconcilerTest {
         assertEquals(Set.of(), contract.expectedTargets());
     }
 
+    @Test
+    void workspaceEvidenceCannotReopenAnIncompleteTargetScan(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><link rel="stylesheet" href="style.css"></head>
+                <body><script src="script.js"></script></body></html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body {}\n");
+        Files.writeString(workspace.resolve("script.js"), "void 0;\n");
+        String request = "Make this website better. "
+                + "a.txt ".repeat(8_193);
+        TaskResolution raw =
+                TaskContractResolver.resolveFromUserRequest(request);
+
+        TaskResolution reconciled =
+                WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+        assertEquals(raw, reconciled);
+        assertTrue(reconciled.sequentialMutationPlan()
+                .targetIndexLimitExceeded());
+        assertFalse(reconciled.contract().mutationAllowed());
+        assertEquals(Set.of(), reconciled.contract().expectedTargets());
+        assertTrue(reconciled.blocksUnscopedMutation());
+    }
+
     private static TaskContract reconciledStaticWebContract(Path workspace) {
         TaskContract raw = TaskContractResolver.fromUserRequest(
                 "Create a modern synthwave website here with CSS styling and JavaScript interaction.");

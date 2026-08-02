@@ -8,6 +8,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -64,6 +66,57 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticWebCreationContinuation]"), prompt);
         assertTrue(prompt.contains("Successful directory mutation: Created directory bmi-website"), prompt);
         assertTrue(prompt.contains("Call talos.write_file now for the actual static web files."), prompt);
+    }
+
+    @Test
+    void incompleteTargetScanCannotCreateDirectoryOrVerificationContinuation()
+            throws Exception {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
+                "Create a complete static website. "
+                        + "a.txt ".repeat(8_193));
+        TaskContract quarantined = resolution.contract();
+        assertFalse(quarantined.mutationAllowed());
+        assertTrue(quarantined.expectedTargets().isEmpty());
+        TurnTaskContractCapture.set(resolution);
+        LoopState state = state(
+                "Create a complete static website. "
+                        + "a.txt ".repeat(8_193));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.mkdir",
+                "site",
+                true,
+                true,
+                false,
+                "Created directory site",
+                ""));
+        state.mutatingToolSuccesses = 1;
+
+        assertTrue(StaticWebContinuationPlanner
+                .directoryOnlyPlan(state, baseTools()).isEmpty());
+
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><link rel="stylesheet" href="styles.css"></head>
+                <body><script src="script.js"></script></body></html>
+                """);
+        LoopState verificationState = state(
+                "Create a complete static website. "
+                        + "a.txt ".repeat(8_193));
+        verificationState.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        verificationState.mutatingToolSuccesses = 1;
+        assertTrue(StaticWebContinuationPlanner
+                .verificationFailurePlan(
+                        verificationState,
+                        baseTools()).isEmpty());
+        assertTrue(StaticWebContinuationPlanner
+                .nextPlan(verificationState, baseTools()).isEmpty());
     }
 
     @Test
@@ -528,7 +581,7 @@ class StaticWebContinuationPlannerTest {
     }
 
     @Test
-    void fullRewriteInteractionRepairIncludesOptionalCssWhenCssVerificationFails() throws Exception {
+    void fullRewriteRepairDoesNotPromoteOptionalCssBeforeT1202() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
                 <html lang="en">
@@ -575,23 +628,25 @@ class StaticWebContinuationPlannerTest {
         Optional<StaticWebContinuationPlanner.Plan> plan =
                 StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools());
 
-        assertTrue(plan.isPresent(), "CSS verification failure should make optional CSS repair-applicable");
+        assertTrue(plan.isPresent(), "required static-web targets still need repair");
         StaticWebContinuationPlanner.Plan continuation = plan.get();
         assertEquals(List.of("talos.write_file"), toolNames(continuation.tools()));
-        assertEquals(List.of("index.html", "scripts.js", "styles.css"), continuation.missingTargets());
+        assertEquals(List.of("index.html", "scripts.js"), continuation.missingTargets());
         assertTrue(continuation.pendingActionObligation().isPresent());
-        assertEquals(List.of("index.html", "scripts.js", "styles.css"),
+        assertEquals(List.of("index.html", "scripts.js"),
                 continuation.pendingActionObligation().orElseThrow().targets());
         String prompt = prompt(continuation.messages());
-        assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js, styles.css"), prompt);
+        assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js"), prompt);
+        assertFalse(prompt.contains(
+                "Static web repair target files: index.html, scripts.js, styles.css"), prompt);
         assertTrue(prompt.contains("CSS references missing class selectors: `.stage`"), prompt);
         assertTrue(prompt.contains("[StaticRepairReadbacks]"), prompt);
-        assertTrue(prompt.contains("\"path\":\"styles.css\""), prompt);
-        assertTrue(prompt.contains(".stage { padding: 2rem; }"), prompt);
+        assertFalse(prompt.contains("\"path\":\"styles.css\""), prompt);
+        assertFalse(prompt.contains(".stage { padding: 2rem; }"), prompt);
         ChatMessage last = continuation.messages().get(continuation.messages().size() - 1);
         assertEquals("user", last.role());
         assertTrue(last.content().contains(
-                "Repair exactly the listed static-web target path(s): index.html, scripts.js, styles.css"),
+                "Repair exactly the listed static-web target path(s): index.html, scripts.js"),
                 last.content());
         assertTrue(last.content().contains("Do not write any other file in this continuation."), last.content());
         assertFalse(prompt.contains("Missing or unmutated target files: styles.css"), prompt);

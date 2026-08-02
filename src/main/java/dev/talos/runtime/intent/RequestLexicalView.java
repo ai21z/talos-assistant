@@ -51,8 +51,19 @@ final class RequestLexicalView {
 
     private final String request;
     private final boolean[] quoted;
+    private final int[] quotedPrefix;
     private final boolean[] providerRemovedControls;
+    private final int[] providerRemovedControlPrefix;
+    private final int[] loneCarriageReturnPrefix;
+    private final int[] malformedDelimiterPrefix;
+    private final int[] delimiterDepth;
+    private final int[] delimiterOwners;
     private final int[] quoteOwners;
+    private final int[] quoteContentStarts;
+    private final int[] quoteContentEnds;
+    private final int[] quoteEnvelopeEnds;
+    private final int[] sentenceEnds;
+    private final int[] sentenceStarts;
     private final String masked;
     private final String maskedLower;
 
@@ -60,8 +71,13 @@ final class RequestLexicalView {
         this.request = request == null ? "" : request;
         QuoteAnalysis quoteAnalysis = quoteAnalysis(this.request);
         this.quoted = quoteAnalysis.mask();
+        this.quotedPrefix = prefixCounts(this.quoted);
         this.providerRemovedControls = new boolean[this.request.length()];
         this.quoteOwners = quoteAnalysis.owners();
+        this.quoteContentStarts = quoteAnalysis.contentStarts();
+        this.quoteContentEnds = quoteAnalysis.contentEnds();
+        this.quoteEnvelopeEnds = quoteAnalysis.envelopeEnds();
+        boolean[] loneCarriageReturns = new boolean[this.request.length()];
         StringBuilder masked = new StringBuilder(this.request.length());
         for (int i = 0; i < this.request.length(); i++) {
             char value = this.request.charAt(i);
@@ -69,10 +85,26 @@ final class RequestLexicalView {
                     this.request,
                     i);
             providerRemovedControls[i] = providerRemovedControl;
+            loneCarriageReturns[i] = value == '\r'
+                    && (i + 1 >= this.request.length()
+                            || this.request.charAt(i + 1) != '\n');
             masked.append(quoted[i] || providerRemovedControl ? ' ' : value);
         }
+        this.providerRemovedControlPrefix = prefixCounts(
+                this.providerRemovedControls);
+        this.loneCarriageReturnPrefix = prefixCounts(loneCarriageReturns);
+        DelimiterAnalysis delimiterAnalysis = delimiterAnalysis(
+                this.request,
+                this.quoted,
+                this.providerRemovedControls);
+        this.delimiterDepth = delimiterAnalysis.depth();
+        this.delimiterOwners = delimiterAnalysis.owners();
+        this.malformedDelimiterPrefix = prefixCounts(
+                delimiterAnalysis.malformed());
         this.masked = masked.toString();
         this.maskedLower = foldCasePreservingLength(this.masked);
+        this.sentenceEnds = sentenceEnds();
+        this.sentenceStarts = sentenceStarts();
     }
 
     static RequestLexicalView of(String canonicalRequest) {
@@ -98,32 +130,59 @@ final class RequestLexicalView {
     boolean isUnquotedRange(int start, int end) {
         int safeStart = Math.max(0, start);
         int safeEnd = Math.min(request.length(), Math.max(safeStart, end));
-        for (int i = safeStart; i < safeEnd; i++) {
-            if (quoted[i]) return false;
-        }
-        return true;
+        return quotedPrefix[safeEnd] == quotedPrefix[safeStart];
+    }
+
+    /**
+     * Returns true only for bytes outside paired (), [], and {} regions.
+     * Quote bytes are ignored while depth is calculated, so punctuation in a
+     * quoted literal cannot change structural ownership.
+     */
+    boolean isTopLevel(int offset) {
+        return offset >= 0
+                && offset < delimiterDepth.length
+                && delimiterDepth[offset] == 0;
+    }
+
+    /**
+     * Returns the exact opening-delimiter offset of the innermost structural
+     * container at {@code offset}, or {@code -1} at top level. Depth alone is
+     * insufficient because adjacent sibling containers have the same depth
+     * but do not share lexical authority.
+     */
+    int delimiterOwner(int offset) {
+        return offset >= 0 && offset < delimiterOwners.length
+                ? delimiterOwners[offset]
+                : -1;
     }
 
     boolean containsProviderRemovedControl(int start, int end) {
         int safeStart = Math.max(0, start);
         int safeEnd = Math.min(request.length(), Math.max(safeStart, end));
-        for (int i = safeStart; i < safeEnd; i++) {
-            if (providerRemovedControls[i]) return true;
-        }
-        return false;
+        return providerRemovedControlPrefix[safeEnd]
+                > providerRemovedControlPrefix[safeStart];
     }
 
     boolean containsLoneCarriageReturn(int start, int end) {
         int safeStart = Math.max(0, start);
         int safeEnd = Math.min(request.length(), Math.max(safeStart, end));
-        for (int i = safeStart; i < safeEnd; i++) {
-            if (request.charAt(i) == '\r'
-                    && (i + 1 >= request.length()
-                            || request.charAt(i + 1) != '\n')) {
-                return true;
-            }
+        return loneCarriageReturnPrefix[safeEnd]
+                > loneCarriageReturnPrefix[safeStart];
+    }
+
+    boolean containsMalformedDelimiter(int start, int end) {
+        int safeStart = Math.max(0, start);
+        int safeEnd = Math.min(request.length(), Math.max(safeStart, end));
+        return malformedDelimiterPrefix[safeEnd]
+                > malformedDelimiterPrefix[safeStart];
+    }
+
+    private static int[] prefixCounts(boolean[] values) {
+        int[] prefix = new int[values.length + 1];
+        for (int i = 0; i < values.length; i++) {
+            prefix[i + 1] = prefix[i] + (values[i] ? 1 : 0);
         }
-        return false;
+        return prefix;
     }
 
     private static boolean providerRemovesControlAt(String value, int index) {
@@ -154,16 +213,39 @@ final class RequestLexicalView {
     }
 
     int sentenceEndAfter(int start) {
-        int safeStart = Math.max(0, start);
-        for (int i = safeStart; i < request.length(); i++) {
-            if (quoted[i]) continue;
-            char value = request.charAt(i);
-            if ((value == '.' || value == '!' || value == '?' || value == '\u2026')
-                    && isSentenceBoundaryAt(i)) {
-                return i + 1;
-            }
+        if (request.isEmpty()) return 0;
+        int safeStart = Math.max(0, Math.min(start, request.length()));
+        return safeStart == request.length()
+                ? request.length()
+                : sentenceEnds[safeStart];
+    }
+
+    private int[] sentenceEnds() {
+        int[] indexed = new int[request.length()];
+        int nextEnd = request.length();
+        for (int index = request.length() - 1; index >= 0; index--) {
+            if (isSentenceBoundaryAt(index)) nextEnd = index + 1;
+            indexed[index] = nextEnd;
         }
-        return request.length();
+        return indexed;
+    }
+
+    private int[] sentenceStarts() {
+        int[] indexed = new int[request.length() + 1];
+        int lastEnd = 0;
+        for (int index = 0; index < request.length(); index++) {
+            if (isSentenceBoundaryAt(index)) lastEnd = index + 1;
+            indexed[index + 1] = lastEnd;
+        }
+        return indexed;
+    }
+
+    int sentenceStartBefore(int lowerBound, int end) {
+        int safeLower = Math.max(0, Math.min(lowerBound, request.length()));
+        int safeEnd = Math.min(
+                request.length(),
+                Math.max(safeLower, end));
+        return Math.max(safeLower, sentenceStarts[safeEnd]);
     }
 
     boolean isSentenceBoundaryAt(int index) {
@@ -202,62 +284,31 @@ final class RequestLexicalView {
     }
 
     Span exactQuotedEnvelope(int start, int end) {
-        if (start <= 0 || end <= start || end >= request.length()) return null;
+        if (start <= 0 || end <= start || start >= request.length()) return null;
         int owner = quoteOwners[start];
-        if (owner >= 0 && request.charAt(owner) == '`') {
-            int delimiterLength = repeatedRunLength(request, owner, '`');
-            if (delimiterLength <= 0
-                    || start != owner + delimiterLength
-                    || end + delimiterLength > request.length()
-                    || repeatedRunLength(request, end, '`') < delimiterLength) {
-                return null;
-            }
-            for (int i = owner; i < end + delimiterLength; i++) {
-                if (!quoted[i] || quoteOwners[i] != owner) return null;
-            }
-            return new Span(owner, end + delimiterLength);
-        }
-        for (int i = start; i < end; i++) {
-            if (!quoted[i]) return null;
-        }
-        char open = request.charAt(start - 1);
-        char close = request.charAt(end);
-        Character expectedClose = open == '\''
-                ? Character.valueOf('\'')
-                : PAIRED_QUOTES.get(open);
-        return expectedClose != null
-                && close == expectedClose
-                && quoted[start - 1]
-                && quoted[end]
-                && quoteOwners[start - 1] == start - 1
-                && quoteOwners[start] == start - 1
-                && quoteOwners[end] == start - 1
-                ? new Span(start - 1, end + 1)
+        return owner >= 0
+                        && quoteContentStarts[owner] == start
+                        && quoteContentEnds[owner] == end
+                        && quoteEnvelopeEnds[owner] > end
+                ? new Span(owner, quoteEnvelopeEnds[owner])
                 : null;
     }
 
     Span exactQuotedContentStartingAt(int envelopeStart, int endLimit) {
         if (envelopeStart < 0
                 || envelopeStart >= request.length()
-                || !quoted[envelopeStart]) {
+                || quoteOwners[envelopeStart] != envelopeStart) {
             return null;
         }
-        int delimiterLength = request.charAt(envelopeStart) == '`'
-                ? repeatedRunLength(request, envelopeStart, '`')
-                : 1;
-        int contentStart = envelopeStart + delimiterLength;
+        int contentStart = quoteContentStarts[envelopeStart];
+        int contentEnd = quoteContentEnds[envelopeStart];
+        if (contentStart < 0 || contentEnd <= contentStart) return null;
         int safeLimit = Math.min(
                 request.length(),
                 Math.max(contentStart, endLimit));
-        for (int contentEnd = contentStart + 1;
-                contentEnd < safeLimit;
-                contentEnd++) {
-            Span envelope = exactQuotedEnvelope(contentStart, contentEnd);
-            if (envelope != null && envelope.start() == envelopeStart) {
-                return new Span(contentStart, contentEnd);
-            }
-        }
-        return null;
+        return contentEnd < safeLimit
+                ? new Span(contentStart, contentEnd)
+                : null;
     }
 
     Span completedQuotedEnvelopeImmediatelyBefore(
@@ -272,19 +323,12 @@ final class RequestLexicalView {
         if (cursor < safeLower || !quoted[cursor]) return null;
         int owner = quoteOwners[cursor];
         if (owner < safeLower || owner >= cursor) return null;
-
-        int delimiterLength = request.charAt(owner) == '`'
-                ? repeatedRunLength(request, owner, '`')
-                : 1;
         int envelopeEnd = cursor + 1;
-        int contentStart = owner + delimiterLength;
-        int contentEnd = envelopeEnd - delimiterLength;
+        int contentStart = quoteContentStarts[owner];
+        int contentEnd = quoteContentEnds[owner];
         if (contentEnd <= contentStart) return null;
-        Span envelope = exactQuotedEnvelope(contentStart, contentEnd);
-        return envelope != null
-                        && envelope.start() == owner
-                        && envelope.end() == envelopeEnd
-                ? envelope
+        return quoteEnvelopeEnds[owner] == envelopeEnd
+                ? new Span(owner, envelopeEnd)
                 : null;
     }
 
@@ -341,7 +385,13 @@ final class RequestLexicalView {
     private static QuoteAnalysis quoteAnalysis(String request) {
         boolean[] mask = new boolean[request.length()];
         int[] owners = new int[request.length()];
+        int[] contentStarts = new int[request.length()];
+        int[] contentEnds = new int[request.length()];
+        int[] envelopeEnds = new int[request.length()];
         java.util.Arrays.fill(owners, -1);
+        java.util.Arrays.fill(contentStarts, -1);
+        java.util.Arrays.fill(contentEnds, -1);
+        java.util.Arrays.fill(envelopeEnds, -1);
         Deque<QuoteFrame> stack = new ArrayDeque<>();
         boolean escaped = false;
         for (int i = 0; i < request.length(); i++) {
@@ -349,8 +399,8 @@ final class RequestLexicalView {
             if (!stack.isEmpty()) {
                 QuoteFrame frame = stack.peek();
                 if (frame.delimiterLength() > 1 || frame.close() == '`') {
-                    int runLength = value == '`'
-                            ? repeatedRunLength(request, i, '`')
+                    int runLength = value == frame.close()
+                            ? repeatedRunLength(request, i, frame.close())
                             : 0;
                     int consumed = runLength >= frame.delimiterLength()
                             ? frame.delimiterLength()
@@ -362,6 +412,11 @@ final class RequestLexicalView {
                         owners[j] = frame.start();
                     }
                     if (runLength >= frame.delimiterLength()) {
+                        contentStarts[frame.start()] = frame.start()
+                                + frame.delimiterLength();
+                        contentEnds[frame.start()] = i;
+                        envelopeEnds[frame.start()] = i
+                                + frame.delimiterLength();
                         stack.pop();
                     }
                     i += consumed - 1;
@@ -383,6 +438,9 @@ final class RequestLexicalView {
                     continue;
                 }
                 if (value == frame.close()) {
+                    contentStarts[frame.start()] = frame.start() + 1;
+                    contentEnds[frame.start()] = i;
+                    envelopeEnds[frame.start()] = i + 1;
                     stack.pop();
                 }
                 continue;
@@ -398,6 +456,17 @@ final class RequestLexicalView {
                     owners[j] = i;
                 }
                 stack.push(new QuoteFrame('`', false, i, delimiterLength));
+                i += delimiterLength - 1;
+                continue;
+            }
+            if (value == '~'
+                    && repeatedRunLength(request, i, '~') >= 3) {
+                int delimiterLength = repeatedRunLength(request, i, '~');
+                for (int j = i; j < i + delimiterLength; j++) {
+                    mask[j] = true;
+                    owners[j] = i;
+                }
+                stack.push(new QuoteFrame('~', false, i, delimiterLength));
                 i += delimiterLength - 1;
                 continue;
             }
@@ -423,8 +492,71 @@ final class RequestLexicalView {
                 if (owners[i] < 0) owners[i] = firstMasked;
             }
         }
-        return new QuoteAnalysis(mask, owners);
+        return new QuoteAnalysis(
+                mask,
+                owners,
+                contentStarts,
+                contentEnds,
+                envelopeEnds);
     }
+
+    private static DelimiterAnalysis delimiterAnalysis(
+            String request,
+            boolean[] quoted,
+            boolean[] providerRemovedControls
+    ) {
+        int[] depthAt = new int[request.length()];
+        int[] ownerAt = new int[request.length()];
+        java.util.Arrays.fill(ownerAt, -1);
+        boolean[] malformed = new boolean[request.length()];
+        Deque<DelimiterFrame> delimiters = new ArrayDeque<>();
+        for (int index = 0; index < request.length(); index++) {
+            char value = request.charAt(index);
+            if (quoted[index] || providerRemovedControls[index]) {
+                depthAt[index] = delimiters.size();
+                ownerAt[index] = delimiters.isEmpty()
+                        ? -1
+                        : delimiters.peek().start();
+                continue;
+            }
+            if (matchesDelimiter(delimiters.peek(), value)) {
+                delimiters.pop();
+            } else if (closingDelimiter(value)) {
+                malformed[index] = true;
+            }
+            depthAt[index] = delimiters.size();
+            ownerAt[index] = delimiters.isEmpty()
+                    ? -1
+                    : delimiters.peek().start();
+            if (value == '(' || value == '[' || value == '{') {
+                delimiters.push(new DelimiterFrame(value, index));
+            }
+        }
+        for (DelimiterFrame unclosed : delimiters) {
+            malformed[unclosed.start()] = true;
+        }
+        return new DelimiterAnalysis(depthAt, ownerAt, malformed);
+    }
+
+    private static boolean matchesDelimiter(DelimiterFrame frame, char close) {
+        Character open = frame == null ? null : frame.open();
+        return open != null
+                && (open == '(' && close == ')'
+                        || open == '[' && close == ']'
+                        || open == '{' && close == '}');
+    }
+
+    private static boolean closingDelimiter(char value) {
+        return value == ')' || value == ']' || value == '}';
+    }
+
+    private record DelimiterFrame(char open, int start) {}
+
+    private record DelimiterAnalysis(
+            int[] depth,
+            int[] owners,
+            boolean[] malformed
+    ) {}
 
     private static boolean apostropheInWordOrPossessive(String request, int index) {
         return index > 0
@@ -464,5 +596,11 @@ final class RequestLexicalView {
             int delimiterLength
     ) {}
 
-    private record QuoteAnalysis(boolean[] mask, int[] owners) {}
+    private record QuoteAnalysis(
+            boolean[] mask,
+            int[] owners,
+            int[] contentStarts,
+            int[] contentEnds,
+            int[] envelopeEnds
+    ) {}
 }

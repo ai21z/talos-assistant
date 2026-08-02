@@ -21,6 +21,7 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -736,6 +737,19 @@ public final class TurnProcessor {
                     "The user only asked to list directory entries on this turn, so do not call "
                             + call.toolName()
                             + ". Use talos.list_dir only and answer with file and directory names."));
+        }
+
+        ToolResult incompleteTargetScanValidation =
+                validateIncompleteAuthorityBeforeApproval(call, mutatingTool);
+        if (incompleteTargetScanValidation != null) {
+            TurnAuditCapture.recordBlockedToolCall(
+                    call,
+                    path == null ? "" : path,
+                    tracePhase,
+                    preApprovalBlockReason(
+                            call,
+                            incompleteTargetScanValidation));
+            return incompleteTargetScanValidation;
         }
 
         if (mutatingTool
@@ -1505,6 +1519,26 @@ public final class TurnProcessor {
             }
         }
         return null;
+    }
+
+    private static ToolResult validateIncompleteAuthorityBeforeApproval(
+            ToolCall call,
+            boolean mutatingTool
+    ) {
+        TaskResolution capturedResolution =
+                TurnTaskContractCapture.getResolution();
+        if (call == null
+                || !mutatingTool
+                || capturedResolution == null
+                || !capturedResolution.sequentialMutationPlan()
+                        .authorityLimitExceeded()) {
+            return null;
+        }
+        return ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                "The current typed authority analysis did not complete, so no "
+                        + "content-mutation target is authorized. No approval "
+                        + "was requested and no file was changed."));
     }
 
     private static List<String> expectedTargetValidationPaths(ToolCall call) {

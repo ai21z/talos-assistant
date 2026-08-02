@@ -69,6 +69,22 @@ public final class ActiveTaskContextPolicy {
             ActiveTaskContext savedContext,
             ArtifactGoal savedGoal,
             int currentUserTurnNumber) {
+        return evaluate(
+                userRequest,
+                rawContract,
+                savedContext,
+                savedGoal,
+                currentUserTurnNumber,
+                true);
+    }
+
+    public static Decision evaluate(
+            String userRequest,
+            TaskContract rawContract,
+            ActiveTaskContext savedContext,
+            ArtifactGoal savedGoal,
+            int currentUserTurnNumber,
+            boolean mutationAuthorityComplete) {
         TaskContract current = rawContract == null ? TaskContract.unknown(userRequest) : rawContract;
 
         if (savedContext == null || savedContext.state() != ActiveTaskContext.State.ACTIVE) {
@@ -98,6 +114,15 @@ public final class ActiveTaskContextPolicy {
                     savedContext.expired("expired after active-context turn limit"),
                     ArtifactGoal.none(),
                     ActiveTaskContext.none(),
+                    false);
+        }
+
+        if (!mutationAuthorityComplete) {
+            return new Decision(
+                    current,
+                    ActiveTaskContext.none(),
+                    ArtifactGoal.none(),
+                    savedContext,
                     false);
         }
 

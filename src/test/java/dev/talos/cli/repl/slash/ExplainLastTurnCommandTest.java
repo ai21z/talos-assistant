@@ -445,9 +445,11 @@ class ExplainLastTurnCommandTest {
                 .verification("FAILED", "Static verification failed", List.of("scripts.js missing"))
                 .outcome("FAILED", "FAILED", "UNKNOWN", "PARTIAL", "TASK_INCOMPLETE")
                 .build();
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.empty()
+                .withNativeTools(trace.toolSurface().nativeTools())
+                .withPromptTools(trace.toolSurface().promptTools());
         try (var writer = store.acquireSessionWriter(sessionId)) {
-            writer.saveTrace(sessionId, trace);
-            writer.appendTurn(sessionId, new TurnRecord(
+            var receipt = writer.persistTurnEnvelope(sessionId, new TurnRecord(
                     1,
                     Instant.parse("2026-04-28T12:00:01Z"),
                     1200,
@@ -459,8 +461,12 @@ class ExplainLastTurnCommandTest {
                     0,
                     "",
                     "ok",
-                    TurnPolicyTrace.empty(),
-                    "trc-local"));
+                    policyTrace,
+                    "trc-local"), trace);
+            assertEquals(
+                    dev.talos.runtime.TurnEnvelopePersistenceReceipt.State
+                            .BOTH_WRITES_OBSERVED,
+                    receipt.state());
         }
 
         Result result = cmd.execute("trace", minimalCtx());

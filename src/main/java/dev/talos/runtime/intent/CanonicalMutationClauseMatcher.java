@@ -40,6 +40,8 @@ final class CanonicalMutationClauseMatcher {
                      + "overwrite|modify|change|fix|adjust|tweak|restyle|"
                     + "redesign|polish|repair|touch"
                      + ")\\b");
+    private static final Pattern DIRECTORY_CONTEXT = Pattern.compile(
+            "(?iu)\\b(?:directories|directory|dirs|dir|folders|folder)\\b");
     private static final Pattern DIRECT_TARGET_PREFIX = Pattern.compile(
             "(?i)^[\\s:,-]*(?:(?:the|a|an|both|current|existing|local)\\s+)*"
                     + "(?:(?:file|files)\\s+)?$");
@@ -118,7 +120,9 @@ final class CanonicalMutationClauseMatcher {
                     + "indicates?|indicated|observes?|observed|hears?|heard|"
                     + "knows?|knew|reports?|reported|claims?|claimed|"
                     + "asserts?|asserted)\\b"
-                    + "|\\bconsider\\s+whether\\b|\\bwhat\\s+would\\b|\\bhow\\s+would\\b"
+                    + "|\\bconsider\\b"
+                    + "|\\byou\\s+should\\b"
+                    + "|\\bwhat\\s+would\\b|\\bhow\\s+would\\b"
                     + "|\\byou\\s+(?:can|could|might)\\b"
                     + "|\\bi\\s+(?:(?:would|might|may|could)\\s+)?"
                     + "(?:strongly\\s+)?(?:suggest|recommend|advise)\\b"
@@ -158,6 +162,38 @@ final class CanonicalMutationClauseMatcher {
                     + "prompt|example)\\b"
                     + "|\\bfor\\s+(?:review|discussion|reference|context|comparison|"
                     + "consideration)(?:\\s+only)?\\b");
+    private static final Pattern EXAMPLE_ONLY_SCOPE = Pattern.compile(
+            "(?iu)(?:^|[\\s,;:])(?:e\\s*\\.\\s*g\\s*\\.|etc\\s*\\.)"
+                    + "(?:[\\s,;:]|$)"
+                    + "|\\b(?:as|for)\\s+(?:an?\\s+)?example\\b");
+    private static final Pattern BARE_EXAMPLE_LABEL = Pattern.compile(
+            "(?iu)(?:^|[\\s\\u2028\\u2029,;])"
+                    + "(?:an?[\\s\\u2028\\u2029]+)?examples?"
+                    + "[\\s\\u2028\\u2029]*:[\\s\\u2028\\u2029]*$");
+    private static final Pattern POSTFIX_OPTIONAL_SCOPE = Pattern.compile(
+             "(?iu)\\b(?:only\\s+)?(?:if|when|unless)\\b"
+                     + "|\\bif\\s+you\\s+(?:want|wish|prefer|choose)\\b"
+                     + "|\\b(?:if|when)\\s+(?:desired|useful|helpful)\\b"
+                     + "|\\bas\\s+(?:needed|necessary)\\b"
+                     + "|\\b(?:optionally|perhaps|maybe|possibly|potentially)\\b");
+    private static final Pattern POSTFIX_REPORTED_SCOPE = Pattern.compile(
+            "(?iu)\\bis\\s+what\\s+(?:the\\s+)?(?:ticket|guide|policy|"
+                    + "runbook|reviewer|verifier|report|requirements?|"
+                    + "spec(?:ification)?|documentation|document|message|"
+                    + "comment|note|issue|task|prompt|example)\\s+"
+                    + "(?:says?|said|states?|stated|requires?|required|"
+                    + "proposes?|proposed|suggests?|suggested|mentions?|"
+                    + "mentioned)\\b"
+                    + "|\\baccording\\s+to\\s+(?:the\\s+)?(?:ticket|guide|"
+                    + "policy|runbook|reviewer|verifier|report|requirements?|"
+                    + "spec(?:ification)?|documentation|document|message|"
+                    + "comment|note|issue|task|prompt|example)\\b"
+                    + "|\\bper\\s+(?:the\\s+)?(?:ticket|guide|policy|"
+                    + "runbook|reviewer|verifier|report|requirements?|"
+                    + "spec(?:ification)?|documentation|document|message|"
+                    + "comment|note|issue|task|prompt|example)\\b"
+                    + "|\\b(?:only\\s+)?as\\s+(?:an?\\s+)?(?:proposal|"
+                    + "suggestion|recommendation|option|example|reference)\\b");
     private static final Pattern METALINGUISTIC_PREFIX = Pattern.compile(
             "(?iu)(?:\\b(?:the\\s+)?(?:command|instruction|text|phrase|literal|"
                     + "example)\\s*|\\bfor\\s+example[\\s,:-]*)$");
@@ -705,7 +741,8 @@ final class CanonicalMutationClauseMatcher {
                         token.verb(),
                         token.start(),
                         token.end(),
-                        authority.nonImperativeUse()));
+                        authority.nonImperativeUse(),
+                        authority.scopeKind()));
                 if (targetAmbiguous) {
                     carried = null;
                     previous = null;
@@ -733,6 +770,11 @@ final class CanonicalMutationClauseMatcher {
                 ActionToken previous,
                 NeutralTransition transition
         ) {
+            if (transition != null
+                    && transition.previousTargetBound()
+                    && transition.freshClauseStart() >= 0) {
+                return Math.max(safeStart, transition.freshClauseStart());
+            }
             if (carried == null
                     || previous == null
                     || transition == null
@@ -748,7 +790,6 @@ final class CanonicalMutationClauseMatcher {
                 ActionAuthority carried,
                 NeutralTransition transition
         ) {
-            if (!carried.nonImperativeUse()) return carried;
             if (!transition.hasReset()) return carried;
             ScopeKind scope = carried.scopeKind();
             boolean reset = switch (scope) {
@@ -786,10 +827,12 @@ final class CanonicalMutationClauseMatcher {
             }
             StringBuilder visible = new StringBuilder(safeTo - safeFrom);
             boolean sentenceBoundary = false;
+            int freshClauseStart = -1;
             for (int offset = safeFrom; offset < safeTo; offset++) {
                 work.connectorInputCharacters++;
                 if (view.isSentenceBoundaryAt(offset)) {
                     sentenceBoundary = true;
+                    freshClauseStart = offset + 1;
                 }
                 visible.append(targetIndex.covers(offset, work)
                         || view.isQuoted(offset)
@@ -805,6 +848,7 @@ final class CanonicalMutationClauseMatcher {
                         "",
                         false,
                         false,
+                        freshClauseStart,
                         true);
             }
             Matcher reset = TYPED_RESET.matcher(envelope);
@@ -828,6 +872,7 @@ final class CanonicalMutationClauseMatcher {
                     connector,
                     fresh,
                     commaBefore,
+                    freshClauseStart,
                     true);
         }
 
@@ -1020,6 +1065,7 @@ final class CanonicalMutationClauseMatcher {
             String connector,
             boolean fresh,
             boolean commaBeforeConnector,
+            int freshClauseStart,
             boolean previousTargetBound
     ) {
         private static NeutralTransition ambiguous() {
@@ -1029,6 +1075,7 @@ final class CanonicalMutationClauseMatcher {
                     "",
                     false,
                     false,
+                    -1,
                     false);
         }
 
@@ -1672,7 +1719,22 @@ final class CanonicalMutationClauseMatcher {
                 || PROPOSAL_LABEL_PREFIX.matcher(prefix).find()
                 || DECLARATIVE_ACTOR_PREFIX.matcher(prefix).find()
                 || NEGATED_NECESSITY_PREFIX.matcher(prefix).find()
+                || EXAMPLE_ONLY_SCOPE.matcher(prefix).find()
+                || BARE_EXAMPLE_LABEL.matcher(prefix).find()
                 || REPORTED_OR_ADVISORY.matcher(prefix).find();
+    }
+
+    /** Finite, fail-closed authority carried by bytes after a target. */
+    static ScopeKind finitePostfixScopeKind(String visibleSuffix) {
+        String suffix = visibleSuffix == null ? "" : visibleSuffix;
+        if (POSTFIX_REPORTED_SCOPE.matcher(suffix).find()
+                || EXAMPLE_ONLY_SCOPE.matcher(suffix).find()) {
+            return ScopeKind.REPORTED_ADVISORY;
+        }
+        if (POSTFIX_OPTIONAL_SCOPE.matcher(suffix).find()) {
+            return ScopeKind.OPTIONAL;
+        }
+        return ScopeKind.NONE;
     }
 
     private static int mutationProhibitionStart(String visiblePrefix) {
@@ -1943,6 +2005,29 @@ final class CanonicalMutationClauseMatcher {
                 || lower.matches(".*\\bdirs?\\b.*");
     }
 
+    static boolean actionMatchesFamily(
+            Action action,
+            Family expected,
+            String trailingContext
+    ) {
+        if (action == null || expected == null) return false;
+        String verb = action.verb().toLowerCase(Locale.ROOT);
+        String context = trailingContext == null ? "" : trailingContext;
+        boolean naturalWorkspace = ("create".equals(verb)
+                        || "make".equals(verb))
+                && (DIRECTORY_CONTEXT.matcher(context).find()
+                        || actions(
+                                RequestLexicalView.of(context),
+                                0,
+                                context.length()).stream().anyMatch(next ->
+                                next.family() == Family.WORKSPACE_OPERATION));
+        Family effective = action.family() == Family.WORKSPACE_OPERATION
+                        || naturalWorkspace
+                ? Family.WORKSPACE_OPERATION
+                : Family.CONTENT_MUTATION;
+        return effective == expected;
+    }
+
     private static boolean targetBoundary(String value, int start, int end) {
         boolean left = start == 0 || !targetCharacter(value.charAt(start - 1));
         boolean right = end == value.length()
@@ -1967,10 +2052,15 @@ final class CanonicalMutationClauseMatcher {
             String verb,
             int start,
             int end,
-            boolean nonImperativeUse
+            boolean nonImperativeUse,
+            ScopeKind scopeKind
     ) {
         Action {
-            if (family == null || verb == null || start < 0 || end <= start) {
+            if (family == null
+                    || verb == null
+                    || scopeKind == null
+                    || start < 0
+                    || end <= start) {
                 throw new IllegalArgumentException("invalid mutation action");
             }
         }

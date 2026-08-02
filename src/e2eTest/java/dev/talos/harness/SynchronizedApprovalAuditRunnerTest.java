@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.JsonSessionStore;
+import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnEnvelopePersistenceReceipt;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.spi.types.PromptDebugCapture;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -744,12 +747,10 @@ class SynchronizedApprovalAuditRunnerTest {
             int authorityEndOffset =
                     canonicalRequest.indexOf("style.css", startOffset)
                             + "style.css".length();
-            LocalTurnTrace trace = coordinatedTailTrace(
+            CoordinatedTailFixture fixture = coordinatedTailTrace(
                     "trc-t1196-exact-span-" + label,
-                    sourceText,
-                    startOffset,
-                    authorityEndOffset,
-                    startOffset + sourceText.length());
+                    canonicalRequest);
+            LocalTurnTrace trace = fixture.trace();
             SynchronizedApprovalAuditRunner.Request request =
                     artifactRequest(
                             "artifact bundle t1196 exact span " + label,
@@ -764,7 +765,8 @@ class SynchronizedApprovalAuditRunnerTest {
                                     List.of(),
                                     "",
                                     trace,
-                                    ""));
+                                    "",
+                                    fixture.policyTrace()));
 
             String sessionId = JsonSessionStore.sessionIdFor(workspace);
             JsonSessionStore store =
@@ -821,12 +823,10 @@ class SynchronizedApprovalAuditRunnerTest {
         int startOffset = requestText.indexOf(sourceText);
         int authorityEndOffset = requestText.indexOf("style.css", startOffset)
                 + "style.css".length();
-        LocalTurnTrace trace = coordinatedTailTrace(
+        CoordinatedTailFixture fixture = coordinatedTailTrace(
                 "trc-t1196-redacted-prefix",
-                sourceText,
-                startOffset,
-                authorityEndOffset,
-                startOffset + sourceText.length());
+                requestText);
+        LocalTurnTrace trace = fixture.trace();
         SynchronizedApprovalAuditRunner.Request request =
                 artifactRequest("artifact bundle t1196 redacted prefix", requestText);
 
@@ -839,7 +839,8 @@ class SynchronizedApprovalAuditRunnerTest {
                                 List.of(),
                                 "",
                                 trace,
-                                ""));
+                                "",
+                                fixture.policyTrace()));
 
         assertByteSequenceAbsent(bundle.root(), rawCanary);
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
@@ -1923,37 +1924,47 @@ class SynchronizedApprovalAuditRunnerTest {
                 List.of());
     }
 
-    private LocalTurnTrace coordinatedTailTrace(
+    private CoordinatedTailFixture coordinatedTailTrace(
             String traceId,
-            String sourceText,
-            int startOffset,
-            int authorityEndOffset,
-            int endOffset
+            String canonicalRequest
     ) {
-        return LocalTurnTrace
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                canonicalRequest);
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                resolution,
+                "unknown",
+                List.of(),
+                List.of());
+        LocalTurnTrace trace = LocalTurnTrace
                 .builder(
                         traceId,
                         JsonSessionStore.sessionIdFor(workspace),
                         1,
                         "2026-07-31T00:00:00Z")
                 .taskContract(new LocalTurnTrace.TaskContractSummary(
-                        "STATIC_WEB_EDIT",
-                        true,
-                        true,
-                        true,
-                        List.of("index.html", "style.css"),
-                        List.of(),
-                        "t1196-coordinated-mutation-tail",
-                        List.of(new LocalTurnTrace.RolefulTargetSummary(
-                                "style.css",
-                                "MUST_MUTATE",
-                                "USER_REQUEST",
-                                "coordinated-tail",
-                                sourceText,
-                                1.0,
-                                startOffset,
-                                authorityEndOffset,
-                                endOffset))))
+                        policyTrace.taskType(),
+                        policyTrace.mutationAllowed(),
+                        policyTrace.verificationRequired(),
+                        policyTrace.mutationRequested(),
+                        policyTrace.expectedTargets(),
+                        policyTrace.forbiddenTargets(),
+                        policyTrace.classificationReason(),
+                        policyTrace.rolefulTargets().stream()
+                                .map(target -> new LocalTurnTrace
+                                        .RolefulTargetSummary(
+                                        target.path(),
+                                        target.role(),
+                                        target.source(),
+                                        target.reason(),
+                                        target.sourceText(),
+                                        target.confidence(),
+                                        target.startOffset(),
+                                        target.authorityEndOffset(),
+                                        target.endOffset()))
+                                .toList()))
+                .event(LexicalPlanEvidenceTraceEvent.create(
+                        "2026-07-31T00:00:00Z",
+                        policyTrace))
                 .outcome(
                         "COMPLETE",
                         "PASSED",
@@ -1961,7 +1972,13 @@ class SynchronizedApprovalAuditRunnerTest {
                         "SUCCEEDED",
                         "COMPLETED_VERIFIED")
                 .build();
+        return new CoordinatedTailFixture(trace, policyTrace);
     }
+
+    private record CoordinatedTailFixture(
+            LocalTurnTrace trace,
+            TurnPolicyTrace policyTrace
+    ) {}
 
     private static LocalTurnTrace.RolefulTargetSummary rolefulTarget(
             LocalTurnTrace trace,

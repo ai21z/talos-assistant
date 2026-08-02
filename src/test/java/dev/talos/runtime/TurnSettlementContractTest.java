@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -102,10 +103,15 @@ class TurnSettlementContractTest {
             @TempDir Path dir
     ) {
         String canary = "T1190_RAW_PROVIDER_BODY_CANARY";
+        Path workspace = dir.resolve("workspace");
+        String traceSessionId = JsonSessionStore.sessionIdFor(workspace);
+        String storageSessionId = JsonSessionStore.newSessionInstanceId(
+                workspace,
+                Instant.parse("2026-07-21T00:00:00Z"));
         TurnFailureClassifier.Classification failure =
                 TurnFailureClassifier.classify(new IllegalStateException("failure"));
         LocalTurnTrace raw = LocalTurnTrace.builder(
-                        "trace-safe", "session", 1, "2026-07-21T00:00:00Z")
+                        "trace-safe", traceSessionId, 1, "2026-07-21T00:00:00Z")
                 .event(TurnTraceEvent.simple(
                         "GENERATION_STARTED",
                         "2026-07-21T00:00:00Z",
@@ -128,15 +134,15 @@ class TurnSettlementContractTest {
         TurnSettlement settlement = TurnSettlement.abnormal(
                 TurnExecutionStage.GENERATION_COORDINATION, result, failure);
         JsonSessionStore store = new JsonSessionStore(dir);
-        try (var writer = store.acquireSessionWriter("hostile")) {
+        try (var writer = store.acquireSessionWriter(storageSessionId)) {
             assertEquals(TurnPublicationReceipt.Status.COMPLETE,
-                    new JsonTurnLogAppender(writer, "hostile")
+                    new JsonTurnLogAppender(writer, storageSessionId)
                             .onTurnSettled(settlement, "raw user input")
                             .status());
         }
-        TurnRecord row = store.loadTurns("hostile").getFirst();
+        TurnRecord row = store.loadTurns(storageSessionId).getFirst();
         LocalTurnTrace projected = store.loadTrace(
-                "hostile", row.traceId()).orElseThrow();
+                storageSessionId, row.traceId()).orElseThrow();
 
         assertEquals(0, projected.events().stream().filter(event ->
                 "GENERATION_STARTED".equals(event.type())).count());

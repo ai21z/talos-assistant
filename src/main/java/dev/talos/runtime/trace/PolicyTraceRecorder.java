@@ -14,7 +14,7 @@ final class PolicyTraceRecorder {
                 trace.taskType(),
                 trace.mutationAllowed(),
                 trace.verificationRequired(),
-                trace.mutationAllowed(),
+                trace.mutationRequested(),
                 trace.expectedTargets(),
                 trace.forbiddenTargets(),
                 trace.classificationReason(),
@@ -23,9 +23,13 @@ final class PolicyTraceRecorder {
                         .toList()));
         builder.phaseTransition(trace.initialPhase(), trace.finalPhase(), "policy trace");
         builder.toolSurface(trace.nativeTools(), trace.promptTools(), "selected for resolved task contract");
+        if (LexicalPlanEvidenceTraceEvent.hasEvidence(trace)) {
+            builder.event(LexicalPlanEvidenceTraceEvent.create(now(), trace));
+        }
         builder.event(TurnTraceEvent.simple("TASK_CONTRACT_RESOLVED", now(), Map.of(
                 "taskType", trace.taskType(),
                 "mutationAllowed", trace.mutationAllowed(),
+                "mutationRequested", trace.mutationRequested(),
                 "verificationRequired", trace.verificationRequired(),
                 "classificationReason", trace.classificationReason())));
         builder.event(TurnTraceEvent.simple("TOOL_SURFACE_SELECTED", now(), Map.of(

@@ -41,7 +41,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     @Test
     void observedPairPersistsResolvableMatchingRowAndTrace(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
-        LocalTurnTrace trace = trace("trace-pair");
+        LocalTurnTrace trace = trace("trace-pair", "pair");
         TurnRecord record = record(trace.traceId());
 
         TurnEnvelopePersistenceReceipt receipt = persist(store, "pair", record, trace);
@@ -58,7 +58,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         Files.createDirectories(dir.resolve("traces"));
         Files.writeString(dir.resolve("traces").resolve("trace-blocked"), "not a directory");
-        LocalTurnTrace trace = trace("trace-write-fails");
+        LocalTurnTrace trace = trace("trace-write-fails", "trace-blocked");
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "trace-blocked", record(trace.traceId()), trace);
@@ -73,7 +73,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     void rowFailureLeavesObservedTraceWithoutInventingPair(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
         Files.createDirectory(dir.resolve("row-blocked.turns.jsonl"));
-        LocalTurnTrace trace = trace("row-write-fails");
+        LocalTurnTrace trace = trace("row-write-fails", "row-blocked");
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "row-blocked", record(trace.traceId()), trace);
@@ -89,7 +89,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         Files.createDirectories(dir.resolve("traces"));
         Files.writeString(dir.resolve("traces").resolve("both-blocked"), "not a directory");
         Files.createDirectory(dir.resolve("both-blocked.turns.jsonl"));
-        LocalTurnTrace trace = trace("both-write-fails");
+        LocalTurnTrace trace = trace("both-write-fails", "both-blocked");
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
                 "both-blocked", record(trace.traceId()), trace);
@@ -104,7 +104,8 @@ class JsonSessionStoreTurnEnvelopeTest {
         JsonSessionStore store = new JsonSessionStore(dir);
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
-                "mismatch", record("different-trace"), trace("actual-trace"));
+                "mismatch", record("different-trace"),
+                trace("actual-trace", "mismatch"));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
         assertTrue(store.loadTurns("mismatch").isEmpty());
@@ -116,7 +117,8 @@ class JsonSessionStoreTurnEnvelopeTest {
         JsonSessionStore store = new JsonSessionStore(dir);
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
-                "turn-mismatch", record("shared-trace"), trace("shared-trace", 2));
+                "turn-mismatch", record("shared-trace"),
+                trace("shared-trace", "turn-mismatch", 2));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
         assertTrue(store.loadTurns("turn-mismatch").isEmpty());
@@ -128,7 +130,7 @@ class JsonSessionStoreTurnEnvelopeTest {
         JsonSessionStore store = new JsonSessionStore(dir);
 
         TurnEnvelopePersistenceReceipt receipt = persist(store,
-                "unsafe-trace", record("a/b"), trace("a/b"));
+                "unsafe-trace", record("a/b"), trace("a/b", "unsafe-trace"));
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED, receipt.state());
         assertTrue(store.loadTurns("unsafe-trace").isEmpty());
@@ -141,10 +143,12 @@ class JsonSessionStoreTurnEnvelopeTest {
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
                 persist(store,
-                        "bad-row", record("trace", 0), trace("trace", 1)).state());
+                        "bad-row", record("trace", 0),
+                        trace("trace", "bad-row", 1)).state());
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
                 persist(store,
-                        "bad-trace", record("trace", 1), trace("trace", 0)).state());
+                        "bad-trace", record("trace", 1),
+                        trace("trace", "bad-trace", 0)).state());
         assertTrue(store.loadTurns("bad-row").isEmpty());
         assertTrue(store.loadTurns("bad-trace").isEmpty());
         assertTrue(store.loadLatestTrace("bad-row").isEmpty());
@@ -158,7 +162,8 @@ class JsonSessionStoreTurnEnvelopeTest {
 
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
                 persist(store,
-                        "overlong", record(overlong), trace(overlong)).state());
+                        "overlong", record(overlong),
+                        trace(overlong, "overlong")).state());
         assertEquals(TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
                 persist(store,
                         "unsafe-row", record("a?b"), null).state());
@@ -171,7 +176,7 @@ class JsonSessionStoreTurnEnvelopeTest {
     @Test
     void loadTraceRejectsFilenameContentIdentityMismatch(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
-        saveTrace(store, "corrupt", trace("actual-trace"));
+        saveTrace(store, "corrupt", trace("actual-trace", "corrupt"));
         Path traceDir = dir.resolve("traces/corrupt");
         Files.move(
                 traceDir.resolve("000001-actual-trace.json"),
@@ -184,7 +189,8 @@ class JsonSessionStoreTurnEnvelopeTest {
     @Test
     void loadTraceRejectsFilenameTurnMismatch(@TempDir Path dir) throws Exception {
         JsonSessionStore store = new JsonSessionStore(dir);
-        saveTrace(store, "corrupt-turn", trace("same-trace", 2));
+        saveTrace(store, "corrupt-turn",
+                trace("same-trace", "corrupt-turn", 2));
         Path traceDir = dir.resolve("traces/corrupt-turn");
         Files.move(
                 traceDir.resolve("000002-same-trace.json"),
@@ -192,6 +198,79 @@ class JsonSessionStoreTurnEnvelopeTest {
 
         assertTrue(store.loadTrace("corrupt-turn", "same-trace").isEmpty());
         assertTrue(store.loadLatestTrace("corrupt-turn").isEmpty());
+    }
+
+    @Test
+    void workspaceTraceIdentityBindsGeneratedAndTimestampSessionIds(
+            @TempDir Path dir
+    ) {
+        String workspaceId = "a".repeat(40);
+        List<String> sessionIds = List.of(
+                workspaceId + "-20260802010203",
+                workspaceId + "-20260802010203-" + "b".repeat(32));
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        for (int index = 0; index < sessionIds.size(); index++) {
+            String sessionId = sessionIds.get(index);
+            String traceId = "workspace-trace-" + index;
+            LocalTurnTrace trace = trace(traceId, workspaceId);
+
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED,
+                    persist(
+                            store,
+                            sessionId,
+                            record(traceId),
+                            trace).state());
+            assertEquals(
+                    trace,
+                    store.loadTrace(sessionId, traceId).orElseThrow());
+        }
+    }
+
+    @Test
+    void workspaceTraceIdentityRejectsOtherOrMalformedNamespaces(
+            @TempDir Path dir
+    ) {
+        String workspaceId = "a".repeat(40);
+        String otherWorkspaceId = "b".repeat(40);
+        JsonSessionStore store = new JsonSessionStore(dir);
+        List<String> destinations = List.of(
+                workspaceId + "-run",
+                workspaceId + "run",
+                workspaceId + "-");
+        List<String> traceSessions = List.of(
+                otherWorkspaceId,
+                workspaceId,
+                workspaceId);
+
+        for (int index = 0; index < destinations.size(); index++) {
+            String destination = destinations.get(index);
+            String traceId = "rejected-workspace-trace-" + index;
+            assertEquals(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
+                    persist(
+                            store,
+                            destination,
+                            record(traceId),
+                            trace(
+                                    traceId,
+                                    traceSessions.get(index))).state());
+            assertTrue(store.loadTurns(destination).isEmpty());
+            assertTrue(store.loadLatestTrace(destination).isEmpty());
+        }
+
+        String arbitraryDestination = "workspace-run";
+        String arbitraryTraceId = "rejected-arbitrary-prefix";
+        assertEquals(
+                TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED,
+                persist(
+                        store,
+                        arbitraryDestination,
+                        record(arbitraryTraceId),
+                        trace(arbitraryTraceId, workspaceId)).state());
+        assertTrue(store.loadTurns(arbitraryDestination).isEmpty());
+        assertTrue(store.loadLatestTrace(arbitraryDestination).isEmpty());
     }
 
     @Test
@@ -290,8 +369,24 @@ class JsonSessionStoreTurnEnvelopeTest {
         return trace(traceId, 1);
     }
 
+    private static LocalTurnTrace trace(String traceId, String sessionId) {
+        return trace(traceId, sessionId, 1);
+    }
+
     private static LocalTurnTrace trace(String traceId, int turnNumber) {
-        return LocalTurnTrace.builder(traceId, "sid", turnNumber, "2026-07-21T00:00:00Z")
+        return trace(traceId, "sid", turnNumber);
+    }
+
+    private static LocalTurnTrace trace(
+            String traceId,
+            String sessionId,
+            int turnNumber
+    ) {
+        return LocalTurnTrace.builder(
+                        traceId,
+                        sessionId,
+                        turnNumber,
+                        "2026-07-21T00:00:00Z")
                 .workspaceHash("workspace")
                 .mode("ask")
                 .model("llama.cpp", "model")

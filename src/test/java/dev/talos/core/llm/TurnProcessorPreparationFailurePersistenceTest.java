@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.stream.Stream;
 
@@ -34,9 +35,12 @@ class TurnProcessorPreparationFailurePersistenceTest {
         ModeController modes = new ModeController().add(new AskMode());
         assertTrue(modes.setActive("ask"));
         JsonSessionStore store = new JsonSessionStore(dir.resolve("sessions"));
+        String sessionId = JsonSessionStore.newSessionInstanceId(
+                dir,
+                Instant.parse("2026-07-21T00:00:00Z"));
         TurnProcessor processor = new TurnProcessor(modes);
-        try (var writer = store.acquireSessionWriter("preparation")) {
-            processor.addListener(new JsonTurnLogAppender(writer, "preparation"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            processor.addListener(new JsonTurnLogAppender(writer, sessionId));
 
             assertThrows(IllegalStateException.class, () -> processor.process(
                     new Session(dir, config),
@@ -44,8 +48,8 @@ class TurnProcessorPreparationFailurePersistenceTest {
                     context));
         }
 
-        TurnRecord row = store.loadTurns("preparation").getFirst();
-        LocalTurnTrace trace = store.loadTrace("preparation", row.traceId()).orElseThrow();
+        TurnRecord row = store.loadTurns(sessionId).getFirst();
+        LocalTurnTrace trace = store.loadTrace(sessionId, row.traceId()).orElseThrow();
         var settlement = trace.events().stream()
                 .filter(event -> "TURN_SETTLED".equals(event.type()))
                 .findFirst().orElseThrow();

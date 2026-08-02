@@ -86,6 +86,41 @@ class ActiveTaskContextPolicyTest {
         assertEquals(ActiveTaskContext.none(), decision.memoryContext());
     }
 
+    @Test void incompleteMutationAuthorityCannotConsumeSavedContext() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        String userRequest = "Fix the remaining issue. "
+                + "a.txt ".repeat(8_193);
+        TaskContract rawContract =
+                TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision completeControl =
+                ActiveTaskContextPolicy.evaluate(
+                        userRequest,
+                        rawContract,
+                        saved,
+                        ArtifactGoal.fromActiveContext(saved),
+                        3);
+        assertTrue(completeControl.consumed());
+        assertTrue(completeControl.taskContract().mutationAllowed());
+
+        ActiveTaskContextPolicy.Decision decision =
+                ActiveTaskContextPolicy.evaluate(
+                        userRequest,
+                        rawContract,
+                        saved,
+                        ArtifactGoal.fromActiveContext(saved),
+                        3,
+                        false);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+        assertFalse(decision.taskContract().mutationAllowed());
+        assertEquals(ActiveTaskContext.State.NONE,
+                decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(saved, decision.memoryContext());
+    }
+
     @Test void nonActiveSavedContextReturnsBaselineDecisionWithoutMemory() {
         String userRequest = "make those changes";
         TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);

@@ -1,6 +1,8 @@
 package dev.talos.runtime;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -13,12 +15,19 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.intent.IntentDerivation;
+import dev.talos.runtime.intent.MutationPlanSelection;
+import dev.talos.runtime.intent.SequentialMutationClausePlan;
 import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.intent.TaskIntentEvidence;
 import dev.talos.runtime.task.StaticWebRequirements;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
+import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,11 +45,13 @@ import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -63,9 +74,43 @@ import java.util.regex.Pattern;
 public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(JsonSessionStore.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    private static final int LEXICAL_EVIDENCE_SCHEMA_VERSION = 1;
+    private static final int MAX_LEXICAL_DECISIONS = 4_096;
+    private static final int MAX_LEXICAL_REGIONS = 4_096;
+    private static final int MAX_POLICY_STRING_LIST = 4_096;
+    private static final int MAX_TRACE_EVENTS = 4_096;
     private static final Pattern OBSERVED_TRACE_ID =
             Pattern.compile("[A-Za-z0-9._-]{1,128}");
+    private static final Set<String> LEXICAL_EVENT_KEYS = Set.of(
+            "schemaVersion", "decisions", "regions");
+    private static final Set<String> LEXICAL_DECISION_KEYS = Set.of(
+            "ordinal", "owner", "path", "pathSha256", "authority",
+            "storedPathSha256", "action", "actionFamily", "source",
+            "evidenceState", "sourceRequestSha256", "sourceRequestChars",
+            "sourceRequestBytes", "actionStartOffset", "actionEndOffset",
+            "targetStartOffset", "startOffset", "authorityEndOffset",
+            "endOffset", "selectedForPath", "activeInResolution",
+            "sourceSpanSha256", "occurrenceSha256");
+    private static final Set<String> LEXICAL_REGION_KEYS = Set.of(
+            "ordinal", "owner", "kind", "source", "evidenceState",
+            "sourceRequestSha256", "sourceRequestChars", "sourceRequestBytes",
+            "action", "pathSha256", "startOffset", "endOffset",
+            "sourceSpanSha256", "regionSha256");
+    private static final Set<String> POLICY_TRACE_V1_KEYS = Set.of(
+            "taskType", "mutationAllowed", "mutationRequested",
+            "verificationRequired", "expectedTargets", "forbiddenTargets",
+            "initialPhase", "finalPhase", "nativeTools", "promptTools",
+            "blocks", "classificationReason", "rolefulTargets",
+            "lexicalEvidenceSchemaVersion", "lexicalDecisions",
+            "lexicalRegions");
+    private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
+            "path", "role", "source", "reason", "sourceText",
+            "confidence", "startOffset", "authorityEndOffset", "endOffset");
+    private static final Pattern WORKSPACE_SESSION_ID =
+            Pattern.compile("[0-9a-f]{40}");
     private static final Pattern SAFE_SESSION_ID =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,199}");
     private static final Pattern WINDOWS_DEVICE_SESSION_ID = Pattern.compile(
@@ -273,7 +318,21 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     ) throws IOException {
         requireStoredUserRequestCoordinates(
                 record.userInput(),
-                record.policyTrace());
+                record.policyTrace(),
+                true);
+        HistoricalRequestIndex prior = loadTurnLedger(sessionId).requests();
+        requireNoGlobalEvidenceConflict(record, prior);
+        boolean redactHistorical = historicalRedactionRequired(record, prior);
+        Map<String, Object> row = turnRow(record);
+        String compact = sanitizedCompactJson(row, redactHistorical);
+        TurnRecord sanitizedRecord = parsedTurnRecord(compact);
+        if (hasHistoricalLexicalEvidence(sanitizedRecord)) {
+            requireHistoricalLexicalBindings(sanitizedRecord, prior);
+        }
+        appendPreparedTurnJson(lease, sessionId, compact);
+    }
+
+    private static Map<String, Object> turnRow(TurnRecord record) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("turnNumber", record.turnNumber());
         row.put("timestamp", record.timestamp().toString());
@@ -297,66 +356,33 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             calls.add(c);
         }
         row.put("toolCalls", calls);
-
-        byte[] line = (sanitizedCompactJson(row) + "\n").getBytes(StandardCharsets.UTF_8);
-        try {
-            Path target = mutationGuard().requireRegularFileTarget(turnsFileFor(sessionId));
-            requireCompleteTurnLogTail(lease, target);
-            try (FileChannel channel = FileChannel.open(
-                    target,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.WRITE,
-                    StandardOpenOption.APPEND,
-                    LinkOption.NOFOLLOW_LINKS)) {
-            ByteBuffer source = ByteBuffer.wrap(line);
-            while (source.hasRemaining()) {
-                int written = channel.write(source);
-                if (written <= 0) throw new IOException("Turn log append made no progress");
-            }
-            channel.force(true);
-            }
-        } catch (SessionWriterUnavailableException failure) {
-            throw failure;
-        } catch (IOException failure) {
-            lease.poison();
-            throw failure;
-        }
+        return row;
     }
 
-    /**
-     * A crash may leave a final JSON fragment without its canonical LF commit
-     * marker. Never append a newly acknowledged row behind that fragment: it
-     * would make the new row unreadable too. T1163 owns any later recovery or
-     * truncation policy; this boundary only detects the condition and stops.
-     */
-    private static void requireCompleteTurnLogTail(
-            SessionWriterLease lease,
-            Path target
-    ) throws IOException {
-        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return;
-        try (FileChannel existing = FileChannel.open(
-                target,
-                StandardOpenOption.READ,
-                LinkOption.NOFOLLOW_LINKS)) {
-            long size = existing.size();
-            if (size == 0L) return;
-            ByteBuffer last = ByteBuffer.allocate(1);
-            existing.position(size - 1L);
-            if (existing.read(last) != 1 || last.array()[0] != (byte) '\n') {
-                lease.poison();
-                throw new SessionWriterUnavailableException(
-                        SessionWriterUnavailableException.Reason.INCOMPLETE_TURN_LOG,
-                        "Session turn log ends with an incomplete record");
-            }
-        }
+    private static TurnRecord parsedTurnRecord(String compact)
+            throws IOException {
+        Map<String, Object> sanitizedRow = MAPPER.readValue(
+                compact,
+                new TypeReference<>() {});
+        return rowToRecord(sanitizedRow, new LinkedHashMap<>());
     }
 
     @Override
     public List<TurnRecord> loadTurns(String sessionId) {
-        if (!safeSessionId(sessionId)) return List.of();
+        return loadTurnLedger(sessionId).turns();
+    }
+
+    private LoadedTurnLedger loadTurnLedger(String sessionId) {
+        if (!safeSessionId(sessionId)) {
+            return LoadedTurnLedger.empty();
+        }
         Path file = turnsFileFor(sessionId);
-        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return List.of();
-        List<TurnRecord> out = new java.util.ArrayList<>();
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            return LoadedTurnLedger.empty();
+        }
+        List<ParsedTurnRecord> parsed = new java.util.ArrayList<>();
+        Map<RequestIdentity, AuthoritativeManifest> manifestCache =
+                new LinkedHashMap<>();
         // Lenient UTF-8 decoding: a single malformed byte (e.g. a partial
         // multi-byte character from a power-loss mid-write) must only affect
         // the line it lands in, not abort the whole load. Files.readAllLines
@@ -377,7 +403,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     break;
                 }
             }
-            if (completeLength == 0) return List.of();
+            if (completeLength == 0) return LoadedTurnLedger.empty();
             String complete = decoder.decode(ByteBuffer.wrap(bytes, 0, completeLength)).toString();
             for (String rawLine : complete.split("\n", -1)) {
                 String line = rawLine.endsWith("\r")
@@ -386,7 +412,11 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 if (line.isBlank()) continue;
                 try {
                     Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
-                    out.add(rowToRecord(row));
+                    TurnRecord record = rowToRecord(row, manifestCache);
+                    parsed.add(new ParsedTurnRecord(
+                            record,
+                            hasExactUserRequestLexicalEvidence(
+                                    record.policyTrace())));
                 } catch (Exception lineErr) {
                     LOG.warn("Skipping malformed turn line in {}: {}",
                             SafeLogFormatter.value(file.getFileName()), SafeLogFormatter.throwableMessage(lineErr));
@@ -396,10 +426,531 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             LOG.warn("Failed to read turn log {}: {}",
                     SafeLogFormatter.value(file), SafeLogFormatter.throwableMessage(e));
         }
-        return out;
+        HistoricalRequestIndex globalRequests = new HistoricalRequestIndex();
+        for (ParsedTurnRecord parsedRecord : parsed) {
+            addHistoricalRequestBinding(
+                    globalRequests,
+                    parsedRecord.record(),
+                    parsedRecord.canonicalManifestValidated());
+        }
+        HistoricalRequestIndex historicalRequests =
+                new HistoricalRequestIndex();
+        historicalRequests.absorbConflicts(globalRequests);
+        List<TurnRecord> out = new java.util.ArrayList<>();
+        for (ParsedTurnRecord parsedRecord : parsed) {
+            TurnRecord record = parsedRecord.record();
+            try {
+                requireNoGlobalEvidenceConflict(record, globalRequests);
+                requireHistoricalLexicalBindings(
+                        record,
+                        historicalRequests,
+                        manifestCache);
+                out.add(record);
+                addHistoricalRequestBinding(
+                        historicalRequests,
+                        record,
+                        parsedRecord.canonicalManifestValidated());
+            } catch (Exception lineErr) {
+                LOG.warn("Skipping conflicted turn line in {}: {}",
+                        SafeLogFormatter.value(file.getFileName()),
+                        SafeLogFormatter.throwableMessage(lineErr));
+            }
+        }
+        // Only chronology-accepted rows may become future replay bindings.
+        // Global conflicts remain absorbed above, but a later or rejected row
+        // must never mint authority for an earlier historical replay.
+        return new LoadedTurnLedger(out, historicalRequests);
     }
 
-    private static TurnRecord rowToRecord(Map<String, Object> row) {
+    private record LoadedTurnLedger(
+            List<TurnRecord> turns,
+            HistoricalRequestIndex requests
+    ) {
+        private LoadedTurnLedger {
+            turns = turns == null ? List.of() : List.copyOf(turns);
+            requests = requests == null
+                    ? new HistoricalRequestIndex()
+                    : requests;
+        }
+
+        private static LoadedTurnLedger empty() {
+            return new LoadedTurnLedger(
+                    List.of(),
+                    new HistoricalRequestIndex());
+        }
+    }
+
+    private record ParsedTurnRecord(
+            TurnRecord record,
+            boolean canonicalManifestValidated
+    ) {
+        private ParsedTurnRecord {
+            if (record == null) {
+                throw new IllegalArgumentException(
+                        "parsed turn record must not be null");
+            }
+        }
+    }
+
+    private static boolean hasExactUserRequestLexicalEvidence(
+            TurnPolicyTrace policyTrace
+    ) {
+        if (policyTrace == null) return false;
+        return policyTrace.lexicalDecisions().stream().anyMatch(decision ->
+                        TargetSource.USER_REQUEST.name().equals(
+                                decision.source())
+                                && MutationPlanSelection.DurableEvidenceState
+                                        .EXACT.name().equals(
+                                                decision.evidenceState()))
+                || policyTrace.lexicalRegions().stream().anyMatch(region ->
+                        TargetSource.USER_REQUEST.name().equals(region.source())
+                                && MutationPlanSelection.DurableEvidenceState
+                                        .EXACT.name().equals(
+                                                region.evidenceState()));
+    }
+
+    private static void requireNoGlobalEvidenceConflict(
+            TurnRecord record,
+            HistoricalRequestIndex globalRequests
+    ) {
+        if (record == null || globalRequests == null) return;
+        LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
+                record.policyTrace());
+        if (!evidence.empty()
+                && globalRequests.conflicted(evidence.requestSha256())) {
+            throw new IllegalArgumentException(
+                    "lexical evidence has a globally conflicted request identity");
+        }
+    }
+
+    private static boolean historicalRedactionRequired(
+            TurnRecord record,
+            HistoricalRequestIndex requests
+    ) {
+        if (!hasHistoricalLexicalEvidence(record)) return false;
+        LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
+                record.policyTrace());
+        String hash = evidence.requestSha256();
+        int chars = evidence.requestChars();
+        int bytes = evidence.requestBytes();
+        if (requests.conflicted(hash)) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence has a conflicted prior identity");
+        }
+        RequestBinding prior = requests.binding(hash, chars, bytes);
+        if (prior == null) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence has no prior identity");
+        }
+        if (!prior.manifest().equals(LexicalManifestIdentity.from(
+                record.policyTrace()))) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence differs from its prior plan");
+        }
+        if (MutationPlanSelection.DurableEvidenceState.REDACTED_HASH_ONLY
+                .name().equals(evidence.evidenceState())) {
+            return false;
+        }
+        return prior.redacted();
+    }
+
+    private static boolean hasHistoricalLexicalEvidence(TurnRecord record) {
+        return record != null
+                && record.policyTrace() != null
+                && (record.policyTrace().lexicalDecisions().stream().anyMatch(
+                        decision -> TargetSource.MESSAGE_HISTORY.name().equals(
+                                decision.source()))
+                        || record.policyTrace().lexicalRegions().stream().anyMatch(
+                                region -> TargetSource.MESSAGE_HISTORY.name()
+                                        .equals(region.source())));
+    }
+
+    private static void requireHistoricalLexicalBindings(
+            TurnRecord record,
+            HistoricalRequestIndex requestsByHash
+    ) {
+        requireHistoricalLexicalBindings(
+                record,
+                requestsByHash,
+                new LinkedHashMap<>());
+    }
+
+    private static void requireHistoricalLexicalBindings(
+            TurnRecord record,
+            HistoricalRequestIndex requestsByHash,
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+    ) {
+        if (record == null || record.policyTrace() == null) return;
+        LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
+                record.policyTrace());
+        String hash = evidence.decisions().isEmpty()
+                ? evidence.regions().isEmpty() ? ""
+                        : evidence.regions().getFirst().sourceRequestSha256()
+                : evidence.decisions().getFirst().sourceRequestSha256();
+        String source = evidence.decisions().isEmpty()
+                ? evidence.regions().isEmpty() ? ""
+                        : evidence.regions().getFirst().source()
+                : evidence.decisions().getFirst().source();
+        if (!TargetSource.MESSAGE_HISTORY.name().equals(source)) return;
+        String state = evidence.decisions().isEmpty()
+                ? evidence.regions().getFirst().evidenceState()
+                : evidence.decisions().getFirst().evidenceState();
+        int requestChars = evidence.decisions().isEmpty()
+                ? evidence.regions().getFirst().sourceRequestChars()
+                : evidence.decisions().getFirst().sourceRequestChars();
+        int requestBytes = evidence.decisions().isEmpty()
+                ? evidence.regions().getFirst().sourceRequestBytes()
+                : evidence.decisions().getFirst().sourceRequestBytes();
+        if (requestsByHash.conflicted(hash)) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence has a conflicted prior identity");
+        }
+        RequestBinding prior = requestsByHash.binding(
+                hash,
+                requestChars,
+                requestBytes);
+        if (prior == null) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence has no prior identity");
+        }
+        if (!prior.manifest().equals(LexicalManifestIdentity.from(
+                record.policyTrace()))) {
+            throw new IllegalArgumentException(
+                    "message-history lexical evidence differs from its prior plan");
+        }
+        if (MutationPlanSelection.DurableEvidenceState.REDACTED_HASH_ONLY
+                .name().equals(state)) {
+            return;
+        }
+        if (prior.canonicalManifestValidated()) {
+            return;
+        }
+        String historical = prior.exactCanonical();
+        if (historical == null) {
+            throw new IllegalArgumentException(
+                    "exact message-history evidence has no prior exact request");
+        }
+        TaskResolution authoritative = authoritativeResolution(
+                historical,
+                manifestCache);
+        MutationPlanSelection.requireCanonicalDurableManifest(
+                historical,
+                authoritative.mutationTailPlan(),
+                authoritative.sequentialMutationPlan(),
+                authoritative.activeLexicalPaths(),
+                evidence.decisions(),
+                evidence.regions());
+        requireCanonicalPolicySemantics(
+                authoritative,
+                record.policyTrace());
+    }
+
+    private static void addHistoricalRequestBinding(
+            HistoricalRequestIndex requestsByHash,
+            TurnRecord record,
+            boolean canonicalManifestValidated
+    ) {
+        if (requestsByHash == null || record == null) return;
+        LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
+                record.policyTrace());
+        if (evidence.empty()) return;
+        String evidenceSource = evidence.decisions().isEmpty()
+                ? evidence.regions().isEmpty() ? ""
+                        : evidence.regions().getFirst().source()
+                : evidence.decisions().getFirst().source();
+        if (TargetSource.MESSAGE_HISTORY.name().equals(evidenceSource)) {
+            return;
+        }
+        boolean redacted = evidence.decisions().stream().anyMatch(decision ->
+                        TargetSource.USER_REQUEST.name().equals(decision.source())
+                                && MutationPlanSelection.DurableEvidenceState
+                                        .REDACTED_HASH_ONLY.name().equals(
+                                                decision.evidenceState()))
+                || evidence.regions().stream().anyMatch(region ->
+                        TargetSource.USER_REQUEST.name().equals(region.source())
+                                && MutationPlanSelection.DurableEvidenceState
+                                        .REDACTED_HASH_ONLY.name().equals(
+                                                region.evidenceState()));
+        LexicalManifestIdentity manifest = LexicalManifestIdentity.from(
+                record.policyTrace());
+        if (redacted) {
+            String hash = evidence.decisions().isEmpty()
+                    ? evidence.regions().getFirst().sourceRequestSha256()
+                    : evidence.decisions().getFirst().sourceRequestSha256();
+            int chars = evidence.decisions().isEmpty()
+                    ? evidence.regions().getFirst().sourceRequestChars()
+                    : evidence.decisions().getFirst().sourceRequestChars();
+            int bytes = evidence.decisions().isEmpty()
+                    ? evidence.regions().getFirst().sourceRequestBytes()
+                    : evidence.decisions().getFirst().sourceRequestBytes();
+            requestsByHash.addRedacted(hash, chars, bytes, manifest);
+        } else if (canonicalManifestValidated) {
+            requestsByHash.addExact(record.userInput(), manifest);
+        }
+    }
+
+    private static final class HistoricalRequestIndex {
+        private final Map<RequestIdentity, RequestBinding> bindings =
+                new LinkedHashMap<>();
+        private final Set<String> conflicts = new HashSet<>();
+
+        private void addExact(
+                String userInput,
+                LexicalManifestIdentity manifest
+        ) {
+            String canonical = userInput == null ? "" : userInput.strip();
+            MutationPlanSelection.SourceRequestIdentity sourceIdentity =
+                    MutationPlanSelection.sourceRequestIdentity(canonical);
+            String hash = sourceIdentity.sha256();
+            RequestIdentity identity = new RequestIdentity(
+                    hash,
+                    sourceIdentity.characters(),
+                    sourceIdentity.bytes());
+            if (conflicts.contains(hash)) return;
+            if (hasDifferentIdentity(hash, identity)) {
+                poison(hash);
+                return;
+            }
+            RequestBinding candidate = new RequestBinding(
+                    canonical,
+                    false,
+                    manifest,
+                    true);
+            RequestBinding existing = bindings.putIfAbsent(
+                    identity,
+                    candidate);
+            if (existing != null && !existing.equals(candidate)) {
+                poison(hash);
+            }
+        }
+
+        private void addRedacted(
+                String hash,
+                int chars,
+                int bytes,
+                LexicalManifestIdentity manifest
+        ) {
+            if (hash == null || !hash.matches("[0-9a-f]{64}")
+                    || chars < 0 || bytes < 0 || conflicts.contains(hash)) return;
+            RequestIdentity identity = new RequestIdentity(hash, chars, bytes);
+            if (hasDifferentIdentity(hash, identity)) {
+                poison(hash);
+                return;
+            }
+            RequestBinding candidate = new RequestBinding(
+                    null,
+                    true,
+                    manifest,
+                    false);
+            RequestBinding existing = bindings.putIfAbsent(
+                    identity,
+                    candidate);
+            if (existing != null && !existing.equals(candidate)) {
+                poison(hash);
+            }
+        }
+
+        private void poison(String hash) {
+            bindings.keySet().removeIf(identity -> identity.sha256().equals(hash));
+            conflicts.add(hash);
+        }
+
+        private void absorbConflicts(HistoricalRequestIndex other) {
+            if (other == null || other.conflicts.isEmpty()) return;
+            for (String hash : other.conflicts) {
+                poison(hash);
+            }
+        }
+
+        private boolean conflicted(String hash) {
+            return conflicts.contains(hash);
+        }
+
+        private boolean hasExact(String hash, int chars, int bytes) {
+            RequestBinding binding = binding(hash, chars, bytes);
+            return binding != null && !binding.redacted();
+        }
+
+        private boolean hasRedacted(String hash, int chars, int bytes) {
+            RequestBinding binding = binding(hash, chars, bytes);
+            return binding != null && binding.redacted();
+        }
+
+        private String exact(String hash, int chars, int bytes) {
+            RequestBinding binding = binding(hash, chars, bytes);
+            return binding == null || binding.redacted()
+                    ? null
+                    : binding.exactCanonical();
+        }
+
+        private RequestBinding binding(String hash, int chars, int bytes) {
+            return bindings.get(new RequestIdentity(hash, chars, bytes));
+        }
+
+        private boolean hasDifferentIdentity(
+                String hash,
+                RequestIdentity identity
+        ) {
+            return bindings.keySet().stream().anyMatch(existing ->
+                            existing.sha256().equals(hash)
+                                    && !existing.equals(identity));
+        }
+    }
+
+    private record RequestIdentity(String sha256, int chars, int bytes) {}
+
+    private record RequestBinding(
+            String exactCanonical,
+            boolean redacted,
+            LexicalManifestIdentity manifest,
+            boolean canonicalManifestValidated
+    ) {
+        private RequestBinding {
+            manifest = manifest == null
+                    ? LexicalManifestIdentity.EMPTY
+                    : manifest;
+        }
+    }
+
+    private record LexicalManifestIdentity(
+            List<DecisionManifestIdentity> decisions,
+            List<RegionManifestIdentity> regions
+    ) {
+        private static final LexicalManifestIdentity EMPTY =
+                new LexicalManifestIdentity(List.of(), List.of());
+
+        private LexicalManifestIdentity {
+            decisions = decisions == null ? List.of() : List.copyOf(decisions);
+            regions = regions == null ? List.of() : List.copyOf(regions);
+        }
+
+        private static LexicalManifestIdentity from(TurnPolicyTrace trace) {
+            TurnPolicyTrace safe = trace == null
+                    ? TurnPolicyTrace.empty()
+                    : trace;
+            Map<String, TurnPolicyTrace.RolefulTarget> rolesByPath =
+                    new LinkedHashMap<>();
+            for (TurnPolicyTrace.RolefulTarget target
+                    : safe.rolefulTargets()) {
+                rolesByPath.put(target.path(), target);
+            }
+            return new LexicalManifestIdentity(
+                    safe.lexicalDecisions().stream()
+                            .map(decision -> DecisionManifestIdentity.from(
+                                    decision,
+                                    decision.selectedForPath()
+                                            ? rolesByPath.get(decision.path())
+                                            : null))
+                            .toList(),
+                    safe.lexicalRegions().stream()
+                            .map(RegionManifestIdentity::from)
+                            .toList());
+        }
+    }
+
+    private record DecisionManifestIdentity(
+            int ordinal,
+            String owner,
+            String pathSha256,
+            String authority,
+            String action,
+            String actionFamily,
+            int actionStartOffset,
+            int actionEndOffset,
+            int targetStartOffset,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset,
+            boolean selectedForPath,
+            boolean activeInResolution,
+            PlanRoleManifestIdentity roleProjection,
+            String sourceSpanSha256
+    ) {
+        private static DecisionManifestIdentity from(
+                TurnPolicyTrace.LexicalDecisionEvidence decision,
+                TurnPolicyTrace.RolefulTarget target
+        ) {
+            return new DecisionManifestIdentity(
+                    decision.ordinal(),
+                    decision.owner(),
+                    decision.pathSha256(),
+                    decision.authority(),
+                    decision.action(),
+                    decision.actionFamily(),
+                    decision.actionStartOffset(),
+                    decision.actionEndOffset(),
+                    decision.targetStartOffset(),
+                    decision.startOffset(),
+                    decision.authorityEndOffset(),
+                    decision.endOffset(),
+                    decision.selectedForPath(),
+                    decision.activeInResolution(),
+                    PlanRoleManifestIdentity.from(
+                            target,
+                            decision.sourceSpanSha256()),
+                    decision.sourceSpanSha256());
+        }
+    }
+
+    private record PlanRoleManifestIdentity(
+            String role,
+            String normalizedSource,
+            String reason,
+            String sourceTextSha256,
+            double confidence
+    ) {
+        private static final PlanRoleManifestIdentity EMPTY =
+                new PlanRoleManifestIdentity("", "", "", "", 0.0);
+
+        private static PlanRoleManifestIdentity from(
+                TurnPolicyTrace.RolefulTarget target,
+                String selectedSourceSpanSha256
+        ) {
+            if (target == null) return EMPTY;
+            String source = target.source();
+            String normalizedSource = TargetSource.USER_REQUEST.name()
+                            .equals(source)
+                    || TargetSource.MESSAGE_HISTORY.name().equals(source)
+                    ? "REQUEST_EVIDENCE"
+                    : source;
+            return new PlanRoleManifestIdentity(
+                    target.role(),
+                    normalizedSource,
+                    target.reason(),
+                    selectedSourceSpanSha256,
+                    target.confidence());
+        }
+    }
+
+    private record RegionManifestIdentity(
+            int ordinal,
+            String owner,
+            String kind,
+            String action,
+            String pathSha256,
+            int startOffset,
+            int endOffset,
+            String sourceSpanSha256
+    ) {
+        private static RegionManifestIdentity from(
+                TurnPolicyTrace.LexicalRegionEvidence region
+        ) {
+            return new RegionManifestIdentity(
+                    region.ordinal(),
+                    region.owner(),
+                    region.kind(),
+                    region.action(),
+                    region.pathSha256(),
+                    region.startOffset(),
+                    region.endOffset(),
+                    region.sourceSpanSha256());
+        }
+    }
+
+    private static TurnRecord rowToRecord(
+            Map<String, Object> row,
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+    ) {
         int turnNumber = intVal(row, "turnNumber");
         Instant ts = parseInstant(row.get("timestamp"));
         long durationMs = row.get("durationMs") instanceof Number n ? n.longValue() : 0L;
@@ -410,8 +961,15 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         int deny = intVal(row, "approvalsDenied");
         String traceSummary = str(row, "retrievalTraceSummary");
         String status = str(row, "status");
-        TurnPolicyTrace policyTrace = policyTraceFrom(row.get("policyTrace"));
-        requireStoredUserRequestCoordinates(userInput, policyTrace);
+        Object rawPolicyTrace = row.get("policyTrace");
+        boolean currentLexicalSchema = rawPolicyTrace instanceof Map<?, ?> map
+                && map.containsKey("lexicalEvidenceSchemaVersion");
+        TurnPolicyTrace policyTrace = policyTraceFrom(rawPolicyTrace);
+        requireStoredUserRequestCoordinates(
+                userInput,
+                policyTrace,
+                currentLexicalSchema,
+                manifestCache);
         String traceId = str(row, "traceId");
 
         @SuppressWarnings("unchecked")
@@ -582,7 +1140,31 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private void saveOwnedTrace(String sessionId, LocalTurnTrace trace) {
         try {
-            writeTrace(sessionId, trace);
+            requireTraceSessionNamespace(sessionId, trace);
+            LexicalEvidenceEnvelope evidence = lexicalEvidenceFromTrace(trace);
+            TraceBindingIndex traceBindings = traceRequestBindings(sessionId);
+            if (traceBindings.conflicted(trace.traceId())) {
+                throw new IllegalArgumentException(
+                        "local trace identity is conflicted in its turn ledger");
+            }
+            TraceRequestBinding binding = traceBindings.binding(
+                    trace.traceId());
+            if (binding != null) {
+                if (binding.turnNumber() != trace.turnNumber()) {
+                    throw new IllegalArgumentException(
+                            "lexical trace requires one matching persisted turn");
+                }
+                String json = matchingTraceJson(trace, binding);
+                writeTraceJson(sessionId, trace, json);
+            } else if (!evidence.empty()) {
+                throw new IllegalArgumentException(
+                        "lexical trace requires one matching persisted turn");
+            } else if (hasPositiveMessageHistoryRole(trace)) {
+                throw new IllegalArgumentException(
+                        "positive message-history trace roles require one matching persisted turn");
+            } else {
+                writeTrace(sessionId, trace);
+            }
         } catch (Exception e) {
             LOG.warn("Failed to save local turn trace for {}: {}",
                     SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
@@ -598,6 +1180,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             LocalTurnTrace trace,
             String canonicalUserRequest
     ) throws IOException {
+        requireTraceSessionNamespace(sessionId, trace);
         requireExactLocalTraceEvidence(
                 MAPPER.valueToTree(trace),
                 canonicalUserRequest);
@@ -605,11 +1188,83 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         requireExactLocalTraceEvidence(
                 MAPPER.readTree(json),
                 canonicalUserRequest);
+        writeTraceJson(sessionId, trace, json);
+    }
+
+    private static String matchingTraceJson(
+            LocalTurnTrace trace,
+            TraceRequestBinding binding
+    ) throws IOException {
+        return matchingTraceJson(trace, binding, null);
+    }
+
+    private static String matchingTraceJson(
+            LocalTurnTrace trace,
+            TraceRequestBinding binding,
+            String validatedRawRequest
+    ) throws IOException {
+        String sanitizationRequest = validatedRawRequest == null
+                ? binding.canonicalRequest()
+                : validatedRawRequest;
+        for (boolean redactHistorical : List.of(false, true)) {
+            String json = sanitizedTraceJson(
+                    trace,
+                    sanitizationRequest,
+                    redactHistorical);
+            JsonNode root = MAPPER.readTree(json);
+            requireExactLocalTraceEvidence(root, binding.canonicalRequest());
+            LocalTurnTrace stored = MAPPER.treeToValue(
+                    root,
+                    LocalTurnTrace.class);
+            if (binding.lexicalEvidence().equals(
+                            lexicalEvidenceFromTrace(stored))) {
+                requireTracePolicyBinding(stored, binding.policyTrace());
+                return json;
+            }
+        }
+        throw new IllegalArgumentException(
+                "local trace evidence does not match its persisted turn");
+    }
+
+    private void writeTraceJson(
+            String sessionId,
+            LocalTurnTrace trace,
+            String json
+    ) throws IOException {
+        requireTraceSessionNamespace(sessionId, trace);
         Path dir = traceDirFor(sessionId);
         NoFollowPathPolicy.GuardedRoot guard = mutationGuard();
         guard.createDirectories(dir);
-        Path target = guard.requireRegularFileTarget(dir.resolve(traceFileName(trace)));
-        atomicFileWriter.replaceCurrent(target, json.getBytes(StandardCharsets.UTF_8));
+        Path target = guard.requireRegularFileTarget(
+                dir.resolve(traceFileName(trace)));
+        atomicFileWriter.replaceCurrent(
+                target,
+                json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void requireTraceSessionNamespace(
+            String sessionId,
+            LocalTurnTrace trace
+    ) {
+        String traceSessionId = trace == null ? "" : trace.sessionId();
+        if (!traceSessionNamespaceMatches(sessionId, traceSessionId)) {
+            throw new IllegalArgumentException(
+                    "local trace workspace identity does not match its destination");
+        }
+    }
+
+    private static boolean traceSessionNamespaceMatches(
+            String sessionId,
+            String traceSessionId
+    ) {
+        boolean exactLegacyIdentity = sessionId != null
+                && sessionId.equals(traceSessionId);
+        boolean workspaceScopedIdentity = WORKSPACE_SESSION_ID.matcher(
+                traceSessionId == null ? "" : traceSessionId).matches()
+                && sessionId != null
+                && sessionId.startsWith(traceSessionId + "-")
+                && sessionId.length() > traceSessionId.length() + 1;
+        return exactLegacyIdentity || workspaceScopedIdentity;
     }
 
     @Override
@@ -655,6 +1310,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 || (trace == null && !recordTraceId.isBlank())
                 || (trace != null && (trace.turnNumber() <= 0
                     || trace.turnNumber() != record.turnNumber()
+                    || !traceSessionNamespaceMatches(
+                            sessionId,
+                            trace.sessionId())
                     || trace.traceId().isBlank()
                     || !OBSERVED_TRACE_ID.matcher(trace.traceId()).matches()
                     || !trace.traceId().equals(recordTraceId)));
@@ -664,24 +1322,80 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             return new TurnEnvelopePersistenceReceipt(
                     TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
         }
+        String preparedRecordJson;
+        String preparedFallbackRecordJson;
+        String preparedTraceJson = null;
         try {
-            requireStoredUserRequestCoordinates(
-                    record.userInput(),
-                    record.policyTrace());
+            try {
+                requireStoredUserRequestCoordinates(
+                        record.userInput(),
+                        record.policyTrace(),
+                        true);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(
+                        "raw turn policy evidence is invalid: "
+                                + SafeLogFormatter.throwableMessage(e),
+                        e);
+            }
+            HistoricalRequestIndex prior = loadTurnLedger(sessionId)
+                    .requests();
+            requireNoGlobalEvidenceConflict(record, prior);
+            boolean redactHistorical = historicalRedactionRequired(
+                    record,
+                    prior);
+            TurnRecord sanitizedRecord;
+            try {
+                sanitizedRecord = parsedTurnRecord(
+                        preparedRecordJson = sanitizedCompactJson(
+                                turnRow(record),
+                                redactHistorical));
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(
+                        "sanitized turn policy evidence is invalid: "
+                                + SafeLogFormatter.throwableMessage(e),
+                        e);
+            }
+            if (hasHistoricalLexicalEvidence(sanitizedRecord)) {
+                requireHistoricalLexicalBindings(
+                        sanitizedRecord,
+                        prior);
+            }
+            // The trace-write fallback clears only traceId, but its complete
+            // sanitized row must also be valid before the first publication.
+            TurnRecord sanitizedFallback;
+            try {
+                sanitizedFallback = parsedTurnRecord(
+                        preparedFallbackRecordJson = sanitizedCompactJson(
+                                turnRow(withTraceId(record, "")),
+                                redactHistorical));
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(
+                        "sanitized fallback turn evidence is invalid: "
+                                + SafeLogFormatter.throwableMessage(e),
+                        e);
+            }
+            if (hasHistoricalLexicalEvidence(sanitizedFallback)) {
+                requireHistoricalLexicalBindings(sanitizedFallback, prior);
+            }
             if (trace != null) {
-                // Prove the original USER_REQUEST evidence against the original
-                // persisted request before either side is sanitized. Redaction
-                // may conservatively invalidate a proven coordinate pair, but
-                // it must never turn an originally unbound pair into an
-                // acceptable unknown-offset envelope.
                 requireExactLocalTraceEvidence(
                         MAPPER.valueToTree(trace),
                         record.userInput());
-                String candidateJson = sanitizedTraceJson(
+                if (!lexicalEvidenceFromTrace(trace).equals(
+                        LexicalEvidenceEnvelope.from(record.policyTrace()))) {
+                    throw new IllegalArgumentException(
+                            "turn record and local trace lexical evidence must match");
+                }
+                requireTracePolicyBinding(trace, record.policyTrace());
+                TraceRequestBinding binding = new TraceRequestBinding(
+                        sanitizedRecord.turnNumber(),
+                        sanitizedRecord.userInput().strip(),
+                        LexicalEvidenceEnvelope.from(
+                                sanitizedRecord.policyTrace()),
+                        sanitizedRecord.policyTrace());
+                preparedTraceJson = matchingTraceJson(
                         trace,
-                        record.userInput());
-                requireExactLocalTraceEvidence(
-                        MAPPER.readTree(candidateJson),
+                        binding,
                         record.userInput());
             }
         } catch (Exception e) {
@@ -695,7 +1409,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         boolean traceWritten = false;
         if (trace != null) {
             try {
-                writeTrace(sessionId, trace, record.userInput());
+                writeTraceJson(sessionId, trace, preparedTraceJson);
                 traceWritten = true;
             } catch (Exception e) {
                 LOG.warn("Failed to save local turn trace for {}: {}",
@@ -703,12 +1417,14 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             }
         }
 
-        TurnRecord row = traceWritten || trace == null
-                ? record
-                : withTraceId(record, "");
         boolean turnWritten = false;
         try {
-            writeTurn(lease, sessionId, row);
+            appendPreparedTurnJson(
+                    lease,
+                    sessionId,
+                    traceWritten || trace == null
+                            ? preparedRecordJson
+                            : preparedFallbackRecordJson);
             turnWritten = true;
         } catch (Exception e) {
             LOG.warn("Failed to append turn record for {}: {}",
@@ -726,6 +1442,74 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             state = TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED;
         }
         return new TurnEnvelopePersistenceReceipt(state);
+    }
+
+    private void appendPreparedTurnJson(
+            SessionWriterLease lease,
+            String sessionId,
+            String compact
+    ) throws IOException {
+        if (compact == null || compact.isBlank()) {
+            throw new IllegalArgumentException(
+                    "prepared turn JSON must not be blank");
+        }
+        byte[] line = (compact + "\n").getBytes(StandardCharsets.UTF_8);
+        try {
+            Path target = mutationGuard().requireRegularFileTarget(
+                    turnsFileFor(sessionId));
+            requireCompleteTurnLogTail(lease, target);
+            try (FileChannel channel = FileChannel.open(
+                    target,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.APPEND,
+                    LinkOption.NOFOLLOW_LINKS)) {
+                ByteBuffer source = ByteBuffer.wrap(line);
+                while (source.hasRemaining()) {
+                    int written = channel.write(source);
+                    if (written <= 0) {
+                        throw new IOException(
+                                "Turn log append made no progress");
+                    }
+                }
+                channel.force(true);
+            }
+        } catch (SessionWriterUnavailableException failure) {
+            throw failure;
+        } catch (IOException failure) {
+            lease.poison();
+            throw failure;
+        }
+    }
+
+    /**
+     * A crash may leave a final JSON fragment without its canonical LF commit
+     * marker. Never append a newly acknowledged row behind that fragment: it
+     * would make the new row unreadable too. T1163 owns any later recovery or
+     * truncation policy; this boundary only detects the condition and stops.
+     */
+    private static void requireCompleteTurnLogTail(
+            SessionWriterLease lease,
+            Path target
+    ) throws IOException {
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return;
+        try (FileChannel existing = FileChannel.open(
+                target,
+                StandardOpenOption.READ,
+                LinkOption.NOFOLLOW_LINKS)) {
+            long size = existing.size();
+            if (size == 0L) return;
+            ByteBuffer last = ByteBuffer.allocate(1);
+            existing.position(size - 1L);
+            if (existing.read(last) != 1
+                    || last.array()[0] != (byte) '\n') {
+                lease.poison();
+                throw new SessionWriterUnavailableException(
+                        SessionWriterUnavailableException.Reason
+                                .INCOMPLETE_TURN_LOG,
+                        "Session turn log ends with an incomplete record");
+            }
+        }
     }
 
     private static TurnRecord withTraceId(TurnRecord record, String traceId) {
@@ -752,12 +1536,14 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         }
         Path dir = traceDirFor(sessionId);
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
-        Map<String, String> requestBindings = traceRequestBindings(sessionId);
-        try (var stream = Files.list(NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
+        TraceBindingIndex requestBindings =
+                traceRequestBindings(sessionId);
+        try (var stream = Files.list(
+                NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith("-" + sanitizeTraceId(traceId) + ".json"))
                     .sorted()
-                    .map(path -> readTrace(path, requestBindings).filter(trace ->
+                    .map(path -> readTrace(sessionId, path, requestBindings).filter(trace ->
                             traceId.equals(trace.traceId())
                                     && trace.turnNumber() > 0
                                     && path.getFileName().toString().equals(
@@ -778,12 +1564,14 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         if (!safeSessionId(sessionId)) return Optional.empty();
         Path dir = traceDirFor(sessionId);
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
-        Map<String, String> requestBindings = traceRequestBindings(sessionId);
-        try (var stream = Files.list(NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
+        TraceBindingIndex requestBindings =
+                traceRequestBindings(sessionId);
+        try (var stream = Files.list(
+                NoFollowPathPolicy.requireUnlinkedDirectory(dir))) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
                     .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
-                    .map(path -> readTrace(path, requestBindings).filter(trace ->
+                    .map(path -> readTrace(sessionId, path, requestBindings).filter(trace ->
                             !trace.traceId().isBlank()
                                     && trace.turnNumber() > 0
                                     && path.getFileName().toString().equals(
@@ -799,8 +1587,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     }
 
     private Optional<LocalTurnTrace> readTrace(
+            String sessionId,
             Path path,
-            Map<String, String> requestBindings
+            TraceBindingIndex requestBindings
     ) {
         try {
             JsonNode root = MAPPER.readTree(
@@ -808,11 +1597,45 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             String traceId = root.path("traceId").isTextual()
                     ? root.path("traceId").asText()
                     : "";
-            String canonicalRequest = requestBindings == null
+            if (requestBindings != null
+                    && requestBindings.conflicted(traceId)) {
+                throw new IllegalArgumentException(
+                        "local trace identity is conflicted in its turn ledger");
+            }
+            TraceRequestBinding binding = requestBindings == null
                     ? null
-                    : requestBindings.get(traceId);
+                    : requestBindings.binding(traceId);
+            String canonicalRequest = binding == null
+                    ? null
+                    : binding.canonicalRequest();
             requireExactLocalTraceEvidence(root, canonicalRequest);
-            return Optional.of(MAPPER.treeToValue(root, LocalTurnTrace.class));
+            LocalTurnTrace trace = MAPPER.treeToValue(
+                    root,
+                    LocalTurnTrace.class);
+            if (!traceSessionNamespaceMatches(
+                    sessionId,
+                    trace.sessionId())) {
+                throw new IllegalArgumentException(
+                        "local trace workspace identity does not match its directory");
+            }
+            LexicalEvidenceEnvelope traceEvidence =
+                    lexicalEvidenceFromTrace(trace);
+            if (binding == null && hasPositiveMessageHistoryRole(trace)) {
+                throw new IllegalArgumentException(
+                        "positive message-history trace roles require one matching persisted turn");
+            }
+            if (binding == null && !traceEvidence.empty()
+                    || binding != null
+                            && (binding.turnNumber() != trace.turnNumber()
+                                    || !traceEvidence.equals(
+                                            binding.lexicalEvidence()))) {
+                throw new IllegalArgumentException(
+                        "local trace lexical evidence has no matching turn record");
+            }
+            if (binding != null) {
+                requireTracePolicyBinding(trace, binding.policyTrace());
+            }
+            return Optional.of(trace);
         } catch (Exception e) {
             LOG.warn("Skipping malformed local trace {}: {}",
                     SafeLogFormatter.value(path.getFileName()), SafeLogFormatter.throwableMessage(e));
@@ -830,12 +1653,25 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             LocalTurnTrace trace,
             String canonicalUserRequest
     ) throws IOException {
+        return sanitizedTraceJson(trace, canonicalUserRequest, false);
+    }
+
+    private static String sanitizedTraceJson(
+            LocalTurnTrace trace,
+            String canonicalUserRequest,
+            boolean redactHistoricalEvidence
+    ) throws IOException {
         JsonNode root = MAPPER.valueToTree(trace);
         sanitizeJsonTextNodes(root, false);
         if (canonicalUserRequest != null
                 && !ProtectedContentPolicy.sanitizeText(canonicalUserRequest)
                 .equals(canonicalUserRequest)) {
             invalidateLocalUserRequestCoordinates(root);
+        }
+        if (redactHistoricalEvidence) {
+            invalidateEvidenceForSource(
+                    root,
+                    TargetSource.MESSAGE_HISTORY.name());
         }
         return MAPPER.writerWithDefaultPrettyPrinter()
                 .writeValueAsString(root);
@@ -845,20 +1681,75 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         JsonNode targets = root == null
                 ? null
                 : root.path("taskContract").path("rolefulTargets");
-        if (targets == null || !targets.isArray()) return;
-        for (JsonNode target : targets) {
-            if (target instanceof ObjectNode objectTarget
-                    && TargetSource.USER_REQUEST.name().equals(
-                            objectTarget.path("source").asText())) {
-                invalidateCoordinateFields(objectTarget);
+        if (targets != null && targets.isArray()) {
+            for (JsonNode target : targets) {
+                if (target instanceof ObjectNode objectTarget
+                        && TargetSource.USER_REQUEST.name().equals(
+                                objectTarget.path("source").asText())) {
+                    invalidateCoordinateFields(objectTarget);
+                }
+            }
+        }
+        JsonNode events = root == null ? null : root.path("events");
+        if (events != null && events.isArray()) {
+            for (JsonNode event : events) {
+                if (!LexicalPlanEvidenceTraceEvent.TYPE.equals(
+                        event.path("type").asText())) continue;
+                for (String listName : List.of("decisions", "regions")) {
+                    JsonNode rows = event.path("data").path(listName);
+                    if (!rows.isArray()) continue;
+                    for (JsonNode row : rows) {
+                        if (row instanceof ObjectNode objectRow
+                                && TargetSource.USER_REQUEST.name().equals(
+                                        objectRow.path("source").asText())) {
+                            invalidateCoordinateFields(objectRow);
+                        }
+                    }
+                }
             }
         }
     }
 
     private static String sanitizedCompactJson(Object value) throws IOException {
+        return sanitizedCompactJson(value, false);
+    }
+
+    private static String sanitizedCompactJson(
+            Object value,
+            boolean redactHistoricalEvidence
+    ) throws IOException {
         JsonNode root = MAPPER.valueToTree(value);
         sanitizeJsonTextNodes(root, false);
+        if (redactHistoricalEvidence) {
+            invalidateEvidenceForSource(
+                    root,
+                    TargetSource.MESSAGE_HISTORY.name());
+        }
         return MAPPER.writeValueAsString(root);
+    }
+
+    private static void invalidateEvidenceForSource(
+            JsonNode node,
+            String source
+    ) {
+        if (node == null || source == null || source.isBlank()) return;
+        if (node instanceof ObjectNode objectNode) {
+            if (source.equals(objectNode.path("source").asText())
+                    && (objectNode.has("evidenceState")
+                            || objectNode.has("startOffset")
+                            || objectNode.has("authorityEndOffset")
+                            || objectNode.has("endOffset"))) {
+                invalidateCoordinateFields(objectNode);
+            }
+            objectNode.elements().forEachRemaining(child ->
+                    invalidateEvidenceForSource(child, source));
+            return;
+        }
+        if (node instanceof ArrayNode arrayNode) {
+            for (JsonNode child : arrayNode) {
+                invalidateEvidenceForSource(child, source);
+            }
+        }
     }
 
     private static void sanitizeJsonTextNodes(
@@ -886,7 +1777,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         if ("userInput".equals(field.getKey())) {
                             invalidateDescendantCoordinates = true;
                         }
-                        if ("sourceText".equals(field.getKey())) {
+                        if ("sourceText".equals(field.getKey())
+                                || objectNode.has("evidenceState")) {
                             invalidateOwnCoordinates = true;
                         }
                     }
@@ -896,6 +1788,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             }
             if (invalidateOwnCoordinates) {
                 invalidateCoordinateFields(objectNode);
+            }
+            if (objectNode.has("storedPathSha256")
+                    && objectNode.path("path").isTextual()) {
+                objectNode.put(
+                        "storedPathSha256",
+                        MutationPlanSelection.pathSha256(
+                                objectNode.path("path").asText()));
             }
             for (Map.Entry<String, JsonNode> child : children) {
                 sanitizeJsonTextNodes(
@@ -919,10 +1818,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         }
     }
 
-    private Map<String, String> traceRequestBindings(String sessionId) {
-        LinkedHashMap<String, String> bindings = new LinkedHashMap<>();
+    private TraceBindingIndex traceRequestBindings(
+            String sessionId
+    ) {
+        LinkedHashMap<String, TraceRequestBinding> bindings =
+                new LinkedHashMap<>();
         java.util.HashSet<String> conflicts = new java.util.HashSet<>();
-        for (TurnRecord record : loadTurns(sessionId)) {
+        for (TurnRecord record : loadTurnLedger(sessionId).turns()) {
             String traceId = record.traceId();
             if (traceId == null || traceId.isBlank() || conflicts.contains(traceId)) {
                 continue;
@@ -930,16 +1832,330 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             String canonical = record.userInput() == null
                     ? ""
                     : record.userInput().strip();
-            String previous = bindings.putIfAbsent(traceId, canonical);
-            if (previous != null && !previous.equals(canonical)) {
+            TraceRequestBinding candidate = new TraceRequestBinding(
+                    record.turnNumber(),
+                    canonical,
+                    LexicalEvidenceEnvelope.from(record.policyTrace()),
+                    record.policyTrace());
+            TraceRequestBinding previous = bindings.putIfAbsent(
+                    traceId,
+                    candidate);
+            if (previous != null) {
                 bindings.remove(traceId);
                 conflicts.add(traceId);
             }
         }
-        return Map.copyOf(bindings);
+        return new TraceBindingIndex(bindings, conflicts);
+    }
+
+    private record TraceBindingIndex(
+            Map<String, TraceRequestBinding> bindings,
+            Set<String> conflicts
+    ) {
+        private TraceBindingIndex {
+            bindings = bindings == null ? Map.of() : Map.copyOf(bindings);
+            conflicts = conflicts == null ? Set.of() : Set.copyOf(conflicts);
+        }
+
+        private TraceRequestBinding binding(String traceId) {
+            return bindings.get(traceId);
+        }
+
+        private boolean conflicted(String traceId) {
+            return traceId != null && conflicts.contains(traceId);
+        }
+    }
+
+    private record TraceRequestBinding(
+            int turnNumber,
+            String canonicalRequest,
+            LexicalEvidenceEnvelope lexicalEvidence,
+            TurnPolicyTrace policyTrace
+    ) {
+        private TraceRequestBinding {
+            if (turnNumber <= 0) {
+                throw new IllegalArgumentException(
+                        "trace request binding requires a positive turn number");
+            }
+            canonicalRequest = canonicalRequest == null
+                    ? ""
+                    : canonicalRequest;
+            lexicalEvidence = lexicalEvidence == null
+                    ? LexicalEvidenceEnvelope.EMPTY
+                    : lexicalEvidence;
+            policyTrace = policyTrace == null
+                    ? TurnPolicyTrace.empty()
+                    : policyTrace;
+        }
+    }
+
+    private static void requireTracePolicyBinding(
+            LocalTurnTrace trace,
+            TurnPolicyTrace policy
+    ) {
+        if (trace == null || policy == null) {
+            throw new IllegalArgumentException(
+                    "trace policy binding requires both trace representations");
+        }
+        LocalTurnTrace.TaskContractSummary task = trace.taskContract();
+        LocalTurnTrace.ToolSurface tools = trace.toolSurface();
+        TurnEvidenceProjectionTraceEvent.Decoded projection =
+                TurnEvidenceProjectionTraceEvent.decode(trace);
+        if (projection.present()) {
+            if (!terminalProjectionPolicyIsEmpty(policy)
+                    || !task.expectedTargets().isEmpty()
+                    || !task.forbiddenTargets().isEmpty()
+                    || !task.classificationReason().isBlank()
+                    || !task.rolefulTargets().isEmpty()
+                    || !tools.nativeTools().isEmpty()
+                    || !tools.promptTools().isEmpty()
+                    || !lexicalEvidenceFromTrace(trace).empty()) {
+                throw new IllegalArgumentException(
+                        "local terminal trace projection does not match its turn record");
+            }
+            return;
+        }
+        if (!normalizedTraceTaskType(task.type()).equals(
+                        normalizedTraceTaskType(policy.taskType()))
+                || task.mutationAllowed() != policy.mutationAllowed()
+                || task.mutationRequested() != policy.mutationRequested()
+                || task.verificationRequired()
+                        != policy.verificationRequired()
+                || !task.expectedTargets().equals(policy.expectedTargets())
+                || !task.forbiddenTargets().equals(policy.forbiddenTargets())
+                || !task.classificationReason().equals(
+                        policy.classificationReason())
+                || !tools.nativeTools().equals(policy.nativeTools())
+                || !tools.promptTools().equals(policy.promptTools())
+                || !traceRoleIdentities(task.rolefulTargets()).equals(
+                        policyRoleIdentities(policy.rolefulTargets()))) {
+            throw new IllegalArgumentException(
+                    "local trace task/tool projection does not match its turn record");
+        }
+    }
+
+    private static boolean terminalProjectionPolicyIsEmpty(
+            TurnPolicyTrace policy
+    ) {
+        return normalizedTraceTaskType(policy.taskType()).isBlank()
+                && !policy.mutationAllowed()
+                && !policy.mutationRequested()
+                && !policy.verificationRequired()
+                && policy.expectedTargets().isEmpty()
+                && policy.forbiddenTargets().isEmpty()
+                && policy.nativeTools().isEmpty()
+                && policy.promptTools().isEmpty()
+                && policy.blocks().isEmpty()
+                && policy.classificationReason().isBlank()
+                && policy.rolefulTargets().isEmpty()
+                && policy.lexicalDecisions().isEmpty()
+                && policy.lexicalRegions().isEmpty();
+    }
+
+    private static String normalizedTraceTaskType(String value) {
+        String normalized = value == null ? "" : value.strip();
+        return "UNKNOWN".equals(normalized) ? "" : normalized;
+    }
+
+    private static List<TraceRoleIdentity> traceRoleIdentities(
+            List<LocalTurnTrace.RolefulTargetSummary> targets
+    ) {
+        if (targets == null || targets.isEmpty()) return List.of();
+        return targets.stream().map(target -> new TraceRoleIdentity(
+                target.path(),
+                target.role(),
+                target.source(),
+                target.reason(),
+                target.sourceText(),
+                target.confidence(),
+                target.startOffset(),
+                target.authorityEndOffset(),
+                target.endOffset())).toList();
+    }
+
+    private static List<TraceRoleIdentity> policyRoleIdentities(
+            List<TurnPolicyTrace.RolefulTarget> targets
+    ) {
+        if (targets == null || targets.isEmpty()) return List.of();
+        return targets.stream().map(target -> new TraceRoleIdentity(
+                target.path(),
+                target.role(),
+                target.source(),
+                target.reason(),
+                target.sourceText(),
+                target.confidence(),
+                target.startOffset(),
+                target.authorityEndOffset(),
+                target.endOffset())).toList();
+    }
+
+    private static boolean hasPositiveMessageHistoryRole(
+            LocalTurnTrace trace
+    ) {
+        if (trace == null || trace.taskContract() == null) return false;
+        return trace.taskContract().rolefulTargets().stream().anyMatch(
+                target -> TargetSource.MESSAGE_HISTORY.name().equals(
+                                target.source())
+                        && switch (target.role()) {
+                            case "MUST_MUTATE",
+                                    "MUST_MUTATE_AFTER_SOURCE_EVIDENCE",
+                                    "OUTPUT_DESTINATION", "MAY_MUTATE" -> true;
+                            default -> false;
+                        });
+    }
+
+    private record TraceRoleIdentity(
+            String path,
+            String role,
+            String source,
+            String reason,
+            String sourceText,
+            double confidence,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset
+    ) {}
+
+    private record LexicalEvidenceEnvelope(
+            List<TurnPolicyTrace.LexicalDecisionEvidence> decisions,
+            List<TurnPolicyTrace.LexicalRegionEvidence> regions
+    ) {
+        private static final LexicalEvidenceEnvelope EMPTY =
+                new LexicalEvidenceEnvelope(List.of(), List.of());
+
+        private LexicalEvidenceEnvelope {
+            decisions = MutationPlanSelection.validatedDurableDecisions(
+                    decisions);
+            regions = MutationPlanSelection.validatedDurableRegions(regions);
+            if (!decisions.isEmpty() && !regions.isEmpty()) {
+                var decision = decisions.getFirst();
+                var region = regions.getFirst();
+                if (!decision.source().equals(region.source())
+                        || !decision.evidenceState().equals(
+                                region.evidenceState())
+                        || !decision.sourceRequestSha256().equals(
+                                region.sourceRequestSha256())
+                        || decision.sourceRequestChars()
+                                != region.sourceRequestChars()
+                        || decision.sourceRequestBytes()
+                                != region.sourceRequestBytes()) {
+                    throw new IllegalArgumentException(
+                            "lexical event rows must share one request identity");
+                }
+            }
+        }
+
+        private static LexicalEvidenceEnvelope from(TurnPolicyTrace trace) {
+            TurnPolicyTrace safe = trace == null
+                    ? TurnPolicyTrace.empty() : trace;
+            if (safe.lexicalDecisions().isEmpty()
+                    && safe.lexicalRegions().isEmpty()) return EMPTY;
+            return new LexicalEvidenceEnvelope(
+                    safe.lexicalDecisions(),
+                    safe.lexicalRegions());
+        }
+
+        private boolean empty() {
+            return decisions.isEmpty() && regions.isEmpty();
+        }
+
+        private String requestSha256() {
+            return decisions.isEmpty()
+                    ? regions.isEmpty() ? ""
+                            : regions.getFirst().sourceRequestSha256()
+                    : decisions.getFirst().sourceRequestSha256();
+        }
+
+        private int requestChars() {
+            return decisions.isEmpty()
+                    ? regions.isEmpty() ? 0
+                            : regions.getFirst().sourceRequestChars()
+                    : decisions.getFirst().sourceRequestChars();
+        }
+
+        private int requestBytes() {
+            return decisions.isEmpty()
+                    ? regions.isEmpty() ? 0
+                            : regions.getFirst().sourceRequestBytes()
+                    : decisions.getFirst().sourceRequestBytes();
+        }
+
+        private String evidenceState() {
+            return decisions.isEmpty()
+                    ? regions.isEmpty() ? ""
+                            : regions.getFirst().evidenceState()
+                    : decisions.getFirst().evidenceState();
+        }
+    }
+
+    private static LexicalEvidenceEnvelope lexicalEvidenceFromTrace(
+            LocalTurnTrace trace
+    ) {
+        if (trace == null || trace.events().isEmpty()) {
+            return LexicalEvidenceEnvelope.EMPTY;
+        }
+        if (trace.events().size() > MAX_TRACE_EVENTS) {
+            throw new IllegalArgumentException("too many local trace events");
+        }
+        TurnTraceEvent match = null;
+        for (TurnTraceEvent event : trace.events()) {
+            if (!LexicalPlanEvidenceTraceEvent.TYPE.equals(event.type())) {
+                continue;
+            }
+            if (match != null) {
+                throw new IllegalArgumentException(
+                        "local trace contains duplicate lexical plan events");
+            }
+            match = event;
+        }
+        if (match == null) return LexicalEvidenceEnvelope.EMPTY;
+        if (!match.phase().isBlank() || !match.toolName().isBlank()) {
+            throw new IllegalArgumentException(
+                    "lexical plan event cannot claim a phase or tool");
+        }
+        return lexicalEvidenceFromEventData(match.data());
+    }
+
+    private static LexicalEvidenceEnvelope lexicalEvidenceFromEventData(
+            Map<String, Object> data
+    ) {
+        requireExactKeys(data, LEXICAL_EVENT_KEYS, "lexical plan event");
+        if (exactInt(data.get("schemaVersion"), "schemaVersion")
+                != LexicalPlanEvidenceTraceEvent.SCHEMA_VERSION) {
+            throw new IllegalArgumentException(
+                    "unsupported lexical plan event schema");
+        }
+        LexicalEvidenceEnvelope evidence = new LexicalEvidenceEnvelope(
+                lexicalDecisionsFrom(data.get("decisions")),
+                lexicalRegionsFrom(data.get("regions")));
+        if (evidence.empty()) {
+            throw new IllegalArgumentException(
+                    "lexical plan event must carry typed evidence");
+        }
+        return evidence;
+    }
+
+    private static void requireExactKeys(
+            Map<?, ?> map,
+            Set<String> expected,
+            String label
+    ) {
+        if (map == null || map.size() != expected.size()
+                || !map.keySet().stream().allMatch(key ->
+                        key instanceof String text && expected.contains(text))) {
+            throw new IllegalArgumentException(
+                    label + " must use its exact JSON key set");
+        }
     }
 
     private static void invalidateCoordinateFields(ObjectNode objectNode) {
+        if (objectNode != null && objectNode.has("evidenceState")) {
+            objectNode.put(
+                    "evidenceState",
+                    MutationPlanSelection.DurableEvidenceState
+                            .REDACTED_HASH_ONLY.name());
+            return;
+        }
         if (objectNode == null
                 || !objectNode.has("startOffset")
                 && !objectNode.has("authorityEndOffset")
@@ -959,11 +2175,16 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 ? null
                 : root.path("taskContract").path("rolefulTargets");
         if (targets == null || targets.isMissingNode() || targets.isNull()) {
-            return;
+            targets = MAPPER.createArrayNode();
         }
         if (!targets.isArray()) {
             throw new IllegalArgumentException(
                     "local trace rolefulTargets must be an array");
+        }
+        if (targets.size()
+                > MutationPlanSelection.MAX_DURABLE_ROLEFUL_TARGETS) {
+            throw new IllegalArgumentException(
+                    "too many local trace roleful targets");
         }
         for (JsonNode target : targets) {
             if (target == null || !target.isObject()) {
@@ -1077,6 +2298,87 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         sourceText);
             }
         }
+        JsonNode events = root == null ? null : root.get("events");
+        if (events == null) return;
+        if (!events.isArray()) {
+            throw new IllegalArgumentException(
+                    "local trace events must be an array");
+        }
+        if (events.size() > MAX_TRACE_EVENTS) {
+            throw new IllegalArgumentException("too many local trace events");
+        }
+        JsonNode lexicalEvent = null;
+        for (JsonNode event : events) {
+            if (event == null || !event.isObject()) continue;
+            JsonNode type = event.get("type");
+            if (type == null || !type.isTextual()
+                    || !LexicalPlanEvidenceTraceEvent.TYPE.equals(
+                            type.asText())) continue;
+            if (lexicalEvent != null) {
+                throw new IllegalArgumentException(
+                        "local trace contains duplicate lexical plan events");
+            }
+            lexicalEvent = event;
+        }
+        if (lexicalEvent == null) return;
+        if (!exactJsonText(lexicalEvent, "phase").isBlank()
+                || !exactJsonText(lexicalEvent, "toolName").isBlank()) {
+            throw new IllegalArgumentException(
+                    "lexical plan event cannot claim a phase or tool");
+        }
+        JsonNode data = lexicalEvent.get("data");
+        if (data == null || !data.isObject()) {
+            throw new IllegalArgumentException(
+                    "lexical plan event data must be an object");
+        }
+        Map<String, Object> eventData = MAPPER.convertValue(
+                data,
+                new TypeReference<>() {});
+        LexicalEvidenceEnvelope evidence = lexicalEvidenceFromEventData(
+                eventData);
+        boolean exactUserRequest = evidence.decisions().stream().anyMatch(
+                decision -> TargetSource.USER_REQUEST.name().equals(
+                                decision.source())
+                        && MutationPlanSelection.DurableEvidenceState.EXACT.name()
+                                .equals(decision.evidenceState()))
+                || evidence.regions().stream().anyMatch(region ->
+                        TargetSource.USER_REQUEST.name().equals(region.source())
+                                && MutationPlanSelection.DurableEvidenceState.EXACT
+                                        .name().equals(region.evidenceState()));
+        if (exactUserRequest) {
+            if (canonicalUserRequest == null) {
+                throw new IllegalArgumentException(
+                        "local trace lexical evidence requires a matching turn");
+            }
+            TaskResolution authoritative =
+                    TaskContractResolver.resolveFromUserRequest(
+                            canonicalUserRequest);
+            MutationPlanSelection.requireCanonicalDurableManifest(
+                    canonicalUserRequest,
+                    authoritative.mutationTailPlan(),
+                    authoritative.sequentialMutationPlan(),
+                    authoritative.activeLexicalPaths(),
+                    evidence.decisions(),
+                    evidence.regions());
+        }
+    }
+
+    private static String exactJsonText(JsonNode object, String field) {
+        JsonNode value = object == null ? null : object.get(field);
+        if (value == null || !value.isTextual()) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON string");
+        }
+        return value.asText();
+    }
+
+    private static boolean exactJsonBoolean(JsonNode object, String field) {
+        JsonNode value = object == null ? null : object.get(field);
+        if (value == null || !value.isBoolean()) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON boolean");
+        }
+        return value.booleanValue();
     }
 
     private static int exactJsonInt(JsonNode value, String field) {
@@ -1091,9 +2393,23 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private static void requireStoredUserRequestCoordinates(
             String userInput,
-            TurnPolicyTrace policyTrace
+            TurnPolicyTrace policyTrace,
+            boolean currentLexicalSchema
     ) {
-        if (policyTrace == null || policyTrace.rolefulTargets().isEmpty()) return;
+        requireStoredUserRequestCoordinates(
+                userInput,
+                policyTrace,
+                currentLexicalSchema,
+                new LinkedHashMap<>());
+    }
+
+    private static void requireStoredUserRequestCoordinates(
+            String userInput,
+            TurnPolicyTrace policyTrace,
+            boolean currentLexicalSchema,
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+    ) {
+        if (policyTrace == null) return;
         String canonical = userInput == null ? "" : userInput.strip();
         for (TurnPolicyTrace.RolefulTarget target : policyTrace.rolefulTargets()) {
             TaskIntentEvidence.requireDurableShape(
@@ -1113,6 +2429,113 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     target.endOffset(),
                     target.sourceText());
         }
+        if (!currentLexicalSchema) return;
+        LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
+                policyTrace);
+        String lexicalSource = evidence.decisions().isEmpty()
+                ? evidence.regions().isEmpty() ? ""
+                        : evidence.regions().getFirst().source()
+                : evidence.decisions().getFirst().source();
+        if (TargetSource.MESSAGE_HISTORY.name().equals(lexicalSource)) {
+            return;
+        }
+        boolean redacted = policyTrace.lexicalDecisions().stream().anyMatch(
+                        decision -> MutationPlanSelection.DurableEvidenceState
+                                .REDACTED_HASH_ONLY.name().equals(
+                                        decision.evidenceState()))
+                || policyTrace.lexicalRegions().stream().anyMatch(region ->
+                        MutationPlanSelection.DurableEvidenceState
+                                .REDACTED_HASH_ONLY.name().equals(
+                                        region.evidenceState()));
+        if (redacted) return;
+        TaskResolution authoritative = authoritativeResolution(
+                canonical,
+                manifestCache);
+        MutationPlanSelection.requireCanonicalDurableManifest(
+                canonical,
+                authoritative.mutationTailPlan(),
+                authoritative.sequentialMutationPlan(),
+                authoritative.activeLexicalPaths(),
+                policyTrace.lexicalDecisions(),
+                policyTrace.lexicalRegions());
+        requireCanonicalPolicySemantics(authoritative, policyTrace);
+    }
+
+    private static void requireCanonicalPolicySemantics(
+            TaskResolution authoritative,
+            TurnPolicyTrace actual
+    ) {
+        TurnPolicyTrace expected = TurnPolicyTrace.from(
+                authoritative,
+                "",
+                List.of(),
+                List.of());
+        LexicalManifestIdentity expectedManifest =
+                LexicalManifestIdentity.from(expected);
+        LexicalManifestIdentity actualManifest =
+                LexicalManifestIdentity.from(actual);
+        if (expectedManifest.decisions().size()
+                != actualManifest.decisions().size()) {
+            throw new IllegalArgumentException(
+                    "durable lexical roles differ from the authoritative resolution");
+        }
+        for (int index = 0;
+                index < actualManifest.decisions().size();
+                index++) {
+            DecisionManifestIdentity actualDecision =
+                    actualManifest.decisions().get(index);
+            if (!actualDecision.activeInResolution()) continue;
+            DecisionManifestIdentity expectedDecision =
+                    expectedManifest.decisions().get(index);
+            if (!expectedDecision.activeInResolution()
+                    || !expectedDecision.roleProjection().equals(
+                            actualDecision.roleProjection())) {
+                throw new IllegalArgumentException(
+                        "durable lexical roles differ from the authoritative resolution");
+            }
+        }
+    }
+
+    private static TaskResolution authoritativeResolution(
+            String request,
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+    ) {
+        String canonical = request == null ? "" : request.strip();
+        MutationPlanSelection.SourceRequestIdentity sourceIdentity =
+                MutationPlanSelection.sourceRequestIdentity(canonical);
+        RequestIdentity identity = new RequestIdentity(
+                sourceIdentity.sha256(),
+                sourceIdentity.characters(),
+                sourceIdentity.bytes());
+        Map<RequestIdentity, AuthoritativeManifest> cache =
+                manifestCache == null ? new LinkedHashMap<>() : manifestCache;
+        AuthoritativeManifest cached = cache.get(identity);
+        if (cached != null && !cached.canonicalRequest().equals(canonical)) {
+            throw new IllegalArgumentException(
+                    "canonical request identity is conflicted during manifest validation");
+        }
+        if (cached == null) {
+            cached = new AuthoritativeManifest(
+                    canonical,
+                    TaskContractResolver.resolveFromUserRequest(canonical));
+            cache.put(identity, cached);
+        }
+        return cached.resolution();
+    }
+
+    private record AuthoritativeManifest(
+            String canonicalRequest,
+            TaskResolution resolution
+    ) {
+        private AuthoritativeManifest {
+            canonicalRequest = canonicalRequest == null
+                    ? ""
+                    : canonicalRequest;
+            if (resolution == null) {
+                throw new IllegalArgumentException(
+                        "authoritative manifest resolution must not be null");
+            }
+        }
     }
 
     private static Map<String, Object> policyTraceToMap(TurnPolicyTrace trace) {
@@ -1120,6 +2543,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("taskType", safe.taskType());
         out.put("mutationAllowed", safe.mutationAllowed());
+        out.put("mutationRequested", safe.mutationRequested());
         out.put("verificationRequired", safe.verificationRequired());
         out.put("expectedTargets", safe.expectedTargets());
         out.put("forbiddenTargets", safe.forbiddenTargets());
@@ -1129,6 +2553,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         out.put("promptTools", safe.promptTools());
         out.put("blocks", safe.blocks());
         out.put("classificationReason", safe.classificationReason());
+        out.put("lexicalEvidenceSchemaVersion",
+                LEXICAL_EVIDENCE_SCHEMA_VERSION);
         List<Map<String, Object>> rolefulTargets = new java.util.ArrayList<>();
         for (TurnPolicyTrace.RolefulTarget target : safe.rolefulTargets()) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -1144,35 +2570,298 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             rolefulTargets.add(row);
         }
         out.put("rolefulTargets", rolefulTargets);
+        List<Map<String, Object>> lexicalDecisions =
+                new java.util.ArrayList<>();
+        for (TurnPolicyTrace.LexicalDecisionEvidence decision
+                : safe.lexicalDecisions()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("ordinal", decision.ordinal());
+            row.put("owner", decision.owner());
+            row.put("path", decision.path());
+            row.put("pathSha256", decision.pathSha256());
+            row.put("storedPathSha256", decision.storedPathSha256());
+            row.put("authority", decision.authority());
+            row.put("action", decision.action());
+            row.put("actionFamily", decision.actionFamily());
+            row.put("source", decision.source());
+            row.put("evidenceState", decision.evidenceState());
+            row.put("sourceRequestSha256",
+                    decision.sourceRequestSha256());
+            row.put("sourceRequestChars", decision.sourceRequestChars());
+            row.put("sourceRequestBytes", decision.sourceRequestBytes());
+            row.put("actionStartOffset", decision.actionStartOffset());
+            row.put("actionEndOffset", decision.actionEndOffset());
+            row.put("targetStartOffset", decision.targetStartOffset());
+            row.put("startOffset", decision.startOffset());
+            row.put("authorityEndOffset", decision.authorityEndOffset());
+            row.put("endOffset", decision.endOffset());
+            row.put("selectedForPath", decision.selectedForPath());
+            row.put("activeInResolution", decision.activeInResolution());
+            row.put("sourceSpanSha256", decision.sourceSpanSha256());
+            row.put("occurrenceSha256", decision.occurrenceSha256());
+            lexicalDecisions.add(row);
+        }
+        out.put("lexicalDecisions", lexicalDecisions);
+        List<Map<String, Object>> lexicalRegions = new java.util.ArrayList<>();
+        for (TurnPolicyTrace.LexicalRegionEvidence region
+                : safe.lexicalRegions()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("ordinal", region.ordinal());
+            row.put("owner", region.owner());
+            row.put("kind", region.kind());
+            row.put("source", region.source());
+            row.put("evidenceState", region.evidenceState());
+            row.put("sourceRequestSha256", region.sourceRequestSha256());
+            row.put("sourceRequestChars", region.sourceRequestChars());
+            row.put("sourceRequestBytes", region.sourceRequestBytes());
+            row.put("action", region.action());
+            row.put("pathSha256", region.pathSha256());
+            row.put("startOffset", region.startOffset());
+            row.put("endOffset", region.endOffset());
+            row.put("sourceSpanSha256", region.sourceSpanSha256());
+            row.put("regionSha256", region.regionSha256());
+            lexicalRegions.add(row);
+        }
+        out.put("lexicalRegions", lexicalRegions);
         return out;
     }
 
     private static TurnPolicyTrace policyTraceFrom(Object raw) {
         if (!(raw instanceof Map<?, ?> map)) return TurnPolicyTrace.empty();
+        boolean hasSchema = map.containsKey("lexicalEvidenceSchemaVersion");
+        boolean hasDecisions = map.containsKey("lexicalDecisions");
+        boolean hasRegions = map.containsKey("lexicalRegions");
+        if (!hasSchema) {
+            if (hasDecisions || hasRegions) {
+                throw new IllegalArgumentException(
+                        "unversioned policy trace cannot carry lexical evidence");
+            }
+        } else if (exactInt(
+                        map.get("lexicalEvidenceSchemaVersion"),
+                        "lexicalEvidenceSchemaVersion")
+                                != LEXICAL_EVIDENCE_SCHEMA_VERSION
+                || !hasDecisions
+                || !hasRegions) {
+            throw new IllegalArgumentException(
+                    "versioned policy trace requires both lexical evidence arrays");
+        }
+        if (hasSchema) {
+            requireExactKeys(map, POLICY_TRACE_V1_KEYS, "policy trace v1");
+            List<?> rawDecisions = exactList(
+                    map.get("lexicalDecisions"),
+                    "lexicalDecisions");
+            List<?> rawRegions = exactList(
+                    map.get("lexicalRegions"),
+                    "lexicalRegions");
+            requireLexicalRowLimit(rawDecisions.size(), rawRegions.size());
+        }
+        List<TurnPolicyTrace.LexicalDecisionEvidence> decisions = hasSchema
+                ? lexicalDecisionsFrom(map.get("lexicalDecisions"))
+                : List.of();
+        List<TurnPolicyTrace.LexicalRegionEvidence> regions = hasSchema
+                ? lexicalRegionsFrom(map.get("lexicalRegions"))
+                : List.of();
+        List<TurnPolicyTrace.RolefulTarget> rolefulTargets =
+                rolefulTargetsFrom(map.get("rolefulTargets"), hasSchema);
+        String taskType = hasSchema
+                ? exactText(map, "taskType")
+                : stringVal(map, "taskType", "UNKNOWN");
+        boolean mutationRequested = hasSchema
+                ? exactBoolean(map, "mutationRequested")
+                : map.containsKey("mutationRequested")
+                        ? boolVal(map, "mutationRequested")
+                : TurnPolicyTrace.inferMutationRequested(
+                        taskType,
+                        rolefulTargets,
+                        decisions);
         return new TurnPolicyTrace(
-                stringVal(map, "taskType", "UNKNOWN"),
-                boolVal(map, "mutationAllowed"),
-                boolVal(map, "verificationRequired"),
-                stringList(map.get("expectedTargets")),
-                stringList(map.get("forbiddenTargets")),
-                stringVal(map, "initialPhase", "unknown"),
-                stringVal(map, "finalPhase", "unknown"),
-                stringList(map.get("nativeTools")),
-                stringList(map.get("promptTools")),
-                stringList(map.get("blocks")),
-                stringVal(map, "classificationReason", ""),
-                rolefulTargetsFrom(map.get("rolefulTargets")));
+                taskType,
+                hasSchema
+                        ? exactBoolean(map, "mutationAllowed")
+                        : boolVal(map, "mutationAllowed"),
+                hasSchema
+                        ? exactBoolean(map, "verificationRequired")
+                        : boolVal(map, "verificationRequired"),
+                hasSchema
+                        ? exactStringList(map, "expectedTargets")
+                        : stringList(map.get("expectedTargets")),
+                hasSchema
+                        ? exactStringList(map, "forbiddenTargets")
+                        : stringList(map.get("forbiddenTargets")),
+                hasSchema
+                        ? exactText(map, "initialPhase")
+                        : stringVal(map, "initialPhase", "unknown"),
+                hasSchema
+                        ? exactText(map, "finalPhase")
+                        : stringVal(map, "finalPhase", "unknown"),
+                hasSchema
+                        ? exactStringList(map, "nativeTools")
+                        : stringList(map.get("nativeTools")),
+                hasSchema
+                        ? exactStringList(map, "promptTools")
+                        : stringList(map.get("promptTools")),
+                hasSchema
+                        ? exactStringList(map, "blocks")
+                        : stringList(map.get("blocks")),
+                hasSchema
+                        ? exactText(map, "classificationReason")
+                        : stringVal(map, "classificationReason", ""),
+                rolefulTargets,
+                decisions,
+                regions,
+                mutationRequested);
     }
 
-    private static List<TurnPolicyTrace.RolefulTarget> rolefulTargetsFrom(Object raw) {
+    private static List<TurnPolicyTrace.LexicalDecisionEvidence>
+            lexicalDecisionsFrom(Object raw) {
         if (raw == null) return List.of();
         if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException(
+                    "lexicalDecisions must be an array when present");
+        }
+        if (list.size() > MAX_LEXICAL_DECISIONS) {
+            throw new IllegalArgumentException("too many lexical decisions");
+        }
+        List<TurnPolicyTrace.LexicalDecisionEvidence> out =
+                new java.util.ArrayList<>();
+        for (Object value : list) {
+            if (!(value instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException(
+                        "lexicalDecisions entries must be objects");
+            }
+            requireExactKeys(
+                    map,
+                    LEXICAL_DECISION_KEYS,
+                    "lexical decision");
+            out.add(new TurnPolicyTrace.LexicalDecisionEvidence(
+                    exactInt(map.get("ordinal"), "ordinal"),
+                    exactString(map, "owner"),
+                    exactString(map, "path"),
+                    exactString(map, "pathSha256"),
+                    exactString(map, "storedPathSha256"),
+                    exactString(map, "authority"),
+                    exactString(map, "action"),
+                    exactString(map, "actionFamily"),
+                    exactString(map, "source"),
+                    exactString(map, "evidenceState"),
+                    exactString(map, "sourceRequestSha256"),
+                    exactInt(map.get("sourceRequestChars"),
+                            "sourceRequestChars"),
+                    exactInt(map.get("sourceRequestBytes"),
+                            "sourceRequestBytes"),
+                    exactInt(
+                            map.get("actionStartOffset"),
+                            "actionStartOffset"),
+                    exactInt(
+                            map.get("actionEndOffset"),
+                            "actionEndOffset"),
+                    exactInt(
+                            map.get("targetStartOffset"),
+                            "targetStartOffset"),
+                    exactInt(map.get("startOffset"), "startOffset"),
+                    exactInt(
+                            map.get("authorityEndOffset"),
+                            "authorityEndOffset"),
+                    exactInt(map.get("endOffset"), "endOffset"),
+                    exactBoolean(map, "selectedForPath"),
+                    exactBoolean(map, "activeInResolution"),
+                    exactString(map, "sourceSpanSha256"),
+                    exactString(map, "occurrenceSha256")));
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<TurnPolicyTrace.LexicalRegionEvidence>
+            lexicalRegionsFrom(Object raw) {
+        if (raw == null) return List.of();
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException(
+                    "lexicalRegions must be an array when present");
+        }
+        if (list.size() > MAX_LEXICAL_REGIONS) {
+            throw new IllegalArgumentException("too many lexical regions");
+        }
+        List<TurnPolicyTrace.LexicalRegionEvidence> out =
+                new java.util.ArrayList<>();
+        for (Object value : list) {
+            if (!(value instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException(
+                        "lexicalRegions entries must be objects");
+            }
+            requireExactKeys(
+                    map,
+                    LEXICAL_REGION_KEYS,
+                    "lexical region");
+            out.add(new TurnPolicyTrace.LexicalRegionEvidence(
+                    exactInt(map.get("ordinal"), "ordinal"),
+                    exactString(map, "owner"),
+                    exactString(map, "kind"),
+                    exactString(map, "source"),
+                    exactString(map, "evidenceState"),
+                    exactString(map, "sourceRequestSha256"),
+                    exactInt(map.get("sourceRequestChars"),
+                            "sourceRequestChars"),
+                    exactInt(map.get("sourceRequestBytes"),
+                            "sourceRequestBytes"),
+                    exactString(map, "action"),
+                    exactString(map, "pathSha256"),
+                    exactInt(map.get("startOffset"), "startOffset"),
+                    exactInt(map.get("endOffset"), "endOffset"),
+                    exactString(map, "sourceSpanSha256"),
+                    exactString(map, "regionSha256")));
+        }
+        return List.copyOf(out);
+    }
+
+    private static void requireLexicalRowLimit(int decisions, int regions) {
+        if (decisions < 0 || regions < 0
+                || (long) decisions + regions
+                        > SequentialMutationClausePlan.MAX_EVIDENCE_ROWS) {
+            throw new IllegalArgumentException(
+                    "combined lexical evidence exceeds its row bound");
+        }
+    }
+
+    private static String exactString(Map<?, ?> map, String field) {
+        Object value = map == null ? null : map.get(field);
+        if (!(value instanceof String text)) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON string");
+        }
+        return text;
+    }
+
+    private static boolean exactBoolean(Map<?, ?> map, String field) {
+        Object value = map == null ? null : map.get(field);
+        if (!(value instanceof Boolean flag)) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON boolean");
+        }
+        return flag;
+    }
+
+    private static List<TurnPolicyTrace.RolefulTarget> rolefulTargetsFrom(
+            Object raw,
+            boolean strict
+    ) {
+        if (raw == null && !strict) return List.of();
+        if (!(raw instanceof List<?> list)) {
             throw new IllegalArgumentException("rolefulTargets must be an array when present");
+        }
+        if (list.size()
+                > MutationPlanSelection.MAX_DURABLE_ROLEFUL_TARGETS) {
+            throw new IllegalArgumentException("too many roleful targets");
         }
         List<TurnPolicyTrace.RolefulTarget> out = new java.util.ArrayList<>();
         for (Object value : list) {
             if (!(value instanceof Map<?, ?> map)) {
                 throw new IllegalArgumentException("rolefulTargets entries must be objects");
+            }
+            if (strict) {
+                requireExactKeys(
+                        map,
+                        ROLEFUL_TARGET_V1_KEYS,
+                        "roleful target v1");
             }
             Object rawRole = map.get("role");
             if (!(rawRole instanceof String role) || role.isBlank()) {
@@ -1221,7 +2910,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                             map.get("authorityEndOffset"),
                             "authorityEndOffset")
                     : IntentDerivation.UNKNOWN_OFFSET;
-            String path = stringVal(map, "path", "");
+            String path = strict
+                    ? exactText(map, "path")
+                    : stringVal(map, "path", "");
             TaskIntentEvidence.requireDurableShape(
                     path,
                     source,
@@ -1234,7 +2925,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     path,
                     role,
                     source,
-                    stringVal(map, "reason", ""),
+                    strict
+                            ? exactText(map, "reason")
+                            : stringVal(map, "reason", ""),
                     sourceText,
                     confidence,
                     start,
@@ -1242,6 +2935,44 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     end));
         }
         return out;
+    }
+
+    private static List<?> exactList(Object raw, String field) {
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON array");
+        }
+        return list;
+    }
+
+    private static String exactText(Map<?, ?> map, String field) {
+        Object value = map == null ? null : map.get(field);
+        if (!(value instanceof String text)) {
+            throw new IllegalArgumentException(
+                    field + " must be an exact JSON string");
+        }
+        return text;
+    }
+
+    private static List<String> exactStringList(
+            Map<?, ?> map,
+            String field
+    ) {
+        List<?> raw = exactList(map == null ? null : map.get(field), field);
+        if (raw.size() > MAX_POLICY_STRING_LIST) {
+            throw new IllegalArgumentException(
+                    field + " exceeds its bounded entry count");
+        }
+        java.util.ArrayList<String> values = new java.util.ArrayList<>(
+                raw.size());
+        for (Object value : raw) {
+            if (!(value instanceof String text) || text.isBlank()) {
+                throw new IllegalArgumentException(
+                        field + " entries must be nonblank JSON strings");
+            }
+            values.add(text);
+        }
+        return List.copyOf(values);
     }
 
     private static String stringVal(Map<?, ?> map, String key, String fallback) {

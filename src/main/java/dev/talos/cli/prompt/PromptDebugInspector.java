@@ -389,9 +389,10 @@ public final class PromptDebugInspector {
                     PromptDebugCapture.TASK_CONTRACT_TARGET_ROLES_DIAGNOSTIC));
             return authoritative.isBlank() ? "(none)" : authoritative;
         }
-        if (contract == null) return "(none)";
+        if (contract == null || snapshot == null) return "(none)";
         List<TurnPolicyTrace.RolefulTarget> targets = TurnPolicyTrace.from(
-                        contract,
+                        TaskContractResolver.resolveFromMessages(
+                                snapshot.messages()),
                         "unknown",
                         List.of(),
                         List.of())

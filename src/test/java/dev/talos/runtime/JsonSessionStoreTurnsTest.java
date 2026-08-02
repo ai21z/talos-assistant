@@ -1,5 +1,8 @@
 package dev.talos.runtime;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  */
 class JsonSessionStoreTurnsTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static void withWriter(
             JsonSessionStore store,
@@ -188,8 +193,7 @@ class JsonSessionStoreTurnsTest {
         var resolution =
                 dev.talos.runtime.task.TaskContractResolver.resolveFromUserRequest(request);
         TurnPolicyTrace trace = TurnPolicyTrace.from(
-                resolution.contract(),
-                resolution.intent(),
+                resolution,
                 "APPLY",
                 List.of("talos.edit_file"),
                 List.of("talos.edit_file"));
@@ -236,9 +240,18 @@ class JsonSessionStoreTurnsTest {
         String legacyKnownSid = "session-policy-legacy-known-offset";
         String persisted = Files.readString(
                 dir.resolve(sid + ".turns.jsonl"));
-        String withoutAuthorityEnd = persisted.replaceAll(
-                "\"authorityEndOffset\"\\s*:\\s*-?\\d+\\s*,",
-                "");
+        ObjectNode legacyRow = (ObjectNode) MAPPER.readTree(persisted);
+        ObjectNode legacyPolicy = (ObjectNode) legacyRow.get("policyTrace");
+        legacyPolicy.remove(List.of(
+                "lexicalEvidenceSchemaVersion",
+                "lexicalDecisions",
+                "lexicalRegions"));
+        for (JsonNode target : legacyPolicy.withArray("rolefulTargets")) {
+            if ("style.css".equals(target.path("path").asText())) {
+                ((ObjectNode) target).remove("authorityEndOffset");
+            }
+        }
+        String withoutAuthorityEnd = MAPPER.writeValueAsString(legacyRow) + "\n";
         assertFalse(persisted.equals(withoutAuthorityEnd));
         Files.writeString(
                 dir.resolve(legacyKnownSid + ".turns.jsonl"),
@@ -282,30 +295,20 @@ class JsonSessionStoreTurnsTest {
     ) throws Exception {
         String request = "DO_NOT_LEAK_T1196_PREFIX. Edit index.html so it works, "
                 + "and update style.css too.";
-        int start = request.indexOf("update style.css");
-        String sourceText = "update style.css too.";
-        TurnPolicyTrace trace = new TurnPolicyTrace(
-                "FILE_EDIT",
-                true,
-                true,
-                List.of("style.css"),
-                List.of(),
-                "APPLY",
+        var resolution =
+                dev.talos.runtime.task.TaskContractResolver
+                        .resolveFromUserRequest(request);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                resolution,
                 "APPLY",
                 List.of("talos.edit_file"),
-                List.of("talos.edit_file"),
-                List.of(),
-                "sanitized-coordinate-test",
-                List.of(new TurnPolicyTrace.RolefulTarget(
-                        "style.css",
-                        "MUST_MUTATE",
-                        "USER_REQUEST",
-                        "explicit-mutation-target",
-                        sourceText,
-                        1.0,
-                        start,
-                        start + "update style.css".length(),
-                        start + sourceText.length())));
+                List.of("talos.edit_file"));
+        TurnPolicyTrace.RolefulTarget original = trace.rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        String sourceText = original.sourceText();
+        assertTrue(original.startOffset() >= 0);
         String sid = "session-sanitized-coordinate";
         JsonSessionStore store = new JsonSessionStore(dir);
 
@@ -329,7 +332,10 @@ class JsonSessionStoreTurnsTest {
                 .getFirst()
                 .policyTrace()
                 .rolefulTargets()
-                .getFirst();
+                .stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
         assertEquals(-1, loaded.startOffset());
         assertEquals(-1, loaded.authorityEndOffset());
         assertEquals(-1, loaded.endOffset());

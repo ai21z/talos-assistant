@@ -1,6 +1,8 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
+import dev.talos.runtime.task.TaskContractResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -120,7 +122,7 @@ class JsonSessionStoreTraceTest {
                 0,
                 "",
                 "ok",
-                TurnPolicyTrace.empty(),
+                matchingPolicyTrace(trace),
                 trace.traceId());
         try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
             assertEquals(
@@ -158,15 +160,9 @@ class JsonSessionStoreTraceTest {
                 "");
         assertFalse(persisted.equals(legacy));
         Files.writeString(traceFile, legacy);
-        LocalTurnTrace.RolefulTargetSummary legacyLoaded = store
-                .loadTrace(sid, trace.traceId())
-                .orElseThrow()
-                .taskContract()
-                .rolefulTargets()
-                .getFirst();
-        assertEquals(expectedTarget.startOffset(), legacyLoaded.startOffset());
-        assertEquals(-1, legacyLoaded.authorityEndOffset());
-        assertEquals(expectedTarget.endOffset(), legacyLoaded.endOffset());
+        assertTrue(store.loadTrace(sid, trace.traceId()).isEmpty(),
+                "removing one role-coordinate field must invalidate the "
+                        + "trace/turn identity binding");
     }
 
     @Test
@@ -234,6 +230,43 @@ class JsonSessionStoreTraceTest {
     }
 
     @Test
+    void positiveMessageHistoryTraceRequiresAMatchingTurn(
+            @TempDir Path dir
+    ) {
+        String sessionId = "session-unbound-history-role";
+        String traceId = "trc-unbound-history-role";
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        traceId,
+                        sessionId,
+                        1,
+                        "2026-08-02T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                        "FILE_EDIT",
+                        true,
+                        true,
+                        true,
+                        List.of("style.css"),
+                        List.of(),
+                        "history-role-without-turn",
+                        List.of(new LocalTurnTrace.RolefulTargetSummary(
+                                "style.css",
+                                "MUST_MUTATE",
+                                "MESSAGE_HISTORY",
+                                "confirmed-pending-request-projection",
+                                "update style.css",
+                                1.0))))
+                .build();
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        withWriter(store, sessionId, writer ->
+                writer.saveTrace(sessionId, trace));
+
+        assertFalse(Files.exists(
+                dir.resolve("traces").resolve(sessionId)));
+        assertTrue(store.loadTrace(sessionId, traceId).isEmpty());
+    }
+
+    @Test
     void sanitizingEnvelopeRequestInvalidatesBoundLocalCoordinates(
             @TempDir Path dir
     ) {
@@ -279,7 +312,7 @@ class JsonSessionStoreTraceTest {
                 0,
                 "",
                 "ok",
-                TurnPolicyTrace.empty(),
+                matchingPolicyTrace(trace),
                 trace.traceId());
 
         try (SessionWriterLease writer = store.acquireSessionWriter(sid)) {
@@ -358,13 +391,17 @@ class JsonSessionStoreTraceTest {
                     + "Edit index.html, then " + sourceText
                     + lineEnding + " ";
             String canonical = request.strip();
-            int start = canonical.indexOf(sourceText);
-            LocalTurnTrace trace = rolefulTrace(
+            var resolution = TaskContractResolver.resolveFromUserRequest(
+                    canonical);
+            TurnPolicyTrace policy = TurnPolicyTrace.from(
+                    resolution,
+                    "APPLY",
+                    List.of(),
+                    List.of());
+            LocalTurnTrace trace = traceForPolicy(
                     sid,
                     traceId,
-                    sourceText,
-                    start,
-                    start + sourceText.length());
+                    policy);
             TurnRecord record = new TurnRecord(
                     1,
                     Instant.parse("2026-07-30T00:00:00Z"),
@@ -377,7 +414,7 @@ class JsonSessionStoreTraceTest {
                     0,
                     "",
                     "ok",
-                    TurnPolicyTrace.empty(),
+                    policy,
                     traceId);
             JsonSessionStore store = new JsonSessionStore(dir);
 
@@ -392,7 +429,10 @@ class JsonSessionStoreTraceTest {
                     .orElseThrow()
                     .taskContract()
                     .rolefulTargets()
-                    .getFirst();
+                    .stream()
+                    .filter(target -> "style.css".equals(target.path()))
+                    .findFirst()
+                    .orElseThrow();
             assertEquals(-1, loaded.startOffset(), label);
             assertEquals(-1, loaded.authorityEndOffset(), label);
             assertEquals(-1, loaded.endOffset(), label);
@@ -540,6 +580,84 @@ class JsonSessionStoreTraceTest {
                                         + sourceText.indexOf("style.css")
                                         + "style.css".length(),
                                 endOffset))))
+                .build();
+    }
+
+    private static TurnPolicyTrace matchingPolicyTrace(
+            LocalTurnTrace trace
+    ) {
+        LocalTurnTrace.TaskContractSummary task = trace.taskContract();
+        LocalTurnTrace.ToolSurface tools = trace.toolSurface();
+        List<TurnPolicyTrace.RolefulTarget> targets = task.rolefulTargets()
+                .stream()
+                .map(target -> new TurnPolicyTrace.RolefulTarget(
+                        target.path(),
+                        target.role(),
+                        target.source(),
+                        target.reason(),
+                        target.sourceText(),
+                        target.confidence(),
+                        target.startOffset(),
+                        target.authorityEndOffset(),
+                        target.endOffset()))
+                .toList();
+        return new TurnPolicyTrace(
+                task.type(),
+                task.mutationAllowed(),
+                task.verificationRequired(),
+                task.expectedTargets(),
+                task.forbiddenTargets(),
+                "unknown",
+                "unknown",
+                tools.nativeTools(),
+                tools.promptTools(),
+                List.of(),
+                task.classificationReason(),
+                targets,
+                List.of(),
+                List.of());
+    }
+
+    private static LocalTurnTrace traceForPolicy(
+            String sessionId,
+            String traceId,
+            TurnPolicyTrace policy
+    ) {
+        LocalTurnTrace.TaskContractSummary task =
+                new LocalTurnTrace.TaskContractSummary(
+                        policy.taskType(),
+                        policy.mutationAllowed(),
+                        policy.verificationRequired(),
+                        policy.mutationRequested(),
+                        policy.expectedTargets(),
+                        policy.forbiddenTargets(),
+                        policy.classificationReason(),
+                        policy.rolefulTargets().stream()
+                                .map(target ->
+                                        new LocalTurnTrace.RolefulTargetSummary(
+                                                target.path(),
+                                                target.role(),
+                                                target.source(),
+                                                target.reason(),
+                                                target.sourceText(),
+                                                target.confidence(),
+                                                target.startOffset(),
+                                                target.authorityEndOffset(),
+                                                target.endOffset()))
+                                .toList());
+        return LocalTurnTrace.builder(
+                        traceId,
+                        sessionId,
+                        1,
+                        "2026-07-30T00:00:00Z")
+                .taskContract(task)
+                .toolSurface(
+                        policy.nativeTools(),
+                        policy.promptTools(),
+                        "selected for resolved task contract")
+                .event(LexicalPlanEvidenceTraceEvent.create(
+                        "2026-07-30T00:00:00Z",
+                        policy))
                 .build();
     }
 }

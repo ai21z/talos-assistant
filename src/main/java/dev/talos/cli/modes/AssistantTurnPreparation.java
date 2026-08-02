@@ -101,7 +101,10 @@ final class AssistantTurnPreparation {
                 TargetSource.WORKSPACE_EVIDENCE,
                 "workspace-target-reconciliation");
         ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
-                AssistantTurnExecutor.latestUserRequest(messages), rawTaskContract, ctx);
+                AssistantTurnExecutor.latestUserRequest(messages),
+                rawTaskContract,
+                initialResolution,
+                ctx);
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 activeDecision.taskContract(),
                 workspace);
@@ -125,16 +128,17 @@ final class AssistantTurnPreparation {
                 effectiveTaskContract,
                 TargetSource.WORKSPACE_EVIDENCE,
                 "workspace-target-reconciliation");
-        TaskResolution effectiveResolution = new TaskResolution(
+        TaskResolution effectiveResolution = initialResolution.projectOnto(
                 effectiveTaskContract,
-                effectiveTaskIntent,
-                initialResolution.projectedMutationTailPlan(
-                        effectiveTaskIntent),
-                initialResolution.provenance());
+                effectiveTaskIntent);
         boolean activeDecisionUpdatesTurnSurface =
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
-        initializeExecutionPhaseForTurn(effectiveTurn.phase(), ctx);
+        ExecutionPhase authoritativePhase = effectiveResolution
+                .blocksUnscopedMutation()
+                ? ExecutionPhase.INSPECT
+                : effectiveTurn.phase();
+        initializeExecutionPhaseForTurn(authoritativePhase, ctx);
         Context turnContext = withNativeToolSurface(
                 ctx,
                 effectiveResolution,
@@ -145,7 +149,10 @@ final class AssistantTurnPreparation {
                 effectiveResolution,
                 turnContext,
                 activeDecision);
-        recordPolicyTrace(currentTurnPlan, effectiveTaskIntent, turnContext);
+        recordPolicyTrace(
+                currentTurnPlan,
+                effectiveResolution,
+                turnContext);
         LocalTurnTraceCapture.recordMutationRequestDecision(
                 MutationIntent.classifyShape(
                         AssistantTurnExecutor.latestUserRequest(messages)),
@@ -179,13 +186,16 @@ final class AssistantTurnPreparation {
         boolean contractRemovesToolAuthority = contract != null && contract.type() == TaskType.SMALL_TALK;
         boolean blocksWorkspaceOperations =
                 resolution != null && resolution.blocksWorkspaceOperations();
+        boolean blocksUnscopedMutation =
+                resolution != null && resolution.blocksUnscopedMutation();
         if (ctx == null) {
             return ctx;
         }
         if (ctx.hasNativeToolSpecOverride()
                 && !forceRecompute
                 && !contractRemovesToolAuthority
-                && !blocksWorkspaceOperations) {
+                && !blocksWorkspaceOperations
+                && !blocksUnscopedMutation) {
             return ctx;
         }
         ExecutionPhase phase = ctx.executionPhaseState() == null
@@ -271,6 +281,7 @@ final class AssistantTurnPreparation {
     private static ActiveTaskContextPolicy.Decision activeTaskContextDecision(
             String userRequest,
             TaskContract rawTaskContract,
+            TaskResolution initialResolution,
             Context ctx
     ) {
         ActiveTaskContext savedContext = ctx == null || ctx.memory() == null
@@ -284,7 +295,10 @@ final class AssistantTurnPreparation {
                 rawTaskContract,
                 savedContext,
                 savedGoal,
-                currentUserTurnNumber(ctx));
+                currentUserTurnNumber(ctx),
+                initialResolution == null
+                        || !initialResolution.sequentialMutationPlan()
+                                .authorityLimitExceeded());
     }
 
     private static boolean activeDecisionUpdatesTurnSurface(
@@ -343,7 +357,7 @@ final class AssistantTurnPreparation {
 
     private static void recordPolicyTrace(
             CurrentTurnPlan plan,
-            TaskIntent taskIntent,
+            TaskResolution resolution,
             Context ctx
     ) {
         if (plan != null && plan.requestObligation() != null) {
@@ -357,8 +371,7 @@ final class AssistantTurnPreparation {
         }
         if (plan == null) return;
         TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
-                plan.taskContract(),
-                taskIntent,
+                resolution,
                 plan.phaseInitial().name(),
                 plan.nativeTools(),
                 plan.promptTools());

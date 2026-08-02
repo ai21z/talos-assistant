@@ -4,12 +4,16 @@ import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 
 /**
  * One redacted event in a local turn trace.
@@ -24,6 +28,8 @@ public record TurnTraceEvent(
         String toolName,
         Map<String, Object> data
 ) {
+    private static final int MAX_DATA_DEPTH = 32;
+    private static final int MAX_DATA_NODES = 16_384;
     private static final String UNRECOGNIZED_TOOL = "<unrecognized-tool>";
     private static final String UNRECOGNIZED_PARAMETER = "<unrecognized-parameter>";
     private static final Set<String> SAFE_PARAMETER_NAMES = Set.of(
@@ -38,7 +44,9 @@ public record TurnTraceEvent(
         timestamp = timestamp == null ? "" : timestamp;
         phase = phase == null ? "" : phase;
         toolName = toolName == null ? "" : toolName;
-        data = data == null ? Map.of() : Map.copyOf(data);
+        data = data == null
+                ? Map.of()
+                : immutableMap(data, 0, new int[] {0});
     }
 
     public static TurnTraceEvent simple(String type, String timestamp, Map<String, Object> data) {
@@ -339,5 +347,69 @@ public record TurnTraceEvent(
             out.add(TraceRedactor.pathHint(value.strip().replace('\\', '/')));
         }
         return List.copyOf(out);
+    }
+
+    private static Map<String, Object> immutableMap(
+            Map<?, ?> source,
+            int depth,
+            int[] nodes
+    ) {
+        requirePayloadBudget(depth, nodes);
+        LinkedHashMap<String, Object> copy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (!(entry.getKey() instanceof String key) || key.isBlank()) {
+                throw new IllegalArgumentException(
+                        "trace event data keys must be nonblank strings");
+            }
+            copy.put(key, immutableValue(entry.getValue(), depth + 1, nodes));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Object immutableValue(Object value, int depth, int[] nodes) {
+        requirePayloadBudget(depth, nodes);
+        if (value instanceof Map<?, ?> map) {
+            return immutableMap(map, depth, nodes);
+        }
+        if (value instanceof List<?> list) {
+            ArrayList<Object> copy = new ArrayList<>(list.size());
+            for (Object item : list) {
+                copy.add(immutableValue(item, depth + 1, nodes));
+            }
+            return List.copyOf(copy);
+        }
+        if (value instanceof Set<?> set) {
+            LinkedHashSet<Object> copy = new LinkedHashSet<>();
+            for (Object item : set) {
+                copy.add(immutableValue(item, depth + 1, nodes));
+            }
+            return Collections.unmodifiableSet(copy);
+        }
+        if (value instanceof Float floatValue && !Float.isFinite(floatValue)
+                || value instanceof Double doubleValue
+                        && !Double.isFinite(doubleValue)) {
+            throw new IllegalArgumentException(
+                    "trace event data numbers must be finite");
+        }
+        if (value instanceof String || value instanceof Boolean
+                || value instanceof Character
+                || value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long
+                || value instanceof Float || value instanceof Double
+                || value instanceof BigInteger || value instanceof BigDecimal) {
+            return value;
+        }
+        if (value instanceof Enum<?> enumValue) {
+            return enumValue.name();
+        }
+        throw new IllegalArgumentException(
+                "trace event data values must be immutable JSON scalars or containers");
+    }
+
+    private static void requirePayloadBudget(int depth, int[] nodes) {
+        if (depth > MAX_DATA_DEPTH || ++nodes[0] > MAX_DATA_NODES) {
+            throw new IllegalArgumentException(
+                    "trace event data exceeds its immutable payload bounds");
+        }
     }
 }

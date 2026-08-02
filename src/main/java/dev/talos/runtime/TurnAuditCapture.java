@@ -49,7 +49,8 @@ public final class TurnAuditCapture {
         return HOLDER.get() != null;
     }
 
-    static TurnPolicyTrace currentPolicyTrace() {
+    /** Returns the immutable policy evidence currently bound to this thread. */
+    public static TurnPolicyTrace currentPolicyTrace() {
         Bag bag = HOLDER.get();
         return bag == null ? TurnPolicyTrace.empty() : bag.policyTrace;
     }

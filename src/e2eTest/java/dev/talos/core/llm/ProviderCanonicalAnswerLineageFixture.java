@@ -20,6 +20,7 @@ import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,9 @@ public final class ProviderCanonicalAnswerLineageFixture {
     public static CapturedTurn run(Path workspace, Path storeRoot) throws Exception {
         Config config = config();
         JsonSessionStore store = new JsonSessionStore(storeRoot);
-        String durableSessionId = "canonical-provider-lineage";
+        String durableSessionId = JsonSessionStore.newSessionInstanceId(
+                workspace,
+                Instant.parse("2026-07-21T00:00:00Z"));
         ModeController modes = new ModeController().add(new AskMode());
         if (!modes.setActive("ask")) {
             throw new IllegalStateException("ask mode was not selectable");

@@ -42,11 +42,7 @@ public final class WorkspaceTargetReconciler {
                 contract,
                 TargetSource.WORKSPACE_EVIDENCE,
                 "workspace-target-reconciliation");
-        return new TaskResolution(
-                contract,
-                intent,
-                resolution.projectedMutationTailPlan(intent),
-                resolution.provenance());
+        return resolution.projectOnto(contract, intent);
     }
 
     public static TaskContract reconcile(TaskContract contract, Path workspace) {

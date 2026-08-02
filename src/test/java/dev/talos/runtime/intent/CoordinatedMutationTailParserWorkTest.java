@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CoordinatedMutationTailParserWorkTest {
@@ -505,6 +507,124 @@ class CoordinatedMutationTailParserWorkTest {
                                     + 9L * indexed.work().nominalPrefixChecks(),
                     fixture.label());
         }
+    }
+
+    @Test
+    void quoteEnvelopeLookupIsExactForSingleAndFenceDelimiters() {
+        for (String delimiter : List.of("\"", "`", "```", "~~~")) {
+            String request = "prefix " + delimiter + "target.css"
+                    + delimiter + " then";
+            RequestLexicalView view = RequestLexicalView.of(request);
+            int envelopeStart = request.indexOf(delimiter);
+            int contentStart = envelopeStart + delimiter.length();
+            int contentEnd = contentStart + "target.css".length();
+            int envelopeEnd = contentEnd + delimiter.length();
+
+            assertEquals(
+                    new RequestLexicalView.Span(envelopeStart, envelopeEnd),
+                    view.exactQuotedEnvelope(contentStart, contentEnd),
+                    delimiter);
+            assertEquals(
+                    new RequestLexicalView.Span(contentStart, contentEnd),
+                    view.exactQuotedContentStartingAt(
+                            envelopeStart,
+                            request.length()),
+                    delimiter);
+            assertEquals(
+                    new RequestLexicalView.Span(envelopeStart, envelopeEnd),
+                    view.completedQuotedEnvelopeImmediatelyBefore(
+                            request.indexOf("then"),
+                            0),
+                    delimiter);
+            assertNull(
+                    view.exactQuotedEnvelope(contentStart, contentEnd - 1),
+                    delimiter);
+        }
+    }
+
+    @Test
+    void actionToOccurrenceBindingVisitsOnlyContainingOutputs() {
+        for (int targetCount : List.of(64, 128)) {
+            Set<String> targets = new LinkedHashSet<>();
+            StringBuilder request = new StringBuilder("Edit index.html so ");
+            for (int index = 0; index < targetCount; index++) {
+                if (index > 0) request.append("; then ");
+                String target = "update-%03d.css".formatted(index);
+                targets.add(target);
+                request.append("update ").append(target);
+            }
+            request.append('.');
+
+            CoordinatedMutationTailParser.ParseWorkResult result =
+                    CoordinatedMutationTailParser.parseWithWork(
+                            request.toString(),
+                            Set.copyOf(targets));
+
+            assertEquals(targetCount, result.plan().decisions().size());
+            assertEquals(
+                    targetCount,
+                    result.work().actionContainmentQueries());
+            assertEquals(
+                    0,
+                    result.work().actionOccurrenceVisits());
+        }
+    }
+
+    @Test
+    void overlappingAutomatonOutputsFailClosedAtTheDeclaredCap() {
+        int patternCount = 192;
+        Set<String> targets = new LinkedHashSet<>();
+        for (int length = 1; length <= patternCount; length++) {
+            targets.add("a".repeat(length));
+        }
+        String request = "Edit index.html so update "
+                + "a".repeat(patternCount) + ".";
+
+        CoordinatedMutationTailParser.ParseWorkResult result =
+                CoordinatedMutationTailParser.parseWithWork(request, targets);
+
+        assertTrue(result.work().targetOutputLimitExceeded());
+        assertEquals(
+                CoordinatedMutationTailParser.MAX_TARGET_OUTPUT_VISITS + 1L,
+                result.work().targetOutputVisits());
+        assertEquals(0, result.work().indexedOccurrenceCount());
+        assertTrue(result.plan().decisions().isEmpty());
+    }
+
+    @Test
+    void indexedOccurrenceAllocationFailsClosedAtTheDeclaredCap() {
+        String target = "repeat.css";
+        String boundaryRequest = "Edit index.html so update "
+                + (target + "; ").repeat(
+                        CoordinatedMutationTailParser
+                                .MAX_INDEXED_TARGET_OCCURRENCES);
+        CoordinatedMutationTailParser.ParseWorkResult boundary =
+                CoordinatedMutationTailParser.parseWithWork(
+                        boundaryRequest,
+                        Set.of(target));
+
+        assertFalse(boundary.work().targetOutputLimitExceeded());
+        assertFalse(boundary.work().targetOccurrenceLimitExceeded());
+        assertEquals(
+                CoordinatedMutationTailParser.MAX_INDEXED_TARGET_OCCURRENCES,
+                boundary.work().indexedOccurrenceCount());
+        assertEquals(
+                CoordinatedMutationTailParser.MAX_INDEXED_TARGET_OCCURRENCES,
+                boundary.work().targetOutputVisits());
+
+        String request = "Edit index.html so update "
+                + (target + "; ").repeat(
+                        CoordinatedMutationTailParser
+                                .MAX_INDEXED_TARGET_OCCURRENCES + 1);
+
+        CoordinatedMutationTailParser.ParseWorkResult result =
+                CoordinatedMutationTailParser.parseWithWork(
+                        request,
+                        Set.of(target));
+
+        assertTrue(result.work().targetOccurrenceLimitExceeded());
+        assertEquals(0, result.work().indexedOccurrenceCount());
+        assertTrue(result.plan().decisions().isEmpty());
     }
 
     private static Fixture fixture(int targetCount, String newline) {
