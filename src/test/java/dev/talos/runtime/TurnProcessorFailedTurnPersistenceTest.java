@@ -12,6 +12,7 @@ import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ProviderResponseCapture;
@@ -35,6 +36,7 @@ import java.nio.file.Files;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -59,6 +61,29 @@ class TurnProcessorFailedTurnPersistenceTest {
         LocalTurnTraceCapture.clear();
         PromptDebugCapture.clear();
         if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+    }
+
+    private static TurnTraceEvent singleGenerationFailure(LocalTurnTrace trace) {
+        List<TurnTraceEvent> failures = trace.events().stream()
+                .filter(event -> "GENERATION_FAILED".equals(event.type()))
+                .toList();
+        assertEquals(1, failures.size(), failures.toString());
+        return failures.getFirst();
+    }
+
+    private static void assertHarnessGenerationFailureIsRedacted(
+            TurnTraceEvent failure,
+            String generationId
+    ) {
+        assertEquals(Map.of(
+                "providerLedgerVersion", 2,
+                "ledgerSequence", 2,
+                "generationId", generationId,
+                "source", "SCRIPTED_HARNESS",
+                "purpose", "HARNESS_FIXTURE",
+                "toolAuthorityMode", "NONE",
+                "failure", "HARNESS_EXCEPTION"),
+                failure.data());
     }
 
     @Test
@@ -241,7 +266,29 @@ class TurnProcessorFailedTurnPersistenceTest {
         assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
         assertTrue(trace.events().stream().noneMatch(event ->
                 "GENERATION_REQUEST_DISPATCHED".equals(event.type())));
-        assertFalse(trace.toString().contains("9001"), trace.toString());
+        assertHarnessGenerationFailureIsRedacted(
+                singleGenerationFailure(trace),
+                trace.traceId() + "-generation-1");
+    }
+
+    @Test
+    void contextBudgetRedactionOracleIgnoresUnrelatedEventTimestamp() {
+        TurnTraceEvent failure = TurnTraceEvent.simple(
+                "GENERATION_FAILED",
+                "2026-07-28T09:00:01.000009001Z",
+                Map.of(
+                        "providerLedgerVersion", 2,
+                        "ledgerSequence", 2,
+                        "generationId", "context-9001-budget-generation-1",
+                        "source", "SCRIPTED_HARNESS",
+                        "purpose", "HARNESS_FIXTURE",
+                        "toolAuthorityMode", "NONE",
+                        "failure", "HARNESS_EXCEPTION"));
+
+        assertTrue(failure.timestamp().contains("9001"), failure.timestamp());
+        assertHarnessGenerationFailureIsRedacted(
+                failure,
+                "context-9001-budget-generation-1");
     }
 
     @Test

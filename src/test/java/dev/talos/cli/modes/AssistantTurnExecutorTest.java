@@ -18,6 +18,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.NoOpApprovalGate;
@@ -5851,6 +5852,29 @@ class AssistantTurnExecutorTest {
     @DisplayName("Error handling")
     class ErrorHandling {
 
+        private TurnTraceEvent singleGenerationFailure(LocalTurnTrace trace) {
+            List<TurnTraceEvent> failures = trace.events().stream()
+                    .filter(event -> "GENERATION_FAILED".equals(event.type()))
+                    .toList();
+            assertEquals(1, failures.size(), failures.toString());
+            return failures.getFirst();
+        }
+
+        private void assertHarnessGenerationFailureIsRedacted(
+                TurnTraceEvent failure,
+                String generationId
+        ) {
+            assertEquals(Map.of(
+                    "providerLedgerVersion", 2,
+                    "ledgerSequence", 2L,
+                    "generationId", generationId,
+                    "source", "SCRIPTED_HARNESS",
+                    "purpose", "HARNESS_FIXTURE",
+                    "toolAuthorityMode", "NONE",
+                    "failure", "HARNESS_EXCEPTION"),
+                    failure.data());
+        }
+
         /**
          * Verifies the successful path remains usable with the minimum timeout.
          */
@@ -5976,14 +6000,32 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertEquals(8500, thrown.estimatedTokens());
-                assertTrue(trace.events().stream()
-                                .flatMap(event -> event.data().values().stream())
-                                .noneMatch(value -> Integer.valueOf(8500).equals(value)
-                                        || "8500".equals(value)),
-                        trace.toString());
+                assertHarnessGenerationFailureIsRedacted(
+                        singleGenerationFailure(trace),
+                        "trc-context-budget-preflight-generation-1");
             } finally {
                 LocalTurnTraceCapture.clear();
             }
+        }
+
+        @Test
+        void generation_failure_redaction_oracle_ignores_unrelated_trace_metadata() {
+            TurnTraceEvent failure = TurnTraceEvent.simple(
+                    "GENERATION_FAILED",
+                    "2026-07-28T06:46:54.599298500Z",
+                    Map.of(
+                            "providerLedgerVersion", 2,
+                            "ledgerSequence", 2L,
+                            "generationId", "trc-context-8500-budget-preflight-generation-1",
+                            "source", "SCRIPTED_HARNESS",
+                            "purpose", "HARNESS_FIXTURE",
+                            "toolAuthorityMode", "NONE",
+                            "failure", "HARNESS_EXCEPTION"));
+
+            assertTrue(failure.timestamp().contains("8500"), failure.timestamp());
+            assertHarnessGenerationFailureIsRedacted(
+                    failure,
+                    "trc-context-8500-budget-preflight-generation-1");
         }
 
         @Test
