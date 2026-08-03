@@ -731,17 +731,34 @@ public final class AssistantTurnExecutor {
     }
 
     private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
-        TaskContract contract =
-                TurnTaskContractCapture.currentOrResolve(messages);
+        var resolution = TurnTaskContractCapture.getResolution();
+        if (resolution == null) {
+            resolution = TaskContractResolver.resolveFromMessages(messages);
+        }
+        TaskContract contract = resolution.contract();
         ExecutionPhase phase = currentExecutionPhase(ctx, contract);
         List<String> promptTools = ctx == null
-                ? ToolSurfacePlanner.defaultVisibleToolNames(contract, phase)
+                ? ToolSurfacePlanner.defaultVisibleToolNamesForResolution(
+                        resolution,
+                        phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         boolean nativeEnabled = ctx == null
                 || ctx.llm() == null
                 || ctx.llm().nativeToolsCurrentlyEnabled();
         List<String> nativeTools = nativeEnabled ? promptTools : List.of();
-        return CurrentTurnPlan.compatibility(contract, phase, nativeTools, promptTools, List.of());
+        return CurrentTurnPlan.createWithActionObligation(
+                resolution,
+                phase,
+                nativeTools,
+                promptTools,
+                List.of(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.derivedVerifierProfile(contract),
+                dev.talos.runtime.policy.ActionObligationPolicy.derive(
+                        resolution,
+                        phase),
+                ctx == null ? null : ctx.cfg());
     }
 
     private static CurrentTurnPlan safePlanFromMessages(

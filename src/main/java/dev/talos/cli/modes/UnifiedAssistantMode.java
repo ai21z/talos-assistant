@@ -141,7 +141,7 @@ public final class UnifiedAssistantMode implements Mode {
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
         CurrentTurnPlan promptPlan =
                 CurrentTurnPlan.createWithActionObligation(
-                        taskContract,
+                        taskResolution,
                         initialPhase,
                         nativeTools ? plannedNativeToolNames : List.of(),
                         plannedNativeToolNames,

@@ -102,7 +102,7 @@ class T1204V2GrammarRegressionTest {
     }
 
     @Test
-    void laterWorkspaceOperationIsTypedBlockedWithoutContentAuthority() {
+    void laterWorkspaceOperationIsTypedWithoutBecomingContentAuthority() {
         String request = TAIL_PROHIBITION + "Then delete cache.tmp.";
         TaskResolution resolution = resolveWithoutThrowing(request);
         SequentialMutationClausePlan.ClauseDecision later =
@@ -121,7 +121,12 @@ class T1204V2GrammarRegressionTest {
                         .WORKSPACE_OPERATION_BLOCKED,
                 later.authority(),
                 request);
-        assertTrue(resolution.blocksWorkspaceOperations(), request);
+        assertFalse(resolution.blocksWorkspaceOperations(), request);
+        assertEquals(
+                WorkspaceOperationObligation.Kind.DELETE_PATH,
+                resolution.workspaceOperationPlan()
+                        .authorizedOperations().getFirst().kind(),
+                request);
         assertNoPositiveAuthority(resolution, "cache.tmp", request);
         assertExactSource(request, later);
     }

@@ -336,6 +336,8 @@ public final class CoordinatedMutationTailParser {
                 workspaceOperationObservations = new ArrayList<>();
         List<CoordinatedMutationTailPlan.WorkspaceOperationClauseObservation>
                 workspaceOperationClauseObservations = new ArrayList<>();
+        List<WorkspaceOperationObligation> workspaceOperationObligations =
+                new ArrayList<>();
         List<CanonicalMutationClauseMatcher.Action> actions =
                 mutationActions(
                         view,
@@ -604,6 +606,21 @@ public final class CoordinatedMutationTailParser {
                                         span.start(),
                                         span.end(),
                                         sourceText));
+                if (authority
+                        == CoordinatedMutationTailPlan.Authority
+                                .WORKSPACE_OPERATION_BLOCKED) {
+                    CanonicalMutationClauseMatcher.bindWorkspaceOperation(
+                                    view,
+                                    action,
+                                    CanonicalMutationClauseMatcher.Family
+                                            .WORKSPACE_OPERATION,
+                                    span.start(),
+                                    span.end(),
+                                    candidates,
+                                    WorkspaceOperationObligation.Owner
+                                            .COORDINATED_TAIL)
+                            .ifPresent(workspaceOperationObligations::add);
+                }
             }
             for (BoundTarget target : boundTargets.targets()) {
                 if (workspaceOperation) {
@@ -663,7 +680,8 @@ public final class CoordinatedMutationTailParser {
                                 CoordinatedMutationTailPlan.TargetDecision::path))
                         .toList(),
                 workspaceOperationObservations,
-                workspaceOperationClauseObservations);
+                workspaceOperationClauseObservations,
+                workspaceOperationObligations);
     }
 
     private static int constraintPayloadStart(

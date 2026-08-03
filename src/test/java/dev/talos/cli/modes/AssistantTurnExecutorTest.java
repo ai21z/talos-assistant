@@ -1587,7 +1587,9 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void confirmationAfterWorkspaceFenceAppliesSavedRelativeMutation(@TempDir Path workspace) {
+        void confirmationAfterWorkspaceFenceCannotReplayMutationWithoutTypedLifecycle(
+                @TempDir Path workspace
+        ) {
             var memory = new SessionMemory();
             var registry = new dev.talos.tools.ToolRegistry();
             registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
@@ -1663,9 +1665,12 @@ class AssistantTurnExecutorTest {
             LocalTurnTraceCapture.recordRoutedAnswerCaptured(confirmOut.text());
             LocalTurnTrace confirmationTrace = LocalTurnTraceCapture.complete();
 
-            assertTrue(Files.isDirectory(workspace.resolve("should-not-be-on-desktop")));
-            assertTrue(confirmOut.text().contains("[Used 1 tool(s): talos.mkdir"), confirmOut.text());
-            assertFalse(confirmOut.text().contains("current workspace is still"), confirmOut.text());
+            assertFalse(Files.exists(workspace.resolve("should-not-be-on-desktop")),
+                    "history-only workspace authority must not execute");
+            assertTrue(confirmOut.text().contains(
+                            "executable tool authority was invalid"),
+                    confirmOut.text());
+            assertFalse(confirmOut.text().contains("[Used"), confirmOut.text());
             assertFalse(recorded.requests().isEmpty(), "confirmation must reach the backend as a mutation turn");
             ChatRequest request = recorded.requests().getFirst();
             String prompt = request.messages.stream()
@@ -1675,8 +1680,9 @@ class AssistantTurnExecutorTest {
                     .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
                     .count(), "exactly one current-turn frame should be sent");
             assertTrue(prompt.contains("type: FILE_CREATE"), prompt);
-            assertTrue(prompt.contains("mutationAllowed: true"), prompt);
-            assertTrue(prompt.contains("visibleTools: talos.mkdir"), prompt);
+            assertTrue(prompt.contains("mutationAllowed: false"), prompt);
+            assertTrue(request.tools.isEmpty(), request.tools.toString());
+            assertFalse(prompt.contains("visibleTools: talos.mkdir"), prompt);
             assertFalse(prompt.contains("visibleTools: talos.list_dir, talos.read_file"), prompt);
             assertTrue(prompt.contains("Create folder should-not-be-on-desktop."), prompt);
             assertFalse(prompt.contains("type: WORKSPACE_EXPLAIN"), prompt);
@@ -1753,7 +1759,9 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void compoundWorkspaceOperationCanApplyBatchThroughVisibleSurface(@TempDir Path workspace) throws Exception {
+        void compoundWorkspaceOperationIsBlockedWithoutSingleTypedAuthority(
+                @TempDir Path workspace
+        ) throws Exception {
             Files.createDirectories(workspace.resolve("docs"));
             Files.writeString(workspace.resolve("docs/summary.md"), "summary body");
             var registry = new dev.talos.tools.ToolRegistry();
@@ -1796,22 +1804,21 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-            assertEquals("summary body", Files.readString(workspace.resolve("assets/summary-renamed.md")));
-            assertFalse(Files.exists(workspace.resolve("drafts/summary-renamed.md")));
-            assertTrue(out.text().contains("[Used 1 tool(s): talos.apply_workspace_batch"), out.text());
+            assertFalse(Files.exists(workspace.resolve("assets")));
+            assertFalse(Files.exists(workspace.resolve("drafts")));
+            assertEquals("summary body", Files.readString(workspace.resolve("docs/summary.md")));
+            assertTrue(out.text().contains(
+                            "executable tool authority was invalid"),
+                    out.text());
+            assertFalse(out.text().contains("[Used"), out.text());
             assertFalse(recorded.requests().isEmpty(), "compound workspace turn must reach the backend");
             List<String> toolNames = recorded.requests().getFirst().tools.stream()
                     .map(ToolSpec::name)
                     .sorted()
                     .toList();
-            assertEquals(
-                    List.of(
-                            "talos.apply_workspace_batch",
-                            "talos.copy_path",
-                            "talos.mkdir",
-                            "talos.move_path",
-                            "talos.rename_path"),
-                    toolNames);
+            assertTrue(toolNames.isEmpty(), toolNames.toString());
+            assertEquals(1, recorded.requests().size(),
+                    "a blocked compound operation cannot dispatch a follow-up");
         }
 
         @Test
@@ -5969,7 +5976,11 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertEquals(8500, thrown.estimatedTokens());
-                assertFalse(trace.toString().contains("8500"), trace.toString());
+                assertTrue(trace.events().stream()
+                                .flatMap(event -> event.data().values().stream())
+                                .noneMatch(value -> Integer.valueOf(8500).equals(value)
+                                        || "8500".equals(value)),
+                        trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }

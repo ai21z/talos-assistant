@@ -1071,7 +1071,11 @@ class T1204SequentialMutationClausePlanTest {
                         .effectiveDecision("style.css")
                         .orElseThrow()
                         .authority());
-        assertTrue(workspaceOperation.blocksWorkspaceOperations());
+        assertFalse(workspaceOperation.blocksWorkspaceOperations());
+        assertEquals(
+                1,
+                workspaceOperation.workspaceOperationPlan()
+                        .authorizedOperations().size());
         assertFalse(
                 workspaceOperation.contract().expectedTargets()
                         .contains("style.css"));

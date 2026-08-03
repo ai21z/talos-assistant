@@ -36,6 +36,109 @@ public final class WorkspaceOperationPlanner {
         };
     }
 
+    public static Optional<WorkspaceOperationPlan> checkpointPlan(
+            ToolCall call,
+            WorkspaceOperationAuthorityPlan authorityPlan
+    ) {
+        if (authorityPlan == null || !authorityPlan.authorizes(call)) {
+            return Optional.empty();
+        }
+        return authorityPlan(authorityPlan);
+    }
+
+    /** Builds the one runtime plan directly from parser-owned typed authority. */
+    public static Optional<WorkspaceOperationPlan> authorityPlan(
+            WorkspaceOperationAuthorityPlan authorityPlan
+    ) {
+        if (authorityPlan == null
+                || authorityPlan.authorizedOperations().size() != 1) {
+            return Optional.empty();
+        }
+        var operation = authorityPlan.authorizedOperations().getFirst();
+        WorkspaceOperationPlan unbound = switch (operation.kind()) {
+            case COPY_PATH -> WorkspaceOperationPlan.copyPath(
+                    operation.sourcePath(),
+                    operation.destinationPath(),
+                    overwritePolicy(operation),
+                    operation.recursivePolicy()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation
+                                    .RecursivePolicy.RECURSIVE_EXPLICIT);
+            case MOVE_PATH -> WorkspaceOperationPlan.movePath(
+                    operation.sourcePath(),
+                    operation.destinationPath(),
+                    overwritePolicy(operation));
+            case RENAME_PATH -> WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
+                    List.of(
+                            WorkspaceOperationPlan.PathEffect.source(
+                                    operation.sourcePath(),
+                                    true,
+                                    WorkspaceOperationPlan.OperationKind
+                                            .RENAME_PATH),
+                            WorkspaceOperationPlan.PathEffect.destination(
+                                    operation.destinationPath(),
+                                    true,
+                                    WorkspaceOperationPlan.OperationKind
+                                            .RENAME_PATH)),
+                    ToolRiskLevel.WRITE,
+                    true,
+                    overwritePolicy(operation),
+                    false,
+                    "Rename " + operation.sourcePath() + " to "
+                            + operation.destinationPath() + ".",
+                    "Rename: " + operation.sourcePath() + " -> "
+                            + operation.destinationPath());
+            case MKDIR -> WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                            operation.targetPath(),
+                            true,
+                            WorkspaceOperationPlan.OperationKind
+                                    .CREATE_DIRECTORY)),
+                    ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                    false,
+                    "Create directory "
+                            + operation.targetPath() + ".",
+                    "Create directory: "
+                            + operation.targetPath());
+            case DELETE_PATH -> WorkspaceOperationPlan.deletePath(
+                    operation.targetPath(),
+                    operation.recursivePolicy()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation
+                                    .RecursivePolicy.RECURSIVE_EXPLICIT);
+        };
+        return Optional.of(new WorkspaceOperationPlan(
+                authorityPlan.planId(),
+                operation.operationId(),
+                unbound.operationKind(),
+                unbound.pathEffects(),
+                unbound.riskLevel(),
+                unbound.requiresCheckpoint(),
+                unbound.overwritePolicy(),
+                unbound.recursive(),
+                unbound.approvalSummary(),
+                unbound.previewSummary()));
+    }
+
+    private static WorkspaceOperationPlan.OverwritePolicy overwritePolicy(
+            dev.talos.runtime.intent.WorkspaceOperationObligation operation
+    ) {
+        return operation.overwritePolicy()
+                        == dev.talos.runtime.intent.WorkspaceOperationObligation
+                                .OverwritePolicy.OVERWRITE_EXPLICIT
+                ? WorkspaceOperationPlan.OverwritePolicy.OVERWRITE
+                : operation.overwritePolicy()
+                                == dev.talos.runtime.intent
+                                        .WorkspaceOperationObligation
+                                        .OverwritePolicy.NOT_APPLICABLE
+                        ? WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE
+                        : WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS;
+    }
+
     public static Optional<String> validateBeforeApproval(ToolCall call) {
         if (call == null || !isWorkspaceOperationTool(call.toolName())) return Optional.empty();
         return switch (ToolAliasPolicy.localCanonicalName(call.toolName())) {

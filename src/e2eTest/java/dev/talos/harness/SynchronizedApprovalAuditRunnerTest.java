@@ -1132,7 +1132,8 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("workspace-move-path-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-rename-path-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-delete-path-approved"));
-        assertTrue(Files.readString(run.summary()).contains("workspace-batch-apply-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-batch-no-typed-authority"));
+        assertFalse(Files.readString(run.summary()).contains("workspace-batch-apply-approved"));
         String appendLineTrace = Files.readString(artifacts
                 .resolve("mutation-append-line-verified")
                 .resolve("traces")
@@ -1268,8 +1269,11 @@ class SynchronizedApprovalAuditRunnerTest {
                 .resolve("delete-me.tmp")));
         assertEquals("batch source\n",
                 Files.readString(workspaces
-                        .resolve("workspace-batch-apply-approved")
-                        .resolve("source-copy.md")));
+                        .resolve("workspace-batch-no-typed-authority")
+                        .resolve("source.md")));
+        assertFalse(Files.exists(workspaces
+                .resolve("workspace-batch-no-typed-authority")
+                .resolve("source-copy.md")));
         assertTrue(run.findings().isEmpty(), run.findings().toString());
         for (SynchronizedApprovalAuditRunner.ArtifactBundle bundle : run.bundles()) {
             assertTrue(Files.exists(bundle.summary()), bundle.summary().toString());
@@ -1285,11 +1289,18 @@ class SynchronizedApprovalAuditRunnerTest {
                 "workspace-copy-path-approved",
                 "workspace-move-path-approved",
                 "workspace-rename-path-approved",
-                "workspace-delete-path-approved",
-                "workspace-batch-apply-approved");
+                "workspace-delete-path-approved");
 
         assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames().containsAll(workspaceOperations));
         assertTrue(SynchronizedApprovalAuditMain.supportedLiveScenarioNames().containsAll(workspaceOperations));
+        assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames()
+                .contains("workspace-batch-no-typed-authority"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedLiveScenarioNames()
+                .contains("workspace-batch-no-typed-authority"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames()
+                .contains("workspace-batch-apply-approved"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedLiveScenarioNames()
+                .contains("workspace-batch-apply-approved"));
     }
 
     @Test
@@ -1366,8 +1377,7 @@ class SynchronizedApprovalAuditRunnerTest {
                 "workspace-copy-path-approved",
                 "workspace-move-path-approved",
                 "workspace-rename-path-approved",
-                "workspace-delete-path-approved",
-                "workspace-batch-apply-approved")) {
+                "workspace-delete-path-approved")) {
             Path artifacts = tempDir.resolve("manual-testing-" + scenario);
             Path workspaces = tempDir.resolve("manual-workspaces-" + scenario);
 
@@ -1396,6 +1406,36 @@ class SynchronizedApprovalAuditRunnerTest {
             assertFalse(outcomeLine.isBlank(), scenario + ": trace has no OUTCOME_RENDERED line");
             assertFalse(outcomeLine.contains("BLOCKED"), scenario + ": " + outcomeLine);
         }
+    }
+
+    @Test
+    void deterministic_audit_entrypoint_proves_batch_has_no_typed_provider_authority(
+            @TempDir Path tempDir
+    ) throws Exception {
+        String scenario = "workspace-batch-no-typed-authority";
+        Path artifacts = tempDir.resolve("manual-testing-" + scenario);
+        Path workspaces = tempDir.resolve("manual-workspaces-" + scenario);
+
+        SynchronizedApprovalAuditMain.RunResult run = SynchronizedApprovalAuditMain.run(
+                new SynchronizedApprovalAuditMain.Arguments(
+                        SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                        artifacts,
+                        workspaces,
+                        null,
+                        "",
+                        scenario));
+
+        assertEquals(1, run.bundles().size());
+        var bundle = run.bundles().getFirst();
+        assertTrue(Files.readString(run.summary()).contains(scenario));
+        assertTrue(Files.readString(bundle.approvalsJsonl()).isBlank());
+        String traceText = Files.readString(bundle.traceText());
+        assertTrue(traceText.contains("TOOL_CALL_AUTHORITY_REJECTED"), traceText);
+        assertFalse(traceText.contains("APPROVAL_REQUIRED"), traceText);
+        assertFalse(traceText.contains("TOOL_EXECUTED"), traceText);
+        assertEquals("batch source\n",
+                Files.readString(workspaces.resolve(scenario).resolve("source.md")));
+        assertFalse(Files.exists(workspaces.resolve(scenario).resolve("source-copy.md")));
     }
 
     @Test
@@ -1843,10 +1883,6 @@ class SynchronizedApprovalAuditRunnerTest {
             }
             case "workspace-delete-path-approved" ->
                     assertFalse(Files.exists(workspace.resolve("delete-me.tmp")));
-            case "workspace-batch-apply-approved" -> {
-                assertEquals("batch source\n", Files.readString(workspace.resolve("source.md")));
-                assertEquals("batch source\n", Files.readString(workspace.resolve("source-copy.md")));
-            }
             default -> throw new AssertionError("unknown workspace operation scenario: " + scenario);
         }
     }

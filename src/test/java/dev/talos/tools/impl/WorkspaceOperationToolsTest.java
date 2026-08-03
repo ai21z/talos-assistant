@@ -24,8 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkspaceOperationToolsTest {
 
     @Test
-    void mkdirCreatesNestedDirectoryAndExposesCreateMetadata(@TempDir Path workspace) {
+    void mkdirCreatesDirectoryUnderExistingParentAndExposesCreateMetadata(
+            @TempDir Path workspace
+    ) throws Exception {
         var tool = new MakeDirectoryTool();
+        Files.createDirectory(workspace.resolve("docs"));
 
         ToolResult result = tool.execute(
                 new ToolCall("talos.mkdir", Map.of("path", "docs/reports")),

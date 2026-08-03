@@ -12,6 +12,8 @@ import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskResolution;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import dev.talos.core.Config;
 
 import java.nio.file.Path;
@@ -34,7 +36,9 @@ public record CurrentTurnPlan(
         String activeTaskContext,
         String artifactGoal,
         String verifierProfile,
-        RequestObligation requestObligation
+        RequestObligation requestObligation,
+        WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+        List<String> contentMutationPredecessorPaths
 ) {
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
     public static final String NOT_DERIVED = "NOT_DERIVED";
@@ -72,6 +76,20 @@ public record CurrentTurnPlan(
                     "Supplied request obligation differs from the runtime-compiled obligation");
         }
         requestObligation = compiledRequestObligation;
+        workspaceOperationPlan = workspaceOperationPlan == null
+                ? WorkspaceOperationAuthorityPlan.none(originalUserRequest)
+                : workspaceOperationPlan;
+        if (!workspaceOperationPlan.bindsRequest(originalUserRequest)) {
+            throw new IllegalArgumentException(
+                    "Supplied workspace operation plan differs from the current request");
+        }
+        contentMutationPredecessorPaths = contentMutationPredecessorPaths == null
+                ? List.of()
+                : contentMutationPredecessorPaths.stream()
+                        .filter(path -> path != null && !path.isBlank())
+                        .map(CurrentTurnPlan::normalizePath)
+                        .distinct()
+                        .toList();
         evidenceObligation = evidenceObligation == null ? NONE_OR_NOT_DERIVED : evidenceObligation;
         outputObligation = outputObligation == null ? NOT_DERIVED : outputObligation;
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
@@ -124,6 +142,83 @@ public record CurrentTurnPlan(
                 artifactGoal,
                 verifierProfile,
                 null);
+    }
+
+    /** Compatibility constructor for callers supplying request obligation only. */
+    public CurrentTurnPlan(
+            TaskContract taskContract,
+            String originalUserRequest,
+            ExecutionPhase phaseInitial,
+            ExecutionPhase phaseFinal,
+            ActionObligation actionObligation,
+            List<TaskExpectation> taskExpectations,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String evidenceObligation,
+            String outputObligation,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            RequestObligation requestObligation
+    ) {
+        this(
+                taskContract,
+                originalUserRequest,
+                phaseInitial,
+                phaseFinal,
+                actionObligation,
+                taskExpectations,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                evidenceObligation,
+                outputObligation,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                requestObligation,
+                null,
+                List.of());
+    }
+
+    /** Compatibility constructor for plans created before predecessor capture. */
+    public CurrentTurnPlan(
+            TaskContract taskContract,
+            String originalUserRequest,
+            ExecutionPhase phaseInitial,
+            ExecutionPhase phaseFinal,
+            ActionObligation actionObligation,
+            List<TaskExpectation> taskExpectations,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String evidenceObligation,
+            String outputObligation,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            RequestObligation requestObligation,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        this(
+                taskContract,
+                originalUserRequest,
+                phaseInitial,
+                phaseFinal,
+                actionObligation,
+                taskExpectations,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                evidenceObligation,
+                outputObligation,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                requestObligation,
+                workspaceOperationPlan,
+                List.of());
     }
 
     public static CurrentTurnPlan create(
@@ -199,7 +294,9 @@ public record CurrentTurnPlan(
                 activeTaskContext,
                 artifactGoal,
                 verifierProfile,
-                null);
+                null,
+                null,
+                List.of());
     }
 
     public static CurrentTurnPlan create(
@@ -222,6 +319,46 @@ public record CurrentTurnPlan(
                 artifactGoal,
                 verifierProfile,
                 null);
+    }
+
+    public static CurrentTurnPlan createWithActionObligation(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            ActionObligation actionObligation,
+            Config cfg
+    ) {
+        TaskResolution safeResolution = resolution == null
+                ? TaskResolution.contractOnly(TaskContract.unknown(""))
+                : resolution;
+        TaskContract contract = safeResolution.contract();
+        return new CurrentTurnPlan(
+                contract,
+                contract.originalUserRequest(),
+                phase,
+                null,
+                actionObligation,
+                TaskExpectationResolver.resolve(contract),
+                nativeTools,
+                promptTools,
+                blockedTools,
+                EvidenceObligationPolicy.derive(
+                        contract,
+                        phase,
+                        Path.of("").toAbsolutePath(),
+                        cfg).name(),
+                NOT_DERIVED,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                null,
+                safeResolution.workspaceOperationPlan(),
+                safeResolution.contentMutationPredecessorPaths());
     }
 
     public static CurrentTurnPlan create(
@@ -270,6 +407,14 @@ public record CurrentTurnPlan(
         if (contract.mutationAllowed()) return ExecutionPhase.APPLY;
         if (contract.verificationRequired()) return ExecutionPhase.VERIFY;
         return ExecutionPhase.INSPECT;
+    }
+
+    private static String normalizePath(String value) {
+        String normalized = value.strip().replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
     }
 
     public static String derivedVerifierProfile(TaskContract contract) {

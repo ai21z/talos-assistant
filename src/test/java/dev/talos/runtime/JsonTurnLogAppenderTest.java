@@ -32,11 +32,22 @@ class JsonTurnLogAppenderTest {
     void writesStructuredRecordWithChromeStrippedText(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-listener";
+        String request =
+                "Edit horror-synth-site/index.html to change the title.";
+        var resolution = dev.talos.runtime.task.TaskContractResolver
+                .resolveFromUserRequest(request);
 
         TurnAudit audit = new TurnAudit(
                 List.of(new TurnRecord.ToolCallSummary(
                         "talos.edit_file", "horror-synth-site/index.html", true)),
-                1, 1, 0);
+                1,
+                1,
+                0,
+                TurnPolicyTrace.from(
+                        resolution,
+                        "APPLY",
+                        List.of("talos.edit_file"),
+                        List.of("talos.edit_file")));
 
         TurnResult tr = new TurnResult(
                 new Result.Streamed(
@@ -44,14 +55,14 @@ class JsonTurnLogAppenderTest {
                 null, 1, Duration.ofMillis(1234), audit);
 
         withAppender(store, sid, appender ->
-                appender.onTurnComplete(tr, "rename the title"));
+                appender.onTurnComplete(tr, request));
 
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());
         TurnRecord rec = loaded.get(0);
 
         assertEquals(1, rec.turnNumber());
-        assertEquals("rename the title", rec.userInput());
+        assertEquals(request, rec.userInput());
         assertEquals("I updated the title.", rec.assistantText(),
                 "UI chrome must be stripped before persistence");
         assertEquals(1234, rec.durationMs());

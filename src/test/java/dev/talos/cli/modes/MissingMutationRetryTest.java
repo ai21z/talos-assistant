@@ -9,6 +9,7 @@ import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -16,6 +17,8 @@ import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
@@ -41,6 +44,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -155,6 +159,77 @@ class MissingMutationRetryTest {
                 messages,
                 "synthetic missing-mutation retry messages must not enter "
                         + "caller-owned history");
+    }
+
+    @Test
+    void failedExactWorkspaceAttemptIsNotReissuedWithoutAttemptAwareLifecycle() {
+        String request = "Copy source.md to copied.md.";
+        var resolution = TaskContractResolver.resolveFromUserRequest(request);
+        WorkspaceOperationPlan operationPlan = WorkspaceOperationPlanner
+                .authorityPlan(resolution.workspaceOperationPlan())
+                .orElseThrow();
+        CurrentTurnPlan safePlan = CurrentTurnPlan.createWithActionObligation(
+                resolution,
+                ExecutionPhase.APPLY,
+                List.of("talos.copy_path"),
+                List.of("talos.copy_path"),
+                List.of(),
+                null,
+                null,
+                null,
+                ActionObligation.WORKSPACE_OPERATION_REQUIRED,
+                new Config());
+        TurnTaskContractCapture.set(resolution);
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request)));
+        var failedAttempt = new ToolCallLoop.ToolOutcome(
+                "talos.copy_path",
+                "copied.md",
+                false,
+                true,
+                false,
+                "",
+                "copy failed",
+                null,
+                ToolError.INVALID_PARAMS,
+                operationPlan);
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The copy failed.",
+                1,
+                1,
+                List.of("talos.copy_path"),
+                messages,
+                1,
+                0,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                List.of(failedAttempt));
+        AtomicInteger chatCalls = new AtomicInteger();
+
+        MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
+                "The copy failed.",
+                messages,
+                safePlan,
+                loopResult,
+                workspace,
+                testContext(),
+                (retryMessages, plan, specs) -> {
+                    chatCalls.incrementAndGet();
+                    return new LlmClient.StreamResult(
+                            "unexpected retry", List.of());
+                });
+
+        assertEquals(0, chatCalls.get(),
+                "one typed operation cannot be rebound to a second parsed call");
+        assertEquals("The copy failed.", result.answer());
+        assertTrue(result.actionObligationFailed());
+        assertEquals(null, result.retryLoopResult());
     }
 
     @Test

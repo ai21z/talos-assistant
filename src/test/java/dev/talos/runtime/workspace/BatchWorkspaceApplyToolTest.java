@@ -96,6 +96,7 @@ class BatchWorkspaceApplyToolTest {
         ToolResult result = tool.execute(
                 new ToolCall("talos.apply_workspace_batch", Map.of("operations", """
                         [
+                          {"op":"mkdir","path":"docs"},
                           {"op":"mkdir","path":"docs/reports"},
                           {"op":"copy_path","from":"source.txt","to":"docs/reports/source.txt"}
                         ]

@@ -210,23 +210,40 @@ class T1196ConstraintTailAuthorityTest {
                     TaskContractResolver.resolveFromUserRequest(prompt);
 
             assertEquals(Set.of(), resolution.contract().expectedTargets(), prompt);
-            assertFalse(resolution.blocksWorkspaceOperations(), prompt);
+            assertTrue(resolution.blocksWorkspaceOperations(), prompt);
         }
 
         TaskResolution move =
                 TaskContractResolver.resolveFromUserRequest(
                         "Create docs or assets, then move old to backup.");
-        assertEquals(Set.of("backup"), move.contract().expectedTargets());
-        assertFalse(move.blocksWorkspaceOperations());
+        assertEquals(Set.of(), move.contract().expectedTargets());
+        assertTrue(move.blocksWorkspaceOperations());
     }
 
     @Test
-    void extensionlessWorkspaceOperandsRemainTypedAndFailClosed() {
+    void exactUnaryExtensionlessWorkspaceOperandsGainTypedAuthority() {
         for (String prompt : List.of(
                 "Edit index.html so it works, then delete docs.",
                 "Edit index.html so it works, then remove docs.",
-                "Edit index.html so it works, then rm docs.",
-                "Edit index.html so it works, then touch docs.",
+                "Edit index.html so it works, then rm docs.")) {
+            TaskResolution resolution =
+                    TaskContractResolver.resolveFromUserRequest(prompt);
+
+            assertFalse(resolution.blocksWorkspaceOperations(), prompt);
+            assertEquals(
+                    1,
+                    resolution.workspaceOperationPlan()
+                            .authorizedOperations().size(),
+                    prompt);
+            assertFalse(
+                    resolution.contract().expectedTargets().contains("docs"),
+                    prompt);
+        }
+    }
+
+    @Test
+    void untypedExtensionlessBinaryAndDirectoryPhrasingsRemainFailClosed() {
+        for (String prompt : List.of(
                 "Edit index.html so it works, then move docs to backup.",
                 "Edit index.html so it works, then copy docs to backup.",
                 "Edit index.html so it works, then rename docs to backup.",
@@ -236,6 +253,8 @@ class T1196ConstraintTailAuthorityTest {
                     TaskContractResolver.resolveFromUserRequest(prompt);
 
             assertTrue(resolution.blocksWorkspaceOperations(), prompt);
+            assertTrue(resolution.workspaceOperationPlan()
+                    .authorizedOperations().isEmpty(), prompt);
             assertFalse(
                     resolution.contract().expectedTargets().contains("docs"),
                     prompt);
@@ -251,6 +270,11 @@ class T1196ConstraintTailAuthorityTest {
                                                             observation.endOffset()))),
                     prompt);
         }
+        TaskResolution touch = TaskContractResolver.resolveFromUserRequest(
+                "Edit index.html so it works, then touch docs.");
+        assertTrue(touch.workspaceOperationPlan()
+                .authorizedOperations().isEmpty());
+        assertFalse(touch.contract().expectedTargets().contains("docs"));
     }
 
     @Test

@@ -46,8 +46,9 @@ public final class SynchronizedApprovalAuditMain {
             "workspace-copy-path-approved",
             "workspace-move-path-approved",
             "workspace-rename-path-approved",
-            "workspace-delete-path-approved",
-            "workspace-batch-apply-approved");
+            "workspace-delete-path-approved");
+    private static final String BATCH_NO_TYPED_AUTHORITY_SCENARIO =
+            "workspace-batch-no-typed-authority";
     private static final List<String> COMMAND_PROFILE_SCENARIOS = List.of(
             "command-profile-gradle-test-approved",
             "command-profile-policy-rejected");
@@ -64,6 +65,7 @@ public final class SynchronizedApprovalAuditMain {
         filters.add("proposal-only-does-not-mutate");
         filters.addAll(COMMAND_PROFILE_SCENARIOS);
         filters.addAll(WORKSPACE_OPERATION_SCENARIOS);
+        filters.add(BATCH_NO_TYPED_AUTHORITY_SCENARIO);
         filters.add("static-web-selector-script-only-malformed-fails");
         return List.copyOf(filters);
     }
@@ -201,7 +203,7 @@ public final class SynchronizedApprovalAuditMain {
         bundles.add(runWorkspaceMovePathApproved(artifactsRoot, workspacesRoot));
         bundles.add(runWorkspaceRenamePathApproved(artifactsRoot, workspacesRoot));
         bundles.add(runWorkspaceDeletePathApproved(artifactsRoot, workspacesRoot));
-        bundles.add(runWorkspaceBatchApplyApproved(artifactsRoot, workspacesRoot));
+        bundles.add(runWorkspaceBatchNoTypedAuthority(artifactsRoot, workspacesRoot));
 
         List<ArtifactCanaryScanner.Finding> findings =
                 ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(artifactsRoot), List.of());
@@ -281,7 +283,6 @@ public final class SynchronizedApprovalAuditMain {
                 bundles.add(runWorkspaceMovePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
                 bundles.add(runWorkspaceRenamePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
                 bundles.add(runWorkspaceDeletePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
-                bundles.add(runWorkspaceBatchApplyApproved(args.artifactsRoot(), args.workspacesRoot(), client));
                 List<ArtifactCanaryScanner.Finding> findings =
                         ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(args.artifactsRoot()), List.of());
                 Path summary = args.artifactsRoot().resolve("SYNCHRONIZED-APPROVAL-AUDIT.md");
@@ -326,8 +327,8 @@ public final class SynchronizedApprovalAuditMain {
                     runWorkspaceRenamePathApproved(artifactsRoot, workspacesRoot);
             case "workspace-delete-path-approved" ->
                     runWorkspaceDeletePathApproved(artifactsRoot, workspacesRoot);
-            case "workspace-batch-apply-approved" ->
-                    runWorkspaceBatchApplyApproved(artifactsRoot, workspacesRoot);
+            case BATCH_NO_TYPED_AUTHORITY_SCENARIO ->
+                    runWorkspaceBatchNoTypedAuthority(artifactsRoot, workspacesRoot);
             case "static-web-selector-script-only-malformed-fails" ->
                     runStaticWebSelectorMalformedFails(artifactsRoot, workspacesRoot);
             default -> throw new IllegalArgumentException("unsupported synchronized approval scenario: "
@@ -361,8 +362,6 @@ public final class SynchronizedApprovalAuditMain {
                     runWorkspaceRenamePathApproved(artifactsRoot, workspacesRoot, client);
             case "workspace-delete-path-approved" ->
                     runWorkspaceDeletePathApproved(artifactsRoot, workspacesRoot, client);
-            case "workspace-batch-apply-approved" ->
-                    runWorkspaceBatchApplyApproved(artifactsRoot, workspacesRoot, client);
             default -> throw new IllegalArgumentException("unsupported synchronized approval scenario: "
                     + scenarioFilter);
         };
@@ -1833,15 +1832,18 @@ public final class SynchronizedApprovalAuditMain {
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
         Path workspace = freshWorkspace(workspacesRoot, "workspace-mkdir-approved");
+        Files.createDirectory(workspace.resolve("docs"));
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "workspace-mkdir-approved",
                 workspace,
                 checkpointConfig(),
-                "Create docs/reports with talos.mkdir.",
+                "Create a directory named docs/reports.",
                 List.of(
                         "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"docs/reports\"}}",
                         "Created docs/reports."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.mkdir", "docs/reports")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: mkdir",
+                        "docs/reports")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         if (!Files.isDirectory(workspace.resolve("docs").resolve("reports"))) {
             throw new IOException("mkdir scenario did not create docs/reports directory");
@@ -1855,13 +1857,16 @@ public final class SynchronizedApprovalAuditMain {
             Path workspacesRoot,
             LlmClient client) throws IOException {
         Path workspace = freshWorkspace(workspacesRoot, "workspace-mkdir-approved");
+        Files.createDirectory(workspace.resolve("docs"));
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "workspace-mkdir-approved",
                 workspace,
                 checkpointConfig(),
-                "Create docs/reports with talos.mkdir.",
+                "Create a directory named docs/reports.",
                 List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.mkdir", "docs/reports")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: mkdir",
+                        "docs/reports")));
         SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
@@ -1888,11 +1893,13 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-copy-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.",
+                "Copy source.md to source-copy.md.",
                 List.of(
                         "{\"name\":\"talos.copy_path\",\"arguments\":{\"from\":\"source.md\",\"to\":\"source-copy.md\"}}",
                         "Copied source.md to source-copy.md."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.copy_path", "source.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: copy_path",
+                        "source.md")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         requireFileContent(workspace.resolve("source.md"), "copy source\n",
                 "copy scenario removed source.md");
@@ -1912,9 +1919,11 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-copy-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.",
+                "Copy source.md to source-copy.md.",
                 List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.copy_path", "source.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: copy_path",
+                        "source.md")));
         SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
@@ -1942,11 +1951,13 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-move-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.",
+                "Move move-me.md to moved.md.",
                 List.of(
                         "{\"name\":\"talos.move_path\",\"arguments\":{\"from\":\"move-me.md\",\"to\":\"moved.md\"}}",
                         "Moved move-me.md to moved.md."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.move_path", "move-me.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: move_path",
+                        "move-me.md")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         if (Files.exists(workspace.resolve("move-me.md"))) {
             throw new IOException("move scenario left move-me.md in place");
@@ -1967,9 +1978,11 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-move-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.",
+                "Move move-me.md to moved.md.",
                 List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.move_path", "move-me.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: move_path",
+                        "move-me.md")));
         SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
@@ -1998,12 +2011,14 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-rename-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.",
+                "Rename rename-me.md to renamed.md.",
                 List.of(
                         "{\"name\":\"talos.rename_path\",\"arguments\":{\"path\":\"rename-me.md\","
                                 + "\"new_name\":\"renamed.md\"}}",
                         "Renamed rename-me.md to renamed.md."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.rename_path", "rename-me.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: rename_path",
+                        "rename-me.md")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         if (Files.exists(workspace.resolve("rename-me.md"))) {
             throw new IOException("rename scenario left rename-me.md in place");
@@ -2024,9 +2039,11 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-rename-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.",
+                "Rename rename-me.md to renamed.md.",
                 List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.rename_path", "rename-me.md")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: rename_path",
+                        "rename-me.md")));
         SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
@@ -2055,11 +2072,13 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-delete-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.",
+                "Delete delete-me.tmp.",
                 List.of(
                         "{\"name\":\"talos.delete_path\",\"arguments\":{\"path\":\"delete-me.tmp\"}}",
                         "Deleted delete-me.tmp."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.delete_path", "delete-me.tmp")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: delete_path",
+                        "delete-me.tmp")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         if (Files.exists(workspace.resolve("delete-me.tmp"))) {
             throw new IOException("delete scenario left delete-me.tmp in place");
@@ -2078,9 +2097,11 @@ public final class SynchronizedApprovalAuditMain {
                 "workspace-delete-path-approved",
                 workspace,
                 checkpointConfig(),
-                "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.",
+                "Delete delete-me.tmp.",
                 List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.delete_path", "delete-me.tmp")));
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "workspace operation: delete_path",
+                        "delete-me.tmp")));
         SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
@@ -2098,63 +2119,54 @@ public final class SynchronizedApprovalAuditMain {
         return bundle;
     }
 
-    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceBatchApplyApproved(
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceBatchNoTypedAuthority(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
-        Path workspace = freshWorkspace(workspacesRoot, "workspace-batch-apply-approved");
+        Path workspace = freshWorkspace(workspacesRoot, BATCH_NO_TYPED_AUTHORITY_SCENARIO);
         Files.writeString(workspace.resolve("source.md"), "batch source\n", StandardCharsets.UTF_8);
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
-                "workspace-batch-apply-approved",
+                BATCH_NO_TYPED_AUTHORITY_SCENARIO,
                 workspace,
                 checkpointConfig(),
-                "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
-                        + "copy source.md to source-copy.md. Perform only that workspace operation.",
+                "Copy source.md to source-copy.md. Perform only that workspace operation.",
                 List.of(
                         "{\"name\":\"talos.apply_workspace_batch\",\"arguments\":{\"operations_json\":\""
                                 + "[{\\\"op\\\":\\\"copy_path\\\",\\\"from\\\":\\\"source.md\\\","
-                                + "\\\"to\\\":\\\"source-copy.md\\\"}]\"}}",
-                        "Applied the batch workspace operation."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.apply_workspace_batch", "source.md")));
+                                + "\\\"to\\\":\\\"source-copy.md\\\"}]\"}}"),
+                List.of());
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
         requireFileContent(workspace.resolve("source.md"), "batch source\n",
-                "batch scenario removed source.md");
-        requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
-                "batch scenario did not create source-copy.md");
-        requireOutcomeNotBlocked(result, "batch scenario rendered a BLOCKED outcome after the approved operation");
-        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
-    }
-
-    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceBatchApplyApproved(
-            Path artifactsRoot,
-            Path workspacesRoot,
-            LlmClient client) throws IOException {
-        Path workspace = freshWorkspace(workspacesRoot, "workspace-batch-apply-approved");
-        Files.writeString(workspace.resolve("source.md"), "batch source\n", StandardCharsets.UTF_8);
-        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
-                "workspace-batch-apply-approved",
-                workspace,
-                checkpointConfig(),
-                "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
-                        + "copy source.md to source-copy.md. Perform only that workspace operation.",
-                List.of(),
-                List.of(ScriptedApprovalGate.Step.approve("talos.apply_workspace_batch", "source.md")));
-        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
-        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
-                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
-        try {
-            requireToolUsed(result, "talos.apply_workspace_batch",
-                    "live batch scenario did not use talos.apply_workspace_batch");
-            requireFileContent(workspace.resolve("source.md"), "batch source\n",
-                    "live batch scenario removed source.md");
-            requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
-                    "live batch scenario did not create source-copy.md");
-            requireOutcomeNotBlocked(result,
-                    "live batch scenario rendered a BLOCKED outcome after the approved operation");
-        } catch (IOException e) {
-            writeFailureMarker(bundle, e);
-            throw e;
+                "batch no-authority scenario changed source.md");
+        if (Files.exists(workspace.resolve("source-copy.md"))) {
+            throw new IOException(
+                    "batch no-authority scenario created source-copy.md");
         }
-        return bundle;
+        if (!result.approvals().isEmpty()) {
+            throw new IOException(
+                    "batch no-authority scenario reached approval");
+        }
+        if (result.trace() == null
+                || result.trace().toolSurface().nativeTools()
+                        .contains("talos.apply_workspace_batch")) {
+            throw new IOException(
+                    "batch no-authority scenario exposed the compatibility tool to the provider");
+        }
+        List<String> eventTypes = result.trace().events().stream()
+                .map(event -> event.type())
+                .toList();
+        if (!eventTypes.contains("TOOL_CALL_AUTHORITY_REJECTED")) {
+            throw new IOException(
+                    "batch no-authority scenario did not record the rejected proposal: "
+                            + eventTypes);
+        }
+        if (eventTypes.contains("APPROVAL_REQUIRED")
+                || eventTypes.contains("TOOL_EXECUTED")) {
+            throw new IOException(
+                    "batch no-authority scenario advanced beyond authority rejection: "
+                            + eventTypes);
+        }
+        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                artifactsRoot, request, result);
     }
 
     private static Config privateDocumentConfig(boolean allowSendToModel) {

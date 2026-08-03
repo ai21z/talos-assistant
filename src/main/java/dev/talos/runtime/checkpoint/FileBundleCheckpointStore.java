@@ -131,7 +131,9 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 traceId,
                 turnNumber,
                 "file-bundle",
-                call.toolName() + " " + pathParam);
+                call.toolName() + " " + pathParam,
+                "",
+                "");
     }
 
     @Override
@@ -142,12 +144,21 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             String traceId,
             int turnNumber
     ) {
-        if (workspace == null || plan == null) {
+        if (plan == null) {
             return CheckpointCaptureResult.failure("Bundle checkpoint requires workspace and operation plan.");
+        }
+        if (workspace == null) {
+            return CheckpointCaptureResult.failure(
+                    "Bundle checkpoint requires workspace and operation plan.",
+                    plan.authorityPlanId(),
+                    plan.operationId());
         }
         List<String> checkpointPaths = plan.checkpointPaths();
         if (checkpointPaths.isEmpty()) {
-            return CheckpointCaptureResult.skipped("Operation plan has no checkpoint paths.");
+            return CheckpointCaptureResult.skipped(
+                    "Operation plan has no checkpoint paths.",
+                    plan.authorityPlanId(),
+                    plan.operationId());
         }
         return captureRelativePaths(
                 workspace.toAbsolutePath().normalize(),
@@ -156,7 +167,9 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 traceId,
                 turnNumber,
                 "workspace-operation",
-                "workspace operation: " + String.join(", ", checkpointPaths));
+                "workspace operation: " + String.join(", ", checkpointPaths),
+                plan.authorityPlanId(),
+                plan.operationId());
     }
 
     @Override
@@ -178,7 +191,9 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 traceId,
                 turnNumber,
                 "restore-safety",
-                trigger == null || trigger.isBlank() ? "restore safety" : trigger);
+                trigger == null || trigger.isBlank() ? "restore safety" : trigger,
+                "",
+                "");
     }
 
     private CheckpointCaptureResult captureRelativePaths(
@@ -188,10 +203,15 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             String traceId,
             int turnNumber,
             String backend,
-            String trigger
+            String trigger,
+            String authorityPlanId,
+            String operationId
     ) {
         if (ws == null || relativePaths == null || relativePaths.isEmpty()) {
-            return CheckpointCaptureResult.failure("Checkpoint requires at least one target path.");
+            return checkpointFailure(
+                    "Checkpoint requires at least one target path.",
+                    authorityPlanId,
+                    operationId);
         }
         CheckpointConfig cfg = CheckpointConfig.from(config);
         Set<String> normalizedPaths = new LinkedHashSet<>();
@@ -201,7 +221,10 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             }
         }
         if (normalizedPaths.isEmpty()) {
-            return CheckpointCaptureResult.failure("Checkpoint requires at least one target path.");
+            return checkpointFailure(
+                    "Checkpoint requires at least one target path.",
+                    authorityPlanId,
+                    operationId);
         }
 
         try {
@@ -211,7 +234,10 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             for (String requestedRel : normalizedPaths) {
                 Path target = ws.resolve(requestedRel).normalize();
                 if (!target.startsWith(ws)) {
-                    return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + requestedRel);
+                    return checkpointFailure(
+                            "Checkpoint target escapes workspace: " + requestedRel,
+                            authorityPlanId,
+                            operationId);
                 }
                 targets.add(target);
             }
@@ -244,8 +270,18 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 byteCount += stats.byteCount();
             }
 
+            boolean typedAuthority = authorityPlanId != null
+                    && !authorityPlanId.isBlank();
+            int schemaVersion = typedAuthority ? 2 : 1;
+            String authorityBinding = typedAuthority
+                    ? checkpointAuthorityBinding(
+                            checkpointId,
+                            authorityPlanId,
+                            operationId)
+                    : "";
+
             Map<String, Object> metadata = new LinkedHashMap<>();
-            metadata.put("schemaVersion", 1);
+            metadata.put("schemaVersion", schemaVersion);
             metadata.put("checkpointId", checkpointId);
             metadata.put("workspaceId", workspaceId);
             metadata.put("createdAt", Instant.now().toString());
@@ -260,40 +296,121 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             metadata.put("status", "CREATED");
             metadata.put("fileCount", files.size());
             metadata.put("byteCount", byteCount);
+            if (typedAuthority) {
+                metadata.put("authorityPlanId", authorityPlanId);
+                metadata.put("operationId", operationId);
+                metadata.put("authorityBindingSha256", authorityBinding);
+            }
 
             Map<String, Object> manifest = new LinkedHashMap<>();
-            manifest.put("schemaVersion", 1);
+            manifest.put("schemaVersion", schemaVersion);
             manifest.put("checkpointId", checkpointId);
+            if (typedAuthority) {
+                manifest.put("authorityPlanId", authorityPlanId);
+                manifest.put("operationId", operationId);
+                manifest.put("authorityBindingSha256", authorityBinding);
+            }
             manifest.put("files", files);
 
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("metadata.json").toFile(), metadata);
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("manifest.json").toFile(), manifest);
 
-            return CheckpointCaptureResult.captured(checkpointId, files.size());
+            return !typedAuthority
+                    ? CheckpointCaptureResult.captured(
+                            checkpointId,
+                            files.size())
+                    : CheckpointCaptureResult.captured(
+                            checkpointId,
+                            files.size(),
+                            authorityPlanId,
+                            operationId);
         } catch (Exception e) {
-            return CheckpointCaptureResult.failure("Failed to create checkpoint: " + e.getMessage());
+            return checkpointFailure(
+                    "Failed to create checkpoint: " + e.getMessage(),
+                    authorityPlanId,
+                    operationId);
         }
+    }
+
+    private static CheckpointCaptureResult checkpointFailure(
+            String message,
+            String authorityPlanId,
+            String operationId
+    ) {
+        return authorityPlanId == null || authorityPlanId.isBlank()
+                ? CheckpointCaptureResult.failure(message)
+                : CheckpointCaptureResult.failure(
+                        message,
+                        authorityPlanId,
+                        operationId);
     }
 
     @Override
     public CheckpointRestoreResult restore(Path workspace, String checkpointId) {
+        return restoreInternal(workspace, checkpointId, null);
+    }
+
+    @Override
+    public CheckpointRestoreResult restore(
+            Path workspace,
+            String checkpointId,
+            String authorityPlanId,
+            String operationId
+    ) {
+        CheckpointAuthority expected = CheckpointAuthority.typed(
+                authorityPlanId,
+                operationId,
+                "");
+        if (!expected.validPair()) {
+            return CheckpointRestoreResult.failure(
+                    checkpointId,
+                    "Workspace-operation checkpoint restore requires exact typed authority identities.");
+        }
+        return restoreInternal(workspace, checkpointId, expected);
+    }
+
+    private CheckpointRestoreResult restoreInternal(
+            Path workspace,
+            String checkpointId,
+            CheckpointAuthority expectedAuthority
+    ) {
         if (workspace == null || checkpointId == null || checkpointId.isBlank()) {
-            return CheckpointRestoreResult.failure(checkpointId, "Workspace and checkpoint id are required.");
+            return restoreFailure(
+                    checkpointId,
+                    "Workspace and checkpoint id are required.",
+                    expectedAuthority);
         }
         Path ws = workspace.toAbsolutePath().normalize();
         String workspaceId = JsonSessionStore.sessionIdFor(ws);
         Path dir = checkpointDir(workspaceId, sanitizeId(checkpointId));
         Path manifestFile = dir.resolve("manifest.json");
         if (!Files.exists(manifestFile)) {
-            return CheckpointRestoreResult.failure(checkpointId, "Checkpoint not found: " + checkpointId);
+            return restoreFailure(
+                    checkpointId,
+                    "Checkpoint not found: " + checkpointId,
+                    expectedAuthority);
         }
 
         int restored = 0;
         int deleted = 0;
+        CheckpointAuthority stored = null;
         try {
             Map<String, Object> manifest = MAPPER.readValue(
                     Files.readString(manifestFile),
                     new TypeReference<>() {});
+            AuthorityValidation authorityValidation = validateCheckpointAuthority(
+                    dir,
+                    checkpointId,
+                    manifest,
+                    expectedAuthority);
+            if (!authorityValidation.valid()) {
+                return restoreFailure(
+                        checkpointId,
+                        "Checkpoint restore identity preflight failed: "
+                                + authorityValidation.message(),
+                        expectedAuthority);
+            }
+            stored = authorityValidation.authority();
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> files = (List<Map<String, Object>>) manifest.getOrDefault("files", List.of());
             RestorePreflight preflight = preflightRestoreEntries(ws, dir, files);
@@ -302,12 +419,13 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                         ? "Checkpoint restore preflight failed."
                         : "Checkpoint restore preflight failed: "
                                 + String.join("; ", preflight.failureReasons());
-                return CheckpointRestoreResult.partial(
+                return restorePartial(
                         checkpointId,
                         message,
                         0,
                         0,
-                        preflight.failed());
+                        preflight.failed(),
+                        stored);
             }
             // Phase 1 - constructive. Every expected path is put in place
             // WITHOUT deleting anything: directories are created (never
@@ -353,14 +471,165 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 deletePathIfExists(leftover);
             }
         } catch (Exception e) {
-            return CheckpointRestoreResult.partial(
+            return restorePartial(
                     checkpointId,
                     "Checkpoint restore failed: " + e.getMessage(),
                     restored,
                     deleted,
-                    1);
+                    1,
+                    stored == null ? expectedAuthority : stored);
         }
-        return CheckpointRestoreResult.success(checkpointId, restored, deleted);
+        return stored == null || !stored.typed()
+                ? CheckpointRestoreResult.success(checkpointId, restored, deleted)
+                : CheckpointRestoreResult.success(
+                        checkpointId,
+                        restored,
+                        deleted,
+                        stored.authorityPlanId(),
+                        stored.operationId());
+    }
+
+    private static AuthorityValidation validateCheckpointAuthority(
+            Path checkpointDir,
+            String requestedCheckpointId,
+            Map<String, Object> manifest,
+            CheckpointAuthority expected
+    ) throws Exception {
+        Path metadataFile = checkpointDir.resolve("metadata.json");
+        Map<String, Object> metadata = Files.isRegularFile(metadataFile)
+                ? MAPPER.readValue(
+                        Files.readString(metadataFile),
+                        new TypeReference<>() {})
+                : Map.of();
+
+        int manifestVersion = schemaVersion(manifest);
+        int metadataVersion = schemaVersion(metadata);
+        boolean typedMarker = manifestVersion == 2
+                || metadataVersion == 2
+                || hasAuthorityMarker(manifest)
+                || hasAuthorityMarker(metadata);
+        if (!typedMarker) {
+            if (manifestVersion > 1 || metadataVersion > 1) {
+                return AuthorityValidation.failure(
+                        "unsupported checkpoint identity schema version");
+            }
+            if (!requestedCheckpointId.equals(String.valueOf(
+                    manifest.getOrDefault("checkpointId", "")))) {
+                return AuthorityValidation.failure(
+                        "legacy manifest checkpoint id does not match its directory");
+            }
+            if (expected != null) {
+                return AuthorityValidation.failure(
+                        "typed restore cannot consume a legacy untyped checkpoint");
+            }
+            return AuthorityValidation.success(CheckpointAuthority.untyped());
+        }
+
+        if (manifestVersion != 2 || metadataVersion != 2) {
+            return AuthorityValidation.failure(
+                    "typed checkpoint identity is omitted from one checkpoint representation");
+        }
+        String manifestCheckpointId = exactString(manifest, "checkpointId");
+        String metadataCheckpointId = exactString(metadata, "checkpointId");
+        if (!requestedCheckpointId.equals(manifestCheckpointId)
+                || !requestedCheckpointId.equals(metadataCheckpointId)) {
+            return AuthorityValidation.failure(
+                    "typed checkpoint id does not match its directory");
+        }
+
+        CheckpointAuthority manifestAuthority = CheckpointAuthority.typed(
+                exactString(manifest, "authorityPlanId"),
+                exactString(manifest, "operationId"),
+                exactString(manifest, "authorityBindingSha256"));
+        CheckpointAuthority metadataAuthority = CheckpointAuthority.typed(
+                exactString(metadata, "authorityPlanId"),
+                exactString(metadata, "operationId"),
+                exactString(metadata, "authorityBindingSha256"));
+        if (!manifestAuthority.validPair()
+                || !metadataAuthority.validPair()
+                || !isSha256Hex(manifestAuthority.bindingSha256())
+                || !isSha256Hex(metadataAuthority.bindingSha256())) {
+            return AuthorityValidation.failure(
+                    "typed checkpoint contains an invalid or incomplete authority identity");
+        }
+        if (!manifestAuthority.equals(metadataAuthority)) {
+            return AuthorityValidation.failure(
+                    "checkpoint representations disagree on typed authority identity");
+        }
+        String calculated = checkpointAuthorityBinding(
+                requestedCheckpointId,
+                manifestAuthority.authorityPlanId(),
+                manifestAuthority.operationId());
+        if (!calculated.equals(manifestAuthority.bindingSha256())) {
+            return AuthorityValidation.failure(
+                    "typed checkpoint authority binding does not match its checkpoint identity");
+        }
+        if (expected != null
+                && (!expected.authorityPlanId().equals(
+                                manifestAuthority.authorityPlanId())
+                        || !expected.operationId().equals(
+                                manifestAuthority.operationId()))) {
+            return AuthorityValidation.failure(
+                    "checkpoint authority identity does not match the requested workspace operation");
+        }
+        return AuthorityValidation.success(manifestAuthority);
+    }
+
+    private static int schemaVersion(Map<String, Object> value) {
+        Object version = value.get("schemaVersion");
+        if (version instanceof Integer integer) return integer;
+        if (version instanceof Long longValue
+                && longValue >= Integer.MIN_VALUE
+                && longValue <= Integer.MAX_VALUE) {
+            return longValue.intValue();
+        }
+        return 0;
+    }
+
+    private static boolean hasAuthorityMarker(Map<String, Object> value) {
+        return value.containsKey("authorityPlanId")
+                || value.containsKey("operationId")
+                || value.containsKey("authorityBindingSha256");
+    }
+
+    private static String exactString(Map<String, Object> value, String key) {
+        Object field = value.get(key);
+        return field instanceof String string ? string : "";
+    }
+
+    private static CheckpointRestoreResult restoreFailure(
+            String checkpointId,
+            String message,
+            CheckpointAuthority authority
+    ) {
+        return authority == null || !authority.typed()
+                ? CheckpointRestoreResult.failure(checkpointId, message)
+                : CheckpointRestoreResult.failure(
+                        checkpointId,
+                        message,
+                        authority.authorityPlanId(),
+                        authority.operationId());
+    }
+
+    private static CheckpointRestoreResult restorePartial(
+            String checkpointId,
+            String message,
+            int restored,
+            int deleted,
+            int failed,
+            CheckpointAuthority authority
+    ) {
+        return authority == null || !authority.typed()
+                ? CheckpointRestoreResult.partial(
+                        checkpointId, message, restored, deleted, failed)
+                : CheckpointRestoreResult.partial(
+                        checkpointId,
+                        message,
+                        restored,
+                        deleted,
+                        failed,
+                        authority.authorityPlanId(),
+                        authority.operationId());
     }
 
     private static RestorePreflight preflightRestoreEntries(
@@ -726,6 +995,21 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return value != null && value.matches("(?i)[0-9a-f]{64}");
     }
 
+    private static String checkpointAuthorityBinding(
+            String checkpointId,
+            String authorityPlanId,
+            String operationId
+    ) throws Exception {
+        String canonical = "talos-checkpoint-authority-v1\u0000"
+                + checkpointId
+                + "\u0000"
+                + authorityPlanId
+                + "\u0000"
+                + operationId;
+        return sha256(canonical.getBytes(
+                java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     private static String sha256(byte[] bytes) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         return HexFormat.of().formatHex(digest.digest(bytes));
@@ -744,6 +1028,55 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             int failed,
             List<String> failureReasons
     ) {}
+
+    private record CheckpointAuthority(
+            String authorityPlanId,
+            String operationId,
+            String bindingSha256
+    ) {
+        private static CheckpointAuthority untyped() {
+            return new CheckpointAuthority("", "", "");
+        }
+
+        private static CheckpointAuthority typed(
+                String authorityPlanId,
+                String operationId,
+                String bindingSha256
+        ) {
+            return new CheckpointAuthority(
+                    authorityPlanId == null ? "" : authorityPlanId,
+                    operationId == null ? "" : operationId,
+                    bindingSha256 == null ? "" : bindingSha256);
+        }
+
+        private boolean typed() {
+            return !authorityPlanId.isEmpty();
+        }
+
+        private boolean validPair() {
+            return authorityPlanId.matches("[0-9a-f]{64}")
+                    && operationId.matches("[0-9a-f]{64}");
+        }
+    }
+
+    private record AuthorityValidation(
+            boolean valid,
+            CheckpointAuthority authority,
+            String message
+    ) {
+        private static AuthorityValidation success(
+                CheckpointAuthority authority
+        ) {
+            return new AuthorityValidation(true, authority, "");
+        }
+
+        private static AuthorityValidation failure(String message) {
+            return new AuthorityValidation(
+                    false,
+                    CheckpointAuthority.untyped(),
+                    message);
+        }
+    }
 
     private record CaptureStats(long byteCount) {}
 

@@ -396,7 +396,8 @@ record ExecutionOutcome(
                         contract,
                         safePlan.requestObligation(),
                         loopResult,
-                        extraMutationSuccesses)
+                        extraMutationSuccesses,
+                        safePlan.workspaceOperationPlan())
                 : usingDocumentExtractionVerification
                 ? documentExtractionEvidence
                 : usingEmbeddedVerification
@@ -405,6 +406,29 @@ record ExecutionOutcome(
         TaskVerificationResult taskVerification = taskVerificationEvidence.compatibilityResult();
         VerificationReport verificationReport = taskVerificationEvidence.report();
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
+        if (safePlan.workspaceOperationPlan().state()
+                        == dev.talos.runtime.workspace
+                                .WorkspaceOperationAuthorityPlan.State
+                                .AUTHORIZED_SINGLE
+                && loopResult.toolOutcomes().stream().anyMatch(outcome ->
+                        outcome != null
+                                && outcome.success()
+                                && outcome.workspaceOperationPlan() != null)) {
+            boolean verified = taskVerification.status()
+                            == TaskVerificationStatus.PASSED
+                    || taskVerification.status()
+                            == TaskVerificationStatus.READBACK_ONLY;
+            LocalTurnTraceCapture.recordWorkspaceOperationLifecycle(
+                    safePlan.workspaceOperationPlan(),
+                    null,
+                    verified
+                            ? LocalTurnTraceCapture
+                                    .WorkspaceOperationLifecycleStage
+                                    .VERIFICATION_SUCCEEDED
+                            : LocalTurnTraceCapture
+                                    .WorkspaceOperationLifecycleStage
+                                    .VERIFICATION_FAILED);
+        }
         LocalTurnTraceCapture.enterExecutionStage(priorVerificationStage);
 
         MutationRecoveryAssessment mutationAssessment = MutationRecoveryAssessment.assess(

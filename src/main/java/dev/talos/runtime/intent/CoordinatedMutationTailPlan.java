@@ -1,6 +1,9 @@
 package dev.talos.runtime.intent;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,7 +19,8 @@ public record CoordinatedMutationTailPlan(
         List<TargetDecision> decisions,
         List<WorkspaceOperationObservation> workspaceOperationObservations,
         List<WorkspaceOperationClauseObservation>
-                workspaceOperationClauseObservations
+                workspaceOperationClauseObservations,
+        List<WorkspaceOperationObligation> workspaceOperationObligations
 ) {
     public static final int NO_CONSTRAINT = -1;
 
@@ -148,6 +152,7 @@ public record CoordinatedMutationTailPlan(
                 tailEnd,
                 decisions,
                 observationsFrom(decisions),
+                List.of(),
                 List.of());
     }
 
@@ -164,6 +169,26 @@ public record CoordinatedMutationTailPlan(
                 tailEnd,
                 decisions,
                 workspaceOperationObservations,
+                List.of(),
+                List.of());
+    }
+
+    public CoordinatedMutationTailPlan(
+            String canonicalRequest,
+            int constraintStart,
+            int tailEnd,
+            List<TargetDecision> decisions,
+            List<WorkspaceOperationObservation> workspaceOperationObservations,
+            List<WorkspaceOperationClauseObservation>
+                    workspaceOperationClauseObservations
+    ) {
+        this(
+                canonicalRequest,
+                constraintStart,
+                tailEnd,
+                decisions,
+                workspaceOperationObservations,
+                workspaceOperationClauseObservations,
                 List.of());
     }
 
@@ -179,11 +204,15 @@ public record CoordinatedMutationTailPlan(
                         : workspaceOperationClauseObservations.stream()
                                 .distinct()
                                 .toList();
+        workspaceOperationObligations = workspaceOperationObligations == null
+                ? List.of()
+                : workspaceOperationObligations.stream().distinct().toList();
         if (constraintStart == NO_CONSTRAINT) {
             if (tailEnd != NO_CONSTRAINT
                     || !decisions.isEmpty()
                     || !workspaceOperationObservations.isEmpty()
-                    || !workspaceOperationClauseObservations.isEmpty()) {
+                    || !workspaceOperationClauseObservations.isEmpty()
+                    || !workspaceOperationObligations.isEmpty()) {
                 throw new IllegalArgumentException("empty tail plan must not carry decisions");
             }
         } else if (constraintStart < 0
@@ -279,6 +308,32 @@ public record CoordinatedMutationTailPlan(
                 throw new IllegalArgumentException(
                         "workspace-operation clause observation must be an "
                                 + "exact action-bearing span inside the tail");
+            }
+        }
+        for (WorkspaceOperationObligation obligation
+                : workspaceOperationObligations) {
+            if (obligation == null
+                    || obligation.owner()
+                            != WorkspaceOperationObligation.Owner
+                                    .COORDINATED_TAIL
+                    || !obligation.canonicalRequestSha256().equals(
+                            sha256(canonicalRequest))
+                    || obligation.sourceStartOffset() < constraintStart
+                    || obligation.sourceEndOffset() > tailEnd
+                    || !canonicalRequest.substring(
+                                    obligation.sourceStartOffset(),
+                                    obligation.sourceEndOffset())
+                            .equals(obligation.sourceText())
+                    || workspaceOperationClauseObservations.stream().noneMatch(
+                            observation ->
+                                    observation.startOffset()
+                                                    == obligation
+                                                            .sourceStartOffset()
+                                            && observation.endOffset()
+                                                    == obligation
+                                                            .sourceEndOffset())) {
+                throw new IllegalArgumentException(
+                        "tail workspace obligation must bind one exact owned observation");
             }
         }
     }
@@ -482,7 +537,8 @@ public record CoordinatedMutationTailPlan(
                 tailEnd,
                 retained,
                 workspaceOperationObservations,
-                workspaceOperationClauseObservations);
+                workspaceOperationClauseObservations,
+                workspaceOperationObligations);
     }
 
     private boolean decisionMatchesIntent(
@@ -603,6 +659,17 @@ public record CoordinatedMutationTailPlan(
             }
         }
         return false;
+    }
+
+    private static String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(
+                            (value == null ? "" : value)
+                                    .getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     private static List<WorkspaceOperationObservation> observationsFrom(

@@ -228,7 +228,7 @@ final class AssistantTurnPreparation {
         String activeTaskContext = renderActiveTaskContextForPlan(activeDecision);
         String artifactGoal = renderArtifactGoalForPlan(activeDecision);
         return CurrentTurnPlan.createWithActionObligation(
-                taskContract,
+                resolution,
                 phase,
                 nativeTools,
                 promptTools,
@@ -401,7 +401,9 @@ final class AssistantTurnPreparation {
                 targetRoles);
         if (ctx == null) return;
         if (TurnAuditCapture.isActive()) {
-            TurnAuditCapture.recordPolicyTrace(policyTrace);
+            TurnAuditCapture.recordPolicyTrace(
+                    policyTrace,
+                    plan.workspaceOperationPlan());
         } else {
             LocalTurnTraceCapture.recordPolicyTrace(policyTrace);
         }

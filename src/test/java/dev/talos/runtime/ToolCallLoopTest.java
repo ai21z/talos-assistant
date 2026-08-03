@@ -24,6 +24,7 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.AfterEach;
@@ -2924,13 +2925,13 @@ class ToolCallLoopTest {
             assertTrue(result.toolOutcomes().stream()
                     .anyMatch(outcome -> !outcome.success()
                             && String.valueOf(outcome.errorMessage()).toLowerCase(Locale.ROOT)
-                            .contains("workspace organization tool")),
+                            .contains("not authorized by the current typed task plan")),
                     result.toolOutcomes().toString());
             assertTrue(trace.events().stream()
                     .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
                     .anyMatch(event -> String.valueOf(event.data().get("reason"))
                             .toLowerCase(Locale.ROOT)
-                            .contains("workspace organization tool")));
+                            .contains("not authorized by the current typed task plan")));
         } finally {
             deleteRecursive(ws);
         }
@@ -3474,7 +3475,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void staticWebCreationDirectoryOnlyMutationContinuesToFileWrites() throws Exception {
+    void staticWebCreationBlocksUnrequestedDirectoryAndContinuesToFileWrites() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-mkdir-continuation-");
         try {
             var registry = new ToolRegistry();
@@ -3543,15 +3544,24 @@ class ToolCallLoopTest {
                     ws,
                     ctx);
 
-            assertTrue(Files.isDirectory(ws.resolve("bmi-website")),
-                    "The first directory mutation should still execute.");
+            assertFalse(
+                    result.failureDecision().shouldStop(),
+                    result.toString());
+            assertFalse(Files.exists(ws.resolve("bmi-website")),
+                    "An unrequested directory has no typed workspace authority.");
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(stylesCss, Files.readString(ws.resolve("styles.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
             assertTrue(result.iterations() > 1,
-                    "A directory-only mutation for a website request must not end the tool loop.");
-            assertTrue(result.mutatingToolSuccesses() >= 4,
-                    "The loop should continue from mkdir to actual HTML/CSS/JS file writes.");
+                    "A blocked directory call for a website request must not end the tool loop.");
+            assertEquals(3, result.mutatingToolSuccesses(),
+                    "Only the exact HTML/CSS/JS file writes should succeed.");
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            "talos.mkdir".equals(outcome.toolName())
+                                    && !outcome.success()
+                                    && String.valueOf(outcome.errorMessage())
+                                            .contains("not authorized by the current typed task plan")),
+                    result.toolOutcomes().toString());
         } finally {
             deleteRecursive(ws);
         }
@@ -5600,6 +5610,85 @@ class ToolCallLoopTest {
     }
 
     // ── Helpers ─────────────────────────────────────────────────────
+
+    @Test
+    void duplicateExactWorkspaceCallsInOneProviderResponseStopAfterFirstAttempt()
+            throws Exception {
+        Path workspace = Files.createTempDirectory(
+                "talos-t1205-duplicate-workspace-attempt-");
+        try {
+            AtomicInteger approvals = new AtomicInteger();
+            AtomicInteger executions = new AtomicInteger();
+            CopyPathTool descriptorOwner = new CopyPathTool();
+            TalosTool failingCopy = new TalosTool() {
+                @Override
+                public String name() {
+                    return descriptorOwner.name();
+                }
+
+                @Override
+                public String description() {
+                    return descriptorOwner.description();
+                }
+
+                @Override
+                public ToolDescriptor descriptor() {
+                    return descriptorOwner.descriptor();
+                }
+
+                @Override
+                public ToolResult execute(ToolCall call, ToolContext context) {
+                    executions.incrementAndGet();
+                    return ToolResult.fail(ToolError.invalidParams(
+                            "simulated exact workspace-operation failure"));
+                }
+            };
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(failingCopy);
+            TurnProcessor processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry,
+                    ApprovalPolicy.ALWAYS_ASK);
+            ToolCallLoop loop = new ToolCallLoop(processor);
+            String request = "Copy source.txt to copied.txt.";
+            List<ChatMessage> messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            List<ChatMessage.NativeToolCall> calls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "copy_attempt_1",
+                            "talos.copy_path",
+                            Map.of("from", "source.txt", "to", "copied.txt")),
+                    new ChatMessage.NativeToolCall(
+                            "copy_attempt_2",
+                            "talos.copy_path",
+                            Map.of("from", "source.txt", "to", "copied.txt")));
+            Context context = Context.builder(new Config())
+                    .sandbox(new Sandbox(workspace, Map.of()))
+                    .llm(textProvider(registry, List.of("The copy failed.")))
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+
+            ToolCallLoop.LoopResult result = runCapturedProviderNative(
+                    loop,
+                    calls,
+                    List.of("talos.copy_path"),
+                    messages,
+                    workspace,
+                    context);
+
+            assertEquals(1, approvals.get());
+            assertEquals(1, executions.get());
+            assertEquals(2, result.failedCalls());
+            assertFalse(Files.exists(workspace.resolve("copied.txt")));
+        } finally {
+            deleteRecursive(workspace);
+        }
+    }
 
     private static ToolCallLoop.LoopResult runCapturedRuntime(
             ToolCallLoop loop,

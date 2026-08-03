@@ -430,17 +430,12 @@ class UnifiedAssistantModeTest {
             @TempDir Path workspace
     ) throws Exception {
         for (String request : List.of(
-                "Make it work so create a directory named generated.",
                 "Make it work so create docs and assets, "
                         + "then copy style.css to docs/style.css.",
                 "Make it work so create .config and assets, "
                         + "then copy style.css to .config/style.css.",
                 "Make it work so create docs.v1 and assets, "
                         + "then copy style.css to docs.v1/style.css.",
-                "Make it work so create index.html and style.css, "
-                        + "then copy style.css to backup.css.",
-                "Make it work so copy style.css to script.js.",
-                "Make it work so delete style.css.",
                 "Make it work so touch config.env.")) {
             LastPromptCapture.clear();
             var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
@@ -489,6 +484,95 @@ class UnifiedAssistantModeTest {
                     render.systemPrompt().contains("Available Tools"),
                     request + "\n" + render.systemPrompt());
         }
+    }
+
+    @Test
+    void exactSingleWorkspaceOperationsExposeOnlyTheirTypedTool(
+            @TempDir Path workspace
+    ) throws Exception {
+        Map<String, String> requests = new LinkedHashMap<>();
+        requests.put(
+                "Make it work so create a directory named generated.",
+                "talos.mkdir");
+        requests.put(
+                "Make it work so copy style.css to script.js.",
+                "talos.copy_path");
+        requests.put(
+                "Make it work so delete style.css.",
+                "talos.delete_path");
+
+        for (Map.Entry<String, String> fixture : requests.entrySet()) {
+            LastPromptCapture.clear();
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "The requested operation remains incomplete.",
+                            List.of())),
+                    4096);
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            registry.register(new MakeDirectoryTool());
+            registry.register(new CopyPathTool());
+            registry.register(new DeletePathTool());
+            Context context = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .toolRegistry(registry)
+                    .llm(recorded.client())
+                    .build();
+
+            new UnifiedAssistantMode().handle(
+                    fixture.getKey(), workspace, context);
+
+            ChatRequest providerRequest = recorded.requests().getFirst();
+            assertEquals(
+                    List.of(fixture.getValue()),
+                    providerRequest.tools.stream()
+                            .map(tool -> tool.name())
+                            .toList(),
+                    fixture.getKey());
+            String providerBody = providerRequest.messages.stream()
+                    .map(message -> message.content() == null
+                            ? ""
+                            : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(providerBody.contains(
+                            "visibleTools: " + fixture.getValue()),
+                    providerBody);
+        }
+    }
+
+    @Test
+    void contentCreationThenExactCopyExposesContentAndCopyAuthority(
+            @TempDir Path workspace
+    ) throws Exception {
+        LastPromptCapture.clear();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "The requested work remains incomplete.",
+                        List.of())),
+                4096);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new CopyPathTool());
+        Context context = Context.builder(new Config())
+                .memory(new SessionMemory())
+                .toolRegistry(registry)
+                .llm(recorded.client())
+                .build();
+
+        new UnifiedAssistantMode().handle(
+                "Write index.html and style.css, then copy style.css to backup.css.",
+                workspace,
+                context);
+
+        List<String> tools = recorded.requests().getFirst().tools.stream()
+                .map(tool -> tool.name())
+                .toList();
+        assertTrue(tools.contains("talos.write_file"), tools.toString());
+        assertTrue(tools.contains("talos.copy_path"), tools.toString());
+        assertFalse(tools.contains("talos.mkdir"), tools.toString());
+        assertFalse(tools.contains("talos.delete_path"), tools.toString());
     }
 
     @Test
@@ -752,7 +836,7 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
-    void mixedContentAndBlockedWorkspaceTailKeepsOnlyContentAuthority(
+    void mixedContentAndExactWorkspaceTailKeepsBothAuthorities(
             @TempDir Path workspace
     ) throws Exception {
         LastPromptCapture.clear();
@@ -782,13 +866,13 @@ class UnifiedAssistantModeTest {
                 .toList();
         assertTrue(tools.contains("talos.write_file"), tools.toString());
         assertTrue(tools.contains("talos.edit_file"), tools.toString());
-        assertFalse(tools.contains("talos.delete_path"), tools.toString());
+        assertTrue(tools.contains("talos.delete_path"), tools.toString());
         String providerBody = providerRequest.messages.stream()
                 .map(message -> message.content() == null
                         ? ""
                         : message.content())
                 .reduce("", (left, right) -> left + "\n" + right);
-        assertFalse(providerBody.contains("talos.delete_path"), providerBody);
+        assertTrue(providerBody.contains("talos.delete_path"), providerBody);
     }
 
     @Test

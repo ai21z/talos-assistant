@@ -301,11 +301,16 @@ Talos has a focused tool set for local workspace work:
 | `move_path` | move a file or directory inside the workspace | required |
 | `rename_path` | rename a file or directory inside its parent | required |
 | `delete_path` | delete a file or directory inside the workspace | required |
-| `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
+| `apply_workspace_batch` | internal compatibility surface; not exposed to models | required |
 | `run_command` | run approved bounded command profiles | required |
 
 Write tools are approval-gated. The workspace remains under user control, and
 Talos records the outcome of each governed operation.
+
+`apply_workspace_batch` remains registered internally for compatibility and
+negative-boundary testing, but the current assistant planner does not expose it
+to models. Compound workspace-operation requests fail closed until Talos has a
+typed multi-operation authority contract.
 
 ### Workspace Boundary
 

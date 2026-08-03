@@ -1,10 +1,13 @@
 package dev.talos.runtime.intent;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,7 +31,8 @@ public record SequentialMutationClausePlan(
         List<SourceSpan> excludedSpans,
         List<ClauseDecision> occurrenceDecisions,
         List<OwnedRegion> ownedRegions,
-        AuthorityLimit authorityLimit
+        AuthorityLimit authorityLimit,
+        List<WorkspaceOperationObligation> workspaceOperationObligations
 ) {
 
     static final int MAX_EXCLUDED_SPANS = 4_096;
@@ -291,7 +295,24 @@ public record SequentialMutationClausePlan(
                 excludedSpans,
                 occurrenceDecisions,
                 ownedRegions,
-                null);
+                null,
+                List.of());
+    }
+
+    public SequentialMutationClausePlan(
+            String canonicalRequest,
+            List<SourceSpan> excludedSpans,
+            List<ClauseDecision> occurrenceDecisions,
+            List<OwnedRegion> ownedRegions,
+            AuthorityLimit authorityLimit
+    ) {
+        this(
+                canonicalRequest,
+                excludedSpans,
+                occurrenceDecisions,
+                ownedRegions,
+                authorityLimit,
+                List.of());
     }
 
     public SequentialMutationClausePlan {
@@ -305,6 +326,9 @@ public record SequentialMutationClausePlan(
                 ownedRegions,
                 MAX_OWNED_REGIONS,
                 "owned regions");
+        workspaceOperationObligations = workspaceOperationObligations == null
+                ? List.of()
+                : List.copyOf(workspaceOperationObligations);
         requireCombinedEvidenceRows(
                 excludedSpans,
                 occurrenceDecisions,
@@ -319,6 +343,10 @@ public record SequentialMutationClausePlan(
                 occurrenceDecisions,
                 ownedRegions,
                 authorityLimit);
+        if (authorityLimit != null && !workspaceOperationObligations.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "authority-limited sequential plan cannot retain workspace authority");
+        }
 
         if (!occurrenceDecisions.isEmpty()) {
             RequestLexicalView lexicalView = RequestLexicalView.of(canonicalRequest);
@@ -418,6 +446,47 @@ public record SequentialMutationClausePlan(
                         "decision evidence must have one containing typed region: "
                                 + decision);
             }
+            }
+        }
+        for (WorkspaceOperationObligation obligation
+                : workspaceOperationObligations) {
+            if (obligation == null
+                    || obligation.owner()
+                            != WorkspaceOperationObligation.Owner
+                                    .SEQUENTIAL_CLAUSE
+                    || !obligation.canonicalRequestSha256().equals(
+                            sha256(canonicalRequest))
+                    || obligation.sourceEndOffset() > canonicalRequest.length()
+                    || !canonicalRequest.substring(
+                                    obligation.sourceStartOffset(),
+                                    obligation.sourceEndOffset())
+                            .equals(obligation.sourceText())
+                    || excludedSpans.stream().anyMatch(span ->
+                            span.intersects(
+                                    obligation.sourceStartOffset(),
+                                    obligation.sourceEndOffset()))
+                    || ownedRegions.stream().noneMatch(region ->
+                            region.kind() == RegionKind.WORKSPACE_OPERATION
+                                    && region.startOffset()
+                                            == obligation.sourceStartOffset()
+                                    && region.endOffset()
+                                            == obligation.sourceEndOffset())
+                    || occurrenceDecisions.stream().noneMatch(decision ->
+                            decision.actionFamily()
+                                            == ActionFamily.WORKSPACE_OPERATION
+                                    && decision.authority()
+                                            == Authority
+                                                    .WORKSPACE_OPERATION_BLOCKED
+                                    && decision.actionStartOffset()
+                                            == obligation.actionStartOffset()
+                                    && decision.actionEndOffset()
+                                            == obligation.actionEndOffset()
+                                    && decision.startOffset()
+                                            == obligation.sourceStartOffset()
+                                    && decision.endOffset()
+                                            == obligation.sourceEndOffset())) {
+                throw new IllegalArgumentException(
+                        "sequential workspace obligation requires exact blocked parser evidence");
             }
         }
     }
@@ -709,7 +778,8 @@ public record SequentialMutationClausePlan(
                 excludedSpans,
                 List.of(),
                 List.of(),
-                null);
+                null,
+                List.of());
     }
 
     static SequentialMutationClausePlan authorityLimit(
@@ -722,7 +792,8 @@ public record SequentialMutationClausePlan(
                 excludedSpans,
                 List.of(),
                 List.of(),
-                new AuthorityLimit(kind));
+                new AuthorityLimit(kind),
+                List.of());
     }
 
     public boolean present() {
@@ -854,6 +925,17 @@ public record SequentialMutationClausePlan(
             derivations.put(decision.path(), decision.derivation());
         }
         return Collections.unmodifiableMap(derivations);
+    }
+
+    private static String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(
+                            (value == null ? "" : value)
+                                    .getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     /**

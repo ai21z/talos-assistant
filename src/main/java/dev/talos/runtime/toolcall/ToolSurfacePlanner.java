@@ -8,7 +8,6 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolDescriptor;
@@ -117,17 +116,6 @@ public final class ToolSurfacePlanner {
                         safeAvailability,
                         "text format apply surface");
             }
-            var workspaceOperation = suppressWorkspaceOperationBranch
-                    ? java.util.Optional.<WorkspaceOperationIntent.Intent>empty()
-                    : WorkspaceOperationIntent.detect(contract);
-            if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
-                WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
-                return select(
-                        registry,
-                        descriptor -> intent.toolNames().contains(descriptor.name()),
-                        safeAvailability,
-                        intent.surfaceReason());
-            }
             if (sourceDerivedFileCreateTargets(contract)) {
                 return select(
                         registry,
@@ -156,7 +144,11 @@ public final class ToolSurfacePlanner {
                         safeAvailability,
                         "static web file target apply surface");
             }
-            return select(registry, ToolSurfacePlanner::isApplyOperation, safeAvailability, "mutation apply surface");
+            return select(
+                    registry,
+                    ToolSurfacePlanner::isLegacyApplyOperation,
+                    safeAvailability,
+                    "typed-authority-free mutation apply surface");
         }
         if (explicitCommandVerificationSurface(contract, phase)) {
             return select(registry, ToolSurfacePlanner::isCommandOperation, safeAvailability, "explicit command profile surface");
@@ -197,6 +189,37 @@ public final class ToolSurfacePlanner {
                     availability,
                     "non-authoritative mutation tail read-only surface");
         }
+        if (phase == ExecutionPhase.APPLY
+                && !safeResolution.workspaceOperationPlan()
+                .authorizedOperations().isEmpty()) {
+            List<String> operationTools = safeResolution
+                    .workspaceOperationPlan()
+                    .toolNames();
+            Plan workspacePlan = select(
+                    registry,
+                    descriptor -> operationTools.contains(descriptor.name()),
+                    availability,
+                    "exact typed workspace-operation authority");
+            if (!safeResolution.hasIndependentAuthorizedContentMutation()) {
+                return workspacePlan;
+            }
+            Plan contentPlan = plan(
+                    safeResolution.contract(),
+                    phase,
+                    registry,
+                    availability,
+                    true);
+            java.util.LinkedHashMap<String, ToolSpec> combined =
+                    new java.util.LinkedHashMap<>();
+            contentPlan.nativeToolSpecs().forEach(spec ->
+                    combined.put(spec.name(), spec));
+            workspacePlan.nativeToolSpecs().forEach(spec ->
+                    combined.put(spec.name(), spec));
+            return new Plan(
+                    List.copyOf(combined.values()),
+                    contentPlan.reason()
+                            + "; exact typed workspace-operation authority");
+        }
         Plan base = plan(
                 safeResolution.contract(),
                 phase,
@@ -230,6 +253,18 @@ public final class ToolSurfacePlanner {
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         if (contract == null) return List.of();
         return plan(contract, phase, CanonicalToolDescriptors.registry()).nativeToolNames();
+    }
+
+    public static List<String> defaultVisibleToolNamesForResolution(
+            TaskResolution resolution,
+            ExecutionPhase phase
+    ) {
+        if (resolution == null) return List.of();
+        return plan(
+                resolution,
+                phase,
+                CanonicalToolDescriptors.registry(),
+                ToolCapabilityAvailability.allEnabled()).nativeToolNames();
     }
 
     public static List<String> names(List<ToolSpec> specs) {
@@ -333,6 +368,12 @@ public final class ToolSurfacePlanner {
         return metadata.mutatesWorkspace()
                 && !metadata.destructive()
                 && metadata.riskLevel() == ToolRiskLevel.WRITE;
+    }
+
+    private static boolean isLegacyApplyOperation(ToolDescriptor descriptor) {
+        return isApplyOperation(descriptor)
+                && !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        descriptor == null ? "" : descriptor.name());
     }
 
     private static boolean isFileTargetApplyOperation(ToolDescriptor descriptor) {

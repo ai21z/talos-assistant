@@ -91,7 +91,9 @@ enum RetryDispatchPurpose {
                 capturedPlan.activeTaskContext(),
                 capturedPlan.artifactGoal(),
                 capturedPlan.verifierProfile(),
-                capturedPlan.requestObligation());
+                capturedPlan.requestObligation(),
+                capturedPlan.workspaceOperationPlan(),
+                capturedPlan.contentMutationPredecessorPaths());
     }
 
     String debugTag() {

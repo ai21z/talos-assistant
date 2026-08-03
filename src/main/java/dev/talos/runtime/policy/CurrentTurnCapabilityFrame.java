@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.Comparator;
 import java.util.List;
@@ -31,7 +32,9 @@ public final class CurrentTurnCapabilityFrame {
                 plan.activeTaskContext(),
                 plan.artifactGoal(),
                 plan.taskExpectations(),
-                plan.actionObligation());
+                plan.actionObligation(),
+                plan.workspaceOperationPlan(),
+                plan.contentMutationPredecessorPaths());
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
@@ -46,7 +49,9 @@ public final class CurrentTurnCapabilityFrame {
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 List.of(),
-                null);
+                null,
+                null,
+                List.of());
     }
 
     private static String render(
@@ -57,7 +62,9 @@ public final class CurrentTurnCapabilityFrame {
             String activeTaskContext,
             String artifactGoal,
             List<TaskExpectation> taskExpectations,
-            ActionObligation suppliedActionObligation
+            ActionObligation suppliedActionObligation,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+            List<String> contentMutationPredecessorPaths
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
@@ -86,6 +93,11 @@ public final class CurrentTurnCapabilityFrame {
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
+        appendWorkspaceOperationGuidance(
+                frame,
+                workspaceOperationPlan,
+                contentMutationPredecessorPaths,
+                mutationAllowed);
         appendTextFormatChangeGuidance(frame, contract, mutationAllowed, visibleTools);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendStaticWebRequirements(frame, contract, mutationAllowed);
@@ -107,12 +119,11 @@ public final class CurrentTurnCapabilityFrame {
                     Do not say you lack filesystem or workspace access.
                     Do not provide manual snippets instead of acting unless a narrow clarification is genuinely required.""");
             case WORKSPACE_OPERATION_REQUIRED -> frame.append("""
-                    Use the visible workspace operation tool for this turn.
+                    Use only the exact workspace operation tool named in the typed operation frame for that operation.
                     Do not emulate move, copy, rename, or mkdir by manually writing or editing file contents.
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
-                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.
-                    operations_json example: [{"op":"copy_path","from":"a.md","to":"b.md"},{"op":"mkdir","path":"docs/reports"}]""");
+                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.""");
             case CONDITIONAL_REVIEW_FIX -> frame.append("""
                     This is a conditional review-and-fix turn.
                     Inspect the relevant files first using read-only tools.
@@ -272,12 +283,6 @@ public final class CurrentTurnCapabilityFrame {
         List<String> targets = orderedExpectedTargets(contract);
         frame.append("[ExpectedTargets]\n")
                 .append("requiredTargets: ").append(String.join(", ", targets)).append('\n');
-        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
-            frame.append("Satisfy these exact source/destination target paths with the visible workspace operation tool.\n")
-                    .append("Do not substitute a generic talos.write_file or talos.edit_file call for a move, copy, rename, or mkdir request.\n")
-                    .append("Similar filenames are not substitutes for required target paths.\n");
-            return;
-        }
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             frame.append("Inspect these exact target paths when they are relevant to the review.\n")
                     .append("If evidence shows a repair is needed, write or edit these exact target paths.\n")
@@ -291,6 +296,59 @@ public final class CurrentTurnCapabilityFrame {
                 .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
                 .append("Do not put required root files inside css/, js/, assets/, site/, or other subdirectories unless the required target path explicitly includes that directory.\n")
                 .append("Do not complete this turn by mutating only a similar sibling filename.\n");
+    }
+
+    private static void appendWorkspaceOperationGuidance(
+            StringBuilder frame,
+            WorkspaceOperationAuthorityPlan plan,
+            List<String> contentPredecessors,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed
+                || plan == null
+                || plan.authorizedOperations().size() != 1) {
+            return;
+        }
+        var operation = plan.authorizedOperations().getFirst();
+        List<String> predecessors = contentPredecessors == null
+                ? List.of()
+                : contentPredecessors;
+        frame.append("[TypedWorkspaceOperation]\n")
+                .append("operationKind: ")
+                .append(operation.kind().name())
+                .append('\n')
+                .append("exactTool: ")
+                .append(operation.toolName())
+                .append('\n');
+        for (var operand : operation.operands()) {
+            String label = switch (operand.role()) {
+                case SOURCE -> "sourcePath";
+                case DESTINATION -> "destinationPath";
+                case TARGET -> "targetPath";
+            };
+            frame.append(label)
+                    .append(": ")
+                    .append(operand.effectivePath())
+                    .append('\n');
+        }
+        frame.append("overwritePolicy: ")
+                .append(operation.overwritePolicy().name())
+                .append('\n')
+                .append("recursivePolicy: ")
+                .append(operation.recursivePolicy().name())
+                .append('\n')
+                .append("parentPolicy: ")
+                .append(operation.parentPolicy().name())
+                .append('\n');
+        if (predecessors.isEmpty()) {
+            frame.append("Call the exact tool once with exactly these typed operands.\n");
+            return;
+        }
+        frame.append("contentPredecessors: ")
+                .append(String.join(", ", predecessors))
+                .append('\n')
+                .append("First complete every content predecessor with the visible file tools. Then call the exact workspace operation tool once.\n")
+                .append("Do not call the workspace operation before every predecessor succeeds.\n");
     }
 
     private static List<String> orderedExpectedTargets(TaskContract contract) {

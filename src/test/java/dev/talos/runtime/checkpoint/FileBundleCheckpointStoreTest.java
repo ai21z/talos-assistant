@@ -386,7 +386,11 @@ class FileBundleCheckpointStoreTest {
         Files.writeString(workspace.resolve("dest.txt"), "dest-before");
         Files.writeString(workspace.resolve("delete.txt"), "delete-before");
 
-        WorkspaceOperationPlan plan = WorkspaceOperationPlan.batch(
+        String authorityPlanId = "a".repeat(64);
+        String operationId = "b".repeat(64);
+        WorkspaceOperationPlan plan = new WorkspaceOperationPlan(
+                authorityPlanId,
+                operationId,
                 WorkspaceOperationPlan.OperationKind.BATCH_APPLY,
                 java.util.List.of(
                         WorkspaceOperationPlan.PathEffect.source("source.txt", true),
@@ -407,6 +411,8 @@ class FileBundleCheckpointStoreTest {
                 workspace, config(true), plan, "trc-bundle", 3);
 
         assertTrue(capture.success(), capture.message());
+        assertEquals(authorityPlanId, capture.authorityPlanId());
+        assertEquals(operationId, capture.operationId());
         assertEquals(4, capture.capturedFiles());
 
         Files.delete(workspace.resolve("source.txt"));

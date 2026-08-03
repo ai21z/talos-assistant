@@ -67,6 +67,11 @@ public final class CopyPathTool implements TalosTool {
         WorkspaceOperationToolSupport.ResolvedPath destination =
                 WorkspaceOperationToolSupport.resolveAllowed(ctx, to);
         if (!destination.valid()) return ToolResult.fail(ToolError.invalidParams(destination.error()));
+        ToolResult parentResult =
+                WorkspaceOperationToolSupport.requireExistingOrdinaryParent(
+                        ctx,
+                        destination.path());
+        if (parentResult != null) return parentResult;
         boolean overwrite = WorkspaceOperationToolSupport.boolParam(call, "overwrite", false);
         boolean recursive = WorkspaceOperationToolSupport.boolParam(call, "recursive", false);
         try {
@@ -96,8 +101,6 @@ public final class CopyPathTool implements TalosTool {
                 workspace.walk(destination.path());
             }
 
-            Path parent = destination.path().getParent();
-            if (parent != null) workspace.createDirectories(parent);
             if (sourceType == NoFollowPathPolicy.EntryType.DIRECTORY) {
                 if (destinationType == NoFollowPathPolicy.EntryType.REGULAR_FILE && overwrite) {
                     Files.deleteIfExists(destination.path());

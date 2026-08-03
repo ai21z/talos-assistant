@@ -30,13 +30,18 @@ class ActionObligationPolicyTest {
     }
 
     @Test
-    void explicitWorkspaceOperationApplyTurnRequiresWorkspaceOperationTool() {
-        var contract = TaskContractResolver.fromUserRequest(
+    void explicitWorkspaceOperationRequiresTypedResolutionAuthority() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
                 "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.");
 
         assertEquals(
                 ActionObligation.valueOf("WORKSPACE_OPERATION_REQUIRED"),
-                ActionObligationPolicy.derive(contract, ExecutionPhase.APPLY));
+                ActionObligationPolicy.derive(resolution, ExecutionPhase.APPLY));
+        assertEquals(
+                ActionObligation.MUTATING_TOOL_REQUIRED,
+                ActionObligationPolicy.derive(
+                        resolution.contract(),
+                        ExecutionPhase.APPLY));
     }
 
     @Test

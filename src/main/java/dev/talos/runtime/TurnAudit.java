@@ -38,7 +38,8 @@ public record TurnAudit(
             int approvalsGranted,
             int approvalsDenied
     ) {
-        this(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied, TurnPolicyTrace.empty(), null);
+        this(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
+                TurnPolicyTrace.empty(), null);
     }
 
     public TurnAudit(
@@ -48,16 +49,19 @@ public record TurnAudit(
             int approvalsDenied,
             TurnPolicyTrace policyTrace
     ) {
-        this(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied, policyTrace, null);
+        this(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
+                policyTrace, null);
     }
 
     /** An empty audit (no tool calls, no approvals). */
     public static TurnAudit empty() {
-        return new TurnAudit(List.of(), 0, 0, 0, TurnPolicyTrace.empty(), null);
+        return new TurnAudit(List.of(), 0, 0, 0,
+                TurnPolicyTrace.empty(), null);
     }
 
     public TurnAudit withLocalTrace(LocalTurnTrace trace) {
-        return new TurnAudit(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied, policyTrace, trace);
+        return new TurnAudit(toolCalls, approvalsRequired, approvalsGranted,
+                approvalsDenied, policyTrace, trace);
     }
 
     /** Remove ordinary prompt/tool/path evidence from a non-conversational settlement. */

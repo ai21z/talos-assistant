@@ -122,7 +122,10 @@ final class ExactWriteContextFallback {
                 plan.outputObligation(),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 plan.artifactGoal(),
-                plan.verifierProfile());
+                plan.verifierProfile(),
+                plan.requestObligation(),
+                plan.workspaceOperationPlan(),
+                plan.contentMutationPredecessorPaths());
     }
 
     private static List<ChatMessage> compactMessages(CurrentTurnPlan plan) {

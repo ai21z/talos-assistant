@@ -3,6 +3,7 @@ package dev.talos.runtime.outcome;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -136,13 +137,11 @@ class MutationOutcomeTest {
 
     @Test
     void duplicateWorkspaceOperationFailureAfterSameSuccessIsRecovered() {
-        var contract = TaskContractResolver.fromUserRequest(
+        var resolution = TaskContractResolver.resolveFromUserRequest(
                 "Copy README.md to docs/README-copy.md.");
-        WorkspaceOperationPlan plan = WorkspaceOperationPlan.copyPath(
-                "README.md",
-                "docs/README-copy.md",
-                WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                false);
+        var contract = resolution.contract();
+        WorkspaceOperationPlan plan = WorkspaceOperationPlanner.authorityPlan(
+                resolution.workspaceOperationPlan()).orElseThrow();
 
         MutationOutcome outcome = MutationOutcome.from(contract, loopResult(List.of(
                 workspaceOutcome("talos.copy_path", "docs/README-copy.md", true,

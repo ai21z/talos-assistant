@@ -12,6 +12,7 @@ import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
@@ -1319,15 +1320,13 @@ class MutationRecoveryAssessmentTest {
     }
 
     @Test
-    void duplicateWorkspaceCompatibilityIsResolvedButNeverRecoveryProof() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void duplicateWorkspaceOperationWithExactTypedIdentityIsResolvedButNeverRecoveryProof() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
                 "Copy README.md to docs/README-copy.md.");
+        TaskContract contract = resolution.contract();
         RequestObligation obligation = RequestObligationCompiler.compile(contract);
-        WorkspaceOperationPlan plan = WorkspaceOperationPlan.copyPath(
-                "README.md",
-                "docs/README-copy.md",
-                WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                false);
+        WorkspaceOperationPlan plan = WorkspaceOperationPlanner.authorityPlan(
+                resolution.workspaceOperationPlan()).orElseThrow();
         ToolCallLoop.ToolOutcome success = workspaceOutcome(
                 "talos.copy_path",
                 "docs/README-copy.md",

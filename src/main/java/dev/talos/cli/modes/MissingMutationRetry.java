@@ -16,8 +16,8 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -91,11 +91,23 @@ final class MissingMutationRetry {
     ) {
         if (answer == null) answer = "";
         if (loopResult == null) return new Result(answer, 0, null);
-        if (loopResult.mutatingToolSuccesses() > 0) return new Result(answer, 0, null);
+        if (loopResult.mutatingToolSuccesses() > 0
+                && !TurnTaskContractCapture.typedMutationObligationsPending()) {
+            return new Result(answer, 0, null);
+        }
         if (ctx == null || ctx.llm() == null) return new Result(answer, 0, null);
         if (ctx.toolCallLoop() == null || chat == null) return new Result(answer, 0, null);
         if (hasDeniedMutation(loopResult)) return new Result(answer, 0, null);
         if (loopResult.failureDecision().shouldStop()) return new Result(answer, 0, null);
+        if (failedBoundWorkspaceOperationAttempt(safePlan, loopResult)) {
+            LocalTurnTraceCapture.recordActionObligation(
+                    ActionObligation.WORKSPACE_OPERATION_REQUIRED.name(),
+                    "FAILED",
+                    "the exact typed workspace operation already failed and "
+                            + "cannot be rebound to a second call",
+                    "WORKSPACE_OPERATION_RETRY_REQUIRES_TYPED_LIFECYCLE");
+            return new Result(answer, 0, null, null, true);
+        }
         // T743: a mutating call that failed with genuinely invalid parameters
         // now gets one bounded corrected retry with the tool error echoed.
         // Previously the model that ATTEMPTED a call got zero retries while a
@@ -141,10 +153,10 @@ final class MissingMutationRetry {
         String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
         List<ToolSpec> retryToolSpecs = toolSpecs(ctx, retryToolNames);
         String retryInstruction = mutationRetryInstruction(
+                safePlan,
                 obligation,
                 userRequest,
-                priorMutationRequest,
-                retryToolNames);
+                priorMutationRequest);
         if (invalidParamsError != null) {
             retryInstruction = retryInstruction
                     + "\nPrevious mutating tool call was rejected with invalid parameters: "
@@ -223,6 +235,31 @@ final class MissingMutationRetry {
                             mergedAnswer = retryLoop.finalAnswer();
                             summary = retryLoop.summary();
                         }
+                    }
+                    if (TurnTaskContractCapture
+                            .typedMutationObligationsPending()) {
+                        List<String> pendingContent =
+                                TurnTaskContractCapture
+                                        .pendingContentMutationPredecessorPaths()
+                                        .stream()
+                                        .sorted()
+                                        .toList();
+                        boolean pendingWorkspace = TurnTaskContractCapture
+                                .workspaceOperationObligationPending();
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                "bounded retry ended with typed mutation obligations still pending");
+                        return new Result(
+                                selectDeterministicAnswer(
+                                        ResponseObligationVerifier
+                                                .deterministicIncompleteTypedWorkspacePlanAnswer(
+                                                        pendingContent,
+                                                        pendingWorkspace)),
+                                retryLoop.mutatingToolSuccesses(),
+                                summary,
+                                retryLoop,
+                                true);
                     }
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
@@ -525,15 +562,38 @@ final class MissingMutationRetry {
             ChatFunction chat,
             List<String> retryToolNames
     ) {
-        List<String> remainingTargets = remainingExpectedTargetsAfterRetry(plan, retryLoop);
-        if (remainingTargets.isEmpty()) return retryLoop;
+        boolean typedWorkspacePlan = plan != null
+                && !plan.workspaceOperationPlan()
+                        .authorizedOperations().isEmpty();
+        List<String> remainingTargets = typedWorkspacePlan
+                ? TurnTaskContractCapture
+                        .pendingContentMutationPredecessorPaths().stream()
+                        .sorted()
+                        .toList()
+                : remainingExpectedTargetsAfterRetry(plan, retryLoop);
+        boolean workspaceOperationPending = typedWorkspacePlan
+                && TurnTaskContractCapture
+                        .workspaceOperationObligationPending();
+        if (remainingTargets.isEmpty() && !workspaceOperationPending) {
+            return retryLoop;
+        }
         if (ctx == null || ctx.toolCallLoop() == null || chat == null) return retryLoop;
 
-        List<ToolSpec> continuationToolSpecs = toolSpecs(ctx, retryToolNames);
+        List<String> continuationToolNames = typedWorkspacePlan
+                ? toolNames(plan, List.of())
+                : retryToolNames;
+        List<ToolSpec> continuationToolSpecs = toolSpecs(
+                ctx,
+                continuationToolNames);
         if (continuationToolSpecs.isEmpty()) return retryLoop;
-        List<ChatMessage> continuationMessages = remainingExpectedTargetContinuationMessages(
-                plan,
-                remainingTargets);
+        List<ChatMessage> continuationMessages = typedWorkspacePlan
+                ? remainingTypedWorkspacePlanMessages(
+                        plan,
+                        remainingTargets,
+                        workspaceOperationPending)
+                : remainingExpectedTargetContinuationMessages(
+                        plan,
+                        remainingTargets);
         dev.talos.runtime.TurnExecutionStage priorStage =
                 LocalTurnTraceCapture.currentExecutionStage();
         try {
@@ -558,6 +618,79 @@ final class MissingMutationRetry {
                     SafeLogFormatter.throwableMessage(e));
             return retryLoop;
         }
+    }
+
+    private static boolean failedBoundWorkspaceOperationAttempt(
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (plan == null
+                || plan.actionObligation()
+                        != ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                || loopResult == null
+                || loopResult.toolOutcomes() == null) {
+            return false;
+        }
+        Optional<WorkspaceOperationPlan> expected =
+                WorkspaceOperationPlanner.authorityPlan(
+                        plan.workspaceOperationPlan());
+        if (expected.isEmpty()) return false;
+        String authorityPlanId = expected.get().authorityPlanId();
+        String operationId = expected.get().operationId();
+        return loopResult.toolOutcomes().stream().anyMatch(outcome -> {
+            if (outcome == null
+                    || outcome.success()
+                    || outcome.denied()
+                    || !outcome.mutating()
+                    || outcome.workspaceOperationPlan() == null) {
+                return false;
+            }
+            WorkspaceOperationPlan observed = outcome.workspaceOperationPlan();
+            return authorityPlanId.equals(observed.authorityPlanId())
+                    && operationId.equals(observed.operationId());
+        });
+    }
+
+    private static List<ChatMessage> remainingTypedWorkspacePlanMessages(
+            CurrentTurnPlan plan,
+            List<String> pendingContentPaths,
+            boolean workspaceOperationPending
+    ) {
+        String request = plan == null || plan.originalUserRequest() == null
+                ? ""
+                : plan.originalUserRequest().strip();
+        String operationTool = plan == null
+                ? ""
+                : String.join(", ", plan.workspaceOperationPlan().toolNames());
+        StringBuilder frame = new StringBuilder();
+        frame.append("[RemainingTypedWorkspaceMutationPlan]\n")
+                .append("The prior bounded retry completed only part of the immutable typed plan.\n");
+        if (!pendingContentPaths.isEmpty()) {
+            frame.append("Pending content predecessor path(s): ")
+                    .append(String.join(", ", pendingContentPaths))
+                    .append('\n')
+                    .append("Complete these exact write/edit mutations first.\n");
+        }
+        if (workspaceOperationPending) {
+            frame.append("Pending exact workspace operation tool: ")
+                    .append(operationTool)
+                    .append('\n')
+                    .append("Call it only after every listed content predecessor succeeds; use the exact stored operands.\n");
+        }
+        if (!request.isBlank()) {
+            frame.append("[CurrentRequest]\n")
+                    .append(request)
+                    .append('\n');
+        }
+        String user = pendingContentPaths.isEmpty()
+                ? "Call the exact pending workspace operation tool now."
+                : workspaceOperationPending
+                        ? "Complete the listed content mutations, then call the exact workspace operation tool."
+                        : "Complete only the listed pending content mutations.";
+        return List.of(
+                ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT),
+                ChatMessage.system(frame.toString()),
+                ChatMessage.user(user));
     }
 
     private static void rethrowControlFlow(Exception failure) {
@@ -650,14 +783,28 @@ final class MissingMutationRetry {
 
     private static List<String> toolNames(CurrentTurnPlan plan, List<ChatMessage> messages) {
         TaskContract contract = plan == null ? null : plan.taskContract();
-        Optional<WorkspaceOperationIntent.Intent> workspaceOperation =
-                plan != null
-                        && plan.actionObligation()
+        if (plan != null
+                && plan.actionObligation()
                         == ActionObligation.WORKSPACE_OPERATION_REQUIRED
-                        ? WorkspaceOperationIntent.detect(contract)
-                        : Optional.empty();
-        if (workspaceOperation.isPresent()) {
-            return workspaceOperation.get().toolNames();
+                && !plan.workspaceOperationPlan()
+                        .authorizedOperations().isEmpty()) {
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            boolean capturePresent = TurnTaskContractCapture.getResolution()
+                    != null;
+            boolean contentPending = capturePresent
+                    ? !TurnTaskContractCapture
+                            .pendingContentMutationPredecessorPaths().isEmpty()
+                    : !plan.contentMutationPredecessorPaths().isEmpty();
+            if (contentPending) {
+                names.add("talos.write_file");
+                names.add("talos.edit_file");
+            }
+            if (!capturePresent
+                    || TurnTaskContractCapture
+                            .workspaceOperationObligationPending()) {
+                names.addAll(plan.workspaceOperationPlan().toolNames());
+            }
+            return List.copyOf(names);
         }
         if (StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract)) {
             return List.of("talos.write_file");
@@ -1062,10 +1209,10 @@ final class MissingMutationRetry {
     }
 
     private static String mutationRetryInstruction(
+            CurrentTurnPlan plan,
             ActionObligation obligation,
             String userRequest,
-            String priorMutationRequest,
-            List<String> retryToolNames
+            String priorMutationRequest
     ) {
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             return "Review/fix retry. "
@@ -1074,12 +1221,30 @@ final class MissingMutationRetry {
                     + "If none, answer exactly: No file change is required.";
         }
         if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
-            String tools = retryToolNames == null || retryToolNames.isEmpty()
+            List<String> operationTools = plan == null
+                    ? List.of()
+                    : plan.workspaceOperationPlan().toolNames();
+            String tools = operationTools.isEmpty()
                     ? "the visible workspace operation tool"
-                    : String.join(", ", retryToolNames);
-            return "Retry required: the previous model response did not issue the required workspace operation tool call. "
+                    : String.join(", ", operationTools);
+            List<String> pendingContent = plan == null
+                    ? List.of()
+                    : (TurnTaskContractCapture.getResolution() == null
+                            ? plan.contentMutationPredecessorPaths()
+                            : TurnTaskContractCapture
+                                    .pendingContentMutationPredecessorPaths()
+                                    .stream()
+                                    .sorted()
+                                    .toList());
+            String orderedContent = pendingContent.isEmpty()
+                    ? ""
+                    : "First complete the required write/edit mutation for "
+                            + String.join(", ", pendingContent)
+                            + ". Only after those exact mutations succeed, ";
+            return "Retry required: the previous model response did not complete the typed mutation plan. "
                     + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                    + "Call " + tools + ". Do not emulate move, copy, rename, or mkdir by writing/editing file content. "
+                    + orderedContent
+                    + "call " + tools + ". Do not emulate move, copy, rename, mkdir, or delete by writing/editing file content. "
                     + "If impossible, name the operation target and reason in one sentence.";
         }
         return "Retry required: the previous model response did not issue required write/edit tool calls. "

@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -194,6 +195,23 @@ public final class TurnAuditCapture {
             b.policyTrace = trace;
             LocalTurnTraceCapture.recordPolicyTrace(trace);
         }
+    }
+
+    /** Atomically binds executable runtime authority to hash-only evidence. */
+    public static void recordPolicyTrace(
+            TurnPolicyTrace trace,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        Bag b = HOLDER.get();
+        if (b == null || trace == null || workspaceOperationPlan == null) {
+            return;
+        }
+        if (!trace.workspaceOperationPlan().matches(workspaceOperationPlan)) {
+            throw new IllegalArgumentException(
+                    "policy trace and workspace-operation authority differ");
+        }
+        b.policyTrace = trace;
+        LocalTurnTraceCapture.recordPolicyTrace(trace);
     }
 
     /** Update the final phase once the mode/tool loop has completed. */

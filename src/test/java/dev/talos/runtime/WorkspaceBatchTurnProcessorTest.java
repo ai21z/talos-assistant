@@ -66,20 +66,15 @@ class WorkspaceBatchTurnProcessorTest {
                         """)),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals(1, approvals.get(), "batch should ask for approval once");
-        assertTrue(Files.isDirectory(workspace.resolve("docs")));
-        assertFalse(Files.exists(workspace.resolve("source.txt")));
-        assertEquals("source-before", Files.readString(workspace.resolve("dest.txt")));
-
-        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        assertEquals("CREATED", trace.checkpoint().status());
-
-        CheckpointRestoreResult restore = checkpoints.restore(workspace, trace.checkpoint().checkpointId());
-        assertTrue(restore.success(), restore.message());
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertEquals(0, approvals.get());
         assertFalse(Files.exists(workspace.resolve("docs")));
         assertEquals("source-before", Files.readString(workspace.resolve("source.txt")));
         assertEquals("dest-before", Files.readString(workspace.resolve("dest.txt")));
+        LocalTurnTraceCapture.complete();
     }
 
     @Test
@@ -102,13 +97,14 @@ class WorkspaceBatchTurnProcessorTest {
                             """)),
                     context(workspace, config));
 
-            assertTrue(result.success(), result.errorMessage());
+            assertFalse(result.success());
+            assertFalse(Files.exists(workspace.resolve("batch-one")));
+            assertFalse(Files.exists(workspace.resolve("batch-two")));
             TurnAudit audit = TurnAuditCapture.end();
             assertEquals(1, audit.toolCalls().size());
             TurnRecord.ToolCallSummary call = audit.toolCalls().getFirst();
             assertEquals("talos.apply_workspace_batch", call.name());
-            assertEquals("batch-one", call.pathHint());
-            assertEquals(List.of("batch-one", "batch-two", "batch-one/styles-copy.css"), call.pathHints());
+            assertFalse(call.success());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
         }
@@ -137,16 +133,10 @@ class WorkspaceBatchTurnProcessorTest {
                         """)),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals("destructive operation: talos.apply_workspace_batch", approvalDescription.get());
-        assertFalse(Files.exists(workspace.resolve("old-plan.md")));
-
-        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        assertEquals("CREATED", trace.checkpoint().status());
-
-        CheckpointRestoreResult restore = checkpoints.restore(workspace, trace.checkpoint().checkpointId());
-        assertTrue(restore.success(), restore.message());
+        assertFalse(result.success());
+        assertEquals("", approvalDescription.get());
         assertEquals("delete me", Files.readString(workspace.resolve("old-plan.md")));
+        LocalTurnTraceCapture.complete();
     }
 
     @Test
@@ -166,7 +156,9 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("protected path"), result.errorMessage());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
         assertEquals(0, approvals.get(), "protected batch mutation must be denied before approval");
         assertTrue(Files.exists(workspace.resolve("public.txt")));
         assertFalse(Files.exists(workspace.resolve(".env")));
@@ -201,8 +193,9 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("extra"), result.errorMessage());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
         assertEquals(0, approvals.get());
         assertFalse(Files.exists(workspace.resolve("batch-one")));
         assertFalse(Files.exists(workspace.resolve("extra")));
@@ -239,8 +232,9 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("extra"), result.errorMessage());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
         assertEquals(0, approvals.get());
         assertFalse(Files.exists(workspace.resolve("batch-one")));
         assertFalse(Files.exists(workspace.resolve("extra")));
@@ -264,10 +258,10 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Batch partially applied."), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Applied: docs"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Failed: missing.txt -> docs/missing.txt"), result.errorMessage());
-        assertTrue(Files.isDirectory(workspace.resolve("docs")));
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs")));
     }
 
     private static TurnProcessor processor(ApprovalGate gate, CheckpointService checkpointService) {

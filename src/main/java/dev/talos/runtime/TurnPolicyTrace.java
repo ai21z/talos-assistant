@@ -11,6 +11,8 @@ import dev.talos.runtime.intent.TaskIntentEvidence;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanEvidence;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -43,7 +45,8 @@ public record TurnPolicyTrace(
         List<RolefulTarget> rolefulTargets,
         List<LexicalDecisionEvidence> lexicalDecisions,
         List<LexicalRegionEvidence> lexicalRegions,
-        boolean mutationRequested
+        boolean mutationRequested,
+        WorkspaceOperationPlanEvidence workspaceOperationPlan
 ) {
     private static final String TARGET_OUTPUT_LIMIT_REASON =
             "sequential-target-output-limit-exceeded";
@@ -434,7 +437,45 @@ public record TurnPolicyTrace(
                 inferMutationRequested(
                         taskType,
                         rolefulTargets,
-                        lexicalDecisions));
+                        lexicalDecisions),
+                null);
+    }
+
+    /** Read compatibility for traces without typed workspace-plan evidence. */
+    public TurnPolicyTrace(
+            String taskType,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            List<String> expectedTargets,
+            List<String> forbiddenTargets,
+            String initialPhase,
+            String finalPhase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blocks,
+            String classificationReason,
+            List<RolefulTarget> rolefulTargets,
+            List<LexicalDecisionEvidence> lexicalDecisions,
+            List<LexicalRegionEvidence> lexicalRegions,
+            boolean mutationRequested
+    ) {
+        this(
+                taskType,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                forbiddenTargets,
+                initialPhase,
+                finalPhase,
+                nativeTools,
+                promptTools,
+                blocks,
+                classificationReason,
+                rolefulTargets,
+                lexicalDecisions,
+                lexicalRegions,
+                mutationRequested,
+                null);
     }
 
     public TurnPolicyTrace {
@@ -450,8 +491,20 @@ public record TurnPolicyTrace(
         rolefulTargets = validatedRolefulTargets(rolefulTargets);
         lexicalDecisions = validatedLexicalDecisions(lexicalDecisions);
         lexicalRegions = validatedLexicalRegions(lexicalRegions);
+        workspaceOperationPlan = workspaceOperationPlan == null
+                ? compatibleNoAuthorityEvidence(
+                        lexicalDecisions,
+                        lexicalRegions)
+                : workspaceOperationPlan;
         requireLexicalRowLimit(lexicalDecisions, lexicalRegions);
         requireSharedLexicalIdentity(lexicalDecisions, lexicalRegions);
+        requireWorkspaceOperationRequestIdentity(
+                lexicalDecisions,
+                lexicalRegions,
+                workspaceOperationPlan);
+        requireWorkspaceOperationLexicalBinding(
+                lexicalRegions,
+                workspaceOperationPlan);
         requireActiveLexicalAgreement(rolefulTargets, lexicalDecisions);
         requireAuthorityLimitAgreement(
                 classificationReason,
@@ -460,11 +513,32 @@ public record TurnPolicyTrace(
                 lexicalRegions);
     }
 
+    private static WorkspaceOperationPlanEvidence
+            compatibleNoAuthorityEvidence(
+                    List<LexicalDecisionEvidence> decisions,
+                    List<LexicalRegionEvidence> regions
+            ) {
+        if (decisions != null && !decisions.isEmpty()) {
+            LexicalDecisionEvidence first = decisions.getFirst();
+            return WorkspaceOperationPlanEvidence.noneForRequestIdentity(
+                    first.sourceRequestSha256(),
+                    first.sourceRequestBytes());
+        }
+        if (regions != null && !regions.isEmpty()) {
+            LexicalRegionEvidence first = regions.getFirst();
+            return WorkspaceOperationPlanEvidence.noneForRequestIdentity(
+                    first.sourceRequestSha256(),
+                    first.sourceRequestBytes());
+        }
+        return WorkspaceOperationPlanEvidence.from(
+                WorkspaceOperationAuthorityPlan.none(""));
+    }
+
     public static TurnPolicyTrace empty() {
         return new TurnPolicyTrace("UNKNOWN", false, false,
                 List.of(), List.of(), "unknown", "unknown",
                 List.of(), List.of(), List.of(), "", List.of(), List.of(),
-                List.of(), false);
+                List.of(), false, null);
     }
 
     public static TurnPolicyTrace from(
@@ -511,7 +585,10 @@ public record TurnPolicyTrace(
                 rolefulTargetsFrom(intent, contract),
                 List.of(),
                 List.of(),
-                contract.mutationRequested());
+                contract.mutationRequested(),
+                WorkspaceOperationPlanEvidence.from(
+                        WorkspaceOperationAuthorityPlan.none(
+                                contract.originalUserRequest())));
     }
 
     public static TurnPolicyTrace from(
@@ -523,6 +600,41 @@ public record TurnPolicyTrace(
         if (resolution == null) return empty().withInitialPhase(initialPhase)
                 .withNativeTools(nativeTools)
                 .withPromptTools(promptTools);
+        return from(
+                resolution,
+                initialPhase,
+                nativeTools,
+                promptTools,
+                WorkspaceOperationPlanEvidence.from(
+                        resolution.workspaceOperationPlan()));
+    }
+
+    /**
+     * Builds the T1204 lexical validation view without importing the reparsed
+     * request's workspace-operation authority into a downstream consumer.
+     */
+    static TurnPolicyTrace lexicalValidationView(TaskResolution resolution) {
+        if (resolution == null) return empty();
+        String request = resolution.intent().originalUserRequest();
+        MutationPlanSelection.SourceRequestIdentity identity =
+                MutationPlanSelection.sourceRequestIdentity(request);
+        return from(
+                resolution,
+                "",
+                List.of(),
+                List.of(),
+                WorkspaceOperationPlanEvidence.noneForRequestIdentity(
+                        identity.sha256(),
+                        identity.bytes()));
+    }
+
+    private static TurnPolicyTrace from(
+            TaskResolution resolution,
+            String initialPhase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            WorkspaceOperationPlanEvidence workspaceOperationEvidence
+    ) {
         TaskContract contract = resolution.contract();
         TaskIntent intent = resolution.intent();
         TaskIntentEvidence.requireCanonicalAgreement(contract, intent);
@@ -543,35 +655,36 @@ public record TurnPolicyTrace(
                 rolefulTargetsFrom(intent, contract),
                 lexicalEvidence.decisions(),
                 lexicalEvidence.regions(),
-                contract.mutationRequested());
+                contract.mutationRequested(),
+                workspaceOperationEvidence);
     }
 
     public TurnPolicyTrace withInitialPhase(String phase) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
                 expectedTargets, forbiddenTargets, phase, finalPhase, nativeTools, promptTools, blocks,
                 classificationReason, rolefulTargets, lexicalDecisions,
-                lexicalRegions, mutationRequested);
+                lexicalRegions, mutationRequested, workspaceOperationPlan);
     }
 
     public TurnPolicyTrace withFinalPhase(String phase) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
                 expectedTargets, forbiddenTargets, initialPhase, phase, nativeTools, promptTools, blocks,
                 classificationReason, rolefulTargets, lexicalDecisions,
-                lexicalRegions, mutationRequested);
+                lexicalRegions, mutationRequested, workspaceOperationPlan);
     }
 
     public TurnPolicyTrace withNativeTools(List<String> tools) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
                 expectedTargets, forbiddenTargets, initialPhase, finalPhase, tools, promptTools, blocks,
                 classificationReason, rolefulTargets, lexicalDecisions,
-                lexicalRegions, mutationRequested);
+                lexicalRegions, mutationRequested, workspaceOperationPlan);
     }
 
     public TurnPolicyTrace withPromptTools(List<String> tools) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
                 expectedTargets, forbiddenTargets, initialPhase, finalPhase, nativeTools, tools, blocks,
                 classificationReason, rolefulTargets, lexicalDecisions,
-                lexicalRegions, mutationRequested);
+                lexicalRegions, mutationRequested, workspaceOperationPlan);
     }
 
     public TurnPolicyTrace withBlocks(List<String> newBlocks) {
@@ -579,7 +692,29 @@ public record TurnPolicyTrace(
                 expectedTargets, forbiddenTargets, initialPhase, finalPhase,
                 nativeTools, promptTools, newBlocks, classificationReason,
                 rolefulTargets, lexicalDecisions, lexicalRegions,
-                mutationRequested);
+                mutationRequested, workspaceOperationPlan);
+    }
+
+    public TurnPolicyTrace withWorkspaceOperationPlan(
+            WorkspaceOperationPlanEvidence evidence
+    ) {
+        return new TurnPolicyTrace(
+                taskType,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                forbiddenTargets,
+                initialPhase,
+                finalPhase,
+                nativeTools,
+                promptTools,
+                blocks,
+                classificationReason,
+                rolefulTargets,
+                lexicalDecisions,
+                lexicalRegions,
+                mutationRequested,
+                evidence);
     }
 
     public static boolean inferMutationRequested(
@@ -616,6 +751,7 @@ public record TurnPolicyTrace(
                 || !blocks.isEmpty()
                 || !lexicalDecisions.isEmpty()
                 || !lexicalRegions.isEmpty()
+                || !"NONE".equals(workspaceOperationPlan.state())
                 || !classificationReason.isBlank();
     }
 
@@ -1079,6 +1215,77 @@ public record TurnPolicyTrace(
                         != region.sourceRequestBytes()) {
             throw new IllegalArgumentException(
                     "lexical decisions and regions must share one request identity");
+        }
+    }
+
+    private static void requireWorkspaceOperationRequestIdentity(
+            List<LexicalDecisionEvidence> decisions,
+            List<LexicalRegionEvidence> regions,
+            WorkspaceOperationPlanEvidence workspacePlan
+    ) {
+        if (workspacePlan == null
+                || (decisions.isEmpty() && regions.isEmpty()
+                        && "NONE".equals(workspacePlan.state()))) {
+            return;
+        }
+        if (decisions.isEmpty() && regions.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "observed workspace operation evidence requires its lexical envelope");
+        }
+        String requestSha256;
+        int requestBytes;
+        if (!decisions.isEmpty()) {
+            LexicalDecisionEvidence first = decisions.getFirst();
+            requestSha256 = first.sourceRequestSha256();
+            requestBytes = first.sourceRequestBytes();
+        } else {
+            LexicalRegionEvidence first = regions.getFirst();
+            requestSha256 = first.sourceRequestSha256();
+            requestBytes = first.sourceRequestBytes();
+        }
+        if (!workspacePlan.canonicalRequestSha256().equals(requestSha256)
+                || workspacePlan.canonicalRequestUtf8Bytes() != requestBytes) {
+            throw new IllegalArgumentException(
+                    "workspace operation evidence must share the lexical request identity");
+        }
+    }
+
+    private static void requireWorkspaceOperationLexicalBinding(
+            List<LexicalRegionEvidence> regions,
+            WorkspaceOperationPlanEvidence workspacePlan
+    ) {
+        if (workspacePlan == null
+                || !"AUTHORIZED_SINGLE".equals(workspacePlan.state())) {
+            return;
+        }
+        if (workspacePlan.operations().size() != 1) {
+            throw new IllegalArgumentException(
+                    "authorized workspace operation evidence must contain one operation");
+        }
+        WorkspaceOperationPlanEvidence.OperationEvidence operation =
+                workspacePlan.operations().getFirst();
+        List<LexicalRegionEvidence> operationClauses = regions.stream()
+                .filter(region -> "WORKSPACE_OPERATION".equals(region.kind())
+                        || "WORKSPACE_OPERATION_CLAUSE_OBSERVATION"
+                                .equals(region.kind()))
+                .toList();
+        String expectedOwner = switch (operation.owner()) {
+            case "COORDINATED_TAIL" ->
+                    MutationPlanSelection.Owner.COORDINATED_MUTATION_TAIL.name();
+            case "SEQUENTIAL_CLAUSE" ->
+                    MutationPlanSelection.Owner.SEQUENTIAL_MUTATION_CLAUSE.name();
+            default -> "";
+        };
+        if (operationClauses.size() != 1) {
+            throw new IllegalArgumentException(
+                    "authorized workspace operation evidence requires exactly one lexical clause");
+        }
+        LexicalRegionEvidence clause = operationClauses.getFirst();
+        if (!expectedOwner.equals(clause.owner())
+                || operation.sourceStartOffset() < clause.startOffset()
+                || operation.sourceEndOffset() > clause.endOffset()) {
+            throw new IllegalArgumentException(
+                    "workspace operation evidence differs from its lexical clause");
         }
     }
 

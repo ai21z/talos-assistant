@@ -861,6 +861,7 @@ class T1204StoreEvidenceBindingTest {
         policy.remove("lexicalEvidenceSchemaVersion");
         policy.remove("lexicalDecisions");
         policy.remove("lexicalRegions");
+        policy.remove("workspaceOperationPlan");
         policy.set("rolefulTargets", JSON.createArrayNode());
         Files.writeString(
                 directory.resolve(sessionId + ".turns.jsonl"),

@@ -13,6 +13,7 @@ import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.outcome.MutationRecoveryAssessment;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.verification.VerificationReport;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
 import dev.talos.core.tool.ToolProtocolText;
@@ -63,6 +64,8 @@ public final class LocalTurnTraceCapture {
                 new IdentityHashMap<>();
         final Map<ProviderResponseCapture.Receipt, Set<Integer>> consumedTextProposals =
                 new IdentityHashMap<>();
+        final Map<String, String> workspaceOperationToolCallIds =
+                new LinkedHashMap<>();
         String latestSelectableGenerationId = "";
         long providerAuthorityEpoch;
         long nextToolCallOrdinal;
@@ -470,6 +473,113 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null || trace == null || !trace.hasPolicyData()) return;
         PolicyTraceRecorder.record(bag.builder, trace);
+    }
+
+    public enum WorkspaceOperationLifecycleStage {
+        APPROVAL_REQUIRED,
+        APPROVAL_GRANTED,
+        APPROVAL_DENIED,
+        CHECKPOINT_CREATED,
+        CHECKPOINT_SKIPPED,
+        CHECKPOINT_FAILED,
+        EXECUTION_SUCCEEDED,
+        EXECUTION_FAILED,
+        VERIFICATION_SUCCEEDED,
+        VERIFICATION_FAILED
+    }
+
+    /** Records only stable IDs and a typed decision; no request/path prose. */
+    public static void recordWorkspaceOperationAuthorityDecision(
+            WorkspaceOperationAuthorityPlan plan,
+            ToolCall call,
+            String decision
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || plan == null || call == null) return;
+        ParsedToolCallPermit permit = bag.activeToolCall;
+        if (permit == null || !permitScopeMatches(permit)
+                || !permitMatches(permit, call)) {
+            throw new IllegalStateException(
+                    "workspace-operation authority decision lacks exact parsed-call lineage");
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("planId", plan.planId());
+        data.put("planState", plan.state().name());
+        data.put("decision", safe(decision));
+        data.put("toolCallId", permit.toolCallId);
+        if (!plan.operations().isEmpty()) {
+            data.put("operationId", plan.operations().getFirst().operationId());
+        }
+        bag.builder.event(TurnTraceEvent.simple(
+                "WORKSPACE_OPERATION_AUTHORITY_DECIDED",
+                now(),
+                data));
+    }
+
+    public static void recordWorkspaceOperationConsumed(
+            WorkspaceOperationAuthorityPlan plan
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || plan == null || plan.operations().isEmpty()) return;
+        String operationId = plan.operations().getFirst().operationId();
+        String toolCallId = bag.workspaceOperationToolCallIds.get(operationId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("planId", plan.planId());
+        data.put("operationId", operationId);
+        if (toolCallId != null && !toolCallId.isBlank()) {
+            data.put("toolCallId", toolCallId);
+        }
+        bag.builder.event(TurnTraceEvent.simple(
+                "WORKSPACE_OPERATION_OBLIGATION_CONSUMED",
+                now(),
+                data));
+    }
+
+    /** Records the exact authority, parsed-call, and lifecycle identity chain. */
+    public static void recordWorkspaceOperationLifecycle(
+            WorkspaceOperationAuthorityPlan plan,
+            ToolCall call,
+            WorkspaceOperationLifecycleStage stage
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null
+                || plan == null
+                || stage == null
+                || plan.authorizedOperations().size() != 1) {
+            return;
+        }
+        String operationId = plan.authorizedOperations().getFirst().operationId();
+        String toolCallId = bag.workspaceOperationToolCallIds.get(operationId);
+        if (call != null) {
+            if (!plan.authorizes(call)) {
+                throw new IllegalStateException(
+                        "workspace-operation lifecycle call differs from authority plan");
+            }
+            ParsedToolCallPermit permit = bag.activeToolCall;
+            if (permit == null || !permitScopeMatches(permit)
+                    || !permitMatches(permit, call)) {
+                throw new IllegalStateException(
+                        "workspace-operation lifecycle lacks exact parsed-call lineage");
+            }
+            toolCallId = permit.toolCallId;
+            String prior = bag.workspaceOperationToolCallIds.putIfAbsent(
+                    operationId,
+                    toolCallId);
+            if (prior != null && !prior.equals(toolCallId)) {
+                throw new IllegalStateException(
+                        "workspace-operation authority was bound to multiple tool calls");
+            }
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("planId", plan.planId());
+        data.put("operationId", operationId);
+        if (toolCallId != null && !toolCallId.isBlank()) {
+            data.put("toolCallId", toolCallId);
+        }
+        bag.builder.event(TurnTraceEvent.simple(
+                "WORKSPACE_OPERATION_" + stage.name(),
+                now(),
+                data));
     }
 
     /** Records one redacted projection of the exact runtime-compiled request obligation. */
@@ -2318,6 +2428,29 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         CheckpointTraceRecorder.record(bag.builder, status, checkpointId, reason, capturedFiles);
+    }
+
+    public static void recordCheckpoint(
+            String status,
+            String checkpointId,
+            String reason,
+            int capturedFiles,
+            String authorityPlanId,
+            String operationId
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        CheckpointTraceRecorder.record(
+                bag.builder,
+                status,
+                checkpointId,
+                reason,
+                capturedFiles,
+                authorityPlanId,
+                operationId,
+                bag.workspaceOperationToolCallIds.getOrDefault(
+                        safe(operationId),
+                        ""));
     }
 
     /**

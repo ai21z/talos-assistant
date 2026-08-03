@@ -48,6 +48,16 @@ public final class SequentialMutationClauseParser {
                     + "(?:directories|directory|dirs|dir|folders|folder))\\b");
     private static final Pattern DIRECTORY_PREFIX_SIGNAL = Pattern.compile(
             "(?iu)\\b(?:directories|directory|dirs|dir|folders|folder)\\b");
+    private static final Pattern DIRECTORY_OBJECT_PREFIX = Pattern.compile(
+            "(?iu)^\\s*(?:(?:me|a|an|the|new)\\s+)*"
+                    + "(?:directories|directory|dirs|dir|folders|folder)\\b");
+    private static final Pattern INDEPENDENT_ACTION_CONNECTOR = Pattern.compile(
+            "(?iu)^\\s*,?\\s*(?:and|then)\\s*$");
+    private static final Pattern SCOPED_SYMBOL_RENAME = Pattern.compile(
+            "(?iu)^\\s+([\\p{L}_$][\\p{L}\\p{N}_$]*)\\s+"
+                    + "(?:to|as)\\s+([\\p{L}_$][\\p{L}\\p{N}_$]*)\\s+"
+                    + "in\\s+([A-Za-z0-9_.-]+(?:[\\\\/][A-Za-z0-9_.-]+)*"
+                    + "\\.[A-Za-z0-9]{1,8})(?:\\s+only)?\\s*[.!?]?\\s*$");
     private static final Pattern PRONOMINAL_PROHIBITION = Pattern.compile(
             "(?iu)^[\\s;,.!?\\u2026]*(?:(?:but|and|then)\\s+)?(?:"
                     + "(?:do\\s+not|don['\\u2019]?t|dont|never)\\s+"
@@ -56,6 +66,21 @@ public final class SequentialMutationClauseParser {
                     + "|leave\\s+(?:(?:it|that|this)(?:\\s+file)?|them|those\\s+files)"
                     + "\\s+unchanged)"
                     + "\\b[\\s.!?\\u2026]*");
+    private static final Pattern DIRECT_PASSIVE_MUTATION_SUFFIX =
+            Pattern.compile(
+                    "(?iu)^\\s*(?:(?:should|must|shall)"
+                            + "|(?:needs?|has|have)\\s+to"
+                            + "|(?:is|are)\\s+to)\\s+be\\s+"
+                            + "(?:deleted|removed|moved|renamed|edited|updated|"
+                            + "modified|rewritten|replaced|changed|fixed)\\b");
+    private static final Pattern ENSURED_PASSIVE_MUTATION_SUFFIX =
+            Pattern.compile(
+                    "(?iu)^\\s*(?:is|are)\\s+"
+                            + "(?:deleted|removed|moved|renamed|edited|updated|"
+                            + "modified|rewritten|replaced|changed|fixed)\\b");
+    private static final Pattern DIRECT_ENSURE_PREFIX = Pattern.compile(
+            "(?iu)^\\s*(?:please\\s+)?(?:ensure|make\\s+sure)"
+                    + "(?:\\s+that)?\\s*$");
     private static final Set<String> BARE_ANAPHORA = Set.of(
             "it", "that", "this", "them", "those");
     private static final Set<String> GENERIC_RESOURCE_CLASSES = Set.of(
@@ -303,6 +328,23 @@ public final class SequentialMutationClauseParser {
                                 preAnchorBoundEnd,
                                 bound.action().start(),
                                 authority);
+                if (bound.family()
+                        == CanonicalMutationClauseMatcher.Family
+                                .WORKSPACE_OPERATION) {
+                    addPreAnchorNonAuthorityEvidence(
+                            view,
+                            bound,
+                            authorityStart,
+                            preAnchorAuthority,
+                            excluded,
+                            regions,
+                            decisions,
+                            regionIdentities,
+                            evidence,
+                            work);
+                    preAnchorBoundEnd = bound.outputEnd();
+                    continue;
+                }
                 boolean eligibleAnchor = eligibleContentAnchor(bound);
                 boolean controlSafeAnchor =
                         !view.containsProviderRemovedControl(
@@ -613,6 +655,24 @@ public final class SequentialMutationClauseParser {
                     evidence,
                     work);
         }
+        addUnboundWorkspaceActionRegions(
+                view,
+                indexedActions,
+                excluded,
+                regions,
+                regionIdentities,
+                boundActions,
+                evidence,
+                work);
+        addDirectPassiveMutationQuarantines(
+                view,
+                occurrences,
+                excluded,
+                boundaries,
+                regions,
+                regionIdentities,
+                evidence,
+                work);
 
         decisions.sort(Comparator
                 .comparingInt(SequentialMutationClausePlan.ClauseDecision
@@ -647,11 +707,19 @@ public final class SequentialMutationClauseParser {
                     SequentialMutationClausePlan.RegionKind
                             .LEXICAL_EVIDENCE_LIMIT_QUARANTINE), work);
         }
+        List<WorkspaceOperationObligation> workspaceOperationObligations =
+                workspaceOperationObligations(
+                        view,
+                        candidates,
+                        decisions,
+                        regions);
         return measured(new SequentialMutationClausePlan(
                 request,
                 excluded,
                 decisions,
-                regions), work);
+                regions,
+                null,
+                workspaceOperationObligations), work);
         } catch (LexicalEvidenceLimitExceeded ignored) {
             return measured(authorityLimitQuarantine(
                     request,
@@ -659,6 +727,72 @@ public final class SequentialMutationClauseParser {
                     SequentialMutationClausePlan.RegionKind
                             .LEXICAL_EVIDENCE_LIMIT_QUARANTINE), work);
         }
+    }
+
+    private static List<WorkspaceOperationObligation>
+            workspaceOperationObligations(
+                    RequestLexicalView view,
+                    List<String> candidates,
+                    List<SequentialMutationClausePlan.ClauseDecision> decisions,
+                    List<SequentialMutationClausePlan.OwnedRegion> regions
+            ) {
+        if (view == null || decisions == null || regions == null) {
+            return List.of();
+        }
+        LinkedHashMap<String, WorkspaceOperationObligation> obligations =
+                new LinkedHashMap<>();
+        for (SequentialMutationClausePlan.ClauseDecision decision : decisions) {
+            if (decision.actionFamily()
+                            != SequentialMutationClausePlan.ActionFamily
+                                    .WORKSPACE_OPERATION
+                    || decision.authority()
+                            != SequentialMutationClausePlan.Authority
+                                    .WORKSPACE_OPERATION_BLOCKED) {
+                continue;
+            }
+            SequentialMutationClausePlan.OwnedRegion region = regions.stream()
+                    .filter(candidate ->
+                            candidate.kind()
+                                            == SequentialMutationClausePlan
+                                                    .RegionKind
+                                                    .WORKSPACE_OPERATION
+                                    && candidate.startOffset()
+                                            == decision.startOffset()
+                                    && candidate.endOffset()
+                                            == decision.endOffset())
+                    .findFirst()
+                    .orElse(null);
+            if (region == null) continue;
+            CanonicalMutationClauseMatcher.Action action =
+                    CanonicalMutationClauseMatcher.actions(
+                                    view,
+                                    region.startOffset(),
+                                    region.endOffset()).stream()
+                            .filter(candidate ->
+                                    candidate.start()
+                                                    == decision
+                                                            .actionStartOffset()
+                                            && candidate.end()
+                                                    == decision
+                                                            .actionEndOffset())
+                            .findFirst()
+                            .orElse(null);
+            if (action == null) continue;
+            CanonicalMutationClauseMatcher.bindWorkspaceOperation(
+                            view,
+                            action,
+                            CanonicalMutationClauseMatcher.Family
+                                    .WORKSPACE_OPERATION,
+                            region.startOffset(),
+                            region.endOffset(),
+                            candidates,
+                            WorkspaceOperationObligation.Owner
+                                    .SEQUENTIAL_CLAUSE)
+                    .ifPresent(obligation -> obligations.putIfAbsent(
+                            obligation.stableId(),
+                            obligation));
+        }
+        return List.copyOf(obligations.values());
     }
 
     private static void addRetainedPrimaryAnchorEvidence(
@@ -965,8 +1099,17 @@ public final class SequentialMutationClauseParser {
             scanEnd = boundaries.clampForwardScanEnd(
                     action.end(),
                     scanEnd);
-            DirectTargets direct =
-                    directTargets(
+            var scopedSymbolTarget = scopedSymbolRenameTarget(
+                    view,
+                    occurrences,
+                    action,
+                    scanEnd,
+                    excluded);
+            DirectTargets direct = scopedSymbolTarget.isPresent()
+                    ? new DirectTargets(
+                            List.of(scopedSymbolTarget.get()),
+                            false)
+                    : directTargets(
                             view,
                             occurrences,
                             action,
@@ -983,12 +1126,23 @@ public final class SequentialMutationClauseParser {
                     outputEnd,
                     scanEnd,
                     nextActionStart);
-            CanonicalMutationClauseMatcher.Family family = effectiveFamily(
+            clauseEnd = trimIndependentActionConnector(
+                    view,
+                    outputEnd,
+                    clauseEnd,
+                    nextActionStart);
+            boolean scopedSymbolRename = isScopedSymbolRename(
                     view,
                     action,
-                    direct.targets().getFirst().envelopeStart(),
-                    outputEnd,
-                    clauseEnd);
+                    scanEnd);
+            CanonicalMutationClauseMatcher.Family family = scopedSymbolRename
+                    ? CanonicalMutationClauseMatcher.Family.CONTENT_MUTATION
+                    : effectiveFamily(
+                            view,
+                            action,
+                            direct.targets().getFirst().envelopeStart(),
+                            outputEnd,
+                            clauseEnd);
             int pronominalProhibitionEnd = family
                             == CanonicalMutationClauseMatcher.Family
                                     .CONTENT_MUTATION
@@ -1016,6 +1170,64 @@ public final class SequentialMutationClauseParser {
             disjunctiveFromPriorAction = disjunctiveContinuation;
         }
         return List.copyOf(bound);
+    }
+
+    private static java.util.Optional<CoordinatedMutationTailParser.TargetOccurrence>
+            scopedSymbolRenameTarget(
+                    RequestLexicalView view,
+                    List<CoordinatedMutationTailParser.TargetOccurrence>
+                            occurrences,
+                    CanonicalMutationClauseMatcher.Action action,
+                    int scanEnd,
+                    List<SequentialMutationClausePlan.SourceSpan> excluded
+            ) {
+        if (!isScopedSymbolRename(view, action, scanEnd)) {
+            return java.util.Optional.empty();
+        }
+        var matcher = SCOPED_SYMBOL_RENAME.matcher(
+                view.masked().substring(action.end(), scanEnd));
+        if (!matcher.matches()) return java.util.Optional.empty();
+        int start = action.end() + matcher.start(3);
+        int end = action.end() + matcher.end(3);
+        return occurrences.stream()
+                .filter(occurrence -> occurrence.envelopeStart() == start
+                        && occurrence.envelopeEnd() == end
+                        && !intersectsExcluded(excluded, start, end))
+                .findFirst();
+    }
+
+    private static boolean isScopedSymbolRename(
+            RequestLexicalView view,
+            CanonicalMutationClauseMatcher.Action action,
+            int scanEnd
+    ) {
+        return view != null
+                && action != null
+                && "rename".equals(
+                        action.verb().toLowerCase(Locale.ROOT))
+                && scanEnd >= action.end()
+                && scanEnd <= view.request().length()
+                && SCOPED_SYMBOL_RENAME.matcher(
+                        view.masked().substring(
+                                action.end(),
+                                scanEnd)).matches();
+    }
+
+    private static int trimIndependentActionConnector(
+            RequestLexicalView view,
+            int outputEnd,
+            int clauseEnd,
+            int nextActionStart
+    ) {
+        if (view == null
+                || nextActionStart >= view.request().length()
+                || clauseEnd <= outputEnd) {
+            return clauseEnd;
+        }
+        String suffix = view.masked().substring(outputEnd, clauseEnd);
+        return INDEPENDENT_ACTION_CONNECTOR.matcher(suffix).matches()
+                ? outputEnd
+                : clauseEnd;
     }
 
     private static DirectTargets
@@ -1723,6 +1935,194 @@ public final class SequentialMutationClauseParser {
                                     clause.sourceText()));
                 }
             }
+        }
+    }
+
+    /**
+     * Retains parser-owned evidence for workspace-family actions whose
+     * operands did not bind. Without this ceiling, a later exact operation
+     * could be authorized while an earlier ambiguous operation silently
+     * disappeared from the compiled plan.
+     */
+    private static void addUnboundWorkspaceActionRegions(
+            RequestLexicalView view,
+            List<CanonicalMutationClauseMatcher.Action> actions,
+            List<SequentialMutationClausePlan.SourceSpan> excluded,
+            List<SequentialMutationClausePlan.OwnedRegion> regions,
+            Set<RegionIdentity> regionIdentities,
+            List<BoundAction> boundActions,
+            EvidenceBudget evidence,
+            MutableParseWork work
+    ) {
+        if (view == null || actions == null || actions.isEmpty()) return;
+        Map<Integer, BoundAction> boundByStart = boundActions.stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        bound -> bound.action().start(),
+                        bound -> bound,
+                        (first, ignored) -> first));
+        for (int index = 0; index < actions.size(); index++) {
+            CanonicalMutationClauseMatcher.Action action = actions.get(index);
+            if ("touch".equalsIgnoreCase(action.verb())) {
+                continue;
+            }
+            BoundAction bound = boundByStart.get(action.start());
+            if (bound != null
+                    && (bound.family()
+                                    == CanonicalMutationClauseMatcher.Family
+                                            .WORKSPACE_OPERATION
+                            || eligibleContentAnchor(bound))) {
+                continue;
+            }
+            int sentenceEnd = view.sentenceEndAfter(action.end());
+            String verb = action.verb().toLowerCase(Locale.ROOT);
+            boolean ambiguousCreate = "create".equals(verb)
+                    || "make".equals(verb);
+            boolean directoryObject = ambiguousCreate
+                    && DIRECTORY_OBJECT_PREFIX.matcher(
+                            view.maskedLower().substring(
+                                    action.end(),
+                                    sentenceEnd)).find();
+            boolean followedByWorkspaceAction = ambiguousCreate
+                    && actions.subList(index + 1, actions.size()).stream()
+                            .takeWhile(next -> next.start() < sentenceEnd)
+                            .anyMatch(next -> next.family()
+                                    == CanonicalMutationClauseMatcher.Family
+                                            .WORKSPACE_OPERATION);
+            boolean workspaceFamily = action.family()
+                            == CanonicalMutationClauseMatcher.Family
+                                    .WORKSPACE_OPERATION
+                    || directoryObject
+                    || followedByWorkspaceAction;
+            if (!workspaceFamily) continue;
+            int nextActionStart = index + 1 < actions.size()
+                    ? actions.get(index + 1).start()
+                    : sentenceEnd;
+            RequestLexicalView.Span span = view.trimmedSpan(
+                    action.start(),
+                    Math.min(sentenceEnd, nextActionStart));
+            if (span.end() <= span.start()
+                    || intersectsExcluded(
+                            excluded,
+                            span.start(),
+                            span.end())
+                    || regions.stream().anyMatch(region ->
+                            region.kind()
+                                            == SequentialMutationClausePlan
+                                                    .RegionKind
+                                                    .WORKSPACE_OPERATION
+                                    && region.startOffset() <= action.start()
+                                    && region.endOffset() >= action.end())) {
+                continue;
+            }
+            String sourceText = evidence.materialize(span);
+            work.regionDedupLookups++;
+            addRegion(
+                    regions,
+                    regionIdentities,
+                    new SequentialMutationClausePlan.OwnedRegion(
+                            SequentialMutationClausePlan.RegionKind
+                                    .WORKSPACE_OPERATION,
+                            span.start(),
+                            span.end(),
+                            sourceText),
+                    evidence);
+        }
+    }
+
+    /**
+     * Retains direct passive mutation clauses that the active-action grammar
+     * cannot type. The workspace-operation region is deliberately unbound: it
+     * is an authority quarantine, so one otherwise exact operation cannot stay
+     * executable while another direct mutation silently disappears.
+     */
+    private static void addDirectPassiveMutationQuarantines(
+            RequestLexicalView view,
+            List<CoordinatedMutationTailParser.TargetOccurrence> occurrences,
+            List<SequentialMutationClausePlan.SourceSpan> excluded,
+            SequenceBoundaryIndex boundaries,
+            List<SequentialMutationClausePlan.OwnedRegion> regions,
+            Set<RegionIdentity> regionIdentities,
+            EvidenceBudget evidence,
+            MutableParseWork work
+    ) {
+        if (view == null || occurrences == null || occurrences.isEmpty()) {
+            return;
+        }
+        for (CoordinatedMutationTailParser.TargetOccurrence occurrence
+                : occurrences) {
+            if (occurrence.quoted()
+                    || !view.isTopLevel(occurrence.envelopeStart())) {
+                continue;
+            }
+            int clauseEnd = view.sentenceEndAfter(occurrence.envelopeEnd());
+            String suffix = view.maskedLower().substring(
+                    occurrence.envelopeEnd(),
+                    clauseEnd);
+            java.util.regex.Matcher passive =
+                    DIRECT_PASSIVE_MUTATION_SUFFIX.matcher(suffix);
+            boolean directModal = passive.find();
+            java.util.regex.Matcher ensured =
+                    ENSURED_PASSIVE_MUTATION_SUFFIX.matcher(suffix);
+            boolean ensureShape = !directModal && ensured.find();
+            if (!directModal && !ensureShape) continue;
+            SequenceBoundary boundary = boundaries.latestBefore(
+                    0,
+                    occurrence.envelopeStart());
+            int clauseStart = boundary.present() ? boundary.clauseStart() : 0;
+            RequestLexicalView.Span span = view.trimmedSpan(
+                    clauseStart,
+                    clauseEnd);
+            if (span.end() <= span.start()
+                    || intersectsExcluded(excluded, span.start(), span.end())
+                    || occurrence.envelopeStart() < span.start()
+                    || occurrence.envelopeEnd() > span.end()) {
+                continue;
+            }
+            String prefix = view.maskedLower().substring(
+                    span.start(),
+                    occurrence.envelopeStart());
+            if (CanonicalMutationClauseMatcher.finiteScopeKind(prefix)
+                    != CanonicalMutationClauseMatcher.ScopeKind.NONE) {
+                continue;
+            }
+            if (ensureShape && !DIRECT_ENSURE_PREFIX.matcher(prefix).matches()) {
+                continue;
+            }
+            int passiveEnd = occurrence.envelopeEnd()
+                    + (directModal ? passive.end() : ensured.end());
+            if (!view.isUnquotedRange(
+                            occurrence.envelopeEnd(),
+                            passiveEnd)
+                    || view.containsProviderRemovedControl(
+                            span.start(),
+                            passiveEnd)
+                    || CanonicalMutationClauseMatcher.finitePostfixScopeKind(
+                                    view.maskedLower().substring(
+                                            passiveEnd,
+                                            span.end()))
+                            != CanonicalMutationClauseMatcher.ScopeKind.NONE) {
+                continue;
+            }
+            boolean alreadyQuarantined = regions.stream().anyMatch(region ->
+                    region.kind()
+                                    == SequentialMutationClausePlan.RegionKind
+                                            .WORKSPACE_OPERATION
+                            && region.startOffset() <= occurrence.envelopeStart()
+                            && region.endOffset() >= passiveEnd);
+            if (alreadyQuarantined) continue;
+            work.clauseClassificationCharacters += span.end() - span.start();
+            String sourceText = evidence.materialize(span);
+            work.regionDedupLookups++;
+            addRegion(
+                    regions,
+                    regionIdentities,
+                    new SequentialMutationClausePlan.OwnedRegion(
+                            SequentialMutationClausePlan.RegionKind
+                                    .WORKSPACE_OPERATION,
+                            span.start(),
+                            span.end(),
+                            sourceText),
+                    evidence);
         }
     }
 

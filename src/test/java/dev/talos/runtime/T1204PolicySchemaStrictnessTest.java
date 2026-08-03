@@ -44,7 +44,8 @@ class T1204PolicySchemaStrictnessTest {
             "rolefulTargets",
             "lexicalEvidenceSchemaVersion",
             "lexicalDecisions",
-            "lexicalRegions");
+            "lexicalRegions",
+            "workspaceOperationPlan");
     private static final List<String> POLICY_STRING_KEYS = List.of(
             "taskType",
             "initialPhase",
@@ -212,6 +213,7 @@ class T1204PolicySchemaStrictnessTest {
         legacyPolicy.remove("lexicalEvidenceSchemaVersion");
         legacyPolicy.remove("lexicalDecisions");
         legacyPolicy.remove("lexicalRegions");
+        legacyPolicy.remove("workspaceOperationPlan");
         legacyPolicy.set("rolefulTargets", JSON.createArrayNode());
         writeTurnJson(directory, "legacy-control", legacy);
 

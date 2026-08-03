@@ -14,6 +14,8 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,6 +68,106 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticWebCreationContinuation]"), prompt);
         assertTrue(prompt.contains("Successful directory mutation: Created directory bmi-website"), prompt);
         assertTrue(prompt.contains("Call talos.write_file now for the actual static web files."), prompt);
+    }
+
+    @Test
+    void blockedUnrequestedDirectoryContinuesWithWriteFileOnly() {
+        LoopState state = state(
+                "I want to create a modern BMI calculator website to use! Can you make it?");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.mkdir",
+                "bmi-website",
+                false,
+                true,
+                false,
+                "",
+                "The requested talos.mkdir operation is not authorized by the current typed task plan.",
+                null,
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
+
+        StaticWebContinuationPlanner.Plan continuation =
+                StaticWebContinuationPlanner.blockedUnrequestedDirectoryPlan(
+                                state,
+                                baseTools())
+                        .orElseThrow();
+
+        assertEquals(
+                "static-web-blocked-directory-continuation",
+                continuation.retryName());
+        assertEquals(List.of("talos.write_file"), toolNames(continuation.tools()));
+        assertEquals(ToolChoiceMode.REQUIRED, continuation.controls().toolChoice());
+        assertEquals(
+                List.of("static-web-blocked-directory-continuation"),
+                continuation.controls().debugTags());
+        assertTrue(continuation.pendingActionObligation().isEmpty());
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains("[StaticWebBlockedDirectoryContinuation]"), prompt);
+        assertTrue(prompt.contains("must not be retried"), prompt);
+        assertTrue(prompt.contains(
+                "Call talos.write_file now for the actual static web files."),
+                prompt);
+    }
+
+    @Test
+    void blockedDirectoryContinuationDoesNotGeneralizePastExactTypedBlock() {
+        LoopState state = state(
+                "I want to create a modern BMI calculator website to use! Can you make it?");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.mkdir",
+                "bmi-website",
+                false,
+                true,
+                false,
+                "",
+                "directory failed",
+                null,
+                ToolError.INVALID_PARAMS));
+
+        assertTrue(StaticWebContinuationPlanner
+                .blockedUnrequestedDirectoryPlan(state, baseTools())
+                .isEmpty());
+    }
+
+    @Test
+    void blockedDirectoryContinuationCannotAbandonAuthorizedTypedMkdir() {
+        String request = "Create index.html for a modern BMI calculator "
+                + "website, then create a directory named bmi-website.";
+        TaskResolution resolution = TaskContractResolver
+                .resolveFromUserRequest(request);
+        assertEquals(
+                dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan
+                        .State.AUTHORIZED_SINGLE,
+                resolution.workspaceOperationPlan().state(),
+                resolution.workspaceOperationPlan().reason());
+        TurnTaskContractCapture.set(resolution);
+        LoopState state = state(request);
+        state.toolOutcomes.add(blockedMkdir("wrong-directory"));
+
+        assertTrue(StaticWebContinuationPlanner
+                .blockedUnrequestedDirectoryPlan(state, baseTools())
+                .isEmpty());
+    }
+
+    @Test
+    void blockedDirectoryContinuationCannotDiscardObservedBlockedMkdir() {
+        String request = "Create a modern BMI calculator website, then create "
+                + "directories named assets and images.";
+        TaskResolution resolution = TaskContractResolver
+                .resolveFromUserRequest(request);
+        assertEquals(
+                dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan
+                        .State.BLOCKED,
+                resolution.workspaceOperationPlan().state(),
+                resolution.workspaceOperationPlan().reason());
+        TurnTaskContractCapture.set(resolution);
+        LoopState state = state(request);
+        state.toolOutcomes.add(blockedMkdir("assets"));
+
+        assertTrue(StaticWebContinuationPlanner
+                .blockedUnrequestedDirectoryPlan(state, baseTools())
+                .isEmpty());
     }
 
     @Test
@@ -673,6 +775,22 @@ class StaticWebContinuationPlannerTest {
                 null,
                 10,
                 0);
+    }
+
+    private static ToolCallLoop.ToolOutcome blockedMkdir(String path) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.mkdir",
+                path,
+                false,
+                true,
+                false,
+                "",
+                "The requested talos.mkdir operation is not authorized by "
+                        + "the current typed task plan.",
+                null,
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED);
     }
 
     private static List<ToolSpec> baseTools() {

@@ -150,9 +150,10 @@ class JsonSessionStoreTurnsTest {
     void policyTraceRolefulTargetsRoundTrip(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-policy-roleful";
+        String request = "Rewrite styles.css so index.html still works.";
         TurnPolicyTrace trace = TurnPolicyTrace.from(
-                dev.talos.runtime.task.TaskContractResolver.fromUserRequest(
-                        "Rewrite styles.css so index.html still works."),
+                dev.talos.runtime.task.TaskContractResolver.resolveFromUserRequest(
+                        request),
                 "APPLY",
                 List.of("talos.write_file", "talos.edit_file"),
                 List.of("talos.write_file", "talos.edit_file"));
@@ -161,7 +162,7 @@ class JsonSessionStoreTurnsTest {
                 1,
                 Instant.parse("2026-04-18T10:00:00Z"),
                 250,
-                "rewrite styles",
+                request,
                 "No file changed.",
                 List.of(),
                 0,
@@ -245,7 +246,8 @@ class JsonSessionStoreTurnsTest {
         legacyPolicy.remove(List.of(
                 "lexicalEvidenceSchemaVersion",
                 "lexicalDecisions",
-                "lexicalRegions"));
+                "lexicalRegions",
+                "workspaceOperationPlan"));
         for (JsonNode target : legacyPolicy.withArray("rolefulTargets")) {
             if ("style.css".equals(target.path("path").asText())) {
                 ((ObjectNode) target).remove("authorityEndOffset");

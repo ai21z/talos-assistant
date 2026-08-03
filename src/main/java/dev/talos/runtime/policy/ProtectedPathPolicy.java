@@ -4,6 +4,7 @@ import dev.talos.safety.ProtectedPathTokens;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolCall;
 
@@ -31,7 +32,9 @@ public final class ProtectedPathPolicy {
         var decisions = new java.util.ArrayList<ResourceDecision>();
         if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
-                WorkspaceOperationPlanner.checkpointPlan(call).ifPresent(plan -> {
+                WorkspaceOperationPlanner.checkpointPlan(
+                        call,
+                        TurnTaskContractCapture.workspaceOperationPlan()).ifPresent(plan -> {
                     for (var effect : plan.pathEffects()) {
                         if (effect != null && effect.path() != null && !effect.path().isBlank()) {
                             decisions.add(classify(workspace, effect.path()));

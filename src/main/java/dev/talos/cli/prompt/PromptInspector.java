@@ -430,7 +430,7 @@ public final class PromptInspector {
         List<String> toolNames = NativeToolSpecPolicy.names(specs);
         CurrentTurnPlan plan =
                 CurrentTurnPlan.createWithActionObligation(
-                        finalResolution.contract(),
+                        finalResolution,
                         authoritativePhase,
                         nativeTools ? toolNames : List.of(),
                         toolNames,

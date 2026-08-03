@@ -157,7 +157,7 @@ class T1204DurableEvidenceAdversarialTest {
             @TempDir Path directory
     ) throws Exception {
         String valid = persistedLexicalTurnJson(directory, "strict-source");
-        String marker = "\"lexicalEvidenceSchemaVersion\":1";
+        String marker = "\"lexicalEvidenceSchemaVersion\":2";
         assertTrue(valid.contains(marker));
 
         String duplicate = valid.replace(
@@ -192,7 +192,7 @@ class T1204DurableEvidenceAdversarialTest {
         writeTurnJson(directory, "schema-partial", missingRegionArray);
 
         ObjectNode unsupported = validRoot.deepCopy();
-        policy(unsupported).put("lexicalEvidenceSchemaVersion", 2);
+        policy(unsupported).put("lexicalEvidenceSchemaVersion", 3);
         writeTurnJson(directory, "schema-unsupported", unsupported);
 
         ObjectNode legacy = validRoot.deepCopy();
@@ -200,6 +200,7 @@ class T1204DurableEvidenceAdversarialTest {
         legacyPolicy.remove("lexicalEvidenceSchemaVersion");
         legacyPolicy.remove("lexicalDecisions");
         legacyPolicy.remove("lexicalRegions");
+        legacyPolicy.remove("workspaceOperationPlan");
         legacyPolicy.set("rolefulTargets", JSON.createArrayNode());
         writeTurnJson(directory, "schema-legacy", legacy);
 

@@ -81,7 +81,7 @@ class AssistantTurnPreparationTargetRolesTest {
     }
 
     @Test
-    void blockedWorkspaceTailRecomputesAFileOnlySurfaceAndObligation(
+    void contentThenExactWorkspaceOperationKeepsBothTypedSurfaces(
             @TempDir Path workspace
     ) {
         String request =
@@ -89,13 +89,8 @@ class AssistantTurnPreparationTargetRolesTest {
         List<ChatMessage> messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user(request)));
-        ToolSpec staleCopy = new ToolSpec(
-                "talos.copy_path",
-                "Copy a path.",
-                "{\"type\":\"object\"}");
         Context context = Context.builder(new Config())
                 .toolRegistry(CanonicalToolDescriptors.registry())
-                .nativeToolSpecs(List.of(staleCopy))
                 .build();
 
         AssistantTurnPreparation.PreparedTurn prepared =
@@ -106,9 +101,13 @@ class AssistantTurnPreparationTargetRolesTest {
                         false,
                         CapabilityPosture.AGENT);
 
-        assertTrue(prepared.taskResolution().blocksWorkspaceOperations());
+        assertFalse(prepared.taskResolution().blocksWorkspaceOperations());
         assertEquals(
-                ActionObligation.MUTATING_TOOL_REQUIRED,
+                1,
+                prepared.taskResolution().workspaceOperationPlan()
+                        .authorizedOperations().size());
+        assertEquals(
+                ActionObligation.WORKSPACE_OPERATION_REQUIRED,
                 prepared.plan().actionObligation());
         assertEquals(
                 java.util.Set.of("index.html"),
@@ -116,17 +115,22 @@ class AssistantTurnPreparationTargetRolesTest {
         assertTrue(
                 prepared.plan().promptTools().contains("talos.edit_file"),
                 prepared.plan().promptTools().toString());
-        assertFalse(
-                prepared.plan().promptTools().stream()
-                        .anyMatch(WorkspaceOperationPlanner::isWorkspaceOperationTool),
+        assertTrue(
+                prepared.plan().promptTools().contains("talos.copy_path"),
                 prepared.plan().promptTools().toString());
+        assertEquals(
+                1,
+                prepared.plan().promptTools().stream()
+                        .filter(WorkspaceOperationPlanner::isWorkspaceOperationTool)
+                        .count());
 
         String frame = CurrentTurnCapabilityFrame.render(prepared.plan());
         assertTrue(
-                frame.contains("obligation: MUTATING_TOOL_REQUIRED"),
+                frame.contains("obligation: WORKSPACE_OPERATION_REQUIRED"),
                 frame);
-        assertFalse(frame.contains("WORKSPACE_OPERATION_REQUIRED"), frame);
-        assertFalse(frame.contains("talos.copy_path"), frame);
+        assertTrue(frame.contains("operationKind: COPY_PATH"), frame);
+        assertTrue(frame.contains("exactTool: talos.copy_path"), frame);
+        assertTrue(frame.contains("contentPredecessors: index.html"), frame);
     }
 
     @Test
@@ -283,7 +287,7 @@ class AssistantTurnPreparationTargetRolesTest {
     }
 
     @Test
-    void pureBlockedWorkspaceTailCannotWidenIntoContentMutation(
+    void exactMkdirRequestUsesOnlyItsTypedWorkspaceSurface(
             @TempDir Path workspace
     ) {
         List<ChatMessage> messages = new ArrayList<>(List.of(
@@ -302,11 +306,16 @@ class AssistantTurnPreparationTargetRolesTest {
                         false,
                         CapabilityPosture.AGENT);
 
-        assertTrue(prepared.taskResolution().blocksWorkspaceOperations());
+        assertFalse(prepared.taskResolution().blocksWorkspaceOperations());
         assertFalse(
-                prepared.taskResolution().hasAuthorizedContentMutation());
-        assertEquals(ActionObligation.NONE, prepared.plan().actionObligation());
-        assertTrue(prepared.plan().promptTools().isEmpty());
+                prepared.taskResolution().hasIndependentAuthorizedContentMutation());
+        assertEquals(
+                ActionObligation.WORKSPACE_OPERATION_REQUIRED,
+                prepared.plan().actionObligation());
+        assertEquals(List.of("talos.mkdir"), prepared.plan().promptTools());
+        String frame = CurrentTurnCapabilityFrame.render(prepared.plan());
+        assertTrue(frame.contains("operationKind: MKDIR"), frame);
+        assertTrue(frame.contains("exactTool: talos.mkdir"), frame);
     }
 
     @Test

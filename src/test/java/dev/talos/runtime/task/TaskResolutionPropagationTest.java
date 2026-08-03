@@ -788,7 +788,7 @@ class TaskResolutionPropagationTest {
     }
 
     @Test
-    void repairHistoryCannotEraseCurrentBlockedWorkspaceOperation() {
+    void repairHistoryCannotEraseOrReplaceCurrentTypedWorkspaceOperation() {
         String followUp = "Repair it so delete cache.tmp.";
         TaskResolution resolution =
                 TaskContractResolver.resolveFromMessages(List.of(
@@ -801,17 +801,22 @@ class TaskResolutionPropagationTest {
         assertFalse(
                 resolution.contract().expectedTargets()
                         .contains("secrets.env"));
-        assertFalse(resolution.hasAuthorizedContentMutation());
-        assertTrue(resolution.blocksWorkspaceOperations());
+        assertFalse(resolution.hasIndependentAuthorizedContentMutation());
+        assertFalse(resolution.blocksWorkspaceOperations());
+        assertEquals(
+                1,
+                resolution.workspaceOperationPlan()
+                        .authorizedOperations().size());
+        var operation = resolution.workspaceOperationPlan()
+                .authorizedOperations().getFirst();
+        assertEquals("DELETE_PATH", operation.kind().name());
+        assertEquals("cache.tmp", operation.targetPath());
+        assertTrue(operation.sourcePath().isEmpty());
+        assertTrue(operation.destinationPath().isEmpty());
         assertEquals(
                 "delete cache.tmp.",
-                resolution.mutationTailPlan()
-                        .workspaceOperationObservations()
-                        .getFirst()
-                        .sourceText());
-        assertEquals(
-                followUp,
-                resolution.mutationTailPlan().canonicalRequest());
+                operation.sourceText());
+        assertTrue(resolution.workspaceOperationPlan().bindsRequest(followUp));
     }
 
     private static void assertSynthesizedBoundaryRemainsPinned(

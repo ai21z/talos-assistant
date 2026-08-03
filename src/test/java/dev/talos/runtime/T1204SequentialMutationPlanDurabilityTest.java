@@ -647,7 +647,8 @@ class T1204SequentialMutationPlanDurabilityTest {
                 rolefulTargets,
                 source.lexicalDecisions(),
                 lexicalRegions,
-                source.mutationRequested());
+                source.mutationRequested(),
+                source.workspaceOperationPlan());
     }
 
     private static TurnPolicyTrace.LexicalRegionEvidence regionWithSpan(

@@ -53,7 +53,7 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
-    void typedBlockedWorkspaceTailCannotReachApprovalOrMutation(
+    void typedWorkspaceTailWaitsForItsContentPredecessorBeforeApproval(
             @TempDir Path workspace
     ) throws Exception {
         Files.writeString(workspace.resolve("style.css"), "body {}\n");
@@ -91,7 +91,7 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
                 result.error().reason());
         assertTrue(
                 result.errorMessage().contains(
-                        "Coordinated workspace-operation tails remain blocked"),
+                        "preceding typed content-mutation obligations have not completed"),
                 result.errorMessage());
         assertEquals(0, approvals.get());
         assertFalse(Files.exists(workspace.resolve("script.js")));
@@ -99,7 +99,7 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
-    void blockedWorkspaceActionCannotEraseSamePathContentAuthority(
+    void orderedWorkspaceActionCannotEraseSamePathContentAuthority(
             @TempDir Path workspace
     ) throws Exception {
         Path target = workspace.resolve("style.css");
@@ -107,13 +107,13 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
         String request = "Edit index.html so update style.css, then delete style.css.";
         var resolution = TaskContractResolver.resolveFromUserRequest(request);
 
-        assertTrue(resolution.blocksWorkspaceOperations());
+        assertFalse(resolution.blocksWorkspaceOperations());
         assertEquals(
                 TargetRole.MUST_MUTATE,
                 resolution.intent().targets().find("style.css")
                         .orElseThrow().role());
         assertEquals(
-                ActionObligation.MUTATING_TOOL_REQUIRED,
+                ActionObligation.WORKSPACE_OPERATION_REQUIRED,
                 ActionObligationPolicy.derive(
                         resolution,
                         ExecutionPhase.APPLY));
@@ -128,7 +128,7 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
                         registry,
                         new Config()));
         assertTrue(visible.contains("talos.edit_file"));
-        assertFalse(visible.contains("talos.delete_path"));
+        assertTrue(visible.contains("talos.delete_path"));
 
         AtomicInteger approvals = new AtomicInteger();
         TurnProcessor processor = new TurnProcessor(
@@ -171,20 +171,12 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
-    void everyWorkspaceOperationFamilyIsRejectedByTheTypedPlanBeforeApproval(
+    void ambiguousNegatedAndBatchSubstitutionOperationsRemainRejectedBeforeApproval(
             @TempDir Path workspace
     ) throws Exception {
         Files.writeString(workspace.resolve("style.css"), "body {}\n");
         Files.createDirectories(workspace.resolve("docs"));
         List<BlockedCall> cases = List.of(
-                new BlockedCall(
-                        new MakeDirectoryTool(),
-                        "Make it work so create a directory named generated.",
-                        new ToolCall("talos.mkdir", Map.of("path", "generated"))),
-                new BlockedCall(
-                        new MakeDirectoryTool(),
-                        "Make it work so create me a new folder generated.",
-                        new ToolCall("talos.mkdir", Map.of("path", "generated"))),
                 new BlockedCall(
                         new MakeDirectoryTool(),
                         "Edit index.html so it works, then create .config and assets, "
@@ -195,66 +187,6 @@ class T1196WorkspaceTailFailClosedTest extends ActiveToolAuthorityTraceTest {
                         "Edit index.html so it works, then create docs.v1 and assets, "
                                 + "then copy style.css to docs.v1/style.css.",
                         new ToolCall("talos.mkdir", Map.of("path", "docs.v1"))),
-                new BlockedCall(
-                        new CopyPathTool(),
-                        "Edit index.html so it works, then copy style.css to script.js.",
-                        new ToolCall(
-                                "talos.copy_path",
-                                Map.of("from", "style.css", "to", "script.js"))),
-                new BlockedCall(
-                        new MovePathTool(),
-                        "Edit index.html so it works, then move style.css to script.js.",
-                        new ToolCall(
-                                "talos.move_path",
-                                Map.of("from", "style.css", "to", "script.js"))),
-                new BlockedCall(
-                        new RenamePathTool(),
-                        "Edit index.html so it works, then rename style.css to script.js.",
-                        new ToolCall(
-                                "talos.rename_path",
-                                Map.of("path", "style.css", "new_name", "script.js"))),
-                new BlockedCall(
-                        new DeletePathTool(),
-                        "Edit index.html so it works, then delete style.css.",
-                        new ToolCall("talos.delete_path", Map.of("path", "style.css"))),
-                new BlockedCall(
-                        new DeletePathTool(),
-                        "Edit index.html so it works, then rm style.css.",
-                        new ToolCall("talos.delete_path", Map.of("path", "style.css"))),
-                new BlockedCall(
-                        new MakeDirectoryTool(),
-                        "Edit index.html so it works, then create docs directory.",
-                        new ToolCall("talos.mkdir", Map.of("path", "docs"))),
-                new BlockedCall(
-                        new CopyPathTool(),
-                        "Edit index.html so it works, then copy docs to backup.",
-                        new ToolCall(
-                                "talos.copy_path",
-                                Map.of("from", "docs", "to", "backup"))),
-                new BlockedCall(
-                        new MovePathTool(),
-                        "Edit index.html so it works, then move docs to backup.",
-                        new ToolCall(
-                                "talos.move_path",
-                                Map.of("from", "docs", "to", "backup"))),
-                new BlockedCall(
-                        new RenamePathTool(),
-                        "Edit index.html so it works, then rename docs to backup.",
-                        new ToolCall(
-                                "talos.rename_path",
-                                Map.of("path", "docs", "new_name", "backup"))),
-                new BlockedCall(
-                        new DeletePathTool(),
-                        "Edit index.html so it works, then delete docs.",
-                        new ToolCall("talos.delete_path", Map.of("path", "docs"))),
-                new BlockedCall(
-                        new DeletePathTool(),
-                        "Edit index.html so it works, then remove docs.",
-                        new ToolCall("talos.delete_path", Map.of("path", "docs"))),
-                new BlockedCall(
-                        new DeletePathTool(),
-                        "Edit index.html so it works, then rm docs.",
-                        new ToolCall("talos.delete_path", Map.of("path", "docs"))),
                 new BlockedCall(
                         new BatchWorkspaceApplyTool(),
                         "Edit index.html so it works, then copy style.css to script.js.",

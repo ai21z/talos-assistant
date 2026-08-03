@@ -10,6 +10,7 @@ import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -24,7 +25,8 @@ public record TaskResolution(
         CoordinatedMutationTailPlan mutationTailPlan,
         SequentialMutationClausePlan sequentialMutationPlan,
         Set<String> activeLexicalPaths,
-        Provenance provenance
+        Provenance provenance,
+        WorkspaceOperationAuthorityPlan workspaceOperationPlan
 ) {
     public enum Provenance {
         CURRENT_USER_REQUEST,
@@ -47,7 +49,55 @@ public record TaskResolution(
                         mutationTailPlan,
                         sequentialMutationPlan,
                         false),
-                Provenance.CURRENT_USER_REQUEST);
+                Provenance.CURRENT_USER_REQUEST,
+                workspaceOperationPlanFor(
+                        intent,
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        Provenance.CURRENT_USER_REQUEST));
+    }
+
+    TaskResolution(
+            TaskContract contract,
+            TaskIntent intent,
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        this(
+                contract,
+                intent,
+                mutationTailPlan,
+                sequentialMutationPlan,
+                activePathsForIntent(
+                        intent,
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        false),
+                Provenance.CURRENT_USER_REQUEST,
+                workspaceOperationPlan);
+    }
+
+    public TaskResolution(
+            TaskContract contract,
+            TaskIntent intent,
+            CoordinatedMutationTailPlan mutationTailPlan,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            Set<String> activeLexicalPaths,
+            Provenance provenance
+    ) {
+        this(
+                contract,
+                intent,
+                mutationTailPlan,
+                sequentialMutationPlan,
+                activeLexicalPaths,
+                provenance,
+                workspaceOperationPlanFor(
+                        intent,
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        provenance));
     }
 
     public TaskResolution {
@@ -71,6 +121,32 @@ public record TaskResolution(
         if (!activeLexicalPaths.equals(expectedActivePaths)) {
             throw new IllegalArgumentException(
                     "task resolution active lexical paths must be derived atomically");
+        }
+        WorkspaceOperationAuthorityPlan expectedWorkspaceOperationPlan =
+                workspaceOperationPlanFor(
+                        intent,
+                        mutationTailPlan,
+                        sequentialMutationPlan,
+                        provenance,
+                        activeLexicalPaths);
+        workspaceOperationPlan = workspaceOperationPlan == null
+                ? expectedWorkspaceOperationPlan
+                : workspaceOperationPlan;
+        if (!workspaceOperationPlan.bindsRequest(
+                intent.originalUserRequest())) {
+            throw new IllegalArgumentException(
+                    "workspace operation plan must bind the canonical intent request");
+        }
+        boolean conservativeProjectionDowngrade = workspaceOperationPlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.BLOCKED
+                && expectedWorkspaceOperationPlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && "workspace-operation-projection-removed-content-predecessor"
+                        .equals(workspaceOperationPlan.reason());
+        if (!workspaceOperationPlan.equals(expectedWorkspaceOperationPlan)
+                && !conservativeProjectionDowngrade) {
+            throw new IllegalArgumentException(
+                    "workspace operation plan must equal the parser-owned merge");
         }
         TaskIntentEvidence.requireCanonicalAgreement(contract, intent);
         TaskContract compiledIntent = TaskContractCompiler.compile(intent);
@@ -164,6 +240,9 @@ public record TaskResolution(
     }
 
     public boolean blocksWorkspaceOperations() {
+        if (workspaceOperationPlan.observedWorkspaceOperation()) {
+            return workspaceOperationPlan.blocksWorkspaceOperations();
+        }
         return mutationTailPlan.blocksWorkspaceOperations()
                 || sequentialMutationPlan.blocksWorkspaceOperations();
     }
@@ -177,6 +256,55 @@ public record TaskResolution(
                                 .isEmpty()
                         || !intent.targets().pathsByRole(
                                 TargetRole.OUTPUT_DESTINATION).isEmpty());
+    }
+
+    /** Positive content targets that are not merely workspace operands. */
+    public boolean hasIndependentAuthorizedContentMutation() {
+        return !independentAuthorizedContentMutationPaths().isEmpty();
+    }
+
+    public Set<String> independentAuthorizedContentMutationPaths() {
+        if (!hasAuthorizedContentMutation()) return Set.of();
+        return intent.targets().targets().stream()
+                .filter(target -> target.role() == TargetRole.MUST_MUTATE
+                        || target.role()
+                                == TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        || target.role() == TargetRole.OUTPUT_DESTINATION)
+                .map(TargetRef::path)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** Content paths that must complete before the one executable operation. */
+    public List<String> contentMutationPredecessorPaths() {
+        return contentMutationPredecessorPaths(
+                intent,
+                workspaceOperationPlan);
+    }
+
+    private static List<String> contentMutationPredecessorPaths(
+            TaskIntent intent,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        if (intent == null
+                || workspaceOperationPlan == null
+                || workspaceOperationPlan.authorizedOperations().isEmpty()) {
+            return List.of();
+        }
+        int operationStart = workspaceOperationPlan.authorizedOperations()
+                .getFirst()
+                .sourceStartOffset();
+        return intent.targets().targets().stream()
+                .filter(target -> target.role() == TargetRole.MUST_MUTATE
+                        || target.role()
+                                == TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        || target.role() == TargetRole.OUTPUT_DESTINATION)
+                .filter(target -> target.derivation().startOffset() < 0
+                        ? operationStart > 0
+                        : target.derivation().endOffset() <= operationStart)
+                .map(TargetRef::path)
+                .distinct()
+                .sorted()
+                .toList();
     }
 
     public boolean limitsMutationAuthority() {
@@ -200,7 +328,9 @@ public record TaskResolution(
     }
 
     public boolean blocksUnscopedMutation() {
-        return limitsMutationAuthority() && !hasAuthorizedContentMutation();
+        return limitsMutationAuthority()
+                && !hasAuthorizedContentMutation()
+                && workspaceOperationPlan.authorizedOperations().isEmpty();
     }
 
     /** Projects one complete resolution without exposing lossy plan fragments. */
@@ -243,17 +373,115 @@ public record TaskResolution(
             projectedSequentialPlan = SequentialMutationClausePlan.empty(
                     projectedIntent.originalUserRequest());
         }
+        WorkspaceOperationAuthorityPlan projectedWorkspacePlan =
+                workspaceOperationPlanFor(
+                        projectedIntent,
+                        projectedTailPlan,
+                        projectedSequentialPlan,
+                        provenance);
+        Set<String> projectedActivePaths = activePathsForIntent(
+                projectedIntent,
+                projectedTailPlan,
+                projectedSequentialPlan,
+                provenance == Provenance.CONFIRMED_PENDING_REQUEST);
+        if (projectedWorkspacePlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && !projectedWorkspaceOperationAnchorRetained(
+                        projectedWorkspacePlan,
+                        projectedActivePaths,
+                        projectedIntent)) {
+            projectedWorkspacePlan = WorkspaceOperationAuthorityPlan.blocked(
+                    projectedIntent.originalUserRequest(),
+                    "workspace-operation-projection-removed-parser-anchor");
+        }
+        if (workspaceOperationPlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && projectedWorkspacePlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && !contentMutationPredecessorPaths()
+                        .equals(contentMutationPredecessorPaths(
+                                projectedIntent,
+                                projectedWorkspacePlan))) {
+            projectedWorkspacePlan = WorkspaceOperationAuthorityPlan.blocked(
+                    projectedIntent.originalUserRequest(),
+                    "workspace-operation-projection-removed-content-predecessor");
+        }
         return new TaskResolution(
                 projectedContract,
                 projectedIntent,
                 projectedTailPlan,
                 projectedSequentialPlan,
+                projectedActivePaths,
+                provenance,
+                projectedWorkspacePlan);
+    }
+
+    private static boolean projectedWorkspaceOperationAnchorRetained(
+            WorkspaceOperationAuthorityPlan plan,
+            Set<String> activePaths,
+            TaskIntent intent
+    ) {
+        if (plan == null || plan.authorizedOperations().size() != 1) {
+            return false;
+        }
+        var operation = plan.authorizedOperations().getFirst();
+        String parserAnchor = operation.operands().getFirst().effectivePath();
+        Set<String> retainedTargets = targetsByPath(intent).keySet();
+        return activePaths != null
+                && activePaths.contains(parserAnchor)
+                && operation.operands().stream()
+                        .map(operand -> operand.effectivePath())
+                        .allMatch(retainedTargets::contains);
+    }
+
+    private static WorkspaceOperationAuthorityPlan workspaceOperationPlanFor(
+            TaskIntent intent,
+            CoordinatedMutationTailPlan tailPlan,
+            SequentialMutationClausePlan sequentialPlan,
+            Provenance provenance
+    ) {
+        return workspaceOperationPlanFor(
+                intent,
+                tailPlan,
+                sequentialPlan,
+                provenance,
                 activePathsForIntent(
-                        projectedIntent,
-                        projectedTailPlan,
-                        projectedSequentialPlan,
-                        provenance == Provenance.CONFIRMED_PENDING_REQUEST),
-                provenance);
+                        intent,
+                        tailPlan,
+                        sequentialPlan,
+                        provenance == Provenance.CONFIRMED_PENDING_REQUEST));
+    }
+
+    private static WorkspaceOperationAuthorityPlan workspaceOperationPlanFor(
+            TaskIntent intent,
+            CoordinatedMutationTailPlan tailPlan,
+            SequentialMutationClausePlan sequentialPlan,
+            Provenance provenance,
+            Set<String> activePaths
+    ) {
+        WorkspaceOperationAuthorityPlan compiled =
+                WorkspaceOperationAuthorityPlan.merge(
+                        intent,
+                        tailPlan,
+                        sequentialPlan);
+        if (provenance == Provenance.CONFIRMED_PENDING_REQUEST
+                && compiled.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE) {
+            return WorkspaceOperationAuthorityPlan.blocked(
+                    intent == null ? "" : intent.originalUserRequest(),
+                    "workspace-operation-replay-requires-typed-lifecycle");
+        }
+        if (compiled.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && !projectedWorkspaceOperationAnchorRetained(
+                        compiled,
+                        activePaths,
+                        intent)) {
+            return WorkspaceOperationAuthorityPlan.blocked(
+                    intent == null ? "" : intent.originalUserRequest(),
+                    "workspace-operation-projection-removed-parser-anchor");
+        }
+        return compiled;
     }
 
     private static boolean hasPositiveMutationAuthority(TaskIntent intent) {

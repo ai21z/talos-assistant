@@ -3,6 +3,8 @@ package dev.talos.runtime.verification;
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.VerificationStatus;
 
 import java.nio.file.InvalidPathException;
@@ -18,11 +20,23 @@ final class MutationTargetReadbackVerifier {
 
     private MutationTargetReadbackVerifier() {}
 
-    static Result verify(Path root, List<ToolCallLoop.ToolOutcome> successfulMutations) {
+    static Result verify(
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations
+    ) {
+        return verify(root, successfulMutations, null);
+    }
+
+    static Result verify(
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            WorkspaceOperationAuthorityPlan expectedWorkspaceOperation
+    ) {
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         Set<String> mutationTargets = new LinkedHashSet<>();
         List<WorkspaceOperationPlan> workspaceOperationPlans = new ArrayList<>();
+        List<String> workspaceOperationToolNames = new ArrayList<>();
 
         if (successfulMutations != null) {
             for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
@@ -36,8 +50,20 @@ final class MutationTargetReadbackVerifier {
                     continue;
                 }
                 WorkspaceOperationPlan workspaceOperationPlan = outcome.workspaceOperationPlan();
-                if (workspaceOperationPlan != null && !workspaceOperationPlan.pathEffects().isEmpty()) {
-                    workspaceOperationPlans.add(workspaceOperationPlan);
+                boolean workspaceOperation =
+                        WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                                outcome.toolName())
+                                || workspaceOperationPlan != null;
+                if (workspaceOperation) {
+                    if (workspaceOperationPlan == null
+                            || workspaceOperationPlan.pathEffects().isEmpty()) {
+                        problems.add(
+                                outcome.toolName()
+                                        + " succeeded without a structured workspace-operation plan.");
+                    } else {
+                        workspaceOperationPlans.add(workspaceOperationPlan);
+                        workspaceOperationToolNames.add(outcome.toolName());
+                    }
                     continue;
                 }
                 String pathHint = normalizePath(outcome.pathHint());
@@ -50,7 +76,56 @@ final class MutationTargetReadbackVerifier {
             }
         }
 
+        requireWorkspaceOperationIdentity(
+                expectedWorkspaceOperation,
+                workspaceOperationPlans,
+                workspaceOperationToolNames,
+                problems);
+
         return new Result(facts, problems, mutationTargets, workspaceOperationPlans);
+    }
+
+    private static void requireWorkspaceOperationIdentity(
+            WorkspaceOperationAuthorityPlan expected,
+            List<WorkspaceOperationPlan> actual,
+            List<String> actualToolNames,
+            List<String> problems
+    ) {
+        if (expected == null) return;
+        if (expected.state()
+                != WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE) {
+            if (!actual.isEmpty()) {
+                problems.add(
+                        "workspace operation succeeded without current-turn typed authority.");
+            }
+            return;
+        }
+        if (actual.size() != 1) {
+            problems.add(
+                    "typed workspace operation expected exactly one successful structured outcome; found "
+                            + actual.size() + ".");
+            return;
+        }
+        WorkspaceOperationPlan observed = actual.getFirst();
+        String observedTool = actualToolNames == null
+                        || actualToolNames.size() != actual.size()
+                ? ""
+                : actualToolNames.getFirst();
+        String expectedTool = expected.authorizedOperations()
+                .getFirst().toolName();
+        String expectedOperationId = expected.authorizedOperations()
+                .getFirst().operationId();
+        WorkspaceOperationPlan expectedPlan = WorkspaceOperationPlanner
+                .authorityPlan(expected)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "authorized workspace operation lacks a runtime plan"));
+        if (!expectedTool.equals(observedTool)
+                || !expected.planId().equals(observed.authorityPlanId())
+                || !expectedOperationId.equals(observed.operationId())
+                || !expectedPlan.equals(observed)) {
+            problems.add(
+                    "workspace operation outcome differs from current-turn typed authority.");
+        }
     }
 
     record Result(

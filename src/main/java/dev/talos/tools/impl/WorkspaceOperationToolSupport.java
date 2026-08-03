@@ -58,18 +58,22 @@ final class WorkspaceOperationToolSupport {
         return new ResolvedPath(displayPath, resolved, "");
     }
 
-    static ToolResult createParentDirectories(ToolContext ctx, Path target) {
+    static ToolResult requireExistingOrdinaryParent(
+            ToolContext ctx,
+            Path target
+    ) {
         Path parent = target.getParent();
-        if (parent == null || Files.exists(parent)) return null;
-        if (!ctx.sandbox().allowedPath(parent)) {
+        if (parent == null) {
             return ToolResult.fail(ToolError.invalidParams(
-                    "Parent directory not allowed: " + ctx.sandbox().explain(parent)));
+                    "Destination requires an existing ordinary parent directory"));
         }
         try {
-            Files.createDirectories(parent);
+            NoFollowPathPolicy.bindExistingDirectory(ctx.workspace())
+                    .requireDirectory(parent);
             return null;
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to create parent directories: " + e.getMessage()));
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Destination requires an existing ordinary parent directory"));
         }
     }
 

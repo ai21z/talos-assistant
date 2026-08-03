@@ -102,6 +102,29 @@ final class StaticWebContinuationPlanner {
                 List.of()));
     }
 
+    static Optional<Plan> blockedUnrequestedDirectoryPlan(
+            LoopState state,
+            List<ToolSpec> baseTools
+    ) {
+        if (!shouldContinueAfterBlockedUnrequestedDirectory(state)) {
+            return Optional.empty();
+        }
+        List<ToolSpec> tools = filterTools(baseTools, List.of("talos.write_file"));
+        if (tools.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Plan(
+                staticWebBlockedDirectoryContinuationMessages(state),
+                tools,
+                staticWebCreationContinuationControls(
+                        state,
+                        tools,
+                        "static-web-blocked-directory-continuation"),
+                "static-web-blocked-directory-continuation",
+                Optional.empty(),
+                List.of()));
+    }
+
     static Optional<Plan> verificationFailurePlan(LoopState state, List<ToolSpec> baseTools) {
         Optional<VerificationContinuation> continuation = verificationContinuation(state);
         if (continuation.isEmpty()) return Optional.empty();
@@ -194,6 +217,30 @@ final class StaticWebContinuationPlanner {
         return hasDirectoryMutation;
     }
 
+    private static boolean shouldContinueAfterBlockedUnrequestedDirectory(
+            LoopState state
+    ) {
+        if (state == null || state.toolOutcomes.isEmpty()
+                || state.mutatingToolSuccesses > 0) {
+            return false;
+        }
+        TaskContract contract = taskContract(state);
+        if (contract == null || !contract.mutationAllowed()
+                || !contract.mutationRequested()
+                || !StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
+            return false;
+        }
+        if (TurnTaskContractCapture.workspaceOperationPlan()
+                .observedWorkspaceOperation()) {
+            return false;
+        }
+        ToolCallLoop.ToolOutcome latest = state.toolOutcomes.getLast();
+        return latest != null
+                && !latest.success()
+                && "talos.mkdir".equals(latest.canonicalToolName())
+                && latest.expectedTargetScopeFailure();
+    }
+
     private static boolean successfulDirectoryMutation(ToolCallLoop.ToolOutcome outcome) {
         if (outcome == null || !outcome.success() || !outcome.mutating()) return false;
         String toolName = canonicalToolName(outcome.toolName());
@@ -260,6 +307,36 @@ final class StaticWebContinuationPlanner {
                 ChatMessage.user("Current user request:\n"
                         + (userTask == null ? "" : userTask.strip())
                         + "\n\n" + toolInstruction));
+    }
+
+    private static List<ChatMessage> staticWebBlockedDirectoryContinuationMessages(
+            LoopState state
+    ) {
+        String userTask = TurnTaskContractCapture.originalUserRequestOrResolve(
+                state.messages);
+        if (userTask == null || userTask.isBlank()) {
+            TaskContract contract = taskContract(state);
+            userTask = contract == null
+                    ? "Create the requested static web artifact."
+                    : contract.originalUserRequest();
+        }
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        An unrequested directory operation was blocked before approval.
+                        Continue the same static-web creation request without creating or using that directory.
+                        Use only the visible write-file tool to create the actual web files in the authorized workspace scope.
+                        """),
+                ChatMessage.system("""
+                        [StaticWebBlockedDirectoryContinuation]
+                        The rejected directory operation has no authority and must not be retried.
+                        Directory creation is not required to satisfy this request.
+                        Write the HTML/CSS/JavaScript surface directly. Prefer index.html, styles.css, and script.js unless the user requested different names.
+                        Do not answer in prose instead of calling the write-file tool.
+                        """),
+                ChatMessage.user("Current user request:\n"
+                        + (userTask == null ? "" : userTask.strip())
+                        + "\n\nCall talos.write_file now for the actual static web files."));
     }
 
     private static List<ChatMessage> staticWebVerificationContinuationMessages(
@@ -395,6 +472,17 @@ final class StaticWebContinuationPlanner {
             LoopState state,
             List<ToolSpec> tools
     ) {
+        return staticWebCreationContinuationControls(
+                state,
+                tools,
+                "static-web-directory-only-continuation");
+    }
+
+    private static ChatRequestControls staticWebCreationContinuationControls(
+            LoopState state,
+            List<ToolSpec> tools,
+            String debugTag
+    ) {
         boolean required = state != null
                 && state.ctx != null
                 && state.ctx.llm() != null
@@ -405,7 +493,7 @@ final class StaticWebContinuationPlanner {
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("static-web-directory-only-continuation"));
+                List.of(debugTag));
     }
 
     private static String successfulDirectoryMutationSummary(LoopState state) {

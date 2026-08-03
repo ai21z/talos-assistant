@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ class SessionApprovalPolicyTest {
 
     @AfterEach void clearTls() {
         TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
         if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
@@ -104,6 +106,54 @@ class SessionApprovalPolicyTest {
         assertTrue(p.rememberInWorkspaceWritesEnabled());
         assertEquals(ApprovalPolicy.Decision.AUTO_APPROVE,
                 p.decide(ws, write, ToolRiskLevel.WRITE));
+    }
+
+    @Test
+    void typedWorkspaceOperationsAreAlwaysOnceOnlySessionApprovals(
+            @TempDir Path ws
+    ) {
+        ToolCall rememberedWrite = new ToolCall("talos.write_file", Map.of(
+                "path", "ordinary.txt",
+                "content", "ordinary"));
+        SessionApprovalPolicy primed = new SessionApprovalPolicy();
+        primed.rememberApproval(ws, rememberedWrite, ToolRiskLevel.WRITE);
+        assertTrue(primed.rememberInWorkspaceWritesEnabled());
+
+        Map<String, ToolCall> calls = Map.of(
+                "Copy source.txt to copied.txt.",
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "source.txt", "to", "copied.txt")),
+                "Move source.txt to moved.txt.",
+                new ToolCall("talos.move_path", Map.of(
+                        "from", "source.txt", "to", "moved.txt")),
+                "Rename source.txt to renamed.txt.",
+                new ToolCall("talos.rename_path", Map.of(
+                        "path", "source.txt", "new_name", "renamed.txt")),
+                "Create a directory named assets.",
+                new ToolCall("talos.mkdir", Map.of("path", "assets")),
+                "Delete source.txt.",
+                new ToolCall("talos.delete_path", Map.of("path", "source.txt")));
+
+        for (Map.Entry<String, ToolCall> fixture : calls.entrySet()) {
+            TurnTaskContractCapture.set(TaskContractResolver
+                    .resolveFromUserRequest(fixture.getKey()));
+            ToolRiskLevel risk = fixture.getValue().toolName()
+                            .equals("talos.delete_path")
+                    ? ToolRiskLevel.DESTRUCTIVE
+                    : ToolRiskLevel.WRITE;
+            assertEquals(
+                    ApprovalPolicy.Decision.ASK,
+                    primed.decide(ws, fixture.getValue(), risk),
+                    fixture.getKey());
+
+            SessionApprovalPolicy fresh = new SessionApprovalPolicy();
+            fresh.rememberApproval(ws, fixture.getValue(), risk);
+            assertFalse(
+                    fresh.rememberInWorkspaceWritesEnabled(),
+                    "typed workspace operation must not enable session memory: "
+                            + fixture.getKey());
+            TurnTaskContractCapture.clear();
+        }
     }
 
     // ---- Sensitive in-workspace paths (Prompt 3 refinement) ----

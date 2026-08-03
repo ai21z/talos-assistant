@@ -1,10 +1,12 @@
 package dev.talos.runtime.task;
 
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -262,63 +264,78 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void deleteRequestBecomesMutationAllowedContractWithExpectedTarget() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void deleteRequestUsesTypedAuthorityInsteadOfGenericExpectedTarget() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Delete docs/synthwave-webpage-plan.md please.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("docs/synthwave-webpage-plan.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertWorkspaceOperation(
+                resolution,
+                WorkspaceOperationObligation.Kind.DELETE_PATH,
+                "",
+                "",
+                "docs/synthwave-webpage-plan.md");
     }
 
     @Test
-    void explicitDeleteToolRequestWithTmpTargetBecomesMutationAllowedContract() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void explicitDeleteToolNameProseDoesNotCreateTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("delete-me.tmp"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceCopyScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceCopyToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("source.md", "source-copy.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceMoveScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceMoveToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("move-me.md", "moved.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceRenameScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceRenameToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("rename-me.md", "renamed.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
@@ -345,12 +362,14 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void naturalBatchCopyDestinationStopWordIsNotAnExpectedTarget() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchWithInvalidCopyDestinationHasNoGenericOrTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one, then copy styles.css to by.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
-        assertEquals(Set.of("batch-one"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
@@ -855,14 +874,22 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void naturalSingleDirectoryCreationBecomesMutationAllowedContract() {
-        TaskContract contract = TaskContractResolver.fromUserRequest("make me a folder called ideas");
+    void naturalSingleDirectoryCreationUsesTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
+                "make me a folder called ideas");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_CREATE, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("ideas"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertWorkspaceOperation(
+                resolution,
+                WorkspaceOperationObligation.Kind.MKDIR,
+                "",
+                "",
+                "ideas");
     }
 
     @Test
@@ -894,50 +921,62 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void batchWorkspaceNaturalPromptTargetsCreatedDirsAndCopyDestinationNotSource() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void batchWorkspaceNaturalPromptFailsClosedAsMultipleOperations() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.apply_workspace_batch to create directories batch-one and batch-two "
                         + "and copy styles.css to batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertEquals("explicit-batch-workspace-apply-request", contract.classificationReason());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void naturalBatchPromptExtractsDirectoryAndCopyTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchPromptFailsClosedAsMultipleOperations() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void naturalBatchPromptWithArrowCopyTreatsCopySourceAsInputOnly() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchPromptWithArrowCopyHasNoPartialAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one and batch-two, then copy styles.css -> batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void explicitBatchWorkspaceApplyPromptExposesBatchToolInApplySurface() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void explicitBatchWorkspaceApplyPromptDoesNotCreateTypedToolAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "
                         + "[{\"op\":\"mkdir\",\"path\":\"docs\"}].");
         ToolRegistry registry = new ToolRegistry();
         registry.register(new BatchWorkspaceApplyTool());
 
-        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.APPLY, registry);
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                resolution,
+                ExecutionPhase.APPLY,
+                registry,
+                dev.talos.runtime.toolcall.ToolCapabilityAvailability
+                        .allEnabled());
 
-        assertTrue(plan.nativeToolNames().contains("talos.apply_workspace_batch"));
+        assertEquals(
+                WorkspaceOperationAuthorityPlan.State.NONE,
+                resolution.workspaceOperationPlan().state());
+        assertTrue(resolution.contract().expectedTargets().isEmpty());
+        assertFalse(plan.nativeToolNames().contains("talos.apply_workspace_batch"));
     }
 
     @Test
@@ -2337,5 +2376,39 @@ class TaskContractResolverTest {
             assertEquals(TaskType.UNKNOWN, contract.type());
             assertFalse(contract.mutationAllowed());
         }
+    }
+
+    private static void assertWorkspaceOperation(
+            TaskResolution resolution,
+            WorkspaceOperationObligation.Kind kind,
+            String sourcePath,
+            String destinationPath,
+            String targetPath) {
+        WorkspaceOperationAuthorityPlan plan = resolution.workspaceOperationPlan();
+
+        assertEquals(WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE, plan.state());
+        assertEquals(1, plan.authorizedOperations().size());
+        WorkspaceOperationObligation operation = plan.authorizedOperations().getFirst();
+        assertEquals(kind, operation.kind());
+        switch (kind) {
+            case COPY_PATH, MOVE_PATH, RENAME_PATH -> {
+                assertEquals(sourcePath, operation.sourcePath());
+                assertEquals(destinationPath, operation.destinationPath());
+                assertEquals("", operation.targetPath());
+            }
+            case MKDIR, DELETE_PATH -> {
+                assertEquals("", operation.sourcePath());
+                assertEquals("", operation.destinationPath());
+                assertEquals(targetPath, operation.targetPath());
+            }
+        }
+    }
+
+    private static void assertBlockedWorkspaceOperation(TaskResolution resolution) {
+        WorkspaceOperationAuthorityPlan plan = resolution.workspaceOperationPlan();
+
+        assertEquals(WorkspaceOperationAuthorityPlan.State.BLOCKED, plan.state());
+        assertTrue(plan.authorizedOperations().isEmpty());
+        assertTrue(plan.toolNames().isEmpty());
     }
 }

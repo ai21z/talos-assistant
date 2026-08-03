@@ -28,6 +28,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
 import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
 import dev.talos.runtime.trace.TurnTraceEvent;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanEvidence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,7 +78,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private static final int LEXICAL_EVIDENCE_SCHEMA_VERSION = 1;
+    private static final int LEGACY_LEXICAL_EVIDENCE_SCHEMA_VERSION = 1;
+    private static final int LEXICAL_EVIDENCE_SCHEMA_VERSION = 2;
     private static final int MAX_LEXICAL_DECISIONS = 4_096;
     private static final int MAX_LEXICAL_REGIONS = 4_096;
     private static final int MAX_POLICY_STRING_LIST = 4_096;
@@ -105,7 +107,36 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             "initialPhase", "finalPhase", "nativeTools", "promptTools",
             "blocks", "classificationReason", "rolefulTargets",
             "lexicalEvidenceSchemaVersion", "lexicalDecisions",
-            "lexicalRegions");
+             "lexicalRegions");
+    private static final Set<String> POLICY_TRACE_V2_KEYS = Set.of(
+            "taskType", "mutationAllowed", "mutationRequested",
+            "verificationRequired", "expectedTargets", "forbiddenTargets",
+            "initialPhase", "finalPhase", "nativeTools", "promptTools",
+            "blocks", "classificationReason", "rolefulTargets",
+            "lexicalEvidenceSchemaVersion", "lexicalDecisions",
+            "lexicalRegions", "workspaceOperationPlan");
+    private static final Set<String> WORKSPACE_PLAN_EVIDENCE_KEYS = Set.of(
+            "schemaVersion", "planId", "state", "reason",
+            "canonicalRequestSha256", "canonicalRequestUtf8Bytes",
+            "operations");
+    private static final Set<String> WORKSPACE_OPERATION_EVIDENCE_KEYS = Set.of(
+            "ordinal", "operationId", "owner", "kind", "toolName",
+            "overwritePolicy", "recursivePolicy", "parentPolicy",
+            "actionStartOffset", "actionEndOffset", "sourceStartOffset",
+            "sourceEndOffset", "sourceSpanSha256", "operands");
+    private static final Set<String> WORKSPACE_OPERAND_EVIDENCE_KEYS = Set.of(
+            "ordinal", "role", "lexicalValueSha256", "effectivePathSha256",
+            "valueStartOffset", "valueEndOffset");
+    private static final Set<String> WORKSPACE_AUTHORITY_DECISION_KEYS = Set.of(
+            "planId", "planState", "decision", "toolCallId");
+    private static final Set<String> WORKSPACE_AUTHORITY_DECISION_WITH_OPERATION_KEYS = Set.of(
+            "planId", "planState", "decision", "operationId", "toolCallId");
+    private static final Set<String> WORKSPACE_LIFECYCLE_KEYS = Set.of(
+            "planId", "operationId", "toolCallId");
+    private static final Set<String> WORKSPACE_AUTHORITY_DECISIONS = Set.of(
+            "NOT_WORKSPACE_OPERATION", "AUTHORIZED", "NO_TYPED_AUTHORITY",
+            "CALL_DOES_NOT_MATCH_PLAN", "PREDECESSOR_NOT_COMPLETE",
+            "ALREADY_CONSUMED");
     private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
             "path", "role", "source", "reason", "sourceText",
             "confidence", "startOffset", "authorityEndOffset", "endOffset");
@@ -345,7 +376,10 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         row.put("retrievalTraceSummary", record.retrievalTraceSummary());
         row.put("status", record.status());
         row.put("traceId", record.traceId());
-        row.put("policyTrace", policyTraceToMap(record.policyTrace()));
+        row.put("policyTrace", policyTraceToMap(
+                policyTraceForPersistence(
+                        record.policyTrace(),
+                        record.userInput())));
         List<Map<String, Object>> calls = new java.util.ArrayList<>();
         for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
             Map<String, Object> c = new LinkedHashMap<>();
@@ -416,7 +450,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     parsed.add(new ParsedTurnRecord(
                             record,
                             hasExactUserRequestLexicalEvidence(
-                                    record.policyTrace())));
+                                    record.policyTrace()),
+                            hasCurrentWorkspacePlanSchema(row)));
                 } catch (Exception lineErr) {
                     LOG.warn("Skipping malformed turn line in {}: {}",
                             SafeLogFormatter.value(file.getFileName()), SafeLogFormatter.throwableMessage(lineErr));
@@ -444,7 +479,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 requireHistoricalLexicalBindings(
                         record,
                         historicalRequests,
-                        manifestCache);
+                        manifestCache,
+                        parsedRecord.currentWorkspacePlanSchema());
                 out.add(record);
                 addHistoricalRequestBinding(
                         historicalRequests,
@@ -482,7 +518,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private record ParsedTurnRecord(
             TurnRecord record,
-            boolean canonicalManifestValidated
+            boolean canonicalManifestValidated,
+            boolean currentWorkspacePlanSchema
     ) {
         private ParsedTurnRecord {
             if (record == null) {
@@ -572,13 +609,15 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         requireHistoricalLexicalBindings(
                 record,
                 requestsByHash,
-                new LinkedHashMap<>());
+                new LinkedHashMap<>(),
+                true);
     }
 
     private static void requireHistoricalLexicalBindings(
             TurnRecord record,
             HistoricalRequestIndex requestsByHash,
-            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache,
+            boolean currentWorkspacePlanSchema
     ) {
         if (record == null || record.policyTrace() == null) return;
         LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
@@ -618,6 +657,19 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             throw new IllegalArgumentException(
                     "message-history lexical evidence differs from its prior plan");
         }
+        if (currentWorkspacePlanSchema) {
+            String historical = prior.exactCanonical();
+            if (historical == null) {
+                if (!"NONE".equals(record.policyTrace()
+                        .workspaceOperationPlan().state())) {
+                    throw new IllegalArgumentException(
+                            "typed message-history workspace evidence has no prior exact request");
+                }
+            } else {
+                record.policyTrace().workspaceOperationPlan()
+                        .requireBindsCanonicalRequest(historical);
+            }
+        }
         if (MutationPlanSelection.DurableEvidenceState.REDACTED_HASH_ONLY
                 .name().equals(state)) {
             return;
@@ -642,7 +694,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 evidence.regions());
         requireCanonicalPolicySemantics(
                 authoritative,
-                record.policyTrace());
+                record.policyTrace(),
+                false);
     }
 
     private static void addHistoricalRequestBinding(
@@ -814,14 +867,26 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     private record LexicalManifestIdentity(
             List<DecisionManifestIdentity> decisions,
-            List<RegionManifestIdentity> regions
+            List<RegionManifestIdentity> regions,
+            WorkspaceOperationPlanEvidence workspaceOperationPlan
     ) {
         private static final LexicalManifestIdentity EMPTY =
-                new LexicalManifestIdentity(List.of(), List.of());
+                new LexicalManifestIdentity(
+                        List.of(),
+                        List.of(),
+                        WorkspaceOperationPlanEvidence.from(
+                                dev.talos.runtime.workspace
+                                        .WorkspaceOperationAuthorityPlan.none(
+                                                "")));
 
         private LexicalManifestIdentity {
             decisions = decisions == null ? List.of() : List.copyOf(decisions);
             regions = regions == null ? List.of() : List.copyOf(regions);
+            workspaceOperationPlan = workspaceOperationPlan == null
+                    ? WorkspaceOperationPlanEvidence.from(
+                            dev.talos.runtime.workspace
+                                    .WorkspaceOperationAuthorityPlan.none(""))
+                    : workspaceOperationPlan;
         }
 
         private static LexicalManifestIdentity from(TurnPolicyTrace trace) {
@@ -844,7 +909,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                             .toList(),
                     safe.lexicalRegions().stream()
                             .map(RegionManifestIdentity::from)
-                            .toList());
+                            .toList(),
+                    safe.workspaceOperationPlan());
         }
     }
 
@@ -964,12 +1030,16 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         Object rawPolicyTrace = row.get("policyTrace");
         boolean currentLexicalSchema = rawPolicyTrace instanceof Map<?, ?> map
                 && map.containsKey("lexicalEvidenceSchemaVersion");
-        TurnPolicyTrace policyTrace = policyTraceFrom(rawPolicyTrace);
+        boolean currentWorkspacePlanSchema = rawPolicyTrace instanceof Map<?, ?> map
+                && map.get("lexicalEvidenceSchemaVersion") instanceof Number number
+                && number.intValue() == LEXICAL_EVIDENCE_SCHEMA_VERSION;
+        TurnPolicyTrace policyTrace = policyTraceFrom(rawPolicyTrace, userInput);
         requireStoredUserRequestCoordinates(
                 userInput,
                 policyTrace,
                 currentLexicalSchema,
-                manifestCache);
+                manifestCache,
+                currentWorkspacePlanSchema);
         String traceId = str(row, "traceId");
 
         @SuppressWarnings("unchecked")
@@ -1897,6 +1967,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             throw new IllegalArgumentException(
                     "trace policy binding requires both trace representations");
         }
+        requireWorkspaceOperationTraceBinding(
+                trace,
+                policy.workspaceOperationPlan());
         LocalTurnTrace.TaskContractSummary task = trace.taskContract();
         LocalTurnTrace.ToolSurface tools = trace.toolSurface();
         TurnEvidenceProjectionTraceEvent.Decoded projection =
@@ -1949,7 +2022,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 && policy.classificationReason().isBlank()
                 && policy.rolefulTargets().isEmpty()
                 && policy.lexicalDecisions().isEmpty()
-                && policy.lexicalRegions().isEmpty();
+                && policy.lexicalRegions().isEmpty()
+                && "NONE".equals(policy.workspaceOperationPlan().state());
     }
 
     private static String normalizedTraceTaskType(String value) {
@@ -2400,17 +2474,30 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 userInput,
                 policyTrace,
                 currentLexicalSchema,
-                new LinkedHashMap<>());
+                new LinkedHashMap<>(),
+                currentLexicalSchema);
+    }
+
+    private static boolean hasCurrentWorkspacePlanSchema(
+            Map<String, Object> row
+    ) {
+        Object rawPolicy = row == null ? null : row.get("policyTrace");
+        return rawPolicy instanceof Map<?, ?> map
+                && map.get("lexicalEvidenceSchemaVersion")
+                        instanceof Number number
+                && number.intValue() == LEXICAL_EVIDENCE_SCHEMA_VERSION;
     }
 
     private static void requireStoredUserRequestCoordinates(
             String userInput,
             TurnPolicyTrace policyTrace,
             boolean currentLexicalSchema,
-            Map<RequestIdentity, AuthoritativeManifest> manifestCache
+            Map<RequestIdentity, AuthoritativeManifest> manifestCache,
+            boolean currentWorkspacePlanSchema
     ) {
         if (policyTrace == null) return;
         String canonical = userInput == null ? "" : userInput.strip();
+        policyTrace = policyTraceForPersistence(policyTrace, canonical);
         for (TurnPolicyTrace.RolefulTarget target : policyTrace.rolefulTargets()) {
             TaskIntentEvidence.requireDurableShape(
                     target.path(),
@@ -2447,10 +2534,41 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         MutationPlanSelection.DurableEvidenceState
                                 .REDACTED_HASH_ONLY.name().equals(
                                         region.evidenceState()));
-        if (redacted) return;
+        boolean retainedRequestMatchesEvidence = evidence.empty()
+                || (evidence.requestSha256().equals(
+                                MutationPlanSelection.sourceRequestSha256(
+                                        canonical))
+                        && evidence.requestChars()
+                                == MutationPlanSelection.sourceRequestChars(
+                                        canonical)
+                        && evidence.requestBytes()
+                                == MutationPlanSelection.sourceRequestBytes(
+                                        canonical));
+        if (redacted && !retainedRequestMatchesEvidence) {
+            if (currentWorkspacePlanSchema
+                    && !"NONE".equals(
+                            policyTrace.workspaceOperationPlan().state())) {
+                throw new IllegalArgumentException(
+                        "redacted workspace-operation evidence cannot be verified against the retained request");
+            }
+            return;
+        }
+        if (currentWorkspacePlanSchema) {
+            policyTrace.workspaceOperationPlan()
+                    .requireBindsCanonicalRequest(canonical);
+        }
         TaskResolution authoritative = authoritativeResolution(
                 canonical,
                 manifestCache);
+        WorkspaceOperationPlanEvidence observed =
+                policyTrace.workspaceOperationPlan();
+        if (currentWorkspacePlanSchema
+                && "AUTHORIZED_SINGLE".equals(observed.state())
+                && !observed.matches(authoritative.workspaceOperationPlan())) {
+            throw new IllegalArgumentException(
+                    "durable workspace operation differs from the authoritative resolution");
+        }
+        if (redacted) return;
         MutationPlanSelection.requireCanonicalDurableManifest(
                 canonical,
                 authoritative.mutationTailPlan(),
@@ -2458,18 +2576,19 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 authoritative.activeLexicalPaths(),
                 policyTrace.lexicalDecisions(),
                 policyTrace.lexicalRegions());
-        requireCanonicalPolicySemantics(authoritative, policyTrace);
+        requireCanonicalPolicySemantics(
+                authoritative,
+                policyTrace,
+                currentWorkspacePlanSchema);
     }
 
     private static void requireCanonicalPolicySemantics(
             TaskResolution authoritative,
-            TurnPolicyTrace actual
+            TurnPolicyTrace actual,
+            boolean currentWorkspacePlanSchema
     ) {
-        TurnPolicyTrace expected = TurnPolicyTrace.from(
-                authoritative,
-                "",
-                List.of(),
-                List.of());
+        TurnPolicyTrace expected =
+                TurnPolicyTrace.lexicalValidationView(authoritative);
         LexicalManifestIdentity expectedManifest =
                 LexicalManifestIdentity.from(expected);
         LexicalManifestIdentity actualManifest =
@@ -2494,6 +2613,428 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         "durable lexical roles differ from the authoritative resolution");
             }
         }
+    }
+
+    private static TurnPolicyTrace policyTraceForPersistence(
+            TurnPolicyTrace trace,
+            String userInput
+    ) {
+        TurnPolicyTrace safe = trace == null ? TurnPolicyTrace.empty() : trace;
+        WorkspaceOperationPlanEvidence workspace =
+                safe.workspaceOperationPlan();
+        if (!"NONE".equals(workspace.state())) return safe;
+        if (!safe.lexicalDecisions().isEmpty()
+                || !safe.lexicalRegions().isEmpty()) {
+            return safe;
+        }
+        String canonical = userInput == null ? "" : userInput.strip();
+        return safe.withWorkspaceOperationPlan(
+                WorkspaceOperationPlanEvidence.from(
+                        dev.talos.runtime.workspace
+                                .WorkspaceOperationAuthorityPlan.none(
+                                        canonical)));
+    }
+
+    private static void requireWorkspaceOperationTraceBinding(
+            LocalTurnTrace trace,
+            WorkspaceOperationPlanEvidence evidence
+    ) {
+        List<TurnTraceEvent> planEvents = trace.events().stream()
+                .filter(event -> "WORKSPACE_OPERATION_PLAN_EVIDENCE_RECORDED"
+                        .equals(event.type()))
+                .toList();
+        boolean expectedPlanEvent = !"NONE".equals(evidence.state());
+        if (planEvents.size() != (expectedPlanEvent ? 1 : 0)
+                || (expectedPlanEvent
+                        && (!planEvents.getFirst().phase().isBlank()
+                                || !planEvents.getFirst().toolName().isBlank()
+                                || !planEvents.getFirst().data().equals(
+                                        workspaceOperationPlanEvidenceToMap(
+                                                evidence))))) {
+            throw new IllegalArgumentException(
+                    "local trace workspace-operation plan evidence does not match its turn record");
+        }
+        String operationId = evidence.operations().isEmpty()
+                ? ""
+                : evidence.operations().getFirst().operationId();
+        Set<String> lifecycleTypes = Set.of(
+                "WORKSPACE_OPERATION_APPROVAL_REQUIRED",
+                "WORKSPACE_OPERATION_APPROVAL_GRANTED",
+                "WORKSPACE_OPERATION_APPROVAL_DENIED",
+                "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED",
+                "WORKSPACE_OPERATION_CHECKPOINT_FAILED",
+                "WORKSPACE_OPERATION_EXECUTION_SUCCEEDED",
+                "WORKSPACE_OPERATION_EXECUTION_FAILED",
+                "WORKSPACE_OPERATION_VERIFICATION_SUCCEEDED",
+                "WORKSPACE_OPERATION_VERIFICATION_FAILED",
+                "WORKSPACE_OPERATION_OBLIGATION_CONSUMED");
+        String lifecycleToolCallId = "";
+        String authorizedToolCallId = "";
+        List<String> lifecycleOrder = new java.util.ArrayList<>();
+        for (TurnTraceEvent event : trace.events()) {
+            boolean authorityDecision =
+                    "WORKSPACE_OPERATION_AUTHORITY_DECIDED"
+                            .equals(event.type());
+            boolean lifecycle = lifecycleTypes.contains(event.type());
+            if (!authorityDecision && !lifecycle) {
+                continue;
+            }
+            if (authorityDecision) {
+                requireExactKeys(
+                        event.data(),
+                        operationId.isEmpty()
+                                ? WORKSPACE_AUTHORITY_DECISION_KEYS
+                                : WORKSPACE_AUTHORITY_DECISION_WITH_OPERATION_KEYS,
+                        "workspace-operation authority decision");
+                String planState = java.util.Objects.toString(
+                        event.data().get("planState"), "");
+                String decision = java.util.Objects.toString(
+                        event.data().get("decision"), "");
+                String decisionToolCallId = java.util.Objects.toString(
+                        event.data().get("toolCallId"), "");
+                if (!evidence.state().equals(planState)
+                        || !WORKSPACE_AUTHORITY_DECISIONS.contains(decision)
+                        || decisionToolCallId.isBlank()
+                        || ("AUTHORIZED".equals(decision)
+                                && !"AUTHORIZED_SINGLE".equals(planState))) {
+                    throw new IllegalArgumentException(
+                            "workspace-operation authority decision differs from its turn record");
+                }
+                if ("AUTHORIZED".equals(decision)) {
+                    if (!authorizedToolCallId.isBlank()
+                            && !authorizedToolCallId.equals(
+                                    decisionToolCallId)) {
+                        throw new IllegalArgumentException(
+                                "workspace-operation authority was granted to multiple parsed calls");
+                    }
+                    authorizedToolCallId = decisionToolCallId;
+                }
+            }
+            if (lifecycle) {
+                requireExactKeys(
+                        event.data(),
+                        WORKSPACE_LIFECYCLE_KEYS,
+                        "workspace-operation lifecycle event");
+            }
+            if (!evidence.planId().equals(java.util.Objects.toString(
+                            event.data().get("planId"), ""))
+                    || (!operationId.isEmpty()
+                            && !operationId.equals(java.util.Objects.toString(
+                                    event.data().get("operationId"), "")))
+                    || (operationId.isEmpty()
+                            && event.data().containsKey("operationId"))) {
+                throw new IllegalArgumentException(
+                        "local trace workspace-operation lifecycle differs from its turn record");
+            }
+            if (lifecycle && !"AUTHORIZED_SINGLE".equals(evidence.state())) {
+                throw new IllegalArgumentException(
+                        "non-authorizing workspace plan cannot record lifecycle events");
+            }
+            if (lifecycle) {
+                String eventToolCallId = java.util.Objects.toString(
+                        event.data().get("toolCallId"), "");
+                if (eventToolCallId.isBlank()
+                        || (!lifecycleToolCallId.isBlank()
+                                && !lifecycleToolCallId.equals(
+                                        eventToolCallId))) {
+                    throw new IllegalArgumentException(
+                            "workspace-operation lifecycle must retain one parsed-call identity");
+                }
+                lifecycleToolCallId = eventToolCallId;
+                lifecycleOrder.add(event.type());
+            }
+        }
+        if (!lifecycleToolCallId.isBlank()
+                && !lifecycleToolCallId.equals(authorizedToolCallId)) {
+            throw new IllegalArgumentException(
+                    "workspace-operation lifecycle differs from its authority decision call");
+        }
+        requireConsumedWorkspaceOperationLifecycle(
+                trace,
+                lifecycleOrder,
+                lifecycleToolCallId,
+                evidence);
+    }
+
+    private static void requireConsumedWorkspaceOperationLifecycle(
+            LocalTurnTrace trace,
+            List<String> order,
+            String toolCallId,
+            WorkspaceOperationPlanEvidence evidence
+    ) {
+        int consumed = java.util.Collections.frequency(
+                order,
+                "WORKSPACE_OPERATION_OBLIGATION_CONSUMED");
+        if (consumed == 0) {
+            requireUnconsumedWorkspaceOperationLifecycle(
+                    trace,
+                    order,
+                    toolCallId,
+                    evidence);
+            return;
+        }
+        if (consumed != 1
+                || java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_APPROVAL_REQUIRED") > 1
+                || java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_APPROVAL_GRANTED") != 1
+                || countAny(
+                        order,
+                        "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                        "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED") != 1
+                || java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_EXECUTION_SUCCEEDED") != 1
+                || countAny(
+                        order,
+                        "WORKSPACE_OPERATION_VERIFICATION_SUCCEEDED",
+                        "WORKSPACE_OPERATION_VERIFICATION_FAILED") != 1
+                || order.contains("WORKSPACE_OPERATION_APPROVAL_DENIED")
+                || order.contains("WORKSPACE_OPERATION_CHECKPOINT_FAILED")
+                || order.contains("WORKSPACE_OPERATION_EXECUTION_FAILED")) {
+            throw new IllegalArgumentException(
+                    "consumed workspace operation lacks one complete lifecycle");
+        }
+        int approval = order.indexOf(
+                "WORKSPACE_OPERATION_APPROVAL_GRANTED");
+        int approvalRequired = order.indexOf(
+                "WORKSPACE_OPERATION_APPROVAL_REQUIRED");
+        int checkpoint = firstIndexOfAny(
+                order,
+                "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED");
+        int execution = order.indexOf(
+                "WORKSPACE_OPERATION_EXECUTION_SUCCEEDED");
+        int consumedIndex = order.indexOf(
+                "WORKSPACE_OPERATION_OBLIGATION_CONSUMED");
+        int verification = firstIndexOfAny(
+                order,
+                "WORKSPACE_OPERATION_VERIFICATION_SUCCEEDED",
+                "WORKSPACE_OPERATION_VERIFICATION_FAILED");
+        if (!((approvalRequired < 0 || approvalRequired < approval)
+                && approval < checkpoint
+                && checkpoint < execution
+                && execution < consumedIndex
+                && consumedIndex < verification
+                && verification == order.size() - 1)) {
+            throw new IllegalArgumentException(
+                    "workspace-operation lifecycle events are out of order");
+        }
+        boolean genericApproval = trace.events().stream().anyMatch(event ->
+                "APPROVAL_GRANTED".equals(event.type())
+                        && toolCallId.equals(java.util.Objects.toString(
+                                event.data().get("toolCallId"), "")));
+        boolean genericExecution = trace.events().stream().anyMatch(event ->
+                "TOOL_EXECUTED".equals(event.type())
+                        && Boolean.TRUE.equals(event.data().get("success"))
+                        && toolCallId.equals(java.util.Objects.toString(
+                                event.data().get("toolCallId"), "")));
+        String planId = evidence.planId();
+        String operationId = evidence.operations().getFirst().operationId();
+        boolean checkpointBinding = trace.events().stream().anyMatch(event ->
+                ("CHECKPOINT_CREATED".equals(event.type())
+                                 || "CHECKPOINT_SKIPPED".equals(event.type()))
+                        && planId.equals(java.util.Objects.toString(
+                                event.data().get("authorityPlanId"), ""))
+                        && operationId.equals(java.util.Objects.toString(
+                                event.data().get("operationId"), ""))
+                        && toolCallId.equals(java.util.Objects.toString(
+                                event.data().get("toolCallId"), "")));
+        if (!genericApproval || !genericExecution || !checkpointBinding) {
+            throw new IllegalArgumentException(
+                    "workspace-operation lifecycle is not joined to approval, checkpoint, and execution evidence");
+        }
+    }
+
+    private static void requireUnconsumedWorkspaceOperationLifecycle(
+            LocalTurnTrace trace,
+            List<String> order,
+            String toolCallId,
+            WorkspaceOperationPlanEvidence evidence
+    ) {
+        if (order.isEmpty()) return;
+        int denied = java.util.Collections.frequency(
+                order,
+                "WORKSPACE_OPERATION_APPROVAL_DENIED");
+        int checkpointFailed = java.util.Collections.frequency(
+                order,
+                "WORKSPACE_OPERATION_CHECKPOINT_FAILED");
+        int executionFailed = java.util.Collections.frequency(
+                order,
+                "WORKSPACE_OPERATION_EXECUTION_FAILED");
+        if (denied + checkpointFailed + executionFailed != 1
+                || countAny(
+                        order,
+                        "WORKSPACE_OPERATION_VERIFICATION_SUCCEEDED",
+                        "WORKSPACE_OPERATION_VERIFICATION_FAILED") != 0
+                || java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_APPROVAL_REQUIRED") > 1) {
+            throw new IllegalArgumentException(
+                    "unconsumed workspace operation lacks one terminal lifecycle outcome");
+        }
+        String terminal;
+        if (denied == 1) {
+            terminal = "WORKSPACE_OPERATION_APPROVAL_DENIED";
+            int approvalRequired = order.indexOf(
+                    "WORKSPACE_OPERATION_APPROVAL_REQUIRED");
+            if ((approvalRequired >= 0
+                            && approvalRequired >= order.indexOf(terminal))
+                    || order.contains("WORKSPACE_OPERATION_APPROVAL_GRANTED")
+                    || countAny(
+                            order,
+                            "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                            "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED") != 0
+                    || order.contains("WORKSPACE_OPERATION_EXECUTION_SUCCEEDED")
+                    || order.contains("WORKSPACE_OPERATION_EXECUTION_FAILED")) {
+                throw new IllegalArgumentException(
+                        "denied workspace operation contains later lifecycle evidence");
+            }
+            requireGenericToolEvent(
+                    trace,
+                    "APPROVAL_DENIED",
+                    toolCallId,
+                    null);
+        } else if (checkpointFailed == 1) {
+            terminal = "WORKSPACE_OPERATION_CHECKPOINT_FAILED";
+            requireOneGrantedBefore(order, terminal);
+            if (order.contains("WORKSPACE_OPERATION_EXECUTION_SUCCEEDED")
+                    || order.contains("WORKSPACE_OPERATION_EXECUTION_FAILED")) {
+                throw new IllegalArgumentException(
+                        "checkpoint-failed workspace operation contains execution evidence");
+            }
+            requireGenericToolEvent(
+                    trace,
+                    "APPROVAL_GRANTED",
+                    toolCallId,
+                    null);
+            requireCheckpointTraceBinding(
+                    trace,
+                    evidence,
+                    Set.of("CHECKPOINT_FAILED"),
+                    toolCallId);
+        } else {
+            terminal = "WORKSPACE_OPERATION_EXECUTION_FAILED";
+            requireOneGrantedBefore(order, terminal);
+            int checkpoint = firstIndexOfAny(
+                    order,
+                    "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                    "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED");
+            if (countAny(
+                            order,
+                            "WORKSPACE_OPERATION_CHECKPOINT_CREATED",
+                            "WORKSPACE_OPERATION_CHECKPOINT_SKIPPED") != 1
+                    || checkpoint >= order.indexOf(terminal)) {
+                throw new IllegalArgumentException(
+                        "execution-failed workspace operation lacks prior checkpoint evidence");
+            }
+            requireGenericToolEvent(
+                    trace,
+                    "APPROVAL_GRANTED",
+                    toolCallId,
+                    null);
+            requireGenericToolEvent(
+                    trace,
+                    "TOOL_EXECUTED",
+                    toolCallId,
+                    Boolean.FALSE);
+            requireCheckpointTraceBinding(
+                    trace,
+                    evidence,
+                    Set.of("CHECKPOINT_CREATED", "CHECKPOINT_SKIPPED"),
+                    toolCallId);
+        }
+        if (order.indexOf(terminal) != order.size() - 1) {
+            throw new IllegalArgumentException(
+                    "workspace-operation terminal lifecycle event must be final");
+        }
+    }
+
+    private static void requireOneGrantedBefore(
+            List<String> order,
+            String terminal
+    ) {
+        if (java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_APPROVAL_GRANTED") != 1
+                || java.util.Collections.frequency(
+                        order,
+                        "WORKSPACE_OPERATION_APPROVAL_REQUIRED") > 1
+                || (order.indexOf("WORKSPACE_OPERATION_APPROVAL_REQUIRED") >= 0
+                        && order.indexOf("WORKSPACE_OPERATION_APPROVAL_REQUIRED")
+                                >= order.indexOf(
+                                        "WORKSPACE_OPERATION_APPROVAL_GRANTED"))
+                || order.indexOf("WORKSPACE_OPERATION_APPROVAL_GRANTED")
+                        >= order.indexOf(terminal)
+                || order.contains("WORKSPACE_OPERATION_APPROVAL_DENIED")) {
+            throw new IllegalArgumentException(
+                    "workspace-operation failure lacks one prior approval grant");
+        }
+    }
+
+    private static void requireGenericToolEvent(
+            LocalTurnTrace trace,
+            String type,
+            String toolCallId,
+            Boolean success
+    ) {
+        boolean found = trace.events().stream().anyMatch(event ->
+                type.equals(event.type())
+                        && toolCallId.equals(java.util.Objects.toString(
+                                event.data().get("toolCallId"), ""))
+                        && (success == null
+                                || success.equals(event.data().get("success"))));
+        if (!found) {
+            throw new IllegalArgumentException(
+                    "workspace-operation lifecycle lacks matching " + type
+                            + " evidence");
+        }
+    }
+
+    private static void requireCheckpointTraceBinding(
+            LocalTurnTrace trace,
+            WorkspaceOperationPlanEvidence evidence,
+            Set<String> types,
+            String toolCallId
+    ) {
+        String planId = evidence.planId();
+        String operationId = evidence.operations().getFirst().operationId();
+        boolean found = trace.events().stream().anyMatch(event ->
+                types.contains(event.type())
+                        && planId.equals(java.util.Objects.toString(
+                                event.data().get("authorityPlanId"), ""))
+                        && operationId.equals(java.util.Objects.toString(
+                                event.data().get("operationId"), ""))
+                        && toolCallId.equals(java.util.Objects.toString(
+                                event.data().get("toolCallId"), "")));
+        if (!found) {
+            throw new IllegalArgumentException(
+                    "workspace-operation lifecycle lacks matching checkpoint evidence");
+        }
+    }
+
+    private static int countAny(
+            List<String> values,
+            String first,
+            String second
+    ) {
+        return java.util.Collections.frequency(values, first)
+                + java.util.Collections.frequency(values, second);
+    }
+
+    private static int firstIndexOfAny(
+            List<String> values,
+            String first,
+            String second
+    ) {
+        int firstIndex = values.indexOf(first);
+        int secondIndex = values.indexOf(second);
+        if (firstIndex < 0) return secondIndex;
+        if (secondIndex < 0) return firstIndex;
+        return Math.min(firstIndex, secondIndex);
     }
 
     private static TaskResolution authoritativeResolution(
@@ -2623,30 +3164,98 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             lexicalRegions.add(row);
         }
         out.put("lexicalRegions", lexicalRegions);
+        out.put("workspaceOperationPlan",
+                workspaceOperationPlanEvidenceToMap(
+                        safe.workspaceOperationPlan()));
         return out;
     }
 
-    private static TurnPolicyTrace policyTraceFrom(Object raw) {
+    private static Map<String, Object> workspaceOperationPlanEvidenceToMap(
+            WorkspaceOperationPlanEvidence evidence
+    ) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("schemaVersion", evidence.schemaVersion());
+        out.put("planId", evidence.planId());
+        out.put("state", evidence.state());
+        out.put("reason", evidence.reason());
+        out.put("canonicalRequestSha256", evidence.canonicalRequestSha256());
+        out.put("canonicalRequestUtf8Bytes",
+                evidence.canonicalRequestUtf8Bytes());
+        List<Map<String, Object>> operations = new java.util.ArrayList<>();
+        for (WorkspaceOperationPlanEvidence.OperationEvidence operation
+                : evidence.operations()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("ordinal", operation.ordinal());
+            row.put("operationId", operation.operationId());
+            row.put("owner", operation.owner());
+            row.put("kind", operation.kind());
+            row.put("toolName", operation.toolName());
+            row.put("overwritePolicy", operation.overwritePolicy());
+            row.put("recursivePolicy", operation.recursivePolicy());
+            row.put("parentPolicy", operation.parentPolicy());
+            row.put("actionStartOffset", operation.actionStartOffset());
+            row.put("actionEndOffset", operation.actionEndOffset());
+            row.put("sourceStartOffset", operation.sourceStartOffset());
+            row.put("sourceEndOffset", operation.sourceEndOffset());
+            row.put("sourceSpanSha256", operation.sourceSpanSha256());
+            List<Map<String, Object>> operands = new java.util.ArrayList<>();
+            for (WorkspaceOperationPlanEvidence.OperandEvidence operand
+                    : operation.operands()) {
+                Map<String, Object> operandRow = new LinkedHashMap<>();
+                operandRow.put("ordinal", operand.ordinal());
+                operandRow.put("role", operand.role());
+                operandRow.put("lexicalValueSha256",
+                        operand.lexicalValueSha256());
+                operandRow.put("effectivePathSha256",
+                        operand.effectivePathSha256());
+                operandRow.put("valueStartOffset", operand.valueStartOffset());
+                operandRow.put("valueEndOffset", operand.valueEndOffset());
+                operands.add(operandRow);
+            }
+            row.put("operands", operands);
+            operations.add(row);
+        }
+        out.put("operations", operations);
+        return out;
+    }
+
+    private static TurnPolicyTrace policyTraceFrom(
+            Object raw,
+            String canonicalRequest
+    ) {
         if (!(raw instanceof Map<?, ?> map)) return TurnPolicyTrace.empty();
         boolean hasSchema = map.containsKey("lexicalEvidenceSchemaVersion");
         boolean hasDecisions = map.containsKey("lexicalDecisions");
         boolean hasRegions = map.containsKey("lexicalRegions");
+        int policySchema = hasSchema
+                ? exactInt(
+                        map.get("lexicalEvidenceSchemaVersion"),
+                        "lexicalEvidenceSchemaVersion")
+                : 0;
         if (!hasSchema) {
-            if (hasDecisions || hasRegions) {
+            if (hasDecisions
+                    || hasRegions
+                    || map.containsKey("workspaceOperationPlan")) {
                 throw new IllegalArgumentException(
                         "unversioned policy trace cannot carry lexical evidence");
             }
-        } else if (exactInt(
-                        map.get("lexicalEvidenceSchemaVersion"),
-                        "lexicalEvidenceSchemaVersion")
-                                != LEXICAL_EVIDENCE_SCHEMA_VERSION
+        } else if ((policySchema
+                                != LEGACY_LEXICAL_EVIDENCE_SCHEMA_VERSION
+                        && policySchema != LEXICAL_EVIDENCE_SCHEMA_VERSION)
                 || !hasDecisions
-                || !hasRegions) {
+                || !hasRegions
+                || (policySchema == LEXICAL_EVIDENCE_SCHEMA_VERSION
+                        && !map.containsKey("workspaceOperationPlan"))) {
             throw new IllegalArgumentException(
-                    "versioned policy trace requires both lexical evidence arrays");
+                    "versioned policy trace requires its complete evidence shape");
         }
         if (hasSchema) {
-            requireExactKeys(map, POLICY_TRACE_V1_KEYS, "policy trace v1");
+            requireExactKeys(
+                    map,
+                    policySchema == LEXICAL_EVIDENCE_SCHEMA_VERSION
+                            ? POLICY_TRACE_V2_KEYS
+                            : POLICY_TRACE_V1_KEYS,
+                    "policy trace v" + policySchema);
             List<?> rawDecisions = exactList(
                     map.get("lexicalDecisions"),
                     "lexicalDecisions");
@@ -2674,6 +3283,17 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         taskType,
                         rolefulTargets,
                         decisions);
+        String request = canonicalRequest == null
+                ? ""
+                : canonicalRequest.strip();
+        WorkspaceOperationPlanEvidence workspacePlan =
+                policySchema == LEXICAL_EVIDENCE_SCHEMA_VERSION
+                        ? workspaceOperationPlanEvidenceFrom(
+                                map.get("workspaceOperationPlan"))
+                        : WorkspaceOperationPlanEvidence.from(
+                                dev.talos.runtime.workspace
+                                        .WorkspaceOperationAuthorityPlan
+                                        .none(request));
         return new TurnPolicyTrace(
                 taskType,
                 hasSchema
@@ -2709,7 +3329,95 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 rolefulTargets,
                 decisions,
                 regions,
-                mutationRequested);
+                mutationRequested,
+                workspacePlan);
+    }
+
+    private static WorkspaceOperationPlanEvidence
+            workspaceOperationPlanEvidenceFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            throw new IllegalArgumentException(
+                    "workspaceOperationPlan must be an object");
+        }
+        requireExactKeys(
+                map,
+                WORKSPACE_PLAN_EVIDENCE_KEYS,
+                "workspace-operation plan evidence");
+        List<?> rawOperations = exactList(
+                map.get("operations"),
+                "workspaceOperationPlan.operations");
+        if (rawOperations.size() > 1) {
+            throw new IllegalArgumentException(
+                    "workspace-operation plan evidence contains too many operations");
+        }
+        List<WorkspaceOperationPlanEvidence.OperationEvidence> operations =
+                new java.util.ArrayList<>();
+        for (Object rawOperation : rawOperations) {
+            if (!(rawOperation instanceof Map<?, ?> operation)) {
+                throw new IllegalArgumentException(
+                        "workspace-operation evidence entry must be an object");
+            }
+            requireExactKeys(
+                    operation,
+                    WORKSPACE_OPERATION_EVIDENCE_KEYS,
+                    "workspace-operation evidence");
+            List<?> rawOperands = exactList(
+                    operation.get("operands"),
+                    "workspaceOperationPlan.operations.operands");
+            if (rawOperands.size() > 2) {
+                throw new IllegalArgumentException(
+                        "workspace-operation evidence contains too many operands");
+            }
+            List<WorkspaceOperationPlanEvidence.OperandEvidence> operands =
+                    new java.util.ArrayList<>();
+            for (Object rawOperand : rawOperands) {
+                if (!(rawOperand instanceof Map<?, ?> operand)) {
+                    throw new IllegalArgumentException(
+                            "workspace-operation operand evidence must be an object");
+                }
+                requireExactKeys(
+                        operand,
+                        WORKSPACE_OPERAND_EVIDENCE_KEYS,
+                        "workspace-operation operand evidence");
+                operands.add(new WorkspaceOperationPlanEvidence.OperandEvidence(
+                        exactInt(operand.get("ordinal"), "ordinal"),
+                        exactText(operand, "role"),
+                        exactText(operand, "lexicalValueSha256"),
+                        exactText(operand, "effectivePathSha256"),
+                        exactInt(operand.get("valueStartOffset"),
+                                "valueStartOffset"),
+                        exactInt(operand.get("valueEndOffset"),
+                                "valueEndOffset")));
+            }
+            operations.add(new WorkspaceOperationPlanEvidence.OperationEvidence(
+                    exactInt(operation.get("ordinal"), "ordinal"),
+                    exactText(operation, "operationId"),
+                    exactText(operation, "owner"),
+                    exactText(operation, "kind"),
+                    exactText(operation, "toolName"),
+                    exactText(operation, "overwritePolicy"),
+                    exactText(operation, "recursivePolicy"),
+                    exactText(operation, "parentPolicy"),
+                    exactInt(operation.get("actionStartOffset"),
+                            "actionStartOffset"),
+                    exactInt(operation.get("actionEndOffset"),
+                            "actionEndOffset"),
+                    exactInt(operation.get("sourceStartOffset"),
+                            "sourceStartOffset"),
+                    exactInt(operation.get("sourceEndOffset"),
+                            "sourceEndOffset"),
+                    exactText(operation, "sourceSpanSha256"),
+                    operands));
+        }
+        return new WorkspaceOperationPlanEvidence(
+                exactInt(map.get("schemaVersion"), "schemaVersion"),
+                exactText(map, "planId"),
+                exactText(map, "state"),
+                exactText(map, "reason"),
+                exactText(map, "canonicalRequestSha256"),
+                exactInt(map.get("canonicalRequestUtf8Bytes"),
+                        "canonicalRequestUtf8Bytes"),
+                operations);
     }
 
     private static List<TurnPolicyTrace.LexicalDecisionEvidence>

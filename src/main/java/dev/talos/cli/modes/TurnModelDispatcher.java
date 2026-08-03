@@ -362,7 +362,9 @@ final class TurnModelDispatcher {
                 plan.activeTaskContext(),
                 plan.artifactGoal(),
                 plan.verifierProfile(),
-                plan.requestObligation());
+                plan.requestObligation(),
+                plan.workspaceOperationPlan(),
+                plan.contentMutationPredecessorPaths());
     }
 
     private static ChatRequestControls withDebugTag(

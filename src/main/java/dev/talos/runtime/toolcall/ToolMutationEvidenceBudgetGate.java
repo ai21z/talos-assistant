@@ -4,7 +4,6 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 
 import java.util.Optional;
 
@@ -28,8 +27,8 @@ final class ToolMutationEvidenceBudgetGate {
                 ? TaskContractResolver.fromMessages(state.messages)
                 : captured;
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
-        if (!TurnTaskContractCapture.blocksWorkspaceOperations()
-                && WorkspaceOperationIntent.detect(contract).isPresent()) {
+        if (!TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty()) {
             return false;
         }
         if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return false;

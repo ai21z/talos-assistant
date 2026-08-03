@@ -2,7 +2,7 @@
 
 Live audit checks Talos behavior against runtime evidence. Do not accept final answers without traces, tool results, approval records, command output, verifier output, and final workspace state.
 
-Every full audit must probe or explicitly exclude each current native tool:
+Every full audit must probe each current model-exposed native tool:
 
 - `talos.list_dir`
 - `talos.read_file`
@@ -15,8 +15,14 @@ Every full audit must probe or explicitly exclude each current native tool:
 - `talos.move_path`
 - `talos.rename_path`
 - `talos.delete_path`
-- `talos.apply_workspace_batch`
 - `talos.run_command`
+
+`talos.apply_workspace_batch` is an explicitly excluded registered
+compatibility surface. The current assistant planner cannot expose it because
+workspace-operation authority is typed for exactly one operation. Run the
+deterministic scripted `workspace-batch-no-typed-authority` scenario to prove a
+fabricated batch proposal is blocked before approval and mutation. Do not use a
+live provider success scenario for this compatibility surface.
 
 Standard setup:
 

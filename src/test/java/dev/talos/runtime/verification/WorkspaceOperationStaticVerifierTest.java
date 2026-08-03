@@ -10,6 +10,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnUserRequestCapture;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -71,7 +72,7 @@ class WorkspaceOperationStaticVerifierTest {
     }
 
     @Test
-    void copyMoveRenameSequenceVerifiesFinalWorkspaceStateFromToolLoopOutcomes() throws Exception {
+    void copyMoveRenameSequenceWithoutOneTypedOperationCannotMutateWorkspace() throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "notes\n");
 
         String request = "Copy notes.md to notes-copy.md, move notes-copy.md to archive/notes-copy.md, "
@@ -85,35 +86,26 @@ class WorkspaceOperationStaticVerifierTest {
                 {"name":"talos.rename_path","arguments":{"path":"archive/notes-copy.md","new_name":"final-notes.md"}}
                 """);
 
-        assertEquals(
-                List.of("notes-copy.md", "archive/notes-copy.md", "archive/final-notes.md"),
-                loopResult.toolOutcomes().stream().map(ToolCallLoop.ToolOutcome::pathHint).toList(),
-                "workspace operation outcomes should expose resulting changed paths, not source paths");
-
+        assertEquals(3, loopResult.toolOutcomes().size());
+        assertTrue(loopResult.toolOutcomes().stream().noneMatch(ToolCallLoop.ToolOutcome::success),
+                "a multi-operation request must not confer authority on any individual proposal");
         assertTrue(Files.exists(workspace.resolve("notes.md")));
         assertFalse(Files.exists(workspace.resolve("notes-copy.md")));
         assertFalse(Files.exists(workspace.resolve("archive/notes-copy.md")));
-        assertEquals("notes\n", Files.readString(workspace.resolve("archive/final-notes.md")));
+        assertFalse(Files.exists(workspace.resolve("archive/final-notes.md")));
 
         TaskVerificationResult verification = StaticTaskVerifier.verify(
                 workspace,
-                TaskContractResolver.fromUserRequest(request),
+                request,
                 loopResult,
                 0);
 
-        assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
-        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("copy source exists: notes.md")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("move source absent: notes-copy.md")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("rename destination exists: archive/final-notes.md")),
-                verification.facts().toString());
-
+        assertEquals(TaskVerificationStatus.NOT_RUN, verification.status(), verification.problems().toString());
+        assertTrue(verification.facts().isEmpty(), verification.facts().toString());
     }
 
     @Test
-    void batchWorkspaceApplyVerifiesPerOperationTargetsFromToolLoopOutcome() throws Exception {
+    void operationsJsonBatchWithoutTypedAuthorityCannotMutateWorkspace() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Fixture\n");
         Files.writeString(workspace.resolve("source.txt"), "source\n");
 
@@ -132,33 +124,26 @@ class WorkspaceOperationStaticVerifierTest {
                 ]"}}
                 """);
 
-        assertTrue(Files.isDirectory(workspace.resolve("docs")));
+        assertEquals(1, loopResult.toolOutcomes().size());
+        assertFalse(loopResult.toolOutcomes().getFirst().success());
+        assertFalse(Files.exists(workspace.resolve("docs")));
         assertTrue(Files.exists(workspace.resolve("README.md")));
-        assertEquals("# Fixture\n", Files.readString(workspace.resolve("docs/README.md")));
-        assertFalse(Files.exists(workspace.resolve("source.txt")));
+        assertTrue(Files.exists(workspace.resolve("source.txt")));
         assertFalse(Files.exists(workspace.resolve("docs/source.txt")));
-        assertEquals("source\n", Files.readString(workspace.resolve("docs/final-source.txt")));
+        assertFalse(Files.exists(workspace.resolve("docs/final-source.txt")));
 
         TaskVerificationResult verification = StaticTaskVerifier.verify(
                 workspace,
-                TaskContractResolver.fromUserRequest(request),
+                request,
                 loopResult,
                 0);
 
-        assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
-        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("directory exists: docs")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("copy destination exists: docs/README.md")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("move source absent: source.txt")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("rename destination exists: docs/final-source.txt")),
-                verification.facts().toString());
+        assertEquals(TaskVerificationStatus.NOT_RUN, verification.status(), verification.problems().toString());
+        assertTrue(verification.facts().isEmpty(), verification.facts().toString());
     }
 
     @Test
-    void naturalBatchDirectoryAndCopyPromptVerifiesAllFinalPaths() throws Exception {
+    void naturalBatchWithoutTypedAuthorityCannotMutateWorkspace() throws Exception {
         Files.writeString(workspace.resolve("styles.css"), "body { color: black; }\n");
 
         String request = "batch this: create batch-one and batch-two, "
@@ -174,26 +159,20 @@ class WorkspaceOperationStaticVerifierTest {
                 ]"}}
                 """);
 
-        assertTrue(Files.isDirectory(workspace.resolve("batch-one")));
-        assertTrue(Files.isDirectory(workspace.resolve("batch-two")));
-        assertEquals("body { color: black; }\n",
-                Files.readString(workspace.resolve("batch-one/styles-copy.css")));
+        assertEquals(1, loopResult.toolOutcomes().size());
+        assertFalse(loopResult.toolOutcomes().getFirst().success());
+        assertFalse(Files.exists(workspace.resolve("batch-one")));
+        assertFalse(Files.exists(workspace.resolve("batch-two")));
+        assertTrue(Files.exists(workspace.resolve("styles.css")));
 
         TaskVerificationResult verification = StaticTaskVerifier.verify(
                 workspace,
-                TaskContractResolver.fromUserRequest(request),
+                request,
                 loopResult,
                 0);
 
-        assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
-        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("directory exists: batch-one")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("directory exists: batch-two")),
-                verification.facts().toString());
-        assertTrue(verification.facts().stream()
-                        .anyMatch(f -> f.contains("copy destination exists: batch-one/styles-copy.css")),
-                verification.facts().toString());
+        assertEquals(TaskVerificationStatus.NOT_RUN, verification.status(), verification.problems().toString());
+        assertTrue(verification.facts().isEmpty(), verification.facts().toString());
     }
 
     @Test
@@ -211,15 +190,45 @@ class WorkspaceOperationStaticVerifierTest {
 
         assertFalse(Files.exists(workspace.resolve("docs/old-plan.md")));
 
-        TaskVerificationResult verification = StaticTaskVerifier.verify(
-                workspace,
-                TaskContractResolver.fromUserRequest(request),
-                loopResult,
-                0);
+        TaskVerificationResult verification = verifyWithTypedAuthority(
+                request,
+                loopResult);
 
         assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
         assertTrue(verification.problems().isEmpty(), verification.problems().toString());
         assertTrue(verification.facts().stream().anyMatch(f -> f.contains("deleted target absent: docs/old-plan.md")),
+                verification.facts().toString());
+    }
+
+    @Test
+    void pureTypedDeleteDoesNotInferAnUnrelatedArtifactProfileFromItsFilename()
+            throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(
+                workspace.resolve("docs/synthwave-webpage-plan.md"),
+                "delete me\n");
+
+        String request = "Delete docs/synthwave-webpage-plan.md please.";
+        ToolCallLoop.LoopResult loopResult = runLoop(
+                request,
+                tools(new DeletePathTool()),
+                """
+                {"name":"talos.delete_path","arguments":{"path":"docs/synthwave-webpage-plan.md"}}
+                """);
+
+        TaskVerificationResult verification = verifyWithTypedAuthority(
+                request,
+                loopResult);
+
+        assertEquals(
+                TaskVerificationStatus.READBACK_ONLY,
+                verification.status(),
+                verification.problems().toString());
+        assertTrue(verification.problems().isEmpty(),
+                verification.problems().toString());
+        assertTrue(verification.facts().stream().anyMatch(fact ->
+                        fact.contains(
+                                "deleted target absent: docs/synthwave-webpage-plan.md")),
                 verification.facts().toString());
     }
 
@@ -237,19 +246,16 @@ class WorkspaceOperationStaticVerifierTest {
                 """);
 
         assertTrue(Files.exists(workspace.resolve("workspace-notes/readme-renamed.md")));
-        assertTrue(Files.exists(workspace.resolve("archive/readme-renamed.md")));
+        assertFalse(Files.exists(workspace.resolve("archive/readme-renamed.md")));
+        assertEquals(1, loopResult.toolOutcomes().size());
+        assertFalse(loopResult.toolOutcomes().getFirst().success());
 
-        TaskVerificationResult verification = StaticTaskVerifier.verify(
-                workspace,
-                TaskContractResolver.fromUserRequest(request),
-                loopResult,
-                0);
+        TaskVerificationResult verification = verifyWithTypedAuthority(
+                request,
+                loopResult);
 
-        assertEquals(TaskVerificationStatus.FAILED, verification.status());
-        assertTrue(verification.problems().stream()
-                        .anyMatch(problem -> problem.contains("workspace-notes/readme-renamed.md")
-                                && problem.contains("expected target was not successfully mutated")),
-                verification.problems().toString());
+        assertEquals(TaskVerificationStatus.NOT_RUN, verification.status());
+        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
     }
 
     @Test
@@ -289,7 +295,7 @@ class WorkspaceOperationStaticVerifierTest {
 
         TaskVerificationResult verification = StaticTaskVerifier.verify(
                 workspace,
-                TaskContractResolver.fromUserRequest(request),
+                request,
                 loopResult,
                 0);
 
@@ -303,9 +309,10 @@ class WorkspaceOperationStaticVerifierTest {
     }
 
     private ToolCallLoop.LoopResult runLoop(String request, ToolRegistry registry, String initialResponse) {
-        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        var resolution = TaskContractResolver.resolveFromUserRequest(request);
+        TaskContract contract = resolution.contract();
         TurnUserRequestCapture.set(request);
-        TurnTaskContractCapture.set(contract);
+        TurnTaskContractCapture.set(resolution);
 
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(),
@@ -321,6 +328,21 @@ class WorkspaceOperationStaticVerifierTest {
                 dev.talos.spi.types.ChatMessage.user(request)));
 
         return loop.run(initialResponse, messages, workspace, context);
+    }
+
+    private TaskVerificationResult verifyWithTypedAuthority(
+            String request,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        var resolution = TaskContractResolver.resolveFromUserRequest(request);
+        return StaticTaskVerifier.verifyWithEvidence(
+                        workspace,
+                        resolution.contract(),
+                        RequestObligationCompiler.compile(resolution.contract()),
+                        loopResult,
+                        0,
+                        resolution.workspaceOperationPlan())
+                .compatibilityResult();
     }
 
     private static ToolRegistry tools(dev.talos.tools.TalosTool... tools) {

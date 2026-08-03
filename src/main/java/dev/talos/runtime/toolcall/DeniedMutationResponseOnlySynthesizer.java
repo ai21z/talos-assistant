@@ -53,7 +53,7 @@ final class DeniedMutationResponseOnlySynthesizer {
                         : state.ctx.executionPhaseState().phase();
         CurrentTurnPlan responseOnlyPlan =
                 CurrentTurnPlan.createWithActionObligation(
-                        resolution.contract(),
+                        resolution,
                         phase,
                         java.util.List.of(),
                         java.util.List.of(),

@@ -3,12 +3,46 @@ package dev.talos.runtime.intent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** One canonical matcher for mutation action families used by intent planners. */
 final class CanonicalMutationClauseMatcher {
+
+    private static final Pattern WORKSPACE_SOURCE_PREFIX = Pattern.compile(
+            "(?iu)^[\\s:,-]*(?:(?:exactly|only)\\s+)*"
+                    + "(?:(?:the|a|an|current|existing|local)\\s+)*"
+                    + "(?:(?:path|file|directory|folder)\\s+)?$");
+    private static final Pattern WORKSPACE_TARGET_PREFIX = Pattern.compile(
+            "(?iu)^[\\s:,-]*(?:(?:named|called|as)\\s+)?"
+                    + "(?:(?:the|a|an|current|existing|local)\\s+)*"
+                    + "(?:(?:path|file|directory|folder)\\s+)?$");
+    private static final Pattern COPY_MOVE_CONNECTOR = Pattern.compile(
+            "(?iu)^\\s+(?:to|into)\\s+$");
+    private static final Pattern RENAME_CONNECTOR = Pattern.compile(
+            "(?iu)^\\s+(?:to|as)\\s+$");
+    private static final Pattern EMPTY_OPERATION_TRAILER = Pattern.compile(
+            "(?iu)^\\s*(?:please|kindly)?\\s*[.!?]?\\s*$");
+    private static final Pattern OVERWRITE_OPERATION_TRAILER = Pattern.compile(
+            "(?iu)^\\s*(?:,?\\s*(?:and\\s+)?overwrite(?:\\s+it)?)?"
+                    + "(?:\\s+(?:please|kindly))?\\s*[.!?]?\\s*$");
+    private static final Pattern RECURSIVE_OPERATION_TRAILER = Pattern.compile(
+            "(?iu)^\\s*(?:,?\\s*(?:and\\s+)?recursively)?"
+                    + "(?:\\s+(?:please|kindly))?\\s*[.!?]?\\s*$");
+    private static final Pattern COPY_OPERATION_TRAILER = Pattern.compile(
+            "(?iu)^\\s*(?:(?:,?\\s*recursively)"
+                    + "(?:\\s+(?:and\\s+)?overwrite(?:\\s+it)?)?"
+                    + "|(?:,?\\s*(?:and\\s+)?overwrite(?:\\s+it)?)"
+                    + "(?:\\s+(?:and\\s+)?recursively)?)?"
+                    + "(?:\\s+(?:please|kindly))?\\s*[.!?]?\\s*$");
+    private static final Pattern DIRECT_ASSISTANT_ACTION_REQUEST =
+            Pattern.compile("(?iu)^\\s*(?:can|could|would)\\s+you\\s*$");
+    private static final Pattern WORKSPACE_OVERWRITE_MODIFIER_GAP =
+            Pattern.compile("(?iu).*(?:\\band\\s+|,\\s*)$");
+    private static final Pattern WORKSPACE_OVERWRITE_MODIFIER_SUFFIX =
+            Pattern.compile("(?iu)^\\s+it\\s*[.!?]?\\s*$");
 
     enum Family {
         CONTENT_MUTATION,
@@ -481,6 +515,244 @@ final class CanonicalMutationClauseMatcher {
 
     private CanonicalMutationClauseMatcher() {}
 
+    /**
+     * Binds operands only inside one exact parser-owned workspace clause.
+     * This is the sole workspace grammar shared by T1196 and T1204; callers
+     * must never invoke it over an unowned whole request.
+     */
+    static Optional<WorkspaceOperationObligation> bindWorkspaceOperation(
+            RequestLexicalView view,
+            Action action,
+            Family effectiveFamily,
+            int clauseStart,
+            int clauseEnd,
+            List<String> candidatePaths,
+            WorkspaceOperationObligation.Owner owner
+    ) {
+        if (view == null
+                || action == null
+                || effectiveFamily != Family.WORKSPACE_OPERATION
+                || owner == null
+                || clauseStart < 0
+                || clauseEnd <= clauseStart
+                || clauseEnd > view.request().length()
+                || action.start() < clauseStart
+                || action.end() > clauseEnd
+                || action.nonImperativeUse()
+                || action.scopeKind() != ScopeKind.NONE
+                || view.containsProviderRemovedControl(clauseStart, clauseEnd)
+                || view.containsLoneCarriageReturn(clauseStart, clauseEnd)
+                || view.containsMalformedDelimiter(clauseStart, clauseEnd)
+                || view.request().substring(clauseStart, clauseEnd)
+                        .indexOf('\0') >= 0) {
+            return Optional.empty();
+        }
+        List<Action> localActions = actions(view, clauseStart, clauseEnd);
+        if (localActions.size() != 1
+                || localActions.getFirst().start() != action.start()
+                || localActions.getFirst().end() != action.end()) {
+            return Optional.empty();
+        }
+        List<String> candidates = candidatePaths == null
+                ? List.of()
+                : candidatePaths.stream().distinct().toList();
+        List<CoordinatedMutationTailParser.TargetOccurrence> operands =
+                CoordinatedMutationTailParser.targetOccurrences(
+                        view,
+                        candidates,
+                        action.end(),
+                        clauseEnd).stream()
+                        .filter(occurrence ->
+                                occurrence.envelopeStart() >= action.end()
+                                        && occurrence.envelopeEnd() <= clauseEnd)
+                        .toList();
+        String verb = action.verb().toLowerCase(Locale.ROOT).strip();
+        WorkspaceOperationObligation.Kind kind = workspaceKind(
+                verb,
+                view.maskedLower().substring(action.end(), clauseEnd));
+        if (kind == null) return Optional.empty();
+
+        int requiredOperands = switch (kind) {
+            case COPY_PATH, MOVE_PATH, RENAME_PATH -> 2;
+            case MKDIR, DELETE_PATH -> 1;
+        };
+        if (operands.size() != requiredOperands) return Optional.empty();
+
+        var first = operands.getFirst();
+        String firstPrefix = view.masked().substring(
+                action.end(),
+                first.envelopeStart());
+        Pattern firstPrefixPattern = kind == WorkspaceOperationObligation.Kind.MKDIR
+                ? WORKSPACE_TARGET_PREFIX
+                : WORKSPACE_SOURCE_PREFIX;
+        if (!firstPrefixPattern.matcher(firstPrefix).matches()) {
+            return Optional.empty();
+        }
+
+        List<WorkspaceOperationObligation.Operand> typedOperands;
+        int lastEnd = first.envelopeEnd();
+        if (requiredOperands == 1) {
+            WorkspaceOperationObligation.Role role =
+                    WorkspaceOperationObligation.Role.TARGET;
+            typedOperands = List.of(operand(view, first, role, first.path()));
+        } else {
+            var second = operands.getLast();
+            String connector = view.masked().substring(
+                    first.envelopeEnd(),
+                    second.envelopeStart());
+            Pattern expectedConnector =
+                    kind == WorkspaceOperationObligation.Kind.RENAME_PATH
+                            ? RENAME_CONNECTOR
+                            : COPY_MOVE_CONNECTOR;
+            if (!expectedConnector.matcher(connector).matches()) {
+                return Optional.empty();
+            }
+            String destination = second.path();
+            if (kind == WorkspaceOperationObligation.Kind.RENAME_PATH) {
+                destination = renameDestination(first.path(), second.path());
+                if (destination.isEmpty()) return Optional.empty();
+            }
+            typedOperands = List.of(
+                    operand(
+                            view,
+                            first,
+                            WorkspaceOperationObligation.Role.SOURCE,
+                            first.path()),
+                    operand(
+                            view,
+                            second,
+                            WorkspaceOperationObligation.Role.DESTINATION,
+                            destination));
+            lastEnd = second.envelopeEnd();
+        }
+
+        String trailer = view.maskedLower().substring(lastEnd, clauseEnd);
+        boolean overwrite = trailer.contains("overwrite");
+        boolean recursive = trailer.contains("recursively");
+        Pattern trailerPattern = switch (kind) {
+            case COPY_PATH -> COPY_OPERATION_TRAILER;
+            case MOVE_PATH, RENAME_PATH -> OVERWRITE_OPERATION_TRAILER;
+            case DELETE_PATH -> RECURSIVE_OPERATION_TRAILER;
+            case MKDIR -> EMPTY_OPERATION_TRAILER;
+        };
+        if (!trailerPattern.matcher(trailer).matches()) {
+            return Optional.empty();
+        }
+        WorkspaceOperationObligation.OverwritePolicy overwritePolicy =
+                switch (kind) {
+                    case COPY_PATH, MOVE_PATH, RENAME_PATH -> overwrite
+                            ? WorkspaceOperationObligation.OverwritePolicy
+                                    .OVERWRITE_EXPLICIT
+                            : WorkspaceOperationObligation.OverwritePolicy
+                                    .FAIL_IF_EXISTS;
+                    case MKDIR, DELETE_PATH ->
+                            WorkspaceOperationObligation.OverwritePolicy
+                                    .NOT_APPLICABLE;
+                };
+        WorkspaceOperationObligation.RecursivePolicy recursivePolicy =
+                switch (kind) {
+                    case COPY_PATH, DELETE_PATH -> recursive
+                            ? WorkspaceOperationObligation.RecursivePolicy
+                                    .RECURSIVE_EXPLICIT
+                            : WorkspaceOperationObligation.RecursivePolicy
+                                    .NON_RECURSIVE;
+                    case MOVE_PATH, RENAME_PATH, MKDIR ->
+                            WorkspaceOperationObligation.RecursivePolicy
+                                    .NOT_APPLICABLE;
+                };
+        WorkspaceOperationObligation.ParentPolicy parentPolicy =
+                switch (kind) {
+                    case COPY_PATH, MOVE_PATH, RENAME_PATH ->
+                            WorkspaceOperationObligation.ParentPolicy
+                                    .REQUIRE_EXISTING_PARENT;
+                    case MKDIR -> WorkspaceOperationObligation.ParentPolicy
+                            .REQUIRE_EXISTING_PARENT;
+                    case DELETE_PATH -> WorkspaceOperationObligation.ParentPolicy
+                            .NOT_APPLICABLE;
+                };
+        try {
+            return Optional.of(WorkspaceOperationObligation.create(
+                    owner,
+                    kind,
+                    typedOperands,
+                    overwritePolicy,
+                    recursivePolicy,
+                    parentPolicy,
+                    view.request(),
+                    action.start(),
+                    action.end(),
+                    clauseStart,
+                    clauseEnd));
+        } catch (IllegalArgumentException rejected) {
+            return Optional.empty();
+        }
+    }
+
+    private static WorkspaceOperationObligation.Operand operand(
+            RequestLexicalView view,
+            CoordinatedMutationTailParser.TargetOccurrence occurrence,
+            WorkspaceOperationObligation.Role role,
+            String effectivePath
+    ) {
+        return new WorkspaceOperationObligation.Operand(
+                role,
+                view.request().substring(
+                        occurrence.envelopeStart(),
+                        occurrence.envelopeEnd()),
+                effectivePath,
+                occurrence.envelopeStart(),
+                occurrence.envelopeEnd());
+    }
+
+    private static WorkspaceOperationObligation.Kind workspaceKind(
+            String verb,
+            String trailingContext
+    ) {
+        if ("copy".equals(verb)) {
+            return WorkspaceOperationObligation.Kind.COPY_PATH;
+        }
+        if ("move".equals(verb)) {
+            return WorkspaceOperationObligation.Kind.MOVE_PATH;
+        }
+        if ("rename".equals(verb)) {
+            return WorkspaceOperationObligation.Kind.RENAME_PATH;
+        }
+        if (Set.of("delete", "remove", "rm").contains(verb)) {
+            return WorkspaceOperationObligation.Kind.DELETE_PATH;
+        }
+        boolean directoryAction = "mkdir".equals(verb)
+                || (verb.startsWith("create ") || verb.startsWith("make "))
+                        && DIRECTORY_CONTEXT.matcher(verb).find()
+                || ("create".equals(verb) || "make".equals(verb))
+                        && DIRECTORY_CONTEXT.matcher(
+                                trailingContext == null
+                                        ? ""
+                                        : trailingContext)
+                                .find();
+        return directoryAction
+                ? WorkspaceOperationObligation.Kind.MKDIR
+                : null;
+    }
+
+    private static String renameDestination(String source, String destination) {
+        String normalizedSource = TargetRef.normalizePath(source);
+        String normalizedDestination = TargetRef.normalizePath(destination);
+        int sourceSlash = normalizedSource.lastIndexOf('/');
+        String sourceParent = sourceSlash < 0
+                ? ""
+                : normalizedSource.substring(0, sourceSlash + 1);
+        if (!normalizedDestination.contains("/")) {
+            return sourceParent + normalizedDestination;
+        }
+        int destinationSlash = normalizedDestination.lastIndexOf('/');
+        String destinationParent = normalizedDestination.substring(
+                0,
+                destinationSlash + 1);
+        return destinationParent.equals(sourceParent)
+                ? normalizedDestination
+                : "";
+    }
+
     static List<Action> actions(RequestLexicalView view, int start, int end) {
         return indexedActions(view, start, end, List.of()).actions();
     }
@@ -528,12 +800,45 @@ final class CanonicalMutationClauseMatcher {
                     matcher.start(),
                     matcher.end()));
         }
+        tokens = withoutWorkspaceOverwriteModifier(view, tokens, safeEnd);
         return new AuthorityConnectorIndex(
                 view,
                 safeStart,
                 safeEnd,
                 tokens,
                 protectedTargetEnvelopes).result(work);
+    }
+
+    private static List<ActionToken> withoutWorkspaceOverwriteModifier(
+            RequestLexicalView view,
+            List<ActionToken> tokens,
+            int safeEnd
+    ) {
+        if (view == null || tokens == null || tokens.size() < 2) {
+            return tokens == null ? List.of() : List.copyOf(tokens);
+        }
+        List<ActionToken> retained = new ArrayList<>(tokens.size());
+        for (ActionToken token : tokens) {
+            ActionToken previous = retained.isEmpty()
+                    ? null
+                    : retained.getLast();
+            boolean exactModifier = previous != null
+                    && previous.family() == Family.WORKSPACE_OPERATION
+                    && "overwrite".equals(token.verb())
+                    && WORKSPACE_OVERWRITE_MODIFIER_GAP.matcher(
+                            view.maskedLower().substring(
+                                    previous.end(),
+                                    token.start())).matches()
+                    && WORKSPACE_OVERWRITE_MODIFIER_SUFFIX.matcher(
+                            view.maskedLower().substring(
+                                    token.end(),
+                                    Math.min(
+                                            safeEnd,
+                                            view.sentenceEndAfter(
+                                                    token.end())))).matches();
+            if (!exactModifier) retained.add(token);
+        }
+        return List.copyOf(retained);
     }
 
     /**
@@ -1117,6 +1422,10 @@ final class CanonicalMutationClauseMatcher {
                 activeRegionStart,
                 prefix);
         String currentClause = activeClause(active);
+        if (DIRECT_ASSISTANT_ACTION_REQUEST.matcher(currentClause).matches()
+                && active.strip().equals(currentClause.strip())) {
+            return new ActionAuthority(false, ScopeKind.NONE);
+        }
         ScopeKind scope = finiteScopeKind(currentClause);
         if (positiveDirectiveSyntax(currentClause)) {
             return new ActionAuthority(false, scope);

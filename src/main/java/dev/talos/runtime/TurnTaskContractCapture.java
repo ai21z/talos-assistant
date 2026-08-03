@@ -5,10 +5,15 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolCall;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Thread-local carrier for the resolved current-turn task contract.
@@ -102,6 +107,108 @@ public final class TurnTaskContractCapture {
                 && captured.resolution().blocksWorkspaceOperations();
     }
 
+    public static WorkspaceOperationAuthorityPlan workspaceOperationPlan() {
+        CapturedResolution captured = HOLDER.get();
+        return captured == null
+                ? WorkspaceOperationAuthorityPlan.none("")
+                : captured.resolution().workspaceOperationPlan();
+    }
+
+    public static WorkspaceAuthorization authorizeWorkspaceOperation(
+            ToolCall call
+    ) {
+        if (call == null
+                || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())) {
+            return WorkspaceAuthorization.NOT_WORKSPACE_OPERATION;
+        }
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null) {
+            return WorkspaceAuthorization.NO_TYPED_AUTHORITY;
+        }
+        WorkspaceOperationAuthorityPlan plan =
+                captured.resolution().workspaceOperationPlan();
+        if (plan.authorizedOperations().isEmpty()) {
+            return WorkspaceAuthorization.NO_TYPED_AUTHORITY;
+        }
+        String operationId = plan.authorizedOperations().getFirst().operationId();
+        if (captured.consumedWorkspaceOperationIds.contains(operationId)) {
+            return WorkspaceAuthorization.ALREADY_CONSUMED;
+        }
+        if (captured.attemptedWorkspaceOperationIds.contains(operationId)) {
+            return WorkspaceAuthorization.ALREADY_ATTEMPTED;
+        }
+        if (!captured.successfulContentMutationPaths.containsAll(
+                captured.resolution()
+                        .contentMutationPredecessorPaths())) {
+            return WorkspaceAuthorization.PREDECESSOR_NOT_COMPLETE;
+        }
+        if (!plan.authorizes(call)) {
+            return WorkspaceAuthorization.CALL_DOES_NOT_MATCH_PLAN;
+        }
+        captured.attemptedWorkspaceOperationIds.add(operationId);
+        return WorkspaceAuthorization.AUTHORIZED;
+    }
+
+    public static Set<String> pendingContentMutationPredecessorPaths() {
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null) return Set.of();
+        LinkedHashSet<String> pending = new LinkedHashSet<>(
+                captured.resolution()
+                        .contentMutationPredecessorPaths());
+        pending.removeAll(captured.successfulContentMutationPaths);
+        return Set.copyOf(pending);
+    }
+
+    public static boolean workspaceOperationObligationPending() {
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null) return false;
+        WorkspaceOperationAuthorityPlan plan =
+                captured.resolution().workspaceOperationPlan();
+        if (plan.authorizedOperations().isEmpty()) return false;
+        return !captured.consumedWorkspaceOperationIds.contains(
+                plan.authorizedOperations().getFirst().operationId());
+    }
+
+    public static boolean typedMutationObligationsPending() {
+        return !pendingContentMutationPredecessorPaths().isEmpty()
+                || workspaceOperationObligationPending();
+    }
+
+    /** Records progress only after the deterministic tool returned success. */
+    public static void recordSuccessfulToolCall(ToolCall call) {
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null || call == null) return;
+        if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            WorkspaceOperationAuthorityPlan plan =
+                    captured.resolution().workspaceOperationPlan();
+            if (plan.authorizes(call)
+                    && !plan.authorizedOperations().isEmpty()) {
+                captured.consumedWorkspaceOperationIds.add(
+                        plan.authorizedOperations().getFirst().operationId());
+            }
+            return;
+        }
+        if (!"talos.write_file".equals(call.toolName())
+                && !"talos.edit_file".equals(call.toolName())) {
+            return;
+        }
+        String path = ToolCallSupport.resolvePathHint(call);
+        if (path == null || path.isBlank()) return;
+        captured.successfulContentMutationPaths.add(
+                normalizePath(path));
+    }
+
+    public enum WorkspaceAuthorization {
+        NOT_WORKSPACE_OPERATION,
+        AUTHORIZED,
+        NO_TYPED_AUTHORITY,
+        CALL_DOES_NOT_MATCH_PLAN,
+        PREDECESSOR_NOT_COMPLETE,
+        ALREADY_CONSUMED,
+        ALREADY_ATTEMPTED
+    }
+
     public static int currentUserBoundaryIndex(List<ChatMessage> messages) {
         CapturedResolution captured = HOLDER.get();
         ChatMessage boundary =
@@ -156,15 +263,42 @@ public final class TurnTaskContractCapture {
         return canonical.substring(markerStart + marker.length()).strip();
     }
 
-    private record CapturedResolution(
-            TaskResolution resolution,
-            ChatMessage currentUserBoundary
-    ) {
-        private CapturedResolution {
+    private static String normalizePath(String path) {
+        String normalized = Objects.toString(path, "").strip().replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
+    }
+
+    private static final class CapturedResolution {
+        private final TaskResolution resolution;
+        private final ChatMessage currentUserBoundary;
+        private final Set<String> successfulContentMutationPaths =
+                new LinkedHashSet<>();
+        private final Set<String> consumedWorkspaceOperationIds =
+                new LinkedHashSet<>();
+        private final Set<String> attemptedWorkspaceOperationIds =
+                new LinkedHashSet<>();
+
+        private CapturedResolution(
+                TaskResolution resolution,
+                ChatMessage currentUserBoundary
+        ) {
             if (resolution == null) {
                 throw new IllegalArgumentException(
                         "captured resolution is required");
             }
+            this.resolution = resolution;
+            this.currentUserBoundary = currentUserBoundary;
+        }
+
+        private TaskResolution resolution() {
+            return resolution;
+        }
+
+        private ChatMessage currentUserBoundary() {
+            return currentUserBoundary;
         }
     }
 }

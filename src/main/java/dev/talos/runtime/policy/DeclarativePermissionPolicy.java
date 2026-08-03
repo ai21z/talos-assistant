@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ApprovalPolicy;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolRiskLevel;
@@ -68,6 +69,8 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
             return PermissionDecision.allow("DEFAULT_READ_ALLOW", resource);
         }
 
+        boolean typedWorkspaceOperation = WorkspaceOperationPlanner
+                .isWorkspaceOperationTool(request.call().toolName());
         ApprovalPolicy.Decision sessionDecision = sessionApprovalPolicy.decide(
                 request.workspace(), request.call(), risk);
         if (sessionDecision == ApprovalPolicy.Decision.DENY) {
@@ -75,11 +78,16 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     "Permission policy denied the tool call through the active approval policy.",
                     resource);
         }
+        if (typedWorkspaceOperation
+                && sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
+            sessionDecision = ApprovalPolicy.Decision.ASK;
+        }
         if (sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
             return PermissionDecision.allow("SESSION_REMEMBER_ALLOW", resource);
         }
 
         boolean rememberEligible = risk == ToolRiskLevel.WRITE
+                && !typedWorkspaceOperation
                 && resource.hasPath()
                 && resource.insideWorkspace()
                 && !resource.protectedPath();
@@ -189,7 +197,9 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         }
         if (request.call() != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(request.call().toolName())) {
             try {
-                return WorkspaceOperationPlanner.checkpointPlan(request.call())
+                return WorkspaceOperationPlanner.checkpointPlan(
+                                request.call(),
+                                TurnTaskContractCapture.workspaceOperationPlan())
                         .map(plan -> classifyUnique(request, plan.checkpointPaths()))
                         .filter(list -> !list.isEmpty())
                         .orElseGet(() -> fallbackResources == null ? java.util.List.of() : fallbackResources);

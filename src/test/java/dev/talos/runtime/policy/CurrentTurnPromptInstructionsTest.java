@@ -66,7 +66,7 @@ class CurrentTurnPromptInstructionsTest {
     }
 
     @Test
-    void noArgTaskContractInstructionPreservesDefaultMutationTools() {
+    void noArgTaskContractInstructionDoesNotAdvertiseWorkspaceAuthority() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Create README.md."));
@@ -82,17 +82,18 @@ class CurrentTurnPromptInstructionsTest {
 
         assertTrue(frame.contains("type: FILE_CREATE"));
         assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
-        assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
-        assertTrue(frame.contains("talos.copy_path"));
-        assertTrue(frame.contains("talos.mkdir"));
-        assertTrue(frame.contains("talos.move_path"));
-        assertTrue(frame.contains("talos.rename_path"));
+        assertFalse(frame.contains("talos.apply_workspace_batch"), frame);
+        assertFalse(frame.contains("talos.copy_path"), frame);
+        assertFalse(frame.contains("talos.mkdir"), frame);
+        assertFalse(frame.contains("talos.move_path"), frame);
+        assertFalse(frame.contains("talos.rename_path"), frame);
+        assertFalse(frame.contains("talos.delete_path"), frame);
         assertTrue(frame.contains("talos.write_file"));
         assertTrue(frame.contains("talos.edit_file"));
     }
 
     @Test
-    void nullPlanInstructionFallbackKeepsDefaultMutationTools() {
+    void nullPlanInstructionFallbackDoesNotAdvertiseWorkspaceAuthority() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Create README.md."));
@@ -108,11 +109,12 @@ class CurrentTurnPromptInstructionsTest {
 
         assertTrue(frame.contains("type: FILE_CREATE"));
         assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
-        assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
-        assertTrue(frame.contains("talos.copy_path"));
-        assertTrue(frame.contains("talos.mkdir"));
-        assertTrue(frame.contains("talos.move_path"));
-        assertTrue(frame.contains("talos.rename_path"));
+        assertFalse(frame.contains("talos.apply_workspace_batch"), frame);
+        assertFalse(frame.contains("talos.copy_path"), frame);
+        assertFalse(frame.contains("talos.mkdir"), frame);
+        assertFalse(frame.contains("talos.move_path"), frame);
+        assertFalse(frame.contains("talos.rename_path"), frame);
+        assertFalse(frame.contains("talos.delete_path"), frame);
         assertTrue(frame.contains("talos.write_file"));
         assertTrue(frame.contains("talos.edit_file"));
     }

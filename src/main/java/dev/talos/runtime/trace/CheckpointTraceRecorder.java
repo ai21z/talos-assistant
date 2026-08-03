@@ -15,6 +15,39 @@ final class CheckpointTraceRecorder {
             String reason,
             int capturedFiles
     ) {
+        record(builder, status, checkpointId, reason, capturedFiles, "", "");
+    }
+
+    static void record(
+            LocalTurnTrace.Builder builder,
+            String status,
+            String checkpointId,
+            String reason,
+            int capturedFiles,
+            String authorityPlanId,
+            String operationId
+    ) {
+        record(
+                builder,
+                status,
+                checkpointId,
+                reason,
+                capturedFiles,
+                authorityPlanId,
+                operationId,
+                "");
+    }
+
+    static void record(
+            LocalTurnTrace.Builder builder,
+            String status,
+            String checkpointId,
+            String reason,
+            int capturedFiles,
+            String authorityPlanId,
+            String operationId,
+            String toolCallId
+    ) {
         if (builder == null) return;
         String safeStatus = safe(status);
         String safeId = safe(checkpointId);
@@ -23,6 +56,11 @@ final class CheckpointTraceRecorder {
         data.put("status", safeStatus);
         data.put("checkpointId", safeId);
         data.put("capturedFiles", capturedFiles);
+        if (authorityPlanId != null && !authorityPlanId.isBlank()) {
+            data.put("authorityPlanId", authorityPlanId.strip());
+            data.put("operationId", safe(operationId));
+            data.put("toolCallId", safe(toolCallId));
+        }
         if (reason != null && !reason.isBlank()) {
             data.put("reason", reason.strip());
         }

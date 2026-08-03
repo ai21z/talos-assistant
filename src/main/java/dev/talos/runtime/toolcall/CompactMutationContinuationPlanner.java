@@ -6,7 +6,6 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -50,8 +49,8 @@ final class CompactMutationContinuationPlanner {
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
             return Optional.empty();
         }
-        if (!TurnTaskContractCapture.blocksWorkspaceOperations()
-                && WorkspaceOperationIntent.detect(contract).isPresent()) {
+        if (!TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty()) {
             return Optional.empty();
         }
         if (!hasMutationTargets(state, contract)) {

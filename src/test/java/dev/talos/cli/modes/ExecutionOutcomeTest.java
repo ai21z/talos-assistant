@@ -6,6 +6,7 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
+import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
@@ -1783,68 +1784,38 @@ class ExecutionOutcomeTest {
         try {
             Files.createDirectories(ws.resolve("archive"));
             Files.createDirectories(ws.resolve("copies"));
-            Files.createDirectories(ws.resolve("scratch/nested/reports"));
             Files.writeString(ws.resolve("archive/source.md"), "# Source\n");
             Files.writeString(ws.resolve("copies/source-final.md"), "# Source\n");
 
+            String request =
+                    "Copy archive/source.md to copies/source-final.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Move source.md to archive/source.md, copy archive/source.md to copies/source-copy.md, "
-                            + "rename copies/source-copy.md to source-final.md, and create directory "
-                            + "scratch/nested/reports."));
-
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "source.md",
-                    "archive/source.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "archive/source.md",
-                    "copies/source-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "copies/source-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "copies/source-final.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename copies/source-copy.md to copies/source-final.md.",
-                    "Rename: copies/source-copy.md -> copies/source-final.md");
-            WorkspaceOperationPlan mkdirPlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
-                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
-                            "scratch/nested/reports", true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
-                    false,
-                    "Create directory scratch/nested/reports.",
-                    "Mkdir: scratch/nested/reports");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Workspace operations applied.", 1, 4,
-                    List.of("talos.move_path", "talos.copy_path", "talos.rename_path", "talos.mkdir"),
-                    List.of(), 4, 0, false, 4, List.of(),
+                    "Workspace operation applied.", 1, 1,
+                    List.of("talos.copy_path"),
+                    List.of(), 1, 0, false, 1, List.of(),
                     0, 0, 0, 0,
-                    List.of(
-                            workspaceOutcome("talos.move_path", "archive/source.md", true,
-                                    "Moved source.md -> archive/source.md", "", "", movePlan),
-                            workspaceOutcome("talos.copy_path", "copies/source-copy.md", true,
-                                    "Copied archive/source.md -> copies/source-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.rename_path", "copies/source-final.md", true,
-                                    "Renamed copies/source-copy.md -> copies/source-final.md", "", "", renamePlan),
-                            workspaceOutcome("talos.mkdir", "scratch/nested/reports", true,
-                                    "Created directory scratch/nested/reports", "", "", mkdirPlan)
-                    ));
+                    List.of(workspaceOutcome(
+                            "talos.copy_path",
+                            "copies/source-final.md",
+                            true,
+                            "Copied archive/source.md -> copies/source-final.md",
+                            "",
+                            "",
+                            fixture.operationPlan())));
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Workspace operations applied.", messages, loopResult, ws, 0);
+                    "Workspace operation applied.",
+                    fixture.turnPlan(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
@@ -2049,68 +2020,38 @@ class ExecutionOutcomeTest {
         Path ws = Files.createTempDirectory("talos-workspace-operation-duplicate-recovery-");
         try {
             Files.createDirectories(ws.resolve("docs/notes"));
-            Files.createDirectories(ws.resolve("scratch"));
             Files.writeString(ws.resolve("README.md"), "# Fixture\n");
             Files.writeString(ws.resolve("docs/notes/README-copy.md"), "# Fixture\n");
-            Files.writeString(ws.resolve("docs/tasks.md"), "todo\n");
 
+            String request =
+                    "Copy README.md to docs/notes/README-copy.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Organize these files using workspace operation tools only: copy README.md to "
-                            + "docs/notes/README-copy.md, move scratch/todo.md to docs/todo.md, "
-                            + "then rename docs/todo.md to tasks.md."));
-
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "README.md",
-                    "docs/notes/README-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "scratch/todo.md",
-                    "docs/todo.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "docs/todo.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "docs/tasks.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename docs/todo.md to docs/tasks.md.",
-                    "Rename: docs/todo.md -> docs/tasks.md");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Organized the workspace.", 2, 6,
-                    List.of(
-                            "talos.copy_path", "talos.move_path", "talos.rename_path",
-                            "talos.copy_path", "talos.move_path", "talos.rename_path"),
-                    List.of(), 3, 0, false, 3, List.of(),
+                    "Copied the file.", 2, 2,
+                    List.of("talos.copy_path", "talos.copy_path"),
+                    List.of(), 1, 0, false, 1, List.of(),
                     0, 0, 0, 0,
                     List.of(
                             workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", true,
-                                    "Copied README.md -> docs/notes/README-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.move_path", "docs/todo.md", true,
-                                    "Moved scratch/todo.md -> docs/todo.md", "", "", movePlan),
-                            workspaceOutcome("talos.rename_path", "docs/tasks.md", true,
-                                    "Renamed docs/todo.md -> docs/tasks.md", "", "", renamePlan),
+                                    "Copied README.md -> docs/notes/README-copy.md", "", "",
+                                    fixture.operationPlan()),
                             workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", false,
                                     "", "Destination already exists: docs/notes/README-copy.md.",
-                                    ToolError.INVALID_PARAMS, copyPlan),
-                            workspaceOutcome("talos.move_path", "docs/todo.md", false,
-                                    "", "Source not found: scratch/todo.md",
-                                    ToolError.NOT_FOUND, movePlan),
-                            workspaceOutcome("talos.rename_path", "docs/tasks.md", false,
-                                    "", "Source not found: docs/todo.md",
-                                    ToolError.NOT_FOUND, renamePlan)
+                                    ToolError.INVALID_PARAMS, fixture.operationPlan())
                     ));
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Organized the workspace.", messages, loopResult, ws, 0);
+                    "Copied the file.",
+                    fixture.turnPlan(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertFalse(outcome.partialMutation());
@@ -2134,61 +2075,46 @@ class ExecutionOutcomeTest {
     void verifiedChangedFilesSummaryUsesWorkspaceOperationDestinationsWhenPathHintsAreSources() throws Exception {
         Path ws = Files.createTempDirectory("talos-workspace-operation-destination-summary-");
         try {
-            Files.createDirectories(ws.resolve("archive"));
             Files.writeString(ws.resolve("notes.md"), "notes\n");
-            Files.writeString(ws.resolve("archive/final-notes.md"), "notes\n");
+            Files.writeString(ws.resolve("notes-copy.md"), "notes\n");
 
+            String request = "Copy notes.md to notes-copy.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Copy notes.md to notes-copy.md, move notes-copy.md to archive/notes-copy.md, "
-                            + "then rename archive/notes-copy.md to final-notes.md."));
-
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "notes.md",
-                    "notes-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "notes-copy.md",
-                    "archive/notes-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "archive/notes-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "archive/final-notes.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename archive/notes-copy.md to archive/final-notes.md.",
-                    "Rename: archive/notes-copy.md -> archive/final-notes.md");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Done.", 1, 3,
-                    List.of("talos.copy_path", "talos.move_path", "talos.rename_path"),
-                    List.of(), 3, 0, false, 3, List.of(),
+                    "Done.", 1, 1,
+                    List.of("talos.copy_path", "talos.write_file"),
+                    List.of(), 1, 0, false, 2, List.of(),
                     0, 0, 0, 0,
                     List.of(
-                            workspaceOutcome("talos.copy_path", "notes.md", true,
-                                    "Copied notes.md -> notes-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.move_path", "notes-copy.md", true,
-                                    "Moved notes-copy.md -> archive/notes-copy.md", "", "", movePlan),
-                            workspaceOutcome("talos.rename_path", "archive/notes-copy.md", true,
-                                    "Renamed archive/notes-copy.md -> archive/final-notes.md", "", "", renamePlan)
-                    ));
+                            workspaceOutcome(
+                                    "talos.copy_path",
+                                    "notes.md",
+                                    true,
+                                    "Copied notes.md -> notes-copy.md",
+                                    "",
+                                    "",
+                                    fixture.operationPlan()),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "index.html",
+                                    true,
+                                    true,
+                                    false,
+                                    "Wrote index.html",
+                                    "")));
 
-            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Done.", messages, loopResult, ws, 0);
+            String summary = StaticVerificationAnswerRenderer
+                    .changedFilesSummary(loopResult);
 
-            assertTrue(outcome.finalAnswer().contains(
-                            "Updated 3 files: notes-copy.md, archive/notes-copy.md, archive/final-notes.md."),
-                    outcome.finalAnswer());
-            assertFalse(outcome.finalAnswer().contains("Updated 3 files: notes.md"),
-                    outcome.finalAnswer());
+            assertTrue(summary.contains(
+                            "Updated 2 files: notes-copy.md, index.html."),
+                    summary);
+            assertFalse(summary.contains("notes.md"), summary);
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -5238,6 +5164,40 @@ class ExecutionOutcomeTest {
                 .anyMatch(line -> line.toLowerCase().contains("embedded assistant-authored")),
                 outcome.verificationReport().limitations().toString());
     }
+
+    private static BoundWorkspaceFixture boundWorkspaceFixture(
+            String request,
+            String toolName
+    ) {
+        var resolution = dev.talos.runtime.task.TaskContractResolver
+                .resolveFromUserRequest(request);
+        assertEquals(
+                dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan
+                        .State.AUTHORIZED_SINGLE,
+                resolution.workspaceOperationPlan().state(),
+                resolution.workspaceOperationPlan().toString());
+        WorkspaceOperationPlan operationPlan =
+                dev.talos.runtime.workspace.WorkspaceOperationPlanner
+                        .authorityPlan(resolution.workspaceOperationPlan())
+                        .orElseThrow();
+        CurrentTurnPlan turnPlan = CurrentTurnPlan.createWithActionObligation(
+                resolution,
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of(toolName),
+                List.of(toolName),
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                new dev.talos.core.Config());
+        return new BoundWorkspaceFixture(turnPlan, operationPlan);
+    }
+
+    private record BoundWorkspaceFixture(
+            CurrentTurnPlan turnPlan,
+            WorkspaceOperationPlan operationPlan
+    ) {}
 
     private static ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,

@@ -27,6 +27,30 @@ public interface CheckpointStore {
 
     CheckpointRestoreResult restore(Path workspace, String checkpointId);
 
+    /**
+     * Restores a checkpoint only when its durable workspace-operation
+     * identity is exactly the one the caller expects. Stores that do not
+     * understand typed checkpoint identity must fail closed.
+     */
+    default CheckpointRestoreResult restore(
+            Path workspace,
+            String checkpointId,
+            String authorityPlanId,
+            String operationId
+    ) {
+        String message = "Typed workspace-operation checkpoint restore is not supported by this store.";
+        return authorityPlanId != null
+                        && operationId != null
+                        && authorityPlanId.matches("[0-9a-f]{64}")
+                        && operationId.matches("[0-9a-f]{64}")
+                ? CheckpointRestoreResult.failure(
+                        checkpointId,
+                        message,
+                        authorityPlanId,
+                        operationId)
+                : CheckpointRestoreResult.failure(checkpointId, message);
+    }
+
     default List<String> listIds(Path workspace) {
         return List.of();
     }

@@ -165,7 +165,7 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
     }
 
     @Test
-    void compoundWorkspaceTurnSendsCompleteWorkspaceOperationSurface() {
+    void compoundWorkspaceTurnExposesNoWorkspaceOperationSurface() {
         RecordingResolver resolver = new RecordingResolver();
         Context ctx = context(resolver);
 
@@ -176,14 +176,8 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        assertEquals(
-                List.of(
-                        "talos.apply_workspace_batch",
-                        "talos.copy_path",
-                        "talos.mkdir",
-                        "talos.move_path",
-                        "talos.rename_path"),
-                toolNames(resolver.lastRequest));
+        assertTrue(toolNames(resolver.lastRequest).isEmpty(),
+                toolNames(resolver.lastRequest).toString());
     }
 
     private static Context context(RecordingResolver resolver) {

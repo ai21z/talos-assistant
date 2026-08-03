@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.*;
+import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
@@ -251,7 +252,9 @@ class TurnProcessorPermissionPolicyTest {
     }
 
     @Test
-    void mkdirParentOfExpectedFileTargetIsAllowedBeforeApproval(@TempDir Path workspace) {
+    void operationBeforeContentMkdirRemainsBlockedBeforeApproval(
+            @TempDir Path workspace
+    ) {
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -260,8 +263,13 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set(
-                "Create docs/notes with talos.mkdir, then create docs/notes/implementation-plan.md.");
+        String request =
+                "Create a directory named docs/notes, then create docs/notes/implementation-plan.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        assertTrue(TurnTaskContractCapture.getResolution()
+                .blocksWorkspaceOperations());
         Session session = new Session(workspace, config);
         Context context = context(workspace, config);
 
@@ -269,23 +277,26 @@ class TurnProcessorPermissionPolicyTest {
                 session,
                 new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
                 context);
-        ToolResult write = processor.executeTool(
-                session,
-                new ToolCall("talos.write_file", Map.of(
-                        "path", "docs/notes/implementation-plan.md",
-                        "content", "# Plan\n")),
-                context);
 
-        assertTrue(mkdir.success(), mkdir.errorMessage());
-        assertTrue(write.success(), write.errorMessage());
-        assertTrue(Files.isDirectory(workspace.resolve("docs/notes")));
-        assertEquals("# Plan\n", assertDoesNotThrow(
-                () -> Files.readString(workspace.resolve("docs/notes/implementation-plan.md"))));
-        assertEquals(2, gateCalls.get(), "mkdir and write should still require approval");
+        assertFalse(mkdir.success());
+        assertEquals(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                mkdir.error().reason());
+        assertTrue(
+                mkdir.errorMessage().contains(
+                        "not authorized by the current typed task plan"),
+                mkdir.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs/notes")));
+        assertEquals(
+                0,
+                gateCalls.get(),
+                "operation-before-content order must fail before approval");
     }
 
     @Test
-    void mkdirOnlyExplicitDirectoryRequestRemainsAllowed(@TempDir Path workspace) {
+    void mkdirOnlyExplicitDirectoryRequestRemainsAllowed(@TempDir Path workspace)
+            throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -293,7 +304,10 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set("Create docs/notes with talos.mkdir.");
+        String request = "Create a directory named docs/notes.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
         ToolResult result = processor.executeTool(
                 new Session(workspace, config),
                 new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
@@ -313,14 +327,20 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set("Create docs/notes/implementation-plan.md.");
+        String request = "Create docs/notes/implementation-plan.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        assertTrue(TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty());
         ToolResult result = processor.executeTool(
                 new Session(workspace, config),
                 new ToolCall("talos.mkdir", Map.of("path", "tmp/unrelated")),
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"),
+        assertTrue(result.errorMessage().contains(
+                        "No executable typed workspace-operation authority is stored"),
                 result.errorMessage());
         assertFalse(Files.exists(workspace.resolve("tmp/unrelated")));
         assertEquals(0, gateCalls.get(), "unrelated target must block before approval");
@@ -355,6 +375,98 @@ class TurnProcessorPermissionPolicyTest {
                 gateCalls.get(),
                 "non-durable optional authority must block before approval");
         assertFalse(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void unresolvedDependencyAuthorityBlocksWorkspaceOperationBeforeApproval(
+            @TempDir Path temp
+    ) throws Exception {
+        for (String request : List.of(
+                "Edit index.html and update style.css as needed, "
+                        + "then copy a.md to b.md.",
+                "Edit index.html and use style.css as reference, "
+                        + "then copy a.md to b.md.")) {
+            Path workspace = temp.resolve(Integer.toHexString(
+                    request.hashCode()));
+            Files.createDirectories(workspace);
+            Files.writeString(workspace.resolve("a.md"), "source");
+            AtomicInteger gateCalls = new AtomicInteger();
+            Config config = checkpointDisabledConfig();
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new CopyPathTool());
+            TurnProcessor processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    gateApproves(gateCalls),
+                    registry);
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromUserRequest(request));
+
+            ToolResult result = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.copy_path", Map.of(
+                            "from", "a.md",
+                            "to", "b.md")),
+                    context(workspace, config));
+
+            assertFalse(result.success(), request);
+            assertEquals(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    result.error().reason(),
+                    request);
+            assertEquals(0, gateCalls.get(), request);
+            assertFalse(Files.exists(workspace.resolve("b.md")), request);
+            TurnTaskContractCapture.clear();
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void exactRequiredContentPredecessorsStillReachTypedCopyApproval(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("a.md"), "source");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        registry.register(new CopyPathTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(gateCalls),
+                registry);
+        String request = "Edit index.html and update style.css, "
+                + "then copy a.md to b.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        Context context = context(workspace, config);
+
+        ToolResult index = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "index.html",
+                        "content", "<main>ready</main>\n")),
+                context);
+        ToolResult style = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "style.css",
+                        "content", "main { display: block; }\n")),
+                context);
+        ToolResult copy = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "a.md",
+                        "to", "b.md")),
+                context);
+
+        assertAll(
+                () -> assertTrue(index.success(), index.errorMessage()),
+                () -> assertTrue(style.success(), style.errorMessage()),
+                () -> assertTrue(copy.success(), copy.errorMessage()));
+        assertEquals(3, gateCalls.get());
+        assertEquals("source", Files.readString(workspace.resolve("b.md")));
     }
 
     @Test
@@ -425,6 +537,16 @@ class TurnProcessorPermissionPolicyTest {
     private static Config configWithRules(List<Map<String, Object>> rules) {
         Config config = new Config();
         config.data.put("permissions", Map.of("rules", rules));
+        return config;
+    }
+
+    private static Config checkpointDisabledConfig() {
+        Config config = new Config();
+        config.data.put("checkpoint", Map.of(
+                "enabled", false,
+                "fail_closed", true,
+                "max_file_bytes", 1_000_000,
+                "max_turn_bytes", 2_000_000));
         return config;
     }
 

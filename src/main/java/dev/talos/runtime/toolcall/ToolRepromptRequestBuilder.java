@@ -109,7 +109,7 @@ final class ToolRepromptRequestBuilder {
                             : List.of();
             CurrentTurnPlan plan =
                     CurrentTurnPlan.createWithActionObligation(
-                            resolution.contract(),
+                            resolution,
                             phase,
                             nativeNames,
                             names,

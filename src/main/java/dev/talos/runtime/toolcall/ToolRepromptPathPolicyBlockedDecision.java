@@ -47,6 +47,25 @@ final class ToolRepromptPathPolicyBlockedDecision {
             return Optional.of(ToolRepromptChatExecutor.execute(
                     state, repair.messages(), repair.tools(), repair.controls(), repair.retryName()));
         }
+        Optional<StaticWebContinuationPlanner.Plan> blockedDirectoryContinuation =
+                StaticWebContinuationPlanner.blockedUnrequestedDirectoryPlan(
+                        state,
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state));
+        if (blockedDirectoryContinuation.isPresent()) {
+            StaticWebContinuationPlanner.Plan continuation =
+                    blockedDirectoryContinuation.get();
+            state.failureDecision = FailureDecision.continueLoop();
+            LocalTurnTraceCapture.recordRepair(
+                    "PLANNED",
+                    "STATIC_WEB_BLOCKED_DIRECTORY_CONTINUATION: rejected "
+                            + "unrequested directory authority; continuing with write_file only");
+            return Optional.of(ToolRepromptChatExecutor.execute(
+                    state,
+                    continuation.messages(),
+                    continuation.tools(),
+                    continuation.controls(),
+                    continuation.retryName()));
+        }
         state.finishWithAnswer(state.failureDecision.shouldStop()
                 ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)
                 : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]");

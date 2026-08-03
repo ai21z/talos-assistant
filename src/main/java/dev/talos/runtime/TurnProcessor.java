@@ -27,7 +27,6 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
@@ -956,6 +955,10 @@ public final class TurnProcessor {
             if (risk.requiresApproval()) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                recordWorkspaceOperationLifecycle(
+                        call,
+                        LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .APPROVAL_DENIED);
                 if (commandTool) {
                     LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
                 }
@@ -980,6 +983,10 @@ public final class TurnProcessor {
         if (permissionDecision.action() == PermissionAction.ASK) {
             TurnAuditCapture.recordApprovalRequired();
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_REQUIRED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalRequired(tracePhase, call);
             }
@@ -1013,6 +1020,10 @@ public final class TurnProcessor {
             if (response == ApprovalResponse.DENIED) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                recordWorkspaceOperationLifecycle(
+                        call,
+                        LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .APPROVAL_DENIED);
                 if (commandTool) {
                     LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
                     LocalTurnTraceCapture.recordCommandDenied(
@@ -1041,6 +1052,10 @@ public final class TurnProcessor {
             // Approved - record and optionally propagate the remember choice.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_GRANTED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
             }
@@ -1052,6 +1067,10 @@ public final class TurnProcessor {
             // AUTO_ALLOW by policy for a mutating call.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_GRANTED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
             }
@@ -1063,7 +1082,25 @@ public final class TurnProcessor {
                     checkpoint.status(),
                     checkpoint.checkpointId(),
                     checkpoint.message(),
-                    checkpoint.capturedFiles());
+                    checkpoint.capturedFiles(),
+                    checkpoint.authorityPlanId(),
+                    checkpoint.operationId());
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    switch (checkpoint.status()) {
+                        case "CREATED" ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_CREATED;
+                        case "SKIPPED" ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_SKIPPED;
+                        default ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_FAILED;
+                    });
             if (!checkpoint.success()) {
                 TurnAuditCapture.recordToolCall(
                         call, path == null ? "" : path, false,
@@ -1098,12 +1135,45 @@ public final class TurnProcessor {
         List<String> resultPathHints = result.success()
                 ? auditPathHints(call, path, result)
                 : (path == null || path.isBlank() ? List.of() : List.of(path));
+        recordWorkspaceOperationLifecycle(
+                call,
+                result.success()
+                        ? LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .EXECUTION_SUCCEEDED
+                        : LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .EXECUTION_FAILED);
         TurnAuditCapture.recordExecutedToolCall(
                 call,
                 resultPathHints,
                 result.success(),
                 result.success() ? "" : toolFailureReason(result));
+        if (result.success()) {
+            TurnTaskContractCapture.recordSuccessfulToolCall(call);
+            if (WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                    call.toolName())) {
+                LocalTurnTraceCapture.recordWorkspaceOperationConsumed(
+                        TurnTaskContractCapture.workspaceOperationPlan());
+            }
+        }
         return result;
+    }
+
+    private static void recordWorkspaceOperationLifecycle(
+            ToolCall call,
+            LocalTurnTraceCapture.WorkspaceOperationLifecycleStage stage
+    ) {
+        if (call == null
+                || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())) {
+            return;
+        }
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (plan.authorizes(call)) {
+            LocalTurnTraceCapture.recordWorkspaceOperationLifecycle(
+                    plan,
+                    call,
+                    stage);
+        }
     }
 
     private ToolResult executeToolWithinStage(ToolExecution execution) {
@@ -1144,7 +1214,10 @@ public final class TurnProcessor {
             return risk;
         }
         try {
-            Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+            Optional<WorkspaceOperationPlan> plan =
+                    WorkspaceOperationPlanner.checkpointPlan(
+                            call,
+                            TurnTaskContractCapture.workspaceOperationPlan());
             if (plan.isPresent() && plan.get().riskLevel() == ToolRiskLevel.DESTRUCTIVE) {
                 return ToolRiskLevel.DESTRUCTIVE;
             }
@@ -1172,7 +1245,10 @@ public final class TurnProcessor {
         boolean operationPathsResolved = false;
         if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
-                Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+                Optional<WorkspaceOperationPlan> plan =
+                        WorkspaceOperationPlanner.checkpointPlan(
+                                call,
+                                TurnTaskContractCapture.workspaceOperationPlan());
                 if (plan.isPresent()) {
                     List<String> changedPaths = plan.get().changedPaths();
                     paths.addAll(changedPaths);
@@ -1192,7 +1268,10 @@ public final class TurnProcessor {
     }
 
     private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {
-        Optional<WorkspaceOperationPlan> operationPlan = WorkspaceOperationPlanner.checkpointPlan(call);
+        Optional<WorkspaceOperationPlan> operationPlan =
+                WorkspaceOperationPlanner.checkpointPlan(
+                        call,
+                        TurnTaskContractCapture.workspaceOperationPlan());
         if (operationPlan.isPresent()) {
             return checkpointService.captureBeforeOperation(
                     session.workspace(),
@@ -1234,9 +1313,20 @@ public final class TurnProcessor {
         }
 
         ToolResult workspaceOrganizationValidation =
-                validateWorkspaceOrganizationToolBeforeApproval(call, taskContract);
+                validateWorkspaceOrganizationToolBeforeApproval(
+                        call,
+                        taskContract,
+                        session == null ? null : session.workspace());
         if (workspaceOrganizationValidation != null) {
             return workspaceOrganizationValidation;
+        }
+
+        ToolResult workspaceContentValidation =
+                validateWorkspaceOperationContentPredecessorBeforeApproval(
+                        call,
+                        mutatingTool);
+        if (workspaceContentValidation != null) {
+            return workspaceContentValidation;
         }
 
         ToolResult expectedTargetValidation =
@@ -1418,38 +1508,199 @@ public final class TurnProcessor {
 
     private static ToolResult validateWorkspaceOrganizationToolBeforeApproval(
             ToolCall call,
-            TaskContract taskContract) {
-        var capturedResolution = TurnTaskContractCapture.getResolution();
-        if (call != null
-                && WorkspaceOperationPlanner.isWorkspaceOperationTool(
-                        call.toolName())
-                && capturedResolution != null
-                && capturedResolution.blocksWorkspaceOperations()) {
-            return ToolResult.fail(ToolError.invalidParams(
-                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
-                    "Workspace operation `" + call.toolName()
-                            + "` is not authorized by the current typed task plan. "
-                            + "Coordinated workspace-operation tails remain blocked until "
-                            + "their dedicated planner binds source and destination authority. "
-                            + "No approval was requested and no file was changed."));
-        }
+            TaskContract taskContract,
+            Path workspace) {
         if (call == null
-                || taskContract == null
-                || taskContract.type() != TaskType.FILE_EDIT
-                || taskContract.expectedTargets().isEmpty()
                 || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
                         call.toolName())) {
             return null;
         }
-        if (WorkspaceOperationIntent.detect(taskContract).isPresent()) {
+        TurnTaskContractCapture.WorkspaceAuthorization authorization =
+                TurnTaskContractCapture.authorizeWorkspaceOperation(call);
+        LocalTurnTraceCapture.recordWorkspaceOperationAuthorityDecision(
+                TurnTaskContractCapture.workspaceOperationPlan(),
+                call,
+                authorization.name());
+        if (authorization
+                == TurnTaskContractCapture.WorkspaceAuthorization.AUTHORIZED) {
+            var operation = TurnTaskContractCapture.workspaceOperationPlan()
+                    .authorizedOperations()
+                    .getFirst();
+            if (operation.operands().size() == 2
+                    && !workspaceOperationPathsAreDistinctWithoutLinks(
+                            workspace,
+                            operation.sourcePath(),
+                            operation.destinationPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed workspace-operation source and destination "
+                                + "must identify distinct ordinary paths. No "
+                                + "approval was requested and no file was changed."));
+            }
+            if (operation.kind()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation.Kind.MKDIR
+                    && !workspaceTargetIsMissingWithoutLinks(
+                            workspace,
+                            operation.targetPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed directory-creation plan requires an absent "
+                                + "ordinary target. No approval was requested "
+                                + "and no file was changed."));
+            }
+            if (operation.parentPolicy()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation.ParentPolicy
+                                    .REQUIRE_EXISTING_PARENT
+                    && !destinationParentExistsWithoutLinks(
+                            workspace,
+                            operation.kind()
+                                            == dev.talos.runtime.intent
+                                                    .WorkspaceOperationObligation.Kind
+                                                    .MKDIR
+                                    ? operation.targetPath()
+                                    : operation.destinationPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed workspace-operation plan requires an existing "
+                                + "ordinary destination parent. No approval was "
+                                + "requested and no file was changed."));
+            }
             return null;
         }
+        String reason = switch (authorization) {
+            case PREDECESSOR_NOT_COMPLETE ->
+                    "The preceding typed content-mutation obligations have not completed.";
+            case ALREADY_CONSUMED ->
+                    "The exact workspace-operation obligation was already consumed.";
+            case ALREADY_ATTEMPTED ->
+                    "The exact workspace-operation obligation was already attempted; "
+                            + "a new attempt requires typed attempt-aware lifecycle authority.";
+            case CALL_DOES_NOT_MATCH_PLAN ->
+                    "The tool, operand roles, paths, or explicit flags do not match the stored plan.";
+            case NO_TYPED_AUTHORITY, NOT_WORKSPACE_OPERATION ->
+                    "No executable typed workspace-operation authority is stored for this turn.";
+            case AUTHORIZED -> "";
+        };
         return ToolResult.fail(ToolError.invalidParams(
-                "Workspace organization tool `" + call.toolName()
-                        + "` is not allowed for this narrow file-edit task. "
-                        + "Use talos.edit_file or talos.write_file for the expected target(s): "
-                        + String.join(", ", orderedExpectedTargets(taskContract))
-                        + ". No approval was requested and no file was changed."));
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                "Workspace operation `" + call.toolName()
+                        + "` is not authorized by the current typed task plan. "
+                        + reason
+                        + " No approval was requested and no file was changed."));
+    }
+
+    private static ToolResult
+            validateWorkspaceOperationContentPredecessorBeforeApproval(
+                    ToolCall call,
+                    boolean mutatingTool
+            ) {
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (call == null
+                || !mutatingTool
+                || WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())
+                || plan.authorizedOperations().isEmpty()) {
+            return null;
+        }
+        TaskResolution resolution = TurnTaskContractCapture.getResolution();
+        List<String> predecessors = resolution == null
+                ? List.of()
+                : resolution.contentMutationPredecessorPaths();
+        String path = resolveParam(
+                call,
+                "path",
+                "file_path",
+                "filepath",
+                "file",
+                "filename",
+                "target");
+        boolean exactContentPredecessor =
+                (isWriteFileTool(call.toolName())
+                                || isEditFileTool(call.toolName()))
+                        && path != null
+                        && predecessors.contains(
+                                path.strip().replace('\\', '/'));
+        if (exactContentPredecessor) return null;
+        return ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                "The current typed task plan authorizes only its exact "
+                        + "workspace operation and declared preceding content "
+                        + "mutations. No approval was requested and no file "
+                        + "was changed."));
+    }
+
+    private static boolean destinationParentExistsWithoutLinks(
+            Path workspace,
+            String destination
+    ) {
+        if (workspace == null || destination == null || destination.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path target = workspace.toAbsolutePath().normalize()
+                    .resolve(destination)
+                    .normalize();
+            Path parent = target.getParent();
+            if (parent == null) return false;
+            root.requireDirectory(parent);
+            return true;
+        } catch (Exception rejected) {
+            return false;
+        }
+    }
+
+    private static boolean workspaceTargetIsMissingWithoutLinks(
+            Path workspace,
+            String targetPath
+    ) {
+        if (workspace == null || targetPath == null || targetPath.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path target = workspace.toAbsolutePath().normalize()
+                    .resolve(targetPath)
+                    .normalize();
+            return root.inspect(target) == NoFollowPathPolicy.EntryType.MISSING;
+        } catch (Exception rejected) {
+            return false;
+        }
+    }
+
+    private static boolean workspaceOperationPathsAreDistinctWithoutLinks(
+            Path workspace,
+            String sourcePath,
+            String destinationPath
+    ) {
+        if (workspace == null
+                || sourcePath == null
+                || sourcePath.isBlank()
+                || destinationPath == null
+                || destinationPath.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path workspaceRoot = workspace.toAbsolutePath().normalize();
+            Path source = workspaceRoot.resolve(sourcePath).normalize();
+            Path destination = workspaceRoot.resolve(destinationPath).normalize();
+            NoFollowPathPolicy.EntryType sourceType = root.inspect(source);
+            NoFollowPathPolicy.EntryType destinationType = root.inspect(destination);
+            if (source.equals(destination)) return false;
+            if (sourceType == NoFollowPathPolicy.EntryType.MISSING
+                    || destinationType == NoFollowPathPolicy.EntryType.MISSING) {
+                return true;
+            }
+            return !Files.isSameFile(source, destination);
+        } catch (Exception rejected) {
+            return false;
+        }
     }
 
     private static ToolResult validateExpectedTargetBeforeApproval(
@@ -1545,7 +1796,9 @@ public final class TurnProcessor {
         var paths = new LinkedHashSet<String>();
         if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
-                WorkspaceOperationPlanner.checkpointPlan(call)
+                WorkspaceOperationPlanner.checkpointPlan(
+                                call,
+                                TurnTaskContractCapture.workspaceOperationPlan())
                         .ifPresent(plan -> paths.addAll(plan.changedPaths()));
             } catch (IllegalArgumentException ignored) {
                 // Invalid operation payloads are handled by normal pre-approval validation.
@@ -1559,8 +1812,8 @@ public final class TurnProcessor {
     }
 
     private static boolean workspaceOperationRequestOwnsTargetShape(TaskContract taskContract) {
-        return !TurnTaskContractCapture.blocksWorkspaceOperations()
-                && WorkspaceOperationIntent.detect(taskContract).isPresent();
+        return !TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty();
     }
 
     private static Set<String> optionalMutationTargets(TaskContract taskContract) {
@@ -1720,6 +1973,12 @@ public final class TurnProcessor {
             PermissionDecision permissionDecision
     ) {
         String toolName = call == null ? "unknown tool" : call.toolName();
+        var workspacePlan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (workspacePlan.authorizes(call)) {
+            return "workspace operation: "
+                    + workspacePlan.authorizedOperations().getFirst().kind()
+                            .name().toLowerCase();
+        }
         if (permissionDecision != null
                 && permissionDecision.protectedPath()
                 && isReadFileTool(toolName)) {
@@ -2112,7 +2371,10 @@ public final class TurnProcessor {
             sb.append("    ");
         }
 
-        if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
+        String workspaceOperationDetail = workspaceOperationApprovalDetail(call);
+        if (workspaceOperationDetail != null) {
+            sb.append(workspaceOperationDetail);
+        } else if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
             try {
                 sb.append(ProtectedContentPolicy.sanitizeText(
                         CommandToolPlanner.approvalDetail(call, workspace, commandProfiles)));
@@ -2205,6 +2467,36 @@ public final class TurnProcessor {
             }
         }
 
+        return sb.toString();
+    }
+
+    private static String workspaceOperationApprovalDetail(ToolCall call) {
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (!plan.authorizes(call)) return null;
+
+        var operation = plan.authorizedOperations().getFirst();
+        var sb = new StringBuilder();
+        sb.append("workspace operation: ")
+                .append(operation.kind().name().toLowerCase());
+        for (var operand : operation.operands()) {
+            String label = switch (operand.role()) {
+                case SOURCE -> "source";
+                case DESTINATION -> "destination";
+                case TARGET -> "target";
+            };
+            sb.append("\n    ")
+                    .append(label)
+                    .append(": ")
+                    .append(sanitizeApprovalText(operand.effectivePath()));
+        }
+        sb.append("\n    overwrite: ")
+                .append(operation.overwritePolicy().name().toLowerCase());
+        sb.append("\n    recursive: ")
+                .append(operation.recursivePolicy().name().toLowerCase());
+        sb.append("\n    parent: ")
+                .append(operation.parentPolicy().name().toLowerCase());
+        sb.append("\n    authority plan: ").append(plan.planId());
+        sb.append("\n    operation: ").append(operation.operationId());
         return sb.toString();
     }
 

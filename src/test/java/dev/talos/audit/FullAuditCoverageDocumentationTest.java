@@ -7,10 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FullAuditCoverageDocumentationTest {
-    private static final List<String> CURRENT_NATIVE_TOOLS = List.of(
+    private static final List<String> CURRENT_MODEL_EXPOSED_NATIVE_TOOLS = List.of(
             "talos.list_dir",
             "talos.read_file",
             "talos.grep",
@@ -22,25 +23,42 @@ class FullAuditCoverageDocumentationTest {
             "talos.move_path",
             "talos.rename_path",
             "talos.delete_path",
-            "talos.apply_workspace_batch",
             "talos.run_command");
 
     @Test
-    void fullE2eAuditDocsNameEveryCurrentNativeTool() throws IOException {
+    void fullE2eAuditDocsNameEveryCurrentModelExposedNativeTool() throws IOException {
         String workflow = read("work-cycle-docs/runbooks/live-audit.md");
 
-        for (String tool : CURRENT_NATIVE_TOOLS) {
+        for (String tool : CURRENT_MODEL_EXPOSED_NATIVE_TOOLS) {
             assertTrue(workflow.contains(tool), () -> "workflow missing native tool: " + tool);
         }
     }
 
     @Test
-    void talosbenchPromptBankMentionsEveryCurrentNativeTool() throws IOException {
+    void talosbenchPromptBankMentionsEveryCurrentModelExposedNativeTool() throws IOException {
         String cases = read("tools/manual-eval/talosbench-cases.json");
 
-        for (String tool : CURRENT_NATIVE_TOOLS) {
+        for (String tool : CURRENT_MODEL_EXPOSED_NATIVE_TOOLS) {
             assertTrue(cases.contains(tool), () -> "TalosBench prompt bank missing native tool: " + tool);
         }
+    }
+
+    @Test
+    void registeredBatchCompatibilitySurfaceIsNotAdvertisedAsProviderCallable() throws IOException {
+        String readme = read("README.md");
+        String workflow = read("work-cycle-docs/runbooks/live-audit.md");
+        String cases = read("tools/manual-eval/talosbench-cases.json");
+
+        assertTrue(readme.contains(
+                "| `apply_workspace_batch` | internal compatibility surface; not exposed to models | required |"),
+                readme);
+        assertTrue(readme.contains("current assistant planner does not expose it"), readme);
+        assertTrue(readme.contains("typed multi-operation authority contract"), readme);
+        assertTrue(workflow.contains("explicitly excluded registered"), workflow);
+        assertTrue(workflow.contains("compatibility surface"), workflow);
+        assertTrue(workflow.contains("`workspace-batch-no-typed-authority`"), workflow);
+        assertFalse(cases.contains("talos.apply_workspace_batch"), cases);
+        assertFalse(cases.contains("full-audit-apply-workspace-batch-tool-probe"), cases);
     }
 
     @Test

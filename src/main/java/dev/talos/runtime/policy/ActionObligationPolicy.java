@@ -1,10 +1,8 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.phase.ExecutionPhase;
-import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskResolution;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 
 /** Deterministically maps a current turn to the action shape Talos must enforce. */
 public final class ActionObligationPolicy {
@@ -23,6 +21,12 @@ public final class ActionObligationPolicy {
         }
         if (resolution.blocksUnscopedMutation()) {
             return ActionObligation.NONE;
+        }
+        if (!resolution.workspaceOperationPlan()
+                        .authorizedOperations().isEmpty()
+                && resolution.contract().mutationAllowed()
+                && phase == ExecutionPhase.APPLY) {
+            return ActionObligation.WORKSPACE_OPERATION_REQUIRED;
         }
         return derive(
                 resolution.contract(),
@@ -62,11 +66,6 @@ public final class ActionObligationPolicy {
         }
         if ("explicit-review-and-fix-request".equals(contract.classificationReason())) {
             return ActionObligation.CONDITIONAL_REVIEW_FIX;
-        }
-        if (!workspaceOperationBlocked
-                && WorkspaceOperationIntent.detect(contract).isPresent()
-                && TaskExpectationResolver.resolve(contract).isEmpty()) {
-            return ActionObligation.WORKSPACE_OPERATION_REQUIRED;
         }
         return ActionObligation.MUTATING_TOOL_REQUIRED;
     }

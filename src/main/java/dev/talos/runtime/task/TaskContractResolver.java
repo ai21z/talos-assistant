@@ -403,7 +403,8 @@ public final class TaskContractResolver {
                 TaskContractCompiler.compile(intent),
                 intent,
                 intentResolution.mutationTailPlan(),
-                intentResolution.sequentialMutationPlan());
+                intentResolution.sequentialMutationPlan(),
+                intentResolution.workspaceOperationPlan());
     }
 
     public static TaskIntent intentFromUserRequest(String userRequest) {

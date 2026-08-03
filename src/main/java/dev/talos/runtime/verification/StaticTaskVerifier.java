@@ -8,7 +8,9 @@ import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -70,11 +72,16 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        TaskResolution resolution =
+                TaskContractResolver.resolveFromUserRequest(userRequest);
         return verifyWithEvidence(
                 workspace,
-                TaskContractResolver.fromUserRequest(userRequest),
+                resolution.contract(),
+                RequestObligationCompiler.compile(resolution.contract()),
                 loopResult,
-                extraMutationSuccesses).compatibilityResult();
+                extraMutationSuccesses,
+                noWorkspaceAuthority(resolution.contract()))
+                .compatibilityResult();
     }
 
     public static TaskVerificationResult verify(
@@ -99,7 +106,8 @@ public final class StaticTaskVerifier {
                 loopResult,
                 extraMutationSuccesses,
                 true,
-                StaticWebRenderVerifier.unavailableRunner());
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract));
     }
 
     public static TaskVerificationEvidence verifyWithEvidence(
@@ -116,7 +124,28 @@ public final class StaticTaskVerifier {
                 loopResult,
                 extraMutationSuccesses,
                 true,
-                StaticWebRenderVerifier.unavailableRunner());
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract));
+    }
+
+    /** Production path: binds post-apply verification to the compiled authority. */
+    public static TaskVerificationEvidence verifyWithEvidence(
+            Path workspace,
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                requestObligation,
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                StaticWebRenderVerifier.unavailableRunner(),
+                workspaceOperationPlan);
     }
 
     static TaskVerificationEvidence verifyWithEvidence(
@@ -133,7 +162,8 @@ public final class StaticTaskVerifier {
                 loopResult,
                 extraMutationSuccesses,
                 true,
-                renderRunner);
+                renderRunner,
+                noWorkspaceAuthority(contract));
     }
 
     public static TaskVerificationResult verifyWithoutTraceEvents(
@@ -149,7 +179,8 @@ public final class StaticTaskVerifier {
                 loopResult,
                 extraMutationSuccesses,
                 false,
-                StaticWebRenderVerifier.unavailableRunner()).compatibilityResult();
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract)).compatibilityResult();
     }
 
     private static TaskVerificationEvidence verifyInternal(
@@ -159,7 +190,8 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses,
             boolean recordExpectationTrace,
-            StaticWebRenderVerifier.RenderRunner renderRunner
+            StaticWebRenderVerifier.RenderRunner renderRunner,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
     ) {
         if (loopResult == null) {
             return TaskVerificationEvidence.postApply(
@@ -219,7 +251,10 @@ public final class StaticTaskVerifier {
         Set<String> mutatedPaths = new LinkedHashSet<>();
         Set<String> expectedTargetExemptions = new LinkedHashSet<>();
         MutationTargetReadbackVerifier.Result mutationReadback =
-                MutationTargetReadbackVerifier.verify(root, successfulMutations);
+                MutationTargetReadbackVerifier.verify(
+                        root,
+                        successfulMutations,
+                        workspaceOperationPlan);
         facts.addAll(mutationReadback.facts());
         problems.addAll(mutationReadback.problems());
         mutatedPaths.addAll(mutationReadback.mutationTargets());
@@ -230,7 +265,13 @@ public final class StaticTaskVerifier {
         mutatedPaths.addAll(workspaceOperationVerification.mutationTargets());
         expectedTargetExemptions.addAll(workspaceOperationVerification.expectedTargetExemptions());
 
-        CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
+        boolean pureTypedWorkspaceOperation = workspaceOperationPlan != null
+                && workspaceOperationPlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && contract.expectedTargets().isEmpty();
+        CapabilityProfile profile = pureTypedWorkspaceOperation
+                ? CapabilityProfile.none()
+                : CapabilityProfileRegistry.select(contract, root, mutatedPaths);
         boolean webCoherenceRequired;
 
         TargetScopeStaticVerifier.Result targetScopeVerification = TargetScopeStaticVerifier.verify(
@@ -283,6 +324,13 @@ public final class StaticTaskVerifier {
                 compatibilityResult,
                 claimReport,
                 expectationVerification.requestObligationReceipt());
+    }
+
+    private static WorkspaceOperationAuthorityPlan noWorkspaceAuthority(
+            TaskContract contract
+    ) {
+        return WorkspaceOperationAuthorityPlan.none(
+                contract == null ? "" : contract.originalUserRequest());
     }
 
     /**
