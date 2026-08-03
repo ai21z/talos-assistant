@@ -32,6 +32,11 @@ final class LlamaCppServerManager implements AutoCloseable {
     private static final Duration DEFAULT_READINESS_POLL_INTERVAL = Duration.ofMillis(500);
     private static final Duration DEFAULT_SHUTDOWN_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration DEFAULT_FORCED_SHUTDOWN_TIMEOUT = Duration.ofSeconds(2);
+    private static final LlamaCppProcessTerminationOwner.Policy
+            DEFAULT_TERMINATION_POLICY =
+            new LlamaCppProcessTerminationOwner.Policy(
+                    DEFAULT_SHUTDOWN_TIMEOUT,
+                    DEFAULT_FORCED_SHUTDOWN_TIMEOUT);
     private static final int LOG_EXCERPT_BYTES = 1600;
     private static final String DEFAULT_AGENT_PARALLEL = "1";
     private static final String DEFAULT_AGENT_PREDICT = "2048";
@@ -50,7 +55,10 @@ final class LlamaCppServerManager implements AutoCloseable {
     private final LlamaCppEndpointOwnerProbe.ObserverIdentityReader endpointObserverIdentityReader;
 
     private LlamaCppProcess process;
+    private LlamaCppProcessTerminationOwner.Lease terminationLease;
     private String lastLaunchFailure = "";
+    private String lastTerminationFailure = "";
+    private LlamaCppProcessTerminationOwner.Outcome lastTerminationOutcome;
     private boolean ready;
     private long readinessObservedEpochMilli;
     private LlamaCppQualificationLaunchExpectation qualificationExpectation;
@@ -154,11 +162,28 @@ final class LlamaCppServerManager implements AutoCloseable {
 
     synchronized void ensureStarted(LlamaCppQualificationLaunchExpectation expectation) {
         if (!config.managed()) return;
+        if (lastTerminationOutcome != null || !lastTerminationFailure.isBlank()) {
+            String detail = !lastTerminationFailure.isBlank()
+                    ? lastTerminationFailure
+                    : "managed llama.cpp process termination remains unproven: "
+                            + lastTerminationOutcome.safeSummary();
+            throw new EngineException.ConnectionFailed(detail, null);
+        }
         if (process != null && process.isAlive()) {
+            if (terminationLease == null) {
+                throw cacheTerminationOwnershipFailure(
+                        "managed llama.cpp process termination ownership "
+                                + "is unavailable for the live launch epoch",
+                        null);
+            }
+            requireOutputCaptureHealthy();
             if (expectation != null) requireSameQualificationLaunch(expectation);
             if (ready) return;
             waitForReadiness(logPath());
             return;
+        }
+        if (process != null || terminationLease != null) {
+            stopManagedProcess(logPath(), "previous process exit");
         }
         ready = false;
         readinessObservedEpochMilli = 0L;
@@ -224,6 +249,24 @@ final class LlamaCppServerManager implements AutoCloseable {
                             logPath,
                             environment,
                             qualificationWorkingDirectory);
+            if (process == null) {
+                throw new EngineException.ConnectionFailed(
+                        "managed llama.cpp launcher returned no process", null);
+            }
+            try {
+                terminationLease = process.terminationLease();
+            } catch (RuntimeException ownershipFailure) {
+                throw cacheTerminationOwnershipFailure(
+                        "managed llama.cpp process termination ownership "
+                                + "could not be observed",
+                        ownershipFailure);
+            }
+            if (terminationLease == null) {
+                throw cacheTerminationOwnershipFailure(
+                        "managed llama.cpp process termination ownership is unavailable",
+                        null);
+            }
+            requireOutputCaptureHealthy();
             appendLifecycleLog(logPath, "Talos managed llama.cpp server process launched");
             if (expectation != null) {
                 LlamaCppProcessLaunchObservation observation = process.launchObservation();
@@ -238,17 +281,45 @@ final class LlamaCppServerManager implements AutoCloseable {
                         config.listenHost(), config.port(), Duration.ofSeconds(3));
             }
             lastLaunchFailure = "";
+        } catch (LlamaCppProcessTerminationOwner.LaunchBlocked blocked) {
+            lastLaunchFailure = blocked.getMessage();
+            ready = false;
+            readinessObservedEpochMilli = 0L;
+            throw new EngineException.ConnectionFailed(
+                    lastLaunchFailure,
+                    blocked);
+        } catch (LlamaCppProcessTerminationOwner.Unsettled unsettled) {
+            terminationLease = unsettled.lease();
+            lastTerminationOutcome = unsettled.outcome();
+            lastTerminationFailure =
+                    "managed llama.cpp process termination remains unproven: "
+                            + unsettled.outcome().safeSummary();
+            ready = false;
+            readinessObservedEpochMilli = 0L;
+            throw new EngineException.ConnectionFailed(
+                    lastTerminationFailure,
+                    unsettled);
         } catch (IOException e) {
             lastLaunchFailure = "failed to launch llama.cpp server: " + e.getMessage();
             throw new EngineException.ConnectionFailed("llama_cpp launch: " + e.getMessage(), e);
         } catch (RuntimeException e) {
-            stopManagedProcess(logPath, "launch identity failed");
+            try {
+                stopManagedProcess(logPath, "launch identity failed");
+            } catch (RuntimeException terminationFailure) {
+                terminationFailure.addSuppressed(e);
+                throw terminationFailure;
+            }
             throw e;
         }
         try {
             waitForReadiness(logPath);
         } catch (RuntimeException e) {
-            stopManagedProcess(logPath, "readiness failed");
+            try {
+                stopManagedProcess(logPath, "readiness failed");
+            } catch (RuntimeException terminationFailure) {
+                terminationFailure.addSuppressed(e);
+                throw terminationFailure;
+            }
             throw e;
         }
     }
@@ -258,6 +329,7 @@ final class LlamaCppServerManager implements AutoCloseable {
             String resolvedProfile,
             boolean profileQualified) {
         requireSameQualificationLaunch(expectation);
+        requireOutputCaptureHealthy();
         if (!ready) {
             throw new EngineException.ConnectionFailed(
                     "managed qualification process is not ready", null);
@@ -312,8 +384,13 @@ final class LlamaCppServerManager implements AutoCloseable {
     }
 
     synchronized ProviderProcessLaunchReceipt requireActiveQualificationReceipt() {
+        requireOutputCaptureHealthy();
         if (qualificationReceipt == null
                 || process == null
+                || !ready
+                || terminationLease == null
+                || lastTerminationOutcome != null
+                || !lastTerminationFailure.isBlank()
                 || !process.isAlive()
                 || qualificationLaunch == null
                 || !qualificationLaunch.sameProcess(process.launchObservation())) {
@@ -336,6 +413,7 @@ final class LlamaCppServerManager implements AutoCloseable {
     synchronized LlamaCppPropsClient.Result fetchQualificationProps(
             LlamaCppQualificationLaunchExpectation expectation) {
         requireSameQualificationLaunch(expectation);
+        requireOutputCaptureHealthy();
         if (!ready || qualificationHttp == null) {
             throw new EngineException.ConnectionFailed(
                     "managed qualification process is not ready for /props", null);
@@ -345,6 +423,7 @@ final class LlamaCppServerManager implements AutoCloseable {
                 new LlamaCppPropsClient(qualificationHttp)
                         .fetch(URI.create(config.baseUrl()));
         requireQualificationEndpointOwner("props completion");
+        requireOutputCaptureHealthy();
         qualificationProps = result.state() == LlamaCppPropsClient.State.AVAILABLE
                 ? new QualificationPropsObservation(
                         qualificationLaunch.processId(),
@@ -355,7 +434,21 @@ final class LlamaCppServerManager implements AutoCloseable {
         return result;
     }
 
-    Health health() {
+    synchronized Health health() {
+        if (!lastTerminationFailure.isBlank()) {
+            return Health.down(lastTerminationFailure);
+        }
+        if (lastTerminationOutcome != null) {
+            return Health.down(
+                    "managed llama.cpp process termination remains unproven: "
+                            + lastTerminationOutcome.safeSummary());
+        }
+        if (process != null) {
+            if (!observeOutputCaptureHealthy()) {
+                return Health.down(
+                        "managed llama.cpp output capture is incomplete");
+            }
+        }
         String validation = managedValidationFailure();
         if (!validation.isBlank()) return Health.down(validation);
         if (!lastLaunchFailure.isBlank()) return Health.down(lastLaunchFailure);
@@ -670,6 +763,7 @@ final class LlamaCppServerManager implements AutoCloseable {
                         + logExcerptSuffix(logPath);
                 throw new EngineException.ConnectionFailed(lastLaunchFailure, null);
             }
+            requireOutputCaptureHealthy();
 
             if (qualificationLaunch != null && !qualificationListenerReady()) {
                 lastHealth = "managed qualification listener is not ready";
@@ -678,6 +772,7 @@ final class LlamaCppServerManager implements AutoCloseable {
             }
             Health health = httpHealth();
             if (health.ok()) {
+                requireOutputCaptureHealthy();
                 if (qualificationLaunch != null) {
                     requireQualificationEndpointOwner("readiness");
                 }
@@ -773,30 +868,108 @@ final class LlamaCppServerManager implements AutoCloseable {
     }
 
     private void stopManagedProcess(Path logPath, String reason) {
-        if (process != null) {
-            LlamaCppProcess ownedProcess = process;
-            appendLifecycleLog(logPath, "Talos managed llama.cpp server stopping: " + Objects.toString(reason, ""));
+        if (process == null && terminationLease == null) return;
+        LlamaCppProcess ownedProcess = process;
+        ready = false;
+        readinessObservedEpochMilli = 0L;
+        appendLifecycleLog(logPath, "Talos managed llama.cpp server stopping: "
+                + Objects.toString(reason, ""));
+
+        LlamaCppProcessTerminationOwner.Lease lease = terminationLease;
+        if (lease == null && ownedProcess != null) {
             try {
-                if (ownedProcess.isAlive()) {
-                    ownedProcess.destroy();
-                    if (!waitForExit(ownedProcess, DEFAULT_SHUTDOWN_TIMEOUT) && ownedProcess.isAlive()) {
-                        appendLifecycleLog(logPath, "Talos managed llama.cpp server still alive; forcing stop");
-                        ownedProcess.destroyForcibly();
-                        waitForExit(ownedProcess, DEFAULT_FORCED_SHUTDOWN_TIMEOUT);
-                    }
-                }
-            } finally {
-                if (ownedProcess.isAlive()) {
-                    appendLifecycleLog(logPath, "Talos managed llama.cpp server may still be running after stop attempt");
-                } else {
-                    appendLifecycleLog(logPath, "Talos managed llama.cpp server stopped");
-                }
+                lease = ownedProcess.terminationLease();
+            } catch (RuntimeException ownershipFailure) {
+                EngineException.ConnectionFailed failure =
+                        cacheTerminationOwnershipFailure(
+                                "managed llama.cpp process termination ownership "
+                                        + "could not be observed",
+                                ownershipFailure);
+                appendLifecycleLog(logPath, lastTerminationFailure);
+                throw failure;
             }
-            process = null;
-            ready = false;
-            readinessObservedEpochMilli = 0L;
-            clearQualificationBinding();
+            terminationLease = lease;
         }
+        if (lease == null) {
+            EngineException.ConnectionFailed failure =
+                    cacheTerminationOwnershipFailure(
+                            "managed llama.cpp process termination ownership is unavailable",
+                            null);
+            appendLifecycleLog(logPath, lastTerminationFailure);
+            throw failure;
+        }
+
+        LlamaCppProcessTerminationOwner.Outcome outcome =
+                lease.terminate(DEFAULT_TERMINATION_POLICY);
+        if (!outcome.terminated()) {
+            lastTerminationOutcome = outcome;
+            lastTerminationFailure =
+                    "managed llama.cpp process termination remains unproven: "
+                            + outcome.safeSummary();
+            appendLifecycleLog(logPath, lastTerminationFailure);
+            throw new EngineException.ConnectionFailed(
+                    lastTerminationFailure,
+                    new LlamaCppProcessTerminationOwner.Unsettled(
+                            lastTerminationFailure,
+                            null,
+                            outcome,
+                            lease));
+        }
+
+        boolean outputCaptureHealthy = true;
+        if (ownedProcess != null) {
+            try {
+                outputCaptureHealthy = ownedProcess.outputCaptureHealthy();
+            } catch (RuntimeException unavailable) {
+                outputCaptureHealthy = false;
+            }
+        }
+
+        appendLifecycleLog(logPath, "Talos managed llama.cpp server stopped");
+        process = null;
+        terminationLease = null;
+        lastTerminationOutcome = null;
+        lastTerminationFailure = "";
+        clearQualificationBinding();
+        if (!outputCaptureHealthy) {
+            lastLaunchFailure =
+                    "managed llama.cpp output capture is incomplete";
+            appendLifecycleLog(logPath, lastLaunchFailure);
+            throw new EngineException.ConnectionFailed(
+                    lastLaunchFailure,
+                    null);
+        }
+    }
+
+    private void requireOutputCaptureHealthy() {
+        if (observeOutputCaptureHealthy()) return;
+        throw new EngineException.ConnectionFailed(lastLaunchFailure, null);
+    }
+
+    private boolean observeOutputCaptureHealthy() {
+        boolean healthy = process == null;
+        try {
+            if (process != null) healthy = process.outputCaptureHealthy();
+        } catch (RuntimeException unavailable) {
+            healthy = false;
+        }
+        if (healthy) return true;
+        lastLaunchFailure = "managed llama.cpp output capture is incomplete";
+        ready = false;
+        readinessObservedEpochMilli = 0L;
+        return false;
+    }
+
+    private EngineException.ConnectionFailed cacheTerminationOwnershipFailure(
+            String message,
+            Throwable cause) {
+        ready = false;
+        readinessObservedEpochMilli = 0L;
+        lastTerminationOutcome = null;
+        lastTerminationFailure = Objects.toString(message, "");
+        return new EngineException.ConnectionFailed(
+                lastTerminationFailure,
+                cause);
     }
 
     private boolean qualificationListenerReady() {
@@ -876,15 +1049,4 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
     }
 
-    private static boolean waitForExit(LlamaCppProcess process, Duration timeout) {
-        if (process == null || !process.isAlive()) return true;
-        try {
-            return process.waitFor(timeout);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (Exception ignored) {
-            return !process.isAlive();
-        }
-    }
 }

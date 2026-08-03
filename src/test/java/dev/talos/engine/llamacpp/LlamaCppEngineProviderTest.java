@@ -448,6 +448,7 @@ class LlamaCppEngineProviderTest {
         AtomicInteger healthCalls = new AtomicInteger();
         AtomicInteger chatCalls = new AtomicInteger();
         HttpServer server = startSequencedServer(healthCalls, chatCalls, List.of(503, 503, 200));
+        OwnedTestProcess process = new OwnedTestProcess();
         try {
             Config cfg = config(Map.of(
                     "mode", "managed",
@@ -457,27 +458,32 @@ class LlamaCppEngineProviderTest {
                     "port", server.getAddress().getPort(),
                     "model", "talos-agent"));
             LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
-            LlamaCppEngine engine = new LlamaCppEngine(
+            try (LlamaCppServerManager manager = new LlamaCppServerManager(
                     llamaCfg,
-                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> new LlamaCppProcess() {
-                        @Override public boolean isAlive() { return true; }
-                        @Override public void destroy() {}
-                    }, HttpClient.newHttpClient(), Duration.ofSeconds(2), Duration.ofMillis(10),
-                            java.nio.file.Files.createTempDirectory("talos-llama-test-logs")),
-                    HttpClient.newHttpClient());
+                    (command, logPath) -> process,
+                    HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2),
+                    Duration.ofMillis(10),
+                    java.nio.file.Files.createTempDirectory("talos-llama-test-logs"))) {
+                LlamaCppEngine engine = new LlamaCppEngine(
+                        llamaCfg,
+                        manager,
+                        HttpClient.newHttpClient());
 
-            String response = engine.chat(new ChatRequest(
-                    "llama_cpp",
-                    "talos-agent",
-                    "",
-                    "",
-                    List.of(),
-                    Duration.ofSeconds(5),
-                    List.of(ChatMessage.user("hello"))));
+                String response = engine.chat(new ChatRequest(
+                        "llama_cpp",
+                        "talos-agent",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(ChatMessage.user("hello"))));
 
-            assertEquals("hello after ready", response);
-            assertEquals(1, chatCalls.get());
-            assertTrue(healthCalls.get() >= 3, "chat must wait for readiness health checks");
+                assertEquals("hello after ready", response);
+                assertEquals(1, chatCalls.get());
+                assertTrue(healthCalls.get() >= 3,
+                        "chat must wait for readiness health checks");
+            }
         } finally {
             server.stop(0);
         }
@@ -621,5 +627,64 @@ class LlamaCppEngineProviderTest {
         java.nio.file.Path path = java.nio.file.Files.createTempFile(name, ".tmp");
         java.nio.file.Files.writeString(path, "fake", StandardCharsets.UTF_8);
         return path.toString();
+    }
+
+    private static final class OwnedTestProcess implements
+            LlamaCppProcess,
+            LlamaCppProcessTerminationOwner.Target {
+        private final LlamaCppProcessTerminationOwner.ProcessIdentity identity =
+                new LlamaCppProcessTerminationOwner.ProcessIdentity(
+                        1L,
+                        0L,
+                        LlamaCppProcessTerminationOwner.IdentityAuthority
+                                .DIRECT_PROCESS_CAPABILITY);
+        private boolean alive = true;
+        private final LlamaCppProcessTerminationOwner.Lease terminationLease =
+                new LlamaCppProcessTerminationOwner().adopt(this);
+
+        @Override
+        public LlamaCppProcessTerminationOwner.ProcessIdentity identity() {
+            return identity;
+        }
+
+        @Override
+        public boolean identityStillMatches() {
+            return true;
+        }
+
+        @Override
+        public boolean isAlive() {
+            return alive;
+        }
+
+        @Override
+        public boolean outputCaptureHealthy() {
+            return true;
+        }
+
+        @Override
+        public List<LlamaCppProcessTerminationOwner.Target> descendants() {
+            return List.of();
+        }
+
+        @Override
+        public void destroy() {
+            alive = false;
+        }
+
+        @Override
+        public void destroyForcibly() {
+            alive = false;
+        }
+
+        @Override
+        public boolean waitFor(Duration timeout) {
+            return !alive;
+        }
+
+        @Override
+        public LlamaCppProcessTerminationOwner.Lease terminationLease() {
+            return terminationLease;
+        }
     }
 }

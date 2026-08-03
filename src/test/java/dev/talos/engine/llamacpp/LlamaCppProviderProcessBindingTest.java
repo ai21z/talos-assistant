@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
+import dev.talos.spi.types.Health;
 import dev.talos.spi.types.ProviderProcessLaunchReceipt;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -200,7 +204,8 @@ class LlamaCppProviderProcessBindingTest {
                 fixture.server().getAddress().getPort());
         Fixture endpointFixture = new Fixture(
                 fixture.engine(), fixture.model(), fixture.server(), config,
-                fixture.engineSha256(), fixture.modelSha256(), fixture.expectation());
+                fixture.engineSha256(), fixture.modelSha256(), fixture.propsCalls(),
+                fixture.expectation());
         QueueLauncher launcher = launcher(observation(
                 7101, 1_721_600_000_000L, endpointFixture));
         LlamaCppServerManager manager = new LlamaCppServerManager(
@@ -331,6 +336,151 @@ class LlamaCppProviderProcessBindingTest {
                 () -> manager.bindQualificationReceipt(
                         fixture.expectation(), "different-profile", true));
         assertTrue(conflict.getMessage().contains("rebind is inconsistent"));
+    }
+
+    @Test
+    void captureFailureRevokesDispatchButRetainsReceiptUntilProvenStop()
+            throws Exception {
+        Fixture fixture = fixture("engine", "model");
+        FakeProcess process = observation(
+                7101, 1_721_600_000_000L, fixture);
+        QueueLauncher launcher = launcher(process);
+        LlamaCppServerManager manager = manager(
+                fixture,
+                launcher,
+                LlamaCppEndpointOwnerProbe.Observation.absent(OBSERVER_A));
+
+        manager.ensureStarted(fixture.expectation());
+        manager.fetchQualificationProps(fixture.expectation());
+        ProviderProcessLaunchReceipt receipt = manager.bindQualificationReceipt(
+                fixture.expectation(), "qualification-model", true);
+        LlamaCppServerManager.QualificationTransport selected =
+                manager.requireActiveQualificationTransport();
+        AtomicInteger delegateAdmissions = new AtomicInteger();
+        AtomicBoolean sendEntered = new AtomicBoolean();
+        ProviderTransportHandoff bound =
+                LlamaCppEngine.bindSelectedQualificationTransport(
+                        delegateAdmissions::incrementAndGet,
+                        selected,
+                        manager::requireActiveQualificationReceipt);
+        ProviderTransportAttempt admitted = bound.admitTransport(
+                ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
+                        "{}", List.of()));
+        assertEquals(1, delegateAdmissions.get());
+
+        process.outputCaptureHealthy = false;
+
+        ProviderTransportHandoff.ProcessBindingInvalidated sendFailure =
+                assertThrows(
+                        ProviderTransportHandoff.ProcessBindingInvalidated.class,
+                        () -> admitted.invokeSend(() -> {
+                            sendEntered.set(true);
+                            return null;
+                        }));
+        assertTrue(sendFailure.getCause()
+                instanceof EngineException.ConnectionFailed);
+        assertTrue(sendFailure.getCause().getMessage().contains(
+                "output capture is incomplete"));
+        assertFalse(sendEntered.get());
+
+        EngineException.ConnectionFailed receiptFailure = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::requireActiveQualificationReceipt);
+        assertTrue(receiptFailure.getMessage().contains(
+                "output capture is incomplete"));
+        assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::requireActiveQualificationTransport);
+        assertSame(receipt, retainedQualificationReceipt(manager),
+                "capture loss revokes use but does not erase process evidence");
+
+        process.destroyLeavesAlive = true;
+        process.forceDestroyLeavesAlive = true;
+        EngineException.ConnectionFailed unprovenStop = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::close);
+        assertTrue(unprovenStop.getMessage().contains(
+                "termination remains unproven"));
+        assertTrue(process.alive);
+        assertSame(receipt, retainedQualificationReceipt(manager),
+                "unproven termination must retain the exact receipt evidence");
+
+        process.alive = false;
+        EngineException.ConnectionFailed provenStop = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::close);
+        assertTrue(provenStop.getMessage().contains(
+                "output capture is incomplete"));
+        assertFalse(process.alive);
+        assertNull(retainedQualificationReceipt(manager),
+                "proven termination clears the unusable process binding");
+    }
+
+    @Test
+    void healthObservationRevokesReadinessBeforePropsCanSend()
+            throws Exception {
+        Fixture fixture = fixture("engine", "model");
+        FakeProcess process = observation(
+                7101, 1_721_600_000_000L, fixture);
+        LlamaCppServerManager manager = manager(
+                fixture,
+                launcher(process),
+                LlamaCppEndpointOwnerProbe.Observation.absent(OBSERVER_A));
+
+        manager.ensureStarted(fixture.expectation());
+        int propsBeforeFailure = fixture.propsCalls().get();
+        process.outputCaptureHealthy = false;
+
+        Health health = manager.health();
+
+        assertFalse(health.ok());
+        assertTrue(health.message().contains("output capture is incomplete"));
+        EngineException.ConnectionFailed captureFailure = assertThrows(
+                EngineException.ConnectionFailed.class,
+                () -> manager.fetchQualificationProps(fixture.expectation()));
+        assertTrue(captureFailure.getMessage().contains(
+                "output capture is incomplete"));
+        assertEquals(propsBeforeFailure, fixture.propsCalls().get());
+
+        process.outputCaptureHealthy = true;
+        EngineException.ConnectionFailed readinessFailure = assertThrows(
+                EngineException.ConnectionFailed.class,
+                () -> manager.fetchQualificationProps(fixture.expectation()));
+        assertTrue(readinessFailure.getMessage().contains("not ready"));
+        assertEquals(propsBeforeFailure, fixture.propsCalls().get(),
+                "readiness revocation must block /props before HTTP dispatch");
+    }
+
+    @Test
+    void unsettledStopRetainsButCannotDispatchTheQualificationReceipt()
+            throws Exception {
+        Fixture fixture = fixture("engine", "model");
+        FakeProcess process = observation(7101, 1_721_600_000_000L, fixture);
+        QueueLauncher launcher = launcher(process);
+        LlamaCppServerManager manager = manager(
+                fixture,
+                launcher,
+                LlamaCppEndpointOwnerProbe.Observation.absent(OBSERVER_A));
+
+        manager.ensureStarted(fixture.expectation());
+        manager.fetchQualificationProps(fixture.expectation());
+        ProviderProcessLaunchReceipt receipt = manager.bindQualificationReceipt(
+                fixture.expectation(), "qualification-model", true);
+        process.destroyLeavesAlive = true;
+        process.forceDestroyLeavesAlive = true;
+
+        assertThrows(EngineException.ConnectionFailed.class, manager::close);
+        assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::requireActiveQualificationReceipt,
+                "readiness revocation must make the retained receipt unusable");
+        assertSame(receipt, retainedQualificationReceipt(manager),
+                "identity evidence must remain until termination is proven");
+
+        process.alive = false;
+        manager.close();
+        assertNull(retainedQualificationReceipt(manager),
+                "verified termination is the only point that clears the binding");
     }
 
     @Test
@@ -704,7 +854,9 @@ class LlamaCppProviderProcessBindingTest {
                         "supports_parallel_tool_calls", false),
                 "modalities", Map.of("vision", false),
                 "build_info", "b9918"));
+        AtomicInteger propsCalls = new AtomicInteger();
         server.createContext("/props", exchange -> {
+            propsCalls.incrementAndGet();
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, props.length);
             exchange.getResponseBody().write(props);
@@ -728,6 +880,7 @@ class LlamaCppProviderProcessBindingTest {
                 config,
                 engineHash,
                 modelHash,
+                propsCalls,
                 new LlamaCppQualificationLaunchExpectation(
                         "a".repeat(64), engineHash, modelHash,
                         ProviderProcessLaunchReceipt.digestEffectiveEnvironment(
@@ -796,6 +949,7 @@ class LlamaCppProviderProcessBindingTest {
             LlamaCppConfig config,
             String engineSha256,
             String modelSha256,
+            AtomicInteger propsCalls,
             LlamaCppQualificationLaunchExpectation expectation) {}
 
     private static final class QueueLauncher implements LlamaCppProcessLauncher {
@@ -832,22 +986,70 @@ class LlamaCppProviderProcessBindingTest {
         }
     }
 
-    private static final class FakeProcess implements LlamaCppProcess {
+    private static final class FakeProcess implements
+            LlamaCppProcess,
+            LlamaCppProcessTerminationOwner.Target {
         private final LlamaCppProcessLaunchObservation observation;
+        private final LlamaCppProcessTerminationOwner.ProcessIdentity identity;
+        private final LlamaCppProcessTerminationOwner.Lease terminationLease;
         private boolean alive = true;
+        private boolean outputCaptureHealthy = true;
         private boolean destroyed;
+        private boolean forceDestroyed;
+        private boolean destroyLeavesAlive;
+        private boolean forceDestroyLeavesAlive;
 
         private FakeProcess(LlamaCppProcessLaunchObservation observation) {
             this.observation = observation;
+            this.identity =
+                    new LlamaCppProcessTerminationOwner.ProcessIdentity(
+                            observation.processId(),
+                            observation.processStartEpochMilli(),
+                            observation.processStartEpochMilli() > 0L
+                                    ? LlamaCppProcessTerminationOwner
+                                            .IdentityAuthority.EXACT_PID_START
+                                    : LlamaCppProcessTerminationOwner
+                                            .IdentityAuthority
+                                            .DIRECT_PROCESS_CAPABILITY);
+            this.terminationLease =
+                    new LlamaCppProcessTerminationOwner().adopt(this);
         }
 
         @Override public boolean isAlive() { return alive; }
+        @Override public boolean outputCaptureHealthy() {
+            return outputCaptureHealthy;
+        }
+        @Override public LlamaCppProcessTerminationOwner.ProcessIdentity identity() {
+            return identity;
+        }
+        @Override public boolean identityStillMatches() { return true; }
+        @Override public List<LlamaCppProcessTerminationOwner.Target> descendants() {
+            return List.of();
+        }
         @Override public LlamaCppProcessLaunchObservation launchObservation() { return observation; }
+        @Override public LlamaCppProcessTerminationOwner.Lease terminationLease() {
+            return terminationLease;
+        }
+        @Override public boolean waitFor(Duration timeout) {
+            return !alive;
+        }
 
         @Override
         public void destroy() {
             destroyed = true;
-            alive = false;
+            if (!destroyLeavesAlive) alive = false;
         }
+        @Override public void destroyForcibly() {
+            forceDestroyed = true;
+            if (!forceDestroyLeavesAlive) alive = false;
+        }
+    }
+
+    private static ProviderProcessLaunchReceipt retainedQualificationReceipt(
+            LlamaCppServerManager manager) throws Exception {
+        java.lang.reflect.Field field = LlamaCppServerManager.class
+                .getDeclaredField("qualificationReceipt");
+        field.setAccessible(true);
+        return (ProviderProcessLaunchReceipt) field.get(manager);
     }
 }

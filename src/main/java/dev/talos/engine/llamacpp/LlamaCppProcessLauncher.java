@@ -42,7 +42,9 @@ interface LlamaCppProcessLauncher {
 interface LlamaCppProcess {
     boolean isAlive();
     void destroy();
+    boolean outputCaptureHealthy();
     default LlamaCppProcessLaunchObservation launchObservation() { return null; }
+    default LlamaCppProcessTerminationOwner.Lease terminationLease() { return null; }
     default boolean waitFor(Duration timeout) throws InterruptedException {
         return !isAlive();
     }

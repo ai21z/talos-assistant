@@ -19,6 +19,12 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +36,54 @@ import static org.junit.jupiter.api.Assertions.*;
 class LlamaCppServerManagerTest {
 
     @TempDir Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void captureHealthFailureBeforeReadinessStopsWithoutHttpProbe(
+            boolean throwsOnObservation) throws Exception {
+        Path exe = touch("capture-health-llama-server.exe");
+        Path model = touch("capture-health-agent.gguf");
+        AtomicInteger healthCalls = new AtomicInteger();
+        HttpServer server = startSequencedHealthServer(
+                healthCalls, List.of(200));
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.outputCaptureHealthy = false;
+            launcher.process.throwOutputCaptureHealth = throwsOnObservation;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg),
+                    launcher,
+                    HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2),
+                    Duration.ofMillis(10),
+                    tempDir.resolve("capture-health-logs-"
+                            + throwsOnObservation));
+
+            EngineException.ConnectionFailed failure = assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+
+            assertTrue(failure.getMessage().contains(
+                    "output capture is incomplete"));
+            assertEquals(0, healthCalls.get());
+            assertFalse(launcher.process.alive);
+            assertTrue(launcher.process.destroyed);
+            assertFalse(manager.health().ok());
+            assertTrue(manager.health().message().contains(
+                    "output capture is incomplete"));
+            assertDoesNotThrow(manager::close,
+                    "proven termination must clear process ownership even "
+                            + "when output evidence is incomplete");
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void managedModeLaunchesConfiguredExecutableWithExpectedArguments() throws Exception {
@@ -825,6 +879,308 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void closeRetainsManagedOwnershipWhenForcedTerminationCannotBeProven() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertThrows(EngineException.ConnectionFailed.class, manager::close,
+                    "an unproven forced stop must be visible to the owner");
+            assertFalse(manager.health().ok());
+            assertTrue(manager.health().message().contains(
+                    "termination remains unproven"));
+            assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted,
+                    "an unsettled owned process must block replacement launch");
+            assertEquals(1, launcher.commands.size(),
+                    "the manager must retain the original ownership epoch");
+
+            launcher.process.alive = false;
+            assertDoesNotThrow(manager::close,
+                    "a later observation of the retained process exit may release ownership");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void healthCannotIssueOrReportOkDuringOrAfterAnUnsettledStop()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        AtomicBoolean observeHealthRequests = new AtomicBoolean();
+        CountDownLatch healthRequestObserved = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(
+                new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/health", exchange -> {
+            if (observeHealthRequests.get()) {
+                healthRequestObserved.countDown();
+            }
+            byte[] bytes = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            launcher.process.blockGracefulDestroy = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+            manager.ensureStarted();
+            observeHealthRequests.set(true);
+
+            Future<?> close = executor.submit(() -> {
+                manager.close();
+                return null;
+            });
+            assertTrue(launcher.process.destroyEntered.await(
+                    5L, TimeUnit.SECONDS));
+
+            CountDownLatch healthStarted = new CountDownLatch(1);
+            Future<Health> concurrentHealth = executor.submit(() -> {
+                healthStarted.countDown();
+                return manager.health();
+            });
+            assertTrue(healthStarted.await(5L, TimeUnit.SECONDS));
+
+            assertFalse(healthRequestObserved.await(
+                            1L, TimeUnit.SECONDS),
+                    "health must not issue an HTTP OK probe while stop owns the lifecycle");
+            assertFalse(concurrentHealth.isDone(),
+                    "health must snapshot lifecycle state only after stop settles");
+
+            launcher.process.releaseDestroy.countDown();
+            java.util.concurrent.ExecutionException stopFailure =
+                    assertThrows(
+                            java.util.concurrent.ExecutionException.class,
+                            () -> close.get(5L, TimeUnit.SECONDS));
+            assertInstanceOf(
+                    EngineException.ConnectionFailed.class,
+                    stopFailure.getCause());
+
+            Health settledHealth =
+                    concurrentHealth.get(5L, TimeUnit.SECONDS);
+            assertFalse(settledHealth.ok());
+            assertTrue(settledHealth.message().contains(
+                    "termination remains unproven"));
+            assertEquals(1L, healthRequestObserved.getCount(),
+                    "unsettled termination must suppress the stale HTTP OK probe");
+        } finally {
+            server.stop(0);
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void interruptedStopRestoresInterruptAndRetainsUnsettledOwnership() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            launcher.process.interruptNextWait = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertThrows(EngineException.ConnectionFailed.class, manager::close);
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "termination must restore the caller's interrupt status");
+            assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+            assertEquals(1, launcher.commands.size());
+        } finally {
+            Thread.interrupted();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void launcherHandoffFailureRetainsStandaloneLeaseForManagerRetry()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString()));
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.process.destroyLeavesAlive = true;
+        launcher.process.forceDestroyLeavesAlive = true;
+        LlamaCppProcessTerminationOwner.Outcome unsettled =
+                launcher.process.terminationLease.terminate(
+                        new LlamaCppProcessTerminationOwner.Policy(
+                                Duration.ZERO,
+                                Duration.ZERO));
+        launcher.runtimeFailure =
+                new LlamaCppProcessTerminationOwner.Unsettled(
+                        "injected post-launch handoff failure",
+                        new IllegalStateException(
+                                "injected launch observation failure"),
+                        unsettled,
+                        launcher.process.terminationLease);
+        LlamaCppServerManager manager = new LlamaCppServerManager(
+                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                Duration.ofMillis(1), Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        assertThrows(EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertThrows(EngineException.ConnectionFailed.class, manager::close,
+                "the standalone lease must remain retryable while live");
+        assertThrows(EngineException.ConnectionFailed.class,
+                manager::ensureStarted,
+                "a retained standalone lease must block another launch");
+        assertEquals(1, launcher.commands.size());
+
+        launcher.process.alive = false;
+        assertDoesNotThrow(manager::close);
+    }
+
+    @Test
+    void aProcessWithoutTerminationLeaseFailsClosedAndBlocksRelaunch()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString()));
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.process.omitTerminationLease = true;
+        LlamaCppServerManager manager = new LlamaCppServerManager(
+                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                Duration.ofMillis(1), Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        EngineException.ConnectionFailed first = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertTrue(first.getMessage().contains(
+                "termination ownership is unavailable"));
+
+        EngineException.ConnectionFailed second = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertTrue(second.getMessage().contains(
+                "termination ownership is unavailable"));
+        assertEquals(1, launcher.commands.size(),
+                "a process with unknown termination ownership must never be replaced");
+    }
+
+    @Test
+    void aThrowingTerminationLeaseGetterCachesFailureAndBlocksLiveReuse()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.throwTerminationLease = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+
+            assertThrows(RuntimeException.class, manager::ensureStarted);
+
+            Health health = manager.health();
+            assertFalse(health.ok(),
+                    "an ownership getter failure must suppress HTTP OK");
+            assertTrue(health.message().contains(
+                    "termination ownership"));
+            assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted,
+                    "a live epoch without cached ownership must not be reused");
+            assertEquals(1, launcher.commands.size());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aTransientTerminationLeaseGetterFailureCleansTheEpochBeforeRelaunch()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            FakeProcess failedEpoch = launcher.process;
+            failedEpoch.terminationLeaseFailuresRemaining = 1;
+            launcher.replaceDeadProcessOnLaunch = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+
+            assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+            assertTrue(failedEpoch.destroyed);
+            assertFalse(failedEpoch.alive);
+
+            assertDoesNotThrow(() -> {
+                manager.ensureStarted();
+            });
+            assertEquals(2, launcher.commands.size(),
+                    "only a fresh process may follow the failed ownership epoch");
+            assertNotSame(failedEpoch, launcher.process);
+            manager.close();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedLifecycleWritesStartAndStopDiagnosticsToLog() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
@@ -930,9 +1286,11 @@ class LlamaCppServerManagerTest {
     private static final class FakeLauncher implements LlamaCppProcessLauncher {
         private final List<List<String>> commands = new ArrayList<>();
         private final List<Map<String, String>> environments = new ArrayList<>();
-        private final FakeProcess process = new FakeProcess();
+        private FakeProcess process = new FakeProcess();
         private IOException failure;
+        private RuntimeException runtimeFailure;
         private String logContentOnStart = "";
+        private boolean replaceDeadProcessOnLaunch;
 
         @Override
         public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
@@ -943,7 +1301,11 @@ class LlamaCppServerManagerTest {
         public LlamaCppProcess start(List<String> command, Path logPath, Map<String, String> environment) throws IOException {
             commands.add(List.copyOf(command));
             environments.add(environment == null ? Map.of() : Map.copyOf(environment));
+            if (runtimeFailure != null) throw runtimeFailure;
             if (failure != null) throw failure;
+            if (replaceDeadProcessOnLaunch && !process.alive) {
+                process = new FakeProcess();
+            }
             if (logPath != null && !logContentOnStart.isBlank()) {
                 Files.createDirectories(logPath.getParent());
                 Files.writeString(logPath, logContentOnStart, StandardCharsets.UTF_8);
@@ -952,17 +1314,74 @@ class LlamaCppServerManagerTest {
         }
     }
 
-    private static final class FakeProcess implements LlamaCppProcess {
+    private static final class FakeProcess implements
+            LlamaCppProcess,
+            LlamaCppProcessTerminationOwner.Target {
+        private final LlamaCppProcessTerminationOwner.ProcessIdentity identity =
+                new LlamaCppProcessTerminationOwner.ProcessIdentity(
+                        1L,
+                        1L,
+                        LlamaCppProcessTerminationOwner.IdentityAuthority
+                                .EXACT_PID_START);
         private boolean alive = true;
+        private boolean outputCaptureHealthy = true;
+        private boolean throwOutputCaptureHealth;
+        private final LlamaCppProcessTerminationOwner.Lease terminationLease =
+                new LlamaCppProcessTerminationOwner().adopt(this);
         private boolean destroyed;
         private boolean destroyLeavesAlive;
         private boolean forceDestroyed;
-
+        private boolean forceDestroyLeavesAlive;
+        private boolean interruptNextWait;
+        private boolean omitTerminationLease;
+        private boolean throwTerminationLease;
+        private int terminationLeaseFailuresRemaining;
+        private boolean blockGracefulDestroy;
+        private final CountDownLatch destroyEntered =
+                new CountDownLatch(1);
+        private final CountDownLatch releaseDestroy =
+                new CountDownLatch(1);
         @Override public boolean isAlive() { return alive; }
+        @Override public boolean outputCaptureHealthy() {
+            if (throwOutputCaptureHealth) {
+                throw new IllegalStateException(
+                        "injected capture-health observation failure");
+            }
+            return outputCaptureHealthy;
+        }
+        @Override public LlamaCppProcessTerminationOwner.ProcessIdentity identity() {
+            return identity;
+        }
+        @Override public boolean identityStillMatches() { return true; }
+        @Override public List<LlamaCppProcessTerminationOwner.Target> descendants() {
+            return List.of();
+        }
+        @Override public LlamaCppProcessTerminationOwner.Lease terminationLease() {
+            if (throwTerminationLease
+                    || terminationLeaseFailuresRemaining > 0) {
+                if (terminationLeaseFailuresRemaining > 0) {
+                    terminationLeaseFailuresRemaining--;
+                }
+                throw new IllegalStateException(
+                        "injected termination lease getter failure");
+            }
+            return omitTerminationLease ? null : terminationLease;
+        }
 
         @Override
         public void destroy() {
             destroyed = true;
+            if (blockGracefulDestroy) {
+                destroyEntered.countDown();
+                try {
+                    releaseDestroy.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "injected blocking destroy was interrupted",
+                            interrupted);
+                }
+            }
             if (!destroyLeavesAlive) {
                 alive = false;
             }
@@ -971,7 +1390,18 @@ class LlamaCppServerManagerTest {
         @Override
         public void destroyForcibly() {
             forceDestroyed = true;
-            alive = false;
+            if (!forceDestroyLeavesAlive) {
+                alive = false;
+            }
+        }
+
+        @Override
+        public boolean waitFor(Duration timeout) throws InterruptedException {
+            if (interruptNextWait) {
+                interruptNextWait = false;
+                throw new InterruptedException("injected stop interruption");
+            }
+            return !alive;
         }
     }
 }
