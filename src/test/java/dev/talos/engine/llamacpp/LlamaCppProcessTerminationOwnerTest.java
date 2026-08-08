@@ -140,6 +140,60 @@ class LlamaCppProcessTerminationOwnerTest {
     }
 
     @Test
+    void forcedOnlySignalsDescendantsBeforeRootWithoutAGracefulPhase() {
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner();
+        List<String> signals = new ArrayList<>();
+        FakeTarget root = new FakeTarget(52L, signals);
+        FakeTarget child = new FakeTarget(53L, signals);
+        root.children.add(child);
+
+        LlamaCppProcessTerminationOwner.Outcome outcome = owner.adopt(root)
+                .terminate(LlamaCppProcessTerminationOwner.Policy.forcedOnly(
+                        Duration.ZERO,
+                        Duration.ZERO));
+
+        assertEquals(List.of("force-53", "force-52"), signals);
+        assertEquals(
+                LlamaCppProcessTerminationOwner.State.TERMINATED,
+                outcome.state());
+        assertEquals(0, owner.ownedLeaseCount());
+    }
+
+    @Test
+    void forcedOnlyRejectsANonzeroGracefulTimeout() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new LlamaCppProcessTerminationOwner.Policy(
+                        Duration.ofMillis(1),
+                        Duration.ZERO,
+                        Duration.ZERO,
+                        LlamaCppProcessTerminationOwner.TerminationMode
+                                .FORCED_ONLY));
+    }
+
+    @Test
+    void forcedOnlyRetainsATreeThatWasUnstableBeforeAnySignal() {
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner();
+        FakeTarget root = new FakeTarget(54L);
+        FakeTarget child = new FakeTarget(55L);
+        root.children.add(child);
+        root.exitDuringDescendantEnumeration = true;
+
+        LlamaCppProcessTerminationOwner.Outcome outcome = owner.adopt(root)
+                .terminate(LlamaCppProcessTerminationOwner.Policy.forcedOnly(
+                        Duration.ZERO,
+                        Duration.ZERO));
+
+        assertEquals(
+                LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                outcome.state());
+        assertTrue(outcome.causes().contains(
+                LlamaCppProcessTerminationOwner.Cause.TREE_CAPTURE_UNSTABLE));
+        assertEquals(1, owner.ownedLeaseCount());
+    }
+
+    @Test
     void changedDescendantIdentityIsRetainedAndNeverSignalled() {
         LlamaCppProcessTerminationOwner owner =
                 new LlamaCppProcessTerminationOwner();

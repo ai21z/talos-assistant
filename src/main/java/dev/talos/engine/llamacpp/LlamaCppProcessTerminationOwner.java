@@ -52,6 +52,11 @@ final class LlamaCppProcessTerminationOwner {
         UNAVAILABLE
     }
 
+    enum TerminationMode {
+        GRACEFUL_THEN_FORCED,
+        FORCED_ONLY
+    }
+
     record ProcessIdentity(
             long processId,
             long processStartEpochMilli,
@@ -85,15 +90,43 @@ final class LlamaCppProcessTerminationOwner {
     record Policy(
             Duration gracefulTimeout,
             Duration forcedTimeout,
-            Duration resourceTimeout) {
+            Duration resourceTimeout,
+            TerminationMode mode) {
         Policy {
             gracefulTimeout = requireTimeout(gracefulTimeout, "graceful timeout");
             forcedTimeout = requireTimeout(forcedTimeout, "forced timeout");
             resourceTimeout = requireTimeout(resourceTimeout, "resource timeout");
+            mode = Objects.requireNonNull(mode, "termination mode");
+            if (mode == TerminationMode.FORCED_ONLY
+                    && !gracefulTimeout.isZero()) {
+                throw new IllegalArgumentException(
+                        "forced-only termination requires a zero graceful timeout");
+            }
+        }
+
+        Policy(
+                Duration gracefulTimeout,
+                Duration forcedTimeout,
+                Duration resourceTimeout) {
+            this(
+                    gracefulTimeout,
+                    forcedTimeout,
+                    resourceTimeout,
+                    TerminationMode.GRACEFUL_THEN_FORCED);
         }
 
         Policy(Duration gracefulTimeout, Duration forcedTimeout) {
             this(gracefulTimeout, forcedTimeout, Duration.ofSeconds(2));
+        }
+
+        static Policy forcedOnly(
+                Duration forcedTimeout,
+                Duration resourceTimeout) {
+            return new Policy(
+                    Duration.ZERO,
+                    forcedTimeout,
+                    resourceTimeout,
+                    TerminationMode.FORCED_ONLY);
         }
 
         private static Duration requireTimeout(Duration value, String label) {
@@ -192,6 +225,19 @@ final class LlamaCppProcessTerminationOwner {
         ResourceAttemptCompletion NONE = () -> {};
 
         void beforeComplete();
+    }
+
+    @FunctionalInterface
+    interface ResourceAttemptJoinObserver {
+        ResourceAttemptJoinObserver NONE = sequence -> {};
+
+        void joined(long sequence);
+
+        default void interrupted(long sequence) {}
+
+        default void followOnSelected(
+                long joinedSequence,
+                long followOnSequence) {}
     }
 
     interface Target {
@@ -306,16 +352,31 @@ final class LlamaCppProcessTerminationOwner {
     private LaunchPermit reservedLaunch;
 
     LlamaCppProcessTerminationOwner() {
-        this(ResourceAttemptCompletion.NONE);
+        this(
+                ResourceAttemptCompletion.NONE,
+                ResourceAttemptJoinObserver.NONE);
     }
 
     LlamaCppProcessTerminationOwner(
             ResourceAttemptCompletion resourceAttemptCompletion) {
+        this(resourceAttemptCompletion, ResourceAttemptJoinObserver.NONE);
+    }
+
+    LlamaCppProcessTerminationOwner(
+            ResourceAttemptCompletion resourceAttemptCompletion,
+            ResourceAttemptJoinObserver resourceAttemptJoinObserver) {
         ResourceAttemptCompletion exact = Objects.requireNonNull(
                 resourceAttemptCompletion,
                 "resource attempt completion");
+        ResourceAttemptJoinObserver exactJoinObserver = Objects.requireNonNull(
+                resourceAttemptJoinObserver,
+                "resource attempt join observer");
         this.processTargetFactory = (process, resources) ->
-                new ProcessTarget(process, resources, exact);
+                new ProcessTarget(
+                        process,
+                        resources,
+                        exact,
+                        exactJoinObserver);
     }
 
     LlamaCppProcessTerminationOwner(ProcessTargetFactory processTargetFactory) {
@@ -467,12 +528,14 @@ final class LlamaCppProcessTerminationOwner {
         if (restoreInterrupt) causes.add(Cause.INTERRUPTED);
         try {
             captureTree(lease, causes);
-            signalGracefully(lease, causes);
-            restoreInterrupt |= awaitTracked(
-                    lease, policy.gracefulTimeout(), causes);
+            if (policy.mode() == TerminationMode.GRACEFUL_THEN_FORCED) {
+                signalGracefully(lease, causes);
+                restoreInterrupt |= awaitTracked(
+                        lease, policy.gracefulTimeout(), causes);
 
-            if (safeAlive(lease.root, causes)) {
-                captureTree(lease, causes);
+                if (safeAlive(lease.root, causes)) {
+                    captureTree(lease, causes);
+                }
             }
             signalForcibly(lease, causes);
             restoreInterrupt |= awaitTracked(
@@ -763,7 +826,8 @@ final class LlamaCppProcessTerminationOwner {
         private ProcessTarget(
                 Process process,
                 ResourceSettlement resources,
-                ResourceAttemptCompletion resourceAttemptCompletion) {
+                ResourceAttemptCompletion resourceAttemptCompletion,
+                ResourceAttemptJoinObserver resourceAttemptJoinObserver) {
             this.process = process;
             this.identity = directProcessIdentity(process);
             this.resources = Objects.requireNonNull(
@@ -771,7 +835,8 @@ final class LlamaCppProcessTerminationOwner {
             this.processResources = new ProcessResources(
                     process,
                     resources,
-                    resourceAttemptCompletion);
+                    resourceAttemptCompletion,
+                    resourceAttemptJoinObserver);
         }
 
         @Override
@@ -836,6 +901,7 @@ final class LlamaCppProcessTerminationOwner {
         private final ResourceSettlement delegated;
         private final boolean delegatedOwnsStdout;
         private final ResourceAttemptCompletion attemptCompletion;
+        private final ResourceAttemptJoinObserver attemptJoinObserver;
         private final AtomicReference<Throwable> failure =
                 new AtomicReference<>();
         private final AtomicBoolean delegatedInterruptObserved =
@@ -844,18 +910,23 @@ final class LlamaCppProcessTerminationOwner {
         private volatile boolean delegatedSettled;
         private volatile boolean stdoutClosed;
         private volatile boolean stderrClosed;
-        private CountDownLatch closeAttempt;
+        private CloseAttempt closeAttempt;
+        private long closeAttemptSequence;
 
         private ProcessResources(
                 Process process,
                 ResourceSettlement delegated,
-                ResourceAttemptCompletion attemptCompletion) {
+                ResourceAttemptCompletion attemptCompletion,
+                ResourceAttemptJoinObserver attemptJoinObserver) {
             this.process = Objects.requireNonNull(process, "process");
             this.delegated = Objects.requireNonNull(
                     delegated, "process resources");
             this.attemptCompletion = Objects.requireNonNull(
                     attemptCompletion,
                     "resource attempt completion");
+            this.attemptJoinObserver = Objects.requireNonNull(
+                    attemptJoinObserver,
+                    "resource attempt join observer");
             this.delegatedOwnsStdout = delegated.ownsProcessStdout();
             this.stdoutClosed = delegatedOwnsStdout;
         }
@@ -863,15 +934,45 @@ final class LlamaCppProcessTerminationOwner {
         private boolean settle(Duration timeout) {
             long deadline = deadlineAfter(
                     timeout == null ? Duration.ZERO : timeout);
-            CountDownLatch attempt = requestCloseAttempt(
-                    timeout == null ? Duration.ZERO : timeout);
-            AwaitResult awaited = await(attempt, deadline);
+            CloseAttemptSelection selected = requestCloseAttempt(deadline);
+            if (selected.joined()) {
+                attemptJoinObserver.joined(selected.attempt().sequence());
+            }
+            AwaitResult awaited = await(
+                    selected.attempt().completion(),
+                    deadline,
+                    selected.joined()
+                            ? () -> attemptJoinObserver.interrupted(
+                                    selected.attempt().sequence())
+                            : null);
             boolean interrupted = awaited.interrupted();
             if (!awaited.completed()) {
                 if (interrupted) Thread.currentThread().interrupt();
                 throw new IllegalStateException(
                         "process resource closure remains unsettled",
                         failure.get());
+            }
+            if (selected.joined()) {
+                CloseAttempt followOn = resolveFollowOn(
+                        selected.attempt().sequence(),
+                        deadline);
+                if (followOn != null) {
+                    attemptJoinObserver.followOnSelected(
+                            selected.attempt().sequence(),
+                            followOn.sequence());
+                    AwaitResult followed = await(
+                            followOn.completion(),
+                            deadline,
+                            () -> attemptJoinObserver.interrupted(
+                                    followOn.sequence()));
+                    interrupted |= followed.interrupted();
+                    if (!followed.completed()) {
+                        if (interrupted) Thread.currentThread().interrupt();
+                        throw new IllegalStateException(
+                                "process resource closure remains unsettled",
+                                failure.get());
+                    }
+                }
             }
             interrupted |= delegatedInterruptObserved.getAndSet(false);
             if (!settled()) {
@@ -883,13 +984,59 @@ final class LlamaCppProcessTerminationOwner {
             return interrupted;
         }
 
-        private synchronized CountDownLatch requestCloseAttempt(
-                Duration timeout) {
-            if (closeAttempt != null && closeAttempt.getCount() != 0L) {
+        private synchronized CloseAttemptSelection requestCloseAttempt(
+                long deadline) {
+            if (closeAttempt != null
+                    && closeAttempt.completion().getCount() != 0L) {
+                return new CloseAttemptSelection(closeAttempt, true);
+            }
+            if (settled()) {
+                return new CloseAttemptSelection(
+                        new CloseAttempt(
+                                closeAttemptSequence,
+                                new CountDownLatch(0)),
+                        false);
+            }
+            return new CloseAttemptSelection(
+                    startCloseAttempt(deadline),
+                    false);
+        }
+
+        private synchronized CloseAttempt resolveFollowOn(
+                long joinedSequence,
+                long deadline) {
+            long followOnSequence;
+            try {
+                followOnSequence = Math.addExact(joinedSequence, 1L);
+            } catch (ArithmeticException overflow) {
+                throw new IllegalStateException(
+                        "process resource attempt generation overflow",
+                        overflow);
+            }
+            if (closeAttempt != null
+                    && closeAttempt.sequence() == followOnSequence) {
                 return closeAttempt;
             }
-            if (settled()) return new CountDownLatch(0);
-            CountDownLatch exact = new CountDownLatch(1);
+            if (closeAttempt == null
+                    || closeAttempt.sequence() < joinedSequence
+                    || closeAttempt.sequence() > followOnSequence) {
+                throw new IllegalStateException(
+                        "process resource attempt generation is unresolvable");
+            }
+            if (closeAttempt.sequence() != joinedSequence
+                    || closeAttempt.completion().getCount() != 0L) {
+                throw new IllegalStateException(
+                        "process resource predecessor remains unresolved");
+            }
+            if (settled() || !beforeDeadline(deadline)) return null;
+            return startCloseAttempt(deadline);
+        }
+
+        private CloseAttempt startCloseAttempt(long deadline) {
+            CountDownLatch completion = new CountDownLatch(1);
+            CloseAttempt exact = new CloseAttempt(
+                    ++closeAttemptSequence,
+                    completion);
             closeAttempt = exact;
             try {
                 Thread closer = Thread.ofPlatform()
@@ -897,24 +1044,24 @@ final class LlamaCppProcessTerminationOwner {
                         .name("talos-llama-process-resources")
                         .unstarted(() -> {
                             try {
-                                closeOwnedResources(timeout);
+                                closeOwnedResources(deadline);
                             } finally {
                                 try {
                                     attemptCompletion.beforeComplete();
                                 } finally {
-                                    exact.countDown();
+                                    completion.countDown();
                                 }
                             }
                         });
                 closer.start();
             } catch (RuntimeException | Error startFailure) {
                 record(failure, startFailure);
-                exact.countDown();
+                completion.countDown();
             }
             return exact;
         }
 
-        private void closeOwnedResources(Duration timeout) {
+        private void closeOwnedResources(long deadline) {
             if (!stdinClosed) {
                 try {
                     process.getOutputStream().close();
@@ -924,16 +1071,19 @@ final class LlamaCppProcessTerminationOwner {
                 }
             }
             if (!delegatedSettled) {
-                try {
-                    if (delegated.settle(timeout)) {
-                        delegatedInterruptObserved.set(true);
+                Duration delegatedBudget = remaining(deadline);
+                if (!delegatedBudget.isZero()) {
+                    try {
+                        if (delegated.settle(delegatedBudget)) {
+                            delegatedInterruptObserved.set(true);
+                        }
+                        delegatedSettled = true;
+                    } catch (Throwable unavailable) {
+                        if (Thread.interrupted()) {
+                            delegatedInterruptObserved.set(true);
+                        }
+                        record(failure, unavailable);
                     }
-                    delegatedSettled = true;
-                } catch (Throwable unavailable) {
-                    if (Thread.interrupted()) {
-                        delegatedInterruptObserved.set(true);
-                    }
-                    record(failure, unavailable);
                 }
             }
             if (!stdoutClosed && !delegatedOwnsStdout) {
@@ -961,9 +1111,21 @@ final class LlamaCppProcessTerminationOwner {
                     && stderrClosed;
         }
 
+        private static boolean beforeDeadline(long deadline) {
+            return deadline == Long.MAX_VALUE
+                    || System.nanoTime() < deadline;
+        }
+
         private static AwaitResult await(
                 CountDownLatch latch,
                 long deadline) {
+            return await(latch, deadline, null);
+        }
+
+        private static AwaitResult await(
+                CountDownLatch latch,
+                long deadline,
+                Runnable interruptObserver) {
             boolean interrupted = false;
             boolean completed = latch.getCount() == 0L;
             while (!completed) {
@@ -974,6 +1136,7 @@ final class LlamaCppProcessTerminationOwner {
                 } catch (InterruptedException stop) {
                     interrupted = true;
                     Thread.interrupted();
+                    if (interruptObserver != null) interruptObserver.run();
                 }
             }
             if (!completed && latch.getCount() == 0L) {
@@ -984,6 +1147,7 @@ final class LlamaCppProcessTerminationOwner {
                     } catch (InterruptedException stop) {
                         interrupted = true;
                         Thread.interrupted();
+                        if (interruptObserver != null) interruptObserver.run();
                     }
                 }
             }
@@ -991,6 +1155,14 @@ final class LlamaCppProcessTerminationOwner {
         }
 
         private record AwaitResult(boolean completed, boolean interrupted) {}
+
+        private record CloseAttempt(
+                long sequence,
+                CountDownLatch completion) {}
+
+        private record CloseAttemptSelection(
+                CloseAttempt attempt,
+                boolean joined) {}
 
         private static void record(
                 AtomicReference<Throwable> destination,

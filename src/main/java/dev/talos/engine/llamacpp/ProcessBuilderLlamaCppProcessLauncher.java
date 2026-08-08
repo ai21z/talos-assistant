@@ -26,8 +26,8 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                     Duration.ofSeconds(2));
     private static final LlamaCppProcessTerminationOwner.Policy
             DIRECT_FORCED_TERMINATION =
-            new LlamaCppProcessTerminationOwner.Policy(
-                    Duration.ZERO,
+            LlamaCppProcessTerminationOwner.Policy.forcedOnly(
+                    Duration.ofSeconds(2),
                     Duration.ofSeconds(2));
     private static final LlamaCppProcessTerminationOwner.Policy
             NATURAL_EXIT_SETTLEMENT =
@@ -221,11 +221,25 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         void beforeComplete();
     }
 
+    @FunctionalInterface
+    interface CaptureAttemptJoinObserver {
+        CaptureAttemptJoinObserver NONE = sequence -> {};
+
+        void joined(long sequence);
+
+        default void interrupted(long sequence) {}
+
+        default void followOnSelected(
+                long joinedSequence,
+                long followOnSequence) {}
+    }
+
     static final class LaunchOutputCapture
             implements LlamaCppProcessTerminationOwner.ResourceSettlement {
         private final OutputSinkFactory sinkFactory;
         private final CaptureThreadFactory threadFactory;
         private final CaptureAttemptCompletion attemptCompletion;
+        private final CaptureAttemptJoinObserver attemptJoinObserver;
         private final CountDownLatch pumpDone = new CountDownLatch(1);
         private final AtomicReference<Throwable> captureFailure =
                 new AtomicReference<>();
@@ -237,7 +251,8 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         private volatile boolean sinkClosed = true;
         private InputStream source;
         private OutputStream sink;
-        private CountDownLatch closeAttempt;
+        private CloseAttempt closeAttempt;
+        private long closeAttemptSequence;
 
         LaunchOutputCapture(OutputSinkFactory sinkFactory) {
             this(
@@ -259,12 +274,26 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                 OutputSinkFactory sinkFactory,
                 CaptureThreadFactory threadFactory,
                 CaptureAttemptCompletion attemptCompletion) {
+            this(
+                    sinkFactory,
+                    threadFactory,
+                    attemptCompletion,
+                    CaptureAttemptJoinObserver.NONE);
+        }
+
+        LaunchOutputCapture(
+                OutputSinkFactory sinkFactory,
+                CaptureThreadFactory threadFactory,
+                CaptureAttemptCompletion attemptCompletion,
+                CaptureAttemptJoinObserver attemptJoinObserver) {
             this.sinkFactory = java.util.Objects.requireNonNull(
                     sinkFactory, "launch output sink factory");
             this.threadFactory = java.util.Objects.requireNonNull(
                     threadFactory, "launch output thread factory");
             this.attemptCompletion = java.util.Objects.requireNonNull(
                     attemptCompletion, "capture attempt completion");
+            this.attemptJoinObserver = java.util.Objects.requireNonNull(
+                    attemptJoinObserver, "capture attempt join observer");
         }
 
         static LaunchOutputCapture prepare(Path logPath) {
@@ -331,14 +360,45 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                         "launch output pump settlement timed out");
             }
 
-            CountDownLatch retry = requestCloseAttempt();
-            AwaitResult close = await(retry, deadline);
+            CloseAttemptSelection selected = requestCloseAttempt();
+            if (selected.joined()) {
+                attemptJoinObserver.joined(selected.attempt().sequence());
+            }
+            AwaitResult close = await(
+                    selected.attempt().completion(),
+                    deadline,
+                    selected.joined()
+                            ? () -> attemptJoinObserver.interrupted(
+                                    selected.attempt().sequence())
+                            : null);
             interrupted |= close.interrupted();
             if (!close.completed()) {
                 restoreBeforeFailure(interrupted);
                 throw new IllegalStateException(
                         "launch output handle closure timed out",
                         resourceFailure.get());
+            }
+            if (selected.joined()) {
+                CloseAttempt followOn = resolveFollowOn(
+                        selected.attempt().sequence(),
+                        deadline);
+                if (followOn != null) {
+                    attemptJoinObserver.followOnSelected(
+                            selected.attempt().sequence(),
+                            followOn.sequence());
+                    AwaitResult followed = await(
+                            followOn.completion(),
+                            deadline,
+                            () -> attemptJoinObserver.interrupted(
+                                    followOn.sequence()));
+                    interrupted |= followed.interrupted();
+                    if (!followed.completed()) {
+                        restoreBeforeFailure(interrupted);
+                        throw new IllegalStateException(
+                                "launch output handle closure timed out",
+                                resourceFailure.get());
+                    }
+                }
             }
             if (!handlesClosed()) {
                 restoreBeforeFailure(interrupted);
@@ -375,35 +435,79 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
             return captureFailure.get();
         }
 
-        private CountDownLatch requestCloseAttempt() {
+        private CloseAttemptSelection requestCloseAttempt() {
             synchronized (this) {
-                if (closeAttempt != null && closeAttempt.getCount() != 0L) {
-                    return closeAttempt;
+                if (closeAttempt != null
+                        && closeAttempt.completion().getCount() != 0L) {
+                    return new CloseAttemptSelection(closeAttempt, true);
                 }
-                if (handlesClosed()) return new CountDownLatch(0);
-                CountDownLatch exact = new CountDownLatch(1);
-                closeAttempt = exact;
-                try {
-                    Thread closer = threadFactory.unstarted(
-                            "talos-llama-output-close",
-                            () -> {
-                                try {
-                                    closeOwnedHandles();
-                                } finally {
-                                    try {
-                                        attemptCompletion.beforeComplete();
-                                    } finally {
-                                        exact.countDown();
-                                    }
-                                }
-                            });
-                    closer.start();
-                } catch (RuntimeException | Error startFailure) {
-                    record(resourceFailure, startFailure);
-                    exact.countDown();
+                if (handlesClosed()) {
+                    return new CloseAttemptSelection(
+                            new CloseAttempt(
+                                    closeAttemptSequence,
+                                    new CountDownLatch(0)),
+                            false);
                 }
-                return exact;
+                return new CloseAttemptSelection(startCloseAttempt(), false);
             }
+        }
+
+        private synchronized CloseAttempt resolveFollowOn(
+                long joinedSequence,
+                long deadline) {
+            long followOnSequence;
+            try {
+                followOnSequence = Math.addExact(joinedSequence, 1L);
+            } catch (ArithmeticException overflow) {
+                throw new IllegalStateException(
+                        "launch output attempt generation overflow",
+                        overflow);
+            }
+            if (closeAttempt != null
+                    && closeAttempt.sequence() == followOnSequence) {
+                return closeAttempt;
+            }
+            if (closeAttempt == null
+                    || closeAttempt.sequence() < joinedSequence
+                    || closeAttempt.sequence() > followOnSequence) {
+                throw new IllegalStateException(
+                        "launch output attempt generation is unresolvable");
+            }
+            if (closeAttempt.sequence() != joinedSequence
+                    || closeAttempt.completion().getCount() != 0L) {
+                throw new IllegalStateException(
+                        "launch output predecessor remains unresolved");
+            }
+            if (handlesClosed() || !beforeDeadline(deadline)) return null;
+            return startCloseAttempt();
+        }
+
+        private CloseAttempt startCloseAttempt() {
+            CountDownLatch completion = new CountDownLatch(1);
+            CloseAttempt exact = new CloseAttempt(
+                    ++closeAttemptSequence,
+                    completion);
+            closeAttempt = exact;
+            try {
+                Thread closer = threadFactory.unstarted(
+                        "talos-llama-output-close",
+                        () -> {
+                            try {
+                                closeOwnedHandles();
+                            } finally {
+                                try {
+                                    attemptCompletion.beforeComplete();
+                                } finally {
+                                    completion.countDown();
+                                }
+                            }
+                        });
+                closer.start();
+            } catch (RuntimeException | Error startFailure) {
+                record(resourceFailure, startFailure);
+                completion.countDown();
+            }
+            return exact;
         }
 
         private void closeOwnedHandles() {
@@ -436,6 +540,13 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         }
 
         private static AwaitResult await(CountDownLatch latch, long deadline) {
+            return await(latch, deadline, null);
+        }
+
+        private static AwaitResult await(
+                CountDownLatch latch,
+                long deadline,
+                Runnable interruptObserver) {
             boolean interrupted = false;
             boolean completed = latch.getCount() == 0L;
             while (!completed) {
@@ -446,6 +557,7 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                 } catch (InterruptedException stop) {
                     interrupted = true;
                     Thread.interrupted();
+                    if (interruptObserver != null) interruptObserver.run();
                 }
             }
             if (!completed && latch.getCount() == 0L) {
@@ -456,6 +568,7 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                     } catch (InterruptedException stop) {
                         interrupted = true;
                         Thread.interrupted();
+                        if (interruptObserver != null) interruptObserver.run();
                     }
                 }
             }
@@ -463,6 +576,14 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         }
 
         private record AwaitResult(boolean completed, boolean interrupted) {}
+
+        private record CloseAttempt(
+                long sequence,
+                CountDownLatch completion) {}
+
+        private record CloseAttemptSelection(
+                CloseAttempt attempt,
+                boolean joined) {}
 
         private static void record(
                 AtomicReference<Throwable> destination,
@@ -497,6 +618,11 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
             return deadline < 0L || deadline < now
                     ? Long.MAX_VALUE
                     : deadline;
+        }
+
+        private static boolean beforeDeadline(long deadline) {
+            return deadline == Long.MAX_VALUE
+                    || System.nanoTime() < deadline;
         }
     }
 

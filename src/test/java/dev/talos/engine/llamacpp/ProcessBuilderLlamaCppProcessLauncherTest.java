@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -398,6 +399,55 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
     }
 
     @Test
+    void directForcedTerminationDoesNotStartAGracefulCaptureRace()
+            throws Exception {
+        AtomicReference<GracefulCaptureRaceTarget> observedTarget =
+                new AtomicReference<>();
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner((process, resources) -> {
+                    GracefulCaptureRaceTarget target =
+                            new GracefulCaptureRaceTarget(process, resources);
+                    observedTarget.set(target);
+                    return target;
+                });
+        ProcessBuilderLlamaCppProcessLauncher launcher =
+                new ProcessBuilderLlamaCppProcessLauncher(
+                        ProcessBuilderLlamaCppProcessLauncher::observeLaunch,
+                        owner);
+        Path log = temp.resolve("forced-only-capture-race.log");
+        LlamaCppProcess child = launcher.start(sleeperCommand(), log);
+
+        try {
+            try {
+                child.destroyForcibly();
+            } catch (LlamaCppProcessTerminationOwner.Unsettled unsettled) {
+                assertEquals(
+                        LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                        unsettled.outcome().state());
+                assertTrue(unsettled.outcome().causes().contains(
+                        LlamaCppProcessTerminationOwner.Cause
+                                .TREE_CAPTURE_UNSTABLE));
+                throw unsettled;
+            }
+
+            GracefulCaptureRaceTarget target = observedTarget.get();
+            assertNotNull(target);
+            assertEquals(0, target.gracefulSignals.get(),
+                    "an explicitly forced operation must not begin a graceful phase");
+            assertEquals(1, target.forcedSignals.get());
+            assertEquals(0, owner.ownedLeaseCount());
+            assertFalse(target.process.isAlive());
+        } finally {
+            GracefulCaptureRaceTarget target = observedTarget.get();
+            if (target != null && target.process.isAlive()) {
+                target.process.destroyForcibly();
+                target.process.waitFor(5L, TimeUnit.SECONDS);
+            }
+            if (Files.exists(log)) awaitDelete(log);
+        }
+    }
+
+    @Test
     void pumpThreadStartFailureStillClosesEveryOpenedCaptureHandle() {
         TrackingInputStream source = new TrackingInputStream(
                 new ByteArrayInputStream("unused".getBytes(StandardCharsets.UTF_8)));
@@ -461,6 +511,297 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         assertTrue(source.closed.get());
         assertTrue(sink.closed.get());
         assertEquals(3, threadRequests.get());
+    }
+
+    @Test
+    void callerJoiningFailedCaptureAttemptRunsOneSerializedFollowOn()
+            throws Exception {
+        TrackingInputStream source = new TrackingInputStream(
+                new ByteArrayInputStream("complete".getBytes(StandardCharsets.UTF_8)));
+        TrackingOutputStream sink = new TrackingOutputStream(2);
+        TrackingProcess process = new TrackingProcess(source);
+        CountDownLatch firstBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CountDownLatch joined = new CountDownLatch(2);
+        CountDownLatch interruptObserved = new CountDownLatch(1);
+        CountDownLatch followOnSelections = new CountDownLatch(2);
+        AtomicInteger completions = new AtomicInteger();
+        AtomicLong joinedSequence = new AtomicLong(-1L);
+        AtomicBoolean followOnMismatch = new AtomicBoolean();
+        ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture capture =
+                new ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture(
+                        () -> sink,
+                        platformThreadFactory(),
+                        () -> {
+                            int completion = completions.incrementAndGet();
+                            if (completion == 1) {
+                                firstBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseFirst);
+                            } else if (completion == 2) {
+                                secondBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseSecond);
+                            }
+                        },
+                        new ProcessBuilderLlamaCppProcessLauncher
+                                .CaptureAttemptJoinObserver() {
+                            @Override
+                            public void joined(long sequence) {
+                                joinedSequence.updateAndGet(previous ->
+                                        previous == -1L || previous == sequence
+                                                ? sequence
+                                                : -2L);
+                                joined.countDown();
+                            }
+
+                            @Override
+                            public void interrupted(long sequence) {
+                                interruptObserved.countDown();
+                            }
+
+                            @Override
+                            public void followOnSelected(
+                                    long predecessor,
+                                    long followOn) {
+                                if (predecessor != 1L || followOn != 2L) {
+                                    followOnMismatch.set(true);
+                                }
+                                followOnSelections.countDown();
+                            }
+                        });
+        capture.start(process);
+        assertTrue(sink.firstCloseAttempt.await(2L, TimeUnit.SECONDS),
+                "pump did not reach sink close");
+
+        AtomicReference<Boolean> firstResult = new AtomicReference<>();
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<Boolean> interruptedResult = new AtomicReference<>();
+        AtomicReference<Throwable> interruptedFailure = new AtomicReference<>();
+        AtomicReference<Boolean> otherResult = new AtomicReference<>();
+        AtomicReference<Throwable> otherFailure = new AtomicReference<>();
+        Thread first = null;
+        Thread interruptedFollower = null;
+        Thread otherFollower = null;
+        try {
+            first = Thread.ofPlatform().start(() -> {
+                try {
+                    firstResult.set(capture.settle(Duration.ofSeconds(2)));
+                } catch (Throwable failure) {
+                    firstFailure.set(failure);
+                }
+            });
+            assertTrue(firstBeforeCompletion.await(2L, TimeUnit.SECONDS));
+
+            interruptedFollower = Thread.ofPlatform().start(() -> {
+                try {
+                    interruptedResult.set(capture.settle(Duration.ofSeconds(2)));
+                } catch (Throwable failure) {
+                    interruptedFailure.set(failure);
+                }
+            });
+            otherFollower = Thread.ofPlatform().start(() -> {
+                try {
+                    otherResult.set(capture.settle(Duration.ofSeconds(2)));
+                } catch (Throwable failure) {
+                    otherFailure.set(failure);
+                }
+            });
+            assertTrue(joined.await(2L, TimeUnit.SECONDS),
+                    "both followers must join the exact older attempt");
+            assertEquals(2, sink.closeAttempts.get(),
+                    "the follow-on must not overlap its active predecessor");
+            interruptedFollower.interrupt();
+            assertTrue(interruptObserved.await(2L, TimeUnit.SECONDS),
+                    "the joined interrupt was not consumed by the N wait");
+            releaseFirst.countDown();
+            assertTrue(secondBeforeCompletion.await(2L, TimeUnit.SECONDS),
+                    "the exact N+1 completion barrier was not reached");
+            assertTrue(followOnSelections.await(2L, TimeUnit.SECONDS),
+                    "every N follower must select exact N+1 before release");
+            assertFalse(followOnMismatch.get());
+            releaseSecond.countDown();
+            joinCaller(first);
+            joinCaller(interruptedFollower);
+            joinCaller(otherFollower);
+
+            assertFalse(first.isAlive());
+            assertFalse(interruptedFollower.isAlive());
+            assertFalse(otherFollower.isAlive());
+            assertEquals(1L, joinedSequence.get());
+            assertEquals(null, interruptedFailure.get());
+            assertEquals(null, otherFailure.get());
+            assertEquals(Boolean.TRUE, interruptedResult.get(),
+                    "the N interrupt must survive the N+1 completion wait");
+            assertEquals(Boolean.FALSE, otherResult.get());
+            assertTrue(firstFailure.get() == null
+                            || firstFailure.get() instanceof IllegalStateException,
+                    "the creator may observe either the shared repair or its own failure");
+            if (firstFailure.get() == null) {
+                assertEquals(Boolean.FALSE, firstResult.get());
+            }
+            assertTrue(source.closed.get());
+            assertTrue(sink.closed.get());
+            assertEquals(3, sink.closeAttempts.get(),
+                    "pump, failed owner, and one follow-on are the only close attempts");
+            assertEquals(2, completions.get(),
+                    "joined callers must share exactly one follow-on generation");
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            joinCaller(first);
+            joinCaller(interruptedFollower);
+            joinCaller(otherFollower);
+        }
+    }
+
+    @Test
+    void expiredCaptureJoinCannotRenewItsDeadlineOrStartAFollowOn()
+            throws Exception {
+        TrackingInputStream source = new TrackingInputStream(
+                new ByteArrayInputStream("complete".getBytes(StandardCharsets.UTF_8)));
+        TrackingOutputStream sink = new TrackingOutputStream(2);
+        TrackingProcess process = new TrackingProcess(source);
+        CountDownLatch firstBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch joined = new CountDownLatch(1);
+        AtomicInteger completions = new AtomicInteger();
+        ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture capture =
+                new ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture(
+                        () -> sink,
+                        platformThreadFactory(),
+                        () -> {
+                            if (completions.incrementAndGet() == 1) {
+                                firstBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseFirst);
+                            }
+                        },
+                        sequence -> joined.countDown());
+        capture.start(process);
+        assertTrue(sink.firstCloseAttempt.await(2L, TimeUnit.SECONDS),
+                "pump did not reach sink close");
+
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<Throwable> expiredFailure = new AtomicReference<>();
+        Thread first = null;
+        Thread expired = null;
+        try {
+            first = Thread.ofPlatform().start(() -> {
+                try {
+                    capture.settle(Duration.ofSeconds(2));
+                } catch (Throwable failure) {
+                    firstFailure.set(failure);
+                }
+            });
+            assertTrue(firstBeforeCompletion.await(2L, TimeUnit.SECONDS));
+
+            expired = Thread.ofPlatform().start(() -> {
+                try {
+                    capture.settle(Duration.ofMillis(25));
+                } catch (Throwable failure) {
+                    expiredFailure.set(failure);
+                }
+            });
+            assertTrue(joined.await(2L, TimeUnit.SECONDS));
+            joinCaller(expired);
+
+            assertFalse(expired.isAlive());
+            assertTrue(expiredFailure.get() instanceof IllegalStateException);
+            assertTrue(expiredFailure.get().getMessage().contains(
+                    "closure timed out"));
+            assertEquals(2, sink.closeAttempts.get());
+
+            releaseFirst.countDown();
+            joinCaller(first);
+            assertFalse(first.isAlive());
+            assertTrue(firstFailure.get() instanceof IllegalStateException);
+            assertFalse(sink.closed.get());
+            assertEquals(2, sink.closeAttempts.get(),
+                    "an expired join must not launch work after its deadline");
+
+            assertFalse(capture.settle(Duration.ofSeconds(1)));
+            assertTrue(sink.closed.get());
+            assertEquals(3, sink.closeAttempts.get());
+            assertEquals(2, completions.get());
+        } finally {
+            releaseFirst.countDown();
+            joinCaller(first);
+            joinCaller(expired);
+        }
+    }
+
+    @Test
+    void persistentCaptureFailureStopsAfterOneJoinedFollowOn()
+            throws Exception {
+        TrackingInputStream source = new TrackingInputStream(
+                new ByteArrayInputStream("complete".getBytes(StandardCharsets.UTF_8)));
+        TrackingOutputStream sink = new TrackingOutputStream(3);
+        TrackingProcess process = new TrackingProcess(source);
+        CountDownLatch firstBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch joined = new CountDownLatch(1);
+        AtomicInteger completions = new AtomicInteger();
+        ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture capture =
+                new ProcessBuilderLlamaCppProcessLauncher.LaunchOutputCapture(
+                        () -> sink,
+                        platformThreadFactory(),
+                        () -> {
+                            if (completions.incrementAndGet() == 1) {
+                                firstBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseFirst);
+                            }
+                        },
+                        sequence -> joined.countDown());
+        capture.start(process);
+        assertTrue(sink.firstCloseAttempt.await(2L, TimeUnit.SECONDS),
+                "pump did not reach sink close");
+
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<Throwable> joinedFailure = new AtomicReference<>();
+        Thread first = null;
+        Thread follower = null;
+        try {
+            first = Thread.ofPlatform().start(() -> {
+                try {
+                    capture.settle(Duration.ofSeconds(2));
+                } catch (Throwable failure) {
+                    firstFailure.set(failure);
+                }
+            });
+            assertTrue(firstBeforeCompletion.await(2L, TimeUnit.SECONDS));
+
+            follower = Thread.ofPlatform().start(() -> {
+                try {
+                    capture.settle(Duration.ofSeconds(2));
+                } catch (Throwable failure) {
+                    joinedFailure.set(failure);
+                }
+            });
+            assertTrue(joined.await(2L, TimeUnit.SECONDS));
+            assertEquals(2, sink.closeAttempts.get());
+            releaseFirst.countDown();
+            joinCaller(first);
+            joinCaller(follower);
+
+            assertFalse(first.isAlive());
+            assertFalse(follower.isAlive());
+            assertTrue(firstFailure.get() instanceof IllegalStateException);
+            assertTrue(joinedFailure.get() instanceof IllegalStateException);
+            assertFalse(sink.closed.get());
+            assertEquals(3, sink.closeAttempts.get(),
+                    "one joined call may run N+1 but never N+2");
+            assertEquals(2, completions.get());
+
+            assertFalse(capture.settle(Duration.ofSeconds(1)));
+            assertTrue(sink.closed.get());
+            assertEquals(4, sink.closeAttempts.get(),
+                    "a later caller owns a new bounded attempt");
+            assertEquals(3, completions.get());
+        } finally {
+            releaseFirst.countDown();
+            joinCaller(first);
+            joinCaller(follower);
+        }
     }
 
     @Test
@@ -697,6 +1038,314 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         } finally {
             Thread.interrupted();
             releaseCompletion.countDown();
+            raw.destroyForcibly();
+            raw.waitFor(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void callerJoiningFailedProcessResourcesRunsOneSerializedFollowOn()
+            throws Exception {
+        CountDownLatch firstBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CountDownLatch joined = new CountDownLatch(1);
+        CountDownLatch interruptObserved = new CountDownLatch(1);
+        CountDownLatch followOnSelected = new CountDownLatch(1);
+        AtomicInteger completions = new AtomicInteger();
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger active = new AtomicInteger();
+        AtomicInteger maxActive = new AtomicInteger();
+        AtomicLong joinedSequence = new AtomicLong(-1L);
+        AtomicBoolean followOnMismatch = new AtomicBoolean();
+        List<Duration> delegatedBudgets = new ArrayList<>();
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner(
+                        () -> {
+                            int completion = completions.incrementAndGet();
+                            if (completion == 1) {
+                                firstBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseFirst);
+                            } else if (completion == 2) {
+                                secondBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseSecond);
+                            }
+                        },
+                        new LlamaCppProcessTerminationOwner
+                                .ResourceAttemptJoinObserver() {
+                            @Override
+                            public void joined(long sequence) {
+                                joinedSequence.set(sequence);
+                                joined.countDown();
+                            }
+
+                            @Override
+                            public void interrupted(long sequence) {
+                                interruptObserved.countDown();
+                            }
+
+                            @Override
+                            public void followOnSelected(
+                                    long predecessor,
+                                    long followOn) {
+                                if (predecessor != 1L || followOn != 2L) {
+                                    followOnMismatch.set(true);
+                                }
+                                followOnSelected.countDown();
+                            }
+                        });
+        Process raw = new ProcessBuilder(sleeperCommand()).start();
+        LlamaCppProcessTerminationOwner.ResourceSettlement resources = timeout -> {
+            int inFlight = active.incrementAndGet();
+            maxActive.accumulateAndGet(inFlight, Math::max);
+            try {
+                delegatedBudgets.add(timeout);
+                if (attempts.incrementAndGet() == 1) {
+                    throw new IllegalStateException(
+                            "injected first resource settlement failure");
+                }
+                return false;
+            } finally {
+                active.decrementAndGet();
+            }
+        };
+        LlamaCppProcessTerminationOwner.Lease lease;
+        try (LlamaCppProcessTerminationOwner.LaunchPermit permit =
+                     owner.retryRetainedAndAcquire(
+                             capturePolicy(Duration.ofSeconds(1)))) {
+            lease = permit.adopt(raw, resources);
+        }
+        try {
+            LlamaCppProcessTerminationOwner.Outcome first = lease.terminate(
+                    capturePolicy(Duration.ofMillis(250)));
+            assertTrue(firstBeforeCompletion.await(2L, TimeUnit.SECONDS));
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                    first.state());
+            assertTrue(first.causes().contains(
+                    LlamaCppProcessTerminationOwner.Cause
+                            .RESOURCE_SETTLEMENT_FAILED));
+            assertEquals(1, owner.ownedLeaseCount());
+
+            AtomicReference<LlamaCppProcessTerminationOwner.Outcome> outcome =
+                    new AtomicReference<>();
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            AtomicBoolean interruptRestored = new AtomicBoolean();
+            Thread follower = Thread.ofPlatform().start(() -> {
+                try {
+                    outcome.set(lease.terminate(
+                            capturePolicy(Duration.ofSeconds(2))));
+                    interruptRestored.set(
+                            Thread.currentThread().isInterrupted());
+                } catch (Throwable unavailable) {
+                    failure.set(unavailable);
+                }
+            });
+            assertTrue(joined.await(2L, TimeUnit.SECONDS),
+                    "the retry did not join the exact active resource attempt");
+            assertEquals(1, attempts.get(),
+                    "the follow-on must not overlap its active predecessor");
+            follower.interrupt();
+            assertTrue(interruptObserved.await(2L, TimeUnit.SECONDS),
+                    "the joined interrupt was not consumed by the N wait");
+            releaseFirst.countDown();
+            assertTrue(secondBeforeCompletion.await(2L, TimeUnit.SECONDS),
+                    "the resource N+1 completion barrier was not reached");
+            assertTrue(followOnSelected.await(2L, TimeUnit.SECONDS));
+            assertFalse(followOnMismatch.get());
+            releaseSecond.countDown();
+            joinCaller(follower);
+
+            assertFalse(follower.isAlive());
+            assertEquals(null, failure.get());
+            assertEquals(1L, joinedSequence.get());
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.TERMINATED,
+                    outcome.get().state());
+            assertTrue(outcome.get().causes().contains(
+                    LlamaCppProcessTerminationOwner.Cause.INTERRUPTED));
+            assertTrue(outcome.get().interruptRestored());
+            assertTrue(interruptRestored.get());
+            assertEquals(2, attempts.get());
+            assertEquals(2, completions.get());
+            assertEquals(1, maxActive.get(),
+                    "resource attempts must remain serialized");
+            assertEquals(2, delegatedBudgets.size());
+            Duration followOnBudget = delegatedBudgets.get(1);
+            assertTrue(followOnBudget.compareTo(Duration.ZERO) > 0,
+                    "the follow-on needs a positive remaining budget");
+            assertTrue(followOnBudget.compareTo(Duration.ofSeconds(2)) < 0,
+                    "the follow-on may not receive the caller's full budget");
+            assertFalse(followOnBudget.equals(delegatedBudgets.get(0)),
+                    "the follow-on must not reuse the older attempt's budget");
+            assertEquals(0, owner.ownedLeaseCount());
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            raw.destroyForcibly();
+            raw.waitFor(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void expiredProcessResourceJoinCannotRunDelegationAfterItsDeadline()
+            throws Exception {
+        Duration expiredBudget = Duration.ofMillis(25);
+        CountDownLatch joined = new CountDownLatch(1);
+        CountDownLatch firstCompleted = new CountDownLatch(1);
+        CountDownLatch delegatedCalled = new CountDownLatch(1);
+        AtomicReference<Duration> delegatedBudget = new AtomicReference<>();
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner(
+                        firstCompleted::countDown,
+                        sequence -> joined.countDown());
+        Process raw = new ProcessBuilder(sleeperCommand()).start();
+        BlockingClose stdinBlocker = new BlockingClose();
+        DelegatingProcess process = new DelegatingProcess(
+                raw,
+                new BlockingCloseOutputStream(
+                        raw.getOutputStream(),
+                        stdinBlocker),
+                raw.getInputStream(),
+                raw.getErrorStream());
+        LlamaCppProcessTerminationOwner.ResourceSettlement resources = timeout -> {
+            delegatedBudget.set(timeout);
+            delegatedCalled.countDown();
+            return false;
+        };
+        LlamaCppProcessTerminationOwner.Lease lease;
+        try (LlamaCppProcessTerminationOwner.LaunchPermit permit =
+                     owner.retryRetainedAndAcquire(
+                             capturePolicy(Duration.ofSeconds(1)))) {
+            lease = permit.adopt(process, resources);
+        }
+        try {
+            LlamaCppProcessTerminationOwner.Outcome first = lease.terminate(
+                    capturePolicy(expiredBudget));
+            assertTrue(stdinBlocker.entered.await(2L, TimeUnit.SECONDS));
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                    first.state());
+
+            AtomicReference<LlamaCppProcessTerminationOwner.Outcome> expired =
+                    new AtomicReference<>();
+            Thread follower = Thread.ofPlatform().start(() -> expired.set(
+                    lease.terminate(capturePolicy(expiredBudget))));
+            assertTrue(joined.await(2L, TimeUnit.SECONDS));
+            joinCaller(follower);
+            assertFalse(follower.isAlive());
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                    expired.get().state());
+            assertEquals(null, delegatedBudget.get(),
+                    "delegation cannot run while stdin consumes the old budget");
+
+            stdinBlocker.release.countDown();
+            assertTrue(firstCompleted.await(2L, TimeUnit.SECONDS));
+            assertFalse(delegatedCalled.await(100L, TimeUnit.MILLISECONDS),
+                    "expired closure must not perform late delegated work");
+
+            Duration retryBudget = Duration.ofSeconds(1);
+            LlamaCppProcessTerminationOwner.Outcome retry = lease.terminate(
+                    capturePolicy(retryBudget));
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.TERMINATED,
+                    retry.state());
+            Duration observed = delegatedBudget.get();
+            assertNotNull(observed);
+            assertTrue(observed.compareTo(Duration.ZERO) > 0);
+            assertTrue(observed.compareTo(retryBudget) < 0,
+                    "delegation must receive remaining, not full, retry budget");
+            assertFalse(observed.equals(expiredBudget),
+                    "the retry must not reuse the expired predecessor budget");
+            assertEquals(0, owner.ownedLeaseCount());
+        } finally {
+            stdinBlocker.release.countDown();
+            raw.destroyForcibly();
+            raw.waitFor(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void persistentProcessResourceFailureStopsAfterOneJoinedFollowOn()
+            throws Exception {
+        CountDownLatch firstBeforeCompletion = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch joined = new CountDownLatch(1);
+        AtomicInteger completions = new AtomicInteger();
+        AtomicInteger attempts = new AtomicInteger();
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner(
+                        () -> {
+                            if (completions.incrementAndGet() == 1) {
+                                firstBeforeCompletion.countDown();
+                                awaitRestoringInterrupt(releaseFirst);
+                            }
+                        },
+                        sequence -> joined.countDown());
+        Process raw = new ProcessBuilder(sleeperCommand()).start();
+        LlamaCppProcessTerminationOwner.ResourceSettlement resources = timeout -> {
+            if (attempts.incrementAndGet() <= 2) {
+                throw new IllegalStateException(
+                        "injected persistent resource settlement failure");
+            }
+            return false;
+        };
+        LlamaCppProcessTerminationOwner.Lease lease;
+        try (LlamaCppProcessTerminationOwner.LaunchPermit permit =
+                     owner.retryRetainedAndAcquire(
+                             capturePolicy(Duration.ofSeconds(1)))) {
+            lease = permit.adopt(raw, resources);
+        }
+        try {
+            LlamaCppProcessTerminationOwner.Outcome first = lease.terminate(
+                    capturePolicy(Duration.ofMillis(25)));
+            assertTrue(firstBeforeCompletion.await(2L, TimeUnit.SECONDS));
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                    first.state());
+
+            AtomicReference<LlamaCppProcessTerminationOwner.Outcome> outcome =
+                    new AtomicReference<>();
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            Thread follower = Thread.ofPlatform().start(() -> {
+                try {
+                    outcome.set(lease.terminate(
+                            capturePolicy(Duration.ofSeconds(2))));
+                } catch (Throwable unavailable) {
+                    failure.set(unavailable);
+                }
+            });
+            assertTrue(joined.await(2L, TimeUnit.SECONDS));
+            assertEquals(1, attempts.get());
+            releaseFirst.countDown();
+            follower.join(3_000L);
+
+            assertFalse(follower.isAlive());
+            assertEquals(null, failure.get());
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.RETAINED_UNVERIFIED,
+                    outcome.get().state());
+            assertTrue(outcome.get().causes().contains(
+                    LlamaCppProcessTerminationOwner.Cause
+                            .RESOURCE_SETTLEMENT_FAILED));
+            assertEquals(2, attempts.get(),
+                    "one joined call may run N+1 but never N+2");
+            assertEquals(2, completions.get());
+            assertEquals(1, owner.ownedLeaseCount(),
+                    "persistent failure must retain exact ownership");
+
+            LlamaCppProcessTerminationOwner.Outcome independentRetry =
+                    lease.terminate(capturePolicy(Duration.ofSeconds(1)));
+            assertEquals(
+                    LlamaCppProcessTerminationOwner.State.TERMINATED,
+                    independentRetry.state());
+            assertEquals(3, attempts.get(),
+                    "a later caller owns a new bounded attempt");
+            assertEquals(0, owner.ownedLeaseCount());
+        } finally {
+            releaseFirst.countDown();
             raw.destroyForcibly();
             raw.waitFor(5L, TimeUnit.SECONDS);
         }
@@ -1012,6 +1661,36 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         assertTrue(condition.getAsBoolean(), failure);
     }
 
+    private static ProcessBuilderLlamaCppProcessLauncher.CaptureThreadFactory
+            platformThreadFactory() {
+        return (name, task) -> Thread.ofPlatform()
+                .daemon(true)
+                .name(name)
+                .unstarted(task);
+    }
+
+    private static void awaitRestoringInterrupt(CountDownLatch release) {
+        boolean interrupted = false;
+        while (release.getCount() != 0L) {
+            try {
+                release.await();
+            } catch (InterruptedException stop) {
+                interrupted = true;
+                Thread.interrupted();
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    private static void joinCaller(Thread caller) throws InterruptedException {
+        if (caller == null) return;
+        caller.join(3_000L);
+        if (caller.isAlive()) {
+            caller.interrupt();
+            caller.join(1_000L);
+        }
+    }
+
     private static LlamaCppProcess startEventually(
             ProcessBuilderLlamaCppProcessLauncher launcher,
             List<String> command,
@@ -1072,8 +1751,7 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
 
     private static LlamaCppProcessTerminationOwner.Policy capturePolicy(
             Duration resourceTimeout) {
-        return new LlamaCppProcessTerminationOwner.Policy(
-                Duration.ZERO,
+        return LlamaCppProcessTerminationOwner.Policy.forcedOnly(
                 Duration.ofSeconds(2),
                 resourceTimeout);
     }
@@ -1483,6 +2161,87 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         }
     }
 
+    /**
+     * Deterministically models the WSL race: a zero-wait graceful signal starts
+     * shutdown, then the root exits while the post-grace tree capture is in
+     * progress. A genuinely forced-only policy never enters that path.
+     */
+    private static final class GracefulCaptureRaceTarget
+            implements LlamaCppProcessTerminationOwner.Target {
+        private final Process process;
+        private final LlamaCppProcessTerminationOwner.ResourceSettlement resources;
+        private final LlamaCppProcessTerminationOwner.ProcessIdentity identity;
+        private final AtomicInteger gracefulSignals = new AtomicInteger();
+        private final AtomicInteger forcedSignals = new AtomicInteger();
+
+        private GracefulCaptureRaceTarget(
+                Process process,
+                LlamaCppProcessTerminationOwner.ResourceSettlement resources) {
+            this.process = process;
+            this.resources = resources;
+            this.identity = new LlamaCppProcessTerminationOwner.ProcessIdentity(
+                    process.pid(),
+                    0L,
+                    LlamaCppProcessTerminationOwner.IdentityAuthority
+                            .DIRECT_PROCESS_CAPABILITY);
+        }
+
+        @Override
+        public LlamaCppProcessTerminationOwner.ProcessIdentity identity() {
+            return identity;
+        }
+
+        @Override public boolean identityStillMatches() { return true; }
+        @Override public boolean isAlive() { return process.isAlive(); }
+
+        @Override
+        public List<LlamaCppProcessTerminationOwner.Target> descendants() {
+            if (gracefulSignals.get() > 0 && process.isAlive()) {
+                process.destroyForcibly();
+                try {
+                    if (!process.waitFor(5L, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "race fixture child did not exit");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "race fixture cleanup interrupted", interrupted);
+                }
+            }
+            return List.of();
+        }
+
+        @Override public void destroy() { gracefulSignals.incrementAndGet(); }
+
+        @Override
+        public void destroyForcibly() {
+            forcedSignals.incrementAndGet();
+            process.destroyForcibly();
+        }
+
+        @Override
+        public boolean waitFor(Duration timeout) throws InterruptedException {
+            long millis = timeout == null ? 0L : timeout.toMillis();
+            return millis > 0L
+                    ? process.waitFor(millis, TimeUnit.MILLISECONDS)
+                    : !process.isAlive();
+        }
+
+        @Override
+        public boolean owns(
+                Process candidate,
+                LlamaCppProcessTerminationOwner.ResourceSettlement
+                        candidateResources) {
+            return process == candidate && resources == candidateResources;
+        }
+
+        @Override
+        public boolean closeResources(Duration timeout) {
+            return resources.settle(timeout);
+        }
+    }
+
     private static final class RawProcessTarget
             implements LlamaCppProcessTerminationOwner.Target {
         private final Process process;
@@ -1599,6 +2358,7 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         private final AtomicInteger closeFailuresRemaining;
         private final AtomicInteger closeAttempts = new AtomicInteger();
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final CountDownLatch firstCloseAttempt = new CountDownLatch(1);
 
         private TrackingOutputStream(int closeFailures) {
             this.closeFailuresRemaining = new AtomicInteger(closeFailures);
@@ -1612,6 +2372,7 @@ class ProcessBuilderLlamaCppProcessLauncherTest {
         }
         @Override public void close() throws IOException {
             closeAttempts.incrementAndGet();
+            firstCloseAttempt.countDown();
             if (closeFailuresRemaining.getAndUpdate(value ->
                     Math.max(0, value - 1)) > 0) {
                 throw new IOException("injected sink close failure");
