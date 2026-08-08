@@ -30,9 +30,10 @@ public final class JsonSessionStoreReservationProcessMain {
         Path ready = Path.of(args[5]).toAbsolutePath().normalize();
         Path release = Path.of(args[6]).toAbsolutePath().normalize();
 
+        AtomicFileWriter atomicFileWriter = new AtomicFileWriter();
         JsonSessionStore store = new JsonSessionStore(
                 sessions,
-                new AtomicFileWriter(),
+                atomicFileWriter,
                 () -> {
                     byte[] next = entropy.poll();
                     if (next == null) {
@@ -77,7 +78,10 @@ public final class JsonSessionStoreReservationProcessMain {
                             .build());
 
             Files.createDirectories(ready.getParent());
-            Files.writeString(ready, sessionId + "\n", StandardCharsets.UTF_8);
+            atomicFileWriter.replace(
+                    ready,
+                    (sessionId + "\n").getBytes(StandardCharsets.UTF_8),
+                    AtomicFileWriter.Preimage.absent());
             awaitFile(release, Duration.ofSeconds(20));
         } finally {
             store.close();
