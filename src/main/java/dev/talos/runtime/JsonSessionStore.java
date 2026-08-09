@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -84,6 +85,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     private static final int MAX_LEXICAL_REGIONS = 4_096;
     private static final int MAX_POLICY_STRING_LIST = 4_096;
     private static final int MAX_TRACE_EVENTS = 4_096;
+    private static final int MAX_OBSERVED_TURN_LOG_BYTES =
+            50 * 1024 * 1024;
+    private static final int MAX_OBSERVED_TRACE_BYTES =
+            10 * 1024 * 1024;
+    private static final int MAX_OBSERVED_TURN_ROWS = 4_096;
+    private static final int MAX_OBSERVED_SESSION_ENTRIES = 65_536;
+    private static final int MAX_OBSERVED_SESSION_LOGS = 4_096;
     private static final Pattern OBSERVED_TRACE_ID =
             Pattern.compile("[A-Za-z0-9._-]{1,128}");
     private static final Set<String> LEXICAL_EVENT_KEYS = Set.of(
@@ -137,6 +145,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             "NOT_WORKSPACE_OPERATION", "AUTHORIZED", "NO_TYPED_AUTHORITY",
             "CALL_DOES_NOT_MATCH_PLAN", "PREDECESSOR_NOT_COMPLETE",
             "ALREADY_CONSUMED");
+    private static final Set<String> TURN_ROW_KEYS = Set.of(
+            "turnNumber", "timestamp", "durationMs", "userInput",
+            "assistantText", "approvalsRequired", "approvalsGranted",
+            "approvalsDenied", "retrievalTraceSummary", "status", "traceId",
+            "policyTrace", "toolCalls");
+    private static final Set<String> TURN_TOOL_CALL_KEYS = Set.of(
+            "name", "pathHint", "success", "reason");
     private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
             "path", "role", "source", "reason", "sourceText",
             "confidence", "startOffset", "authorityEndOffset", "endOffset");
@@ -159,6 +174,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     private final Path sessionsDir;
     private final AtomicFileWriter atomicFileWriter;
     private final Supplier<byte[]> entropySource;
+    private final DiagnosticObservationLimits diagnosticObservationLimits;
     private final Map<String, SessionWriterLease> activeLeases = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -169,7 +185,11 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
 
     /** Custom directory (useful for testing with {@code @TempDir}). */
     public JsonSessionStore(Path sessionsDir) {
-        this(sessionsDir, new AtomicFileWriter(), JsonSessionStore::secureEntropy);
+        this(
+                sessionsDir,
+                new AtomicFileWriter(),
+                JsonSessionStore::secureEntropy,
+                DiagnosticObservationLimits.defaults());
     }
 
     JsonSessionStore(
@@ -177,12 +197,39 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             AtomicFileWriter atomicFileWriter,
             Supplier<byte[]> entropySource
     ) {
+        this(
+                sessionsDir,
+                atomicFileWriter,
+                entropySource,
+                DiagnosticObservationLimits.defaults());
+    }
+
+    JsonSessionStore(
+            Path sessionsDir,
+            DiagnosticObservationLimits diagnosticObservationLimits
+    ) {
+        this(
+                sessionsDir,
+                new AtomicFileWriter(),
+                JsonSessionStore::secureEntropy,
+                diagnosticObservationLimits);
+    }
+
+    private JsonSessionStore(
+            Path sessionsDir,
+            AtomicFileWriter atomicFileWriter,
+            Supplier<byte[]> entropySource,
+            DiagnosticObservationLimits diagnosticObservationLimits
+    ) {
         this.sessionsDir = java.util.Objects.requireNonNull(
                 sessionsDir, "sessionsDir").toAbsolutePath().normalize();
         this.atomicFileWriter = java.util.Objects.requireNonNull(
                 atomicFileWriter, "atomicFileWriter");
         this.entropySource = java.util.Objects.requireNonNull(
                 entropySource, "entropySource");
+        this.diagnosticObservationLimits = java.util.Objects.requireNonNull(
+                diagnosticObservationLimits,
+                "diagnosticObservationLimits");
         try {
             NoFollowPathPolicy.createUnlinkedDirectories(sessionsDir);
         } catch (IOException e) {
@@ -401,22 +448,213 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         return rowToRecord(sanitizedRow, new LinkedHashMap<>());
     }
 
+    private static boolean exactTurnRowShape(Map<String, Object> row) {
+        if (row == null || !TURN_ROW_KEYS.equals(row.keySet())
+                || !positiveExactInt(row.get("turnNumber"))
+                || !nonNegativeExactLong(row.get("durationMs"))
+                || !nonNegativeExactInt(row.get("approvalsRequired"))
+                || !nonNegativeExactInt(row.get("approvalsGranted"))
+                || !nonNegativeExactInt(row.get("approvalsDenied"))
+                || !(row.get("timestamp") instanceof String timestamp)
+                || !canonicalInstant(timestamp)
+                || !(row.get("userInput") instanceof String)
+                || !(row.get("assistantText") instanceof String)
+                || !(row.get("retrievalTraceSummary") instanceof String)
+                || !(row.get("status") instanceof String)
+                || !(row.get("traceId") instanceof String traceId)
+                || !OBSERVED_TRACE_ID.matcher(traceId).matches()
+                || !(row.get("policyTrace") instanceof Map<?, ?>)
+                || !(row.get("toolCalls") instanceof List<?> calls)) {
+            return false;
+        }
+        for (Object value : calls) {
+            if (!(value instanceof Map<?, ?> call)
+                    || !TURN_TOOL_CALL_KEYS.equals(call.keySet())
+                    || !(call.get("name") instanceof String)
+                    || !(call.get("pathHint") instanceof String)
+                    || !(call.get("success") instanceof Boolean)
+                    || !(call.get("reason") instanceof String)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean canonicalInstant(String value) {
+        try {
+            return Instant.parse(value).toString().equals(value);
+        } catch (Exception malformed) {
+            return false;
+        }
+    }
+
+    record DiagnosticObservationLimits(
+            int maxTurnLogBytes,
+            int maxTraceBytes,
+            int maxTurnRows,
+            int maxSessionEntries,
+            int maxSessionLogs
+    ) {
+        DiagnosticObservationLimits {
+            if (maxTurnLogBytes <= 0 || maxTraceBytes <= 0
+                    || maxTurnLogBytes == Integer.MAX_VALUE
+                    || maxTraceBytes == Integer.MAX_VALUE
+                    || maxTurnRows <= 0 || maxSessionEntries <= 0
+                    || maxSessionLogs <= 0
+                    || maxSessionLogs > maxSessionEntries) {
+                throw new IllegalArgumentException(
+                        "diagnostic observation limits must be positive and nested");
+            }
+        }
+
+        private static DiagnosticObservationLimits defaults() {
+            return new DiagnosticObservationLimits(
+                    MAX_OBSERVED_TURN_LOG_BYTES,
+                    MAX_OBSERVED_TRACE_BYTES,
+                    MAX_OBSERVED_TURN_ROWS,
+                    MAX_OBSERVED_SESSION_ENTRIES,
+                    MAX_OBSERVED_SESSION_LOGS);
+        }
+    }
+
+    private static boolean positiveExactInt(Object value) {
+        return exactLongValue(value) >= 1
+                && exactLongValue(value) <= Integer.MAX_VALUE;
+    }
+
+    private static boolean nonNegativeExactInt(Object value) {
+        return exactLongValue(value) >= 0
+                && exactLongValue(value) <= Integer.MAX_VALUE;
+    }
+
+    private static boolean nonNegativeExactLong(Object value) {
+        return exactLongValue(value) >= 0;
+    }
+
+    private static long exactLongValue(Object value) {
+        return value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long
+                ? ((Number) value).longValue()
+                : Long.MIN_VALUE;
+    }
+
     @Override
     public List<TurnRecord> loadTurns(String sessionId) {
         return loadTurnLedger(sessionId).turns();
     }
 
-    private LoadedTurnLedger loadTurnLedger(String sessionId) {
+    /**
+     * Observe one physical JSONL tail without the lenient recovery semantics
+     * of {@link #loadTurns}. Any torn bytes, malformed row, skipped conflict,
+     * unsafe identity, or read failure is typed and cannot become a fallback
+     * diagnostic selection.
+     */
+    @Override
+    public TurnLogTailObservation observeTurnLogTail(String sessionId) {
+        LoadedTurnLedger ledger = loadObservedTurnLedger(sessionId);
+        return switch (ledger.state()) {
+            case ABSENT -> TurnLogTailObservation.absent();
+            case INVALID -> TurnLogTailObservation.invalid();
+            case UNAVAILABLE -> TurnLogTailObservation.unavailable();
+            case EXACT -> ledger.turns().isEmpty()
+                    ? TurnLogTailObservation.invalid()
+                    : TurnLogTailObservation.exact(
+                            ledger.turns().getLast(),
+                            ledger.turns().size(),
+                            ledger.tailRowSha256());
+        };
+    }
+
+    @Override
+    public TerminalTurnPairObservation observeTerminalTurnPair(
+            String sessionId
+    ) {
         if (!safeSessionId(sessionId)) {
-            return LoadedTurnLedger.empty();
+            return TerminalTurnPairObservation.unavailable();
+        }
+        FileChannel channel = null;
+        FileLock lock = null;
+        try {
+            synchronized (JVM_LOCK_MUTEX) {
+                requireStoreOpen();
+                NoFollowPathPolicy.GuardedRoot guard =
+                        NoFollowPathPolicy.bindExistingDirectory(sessionsDir);
+                Path reservationPath = guard.requireRegularFile(
+                        reservationPathFor(sessionId));
+                requireReservationMarker(reservationPath, sessionId);
+                Path lockPath = guard.requireRegularFile(
+                        writerLockPathFor(sessionId));
+                lockPath = lockPath.getParent().toRealPath()
+                        .resolve(lockPath.getFileName()).normalize();
+                if (JVM_ACTIVE_LEASES.containsKey(lockPath)) {
+                    return TerminalTurnPairObservation.unavailable();
+                }
+                channel = FileChannel.open(
+                        lockPath,
+                        StandardOpenOption.READ,
+                        StandardOpenOption.WRITE,
+                        LinkOption.NOFOLLOW_LINKS);
+                try {
+                    lock = channel.tryLock(0L, 1L, false);
+                } catch (OverlappingFileLockException overlapping) {
+                    return TerminalTurnPairObservation.unavailable();
+                }
+                if (lock == null) {
+                    return TerminalTurnPairObservation.unavailable();
+                }
+            }
+            return TerminalTurnPairObservation.observe(this, sessionId);
+        } catch (Exception unavailable) {
+            return TerminalTurnPairObservation.unavailable();
+        } finally {
+            closeAcquisition(channel, lock);
+        }
+    }
+
+    private LoadedTurnLedger loadTurnLedger(String sessionId) {
+        return loadTurnLedgerFromSource(sessionId, false);
+    }
+
+    private LoadedTurnLedger loadObservedTurnLedger(String sessionId) {
+        return loadTurnLedgerFromSource(sessionId, true);
+    }
+
+    private LoadedTurnLedger loadTurnLedgerFromSource(
+            String sessionId,
+            boolean diagnosticObservation
+    ) {
+        if (!safeSessionId(sessionId)) {
+            return LoadedTurnLedger.unavailable();
         }
         Path file = turnsFileFor(sessionId);
-        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-            return LoadedTurnLedger.empty();
+        byte[] observedBytes = null;
+        if (diagnosticObservation) {
+            try {
+                NoFollowPathPolicy.GuardedRoot guard =
+                        NoFollowPathPolicy.bindExistingDirectory(sessionsDir);
+                NoFollowPathPolicy.EntryType type = guard.inspect(file);
+                if (type == NoFollowPathPolicy.EntryType.MISSING) {
+                    return LoadedTurnLedger.absent();
+                }
+                if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                    return LoadedTurnLedger.unavailable();
+                }
+                observedBytes = readBoundedDiagnosticBytes(
+                        guard,
+                        file,
+                        diagnosticObservationLimits.maxTurnLogBytes());
+            } catch (IOException unavailable) {
+                return LoadedTurnLedger.unavailable();
+            }
+        } else if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            return LoadedTurnLedger.absent();
         }
         List<ParsedTurnRecord> parsed = new java.util.ArrayList<>();
         Map<RequestIdentity, AuthoritativeManifest> manifestCache =
                 new LinkedHashMap<>();
+        boolean exact = true;
+        int physicalRows = 0;
+        String tailRowSha256 = "";
         // Lenient UTF-8 decoding: a single malformed byte (e.g. a partial
         // multi-byte character from a power-loss mid-write) must only affect
         // the line it lands in, not abort the whole load. Files.readAllLines
@@ -429,7 +667,12 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE);
         try {
-            byte[] bytes = NoFollowPathPolicy.readAllBytes(file);
+            byte[] bytes = diagnosticObservation
+                    ? observedBytes
+                    : NoFollowPathPolicy.readAllBytes(file);
+            if (bytes.length == 0) {
+                return LoadedTurnLedger.invalid();
+            }
             int completeLength = 0;
             for (int index = bytes.length - 1; index >= 0; index--) {
                 if (bytes[index] == (byte) '\n') {
@@ -437,22 +680,60 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     break;
                 }
             }
-            if (completeLength == 0) return LoadedTurnLedger.empty();
+            if (completeLength == 0) return LoadedTurnLedger.invalid();
+            if (completeLength != bytes.length) exact = false;
+            if (diagnosticObservation
+                    && exceedsLfDelimitedRowLimit(
+                            bytes,
+                            completeLength,
+                            diagnosticObservationLimits.maxTurnRows())) {
+                return LoadedTurnLedger.unavailable();
+            }
+            try {
+                java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes, 0, completeLength));
+            } catch (java.nio.charset.CharacterCodingException malformedUtf8) {
+                exact = false;
+            }
             String complete = decoder.decode(ByteBuffer.wrap(bytes, 0, completeLength)).toString();
-            for (String rawLine : complete.split("\n", -1)) {
-                String line = rawLine.endsWith("\r")
+            String[] rawLines = complete.split("\n", -1);
+            int previousPhysicalTurnNumber = 0;
+            for (int lineIndex = 0; lineIndex < rawLines.length; lineIndex++) {
+                String rawLine = rawLines[lineIndex];
+                if (lineIndex == rawLines.length - 1 && rawLine.isEmpty()) continue;
+                boolean carriageReturn = rawLine.endsWith("\r");
+                if (carriageReturn) exact = false;
+                String line = carriageReturn
                         ? rawLine.substring(0, rawLine.length() - 1)
                         : rawLine;
-                if (line.isBlank()) continue;
+                if (line.isBlank()) {
+                    exact = false;
+                    continue;
+                }
+                physicalRows++;
+                tailRowSha256 = Hash.sha256Hex(
+                        line.getBytes(StandardCharsets.UTF_8));
                 try {
                     Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
+                    boolean exactPhysicalShape = exactTurnRowShape(row);
                     TurnRecord record = rowToRecord(row, manifestCache);
+                    if (!exactPhysicalShape
+                            || !exactCurrentTurnRowEncoding(row, record)) {
+                        exact = false;
+                    }
+                    if (record.turnNumber() <= previousPhysicalTurnNumber) {
+                        exact = false;
+                    }
+                    previousPhysicalTurnNumber = record.turnNumber();
                     parsed.add(new ParsedTurnRecord(
                             record,
                             hasExactUserRequestLexicalEvidence(
                                     record.policyTrace()),
                             hasCurrentWorkspacePlanSchema(row)));
                 } catch (Exception lineErr) {
+                    exact = false;
                     LOG.warn("Skipping malformed turn line in {}: {}",
                             SafeLogFormatter.value(file.getFileName()), SafeLogFormatter.throwableMessage(lineErr));
                 }
@@ -460,6 +741,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         } catch (IOException e) {
             LOG.warn("Failed to read turn log {}: {}",
                     SafeLogFormatter.value(file), SafeLogFormatter.throwableMessage(e));
+            return LoadedTurnLedger.unavailable();
         }
         HistoricalRequestIndex globalRequests = new HistoricalRequestIndex();
         for (ParsedTurnRecord parsedRecord : parsed) {
@@ -487,6 +769,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         record,
                         parsedRecord.canonicalManifestValidated());
             } catch (Exception lineErr) {
+                exact = false;
                 LOG.warn("Skipping conflicted turn line in {}: {}",
                         SafeLogFormatter.value(file.getFileName()),
                         SafeLogFormatter.throwableMessage(lineErr));
@@ -495,25 +778,101 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         // Only chronology-accepted rows may become future replay bindings.
         // Global conflicts remain absorbed above, but a later or rejected row
         // must never mint authority for an earlier historical replay.
-        return new LoadedTurnLedger(out, historicalRequests);
+        if (physicalRows == 0 || parsed.size() != physicalRows
+                || out.size() != parsed.size()) {
+            exact = false;
+        }
+        return new LoadedTurnLedger(
+                out,
+                historicalRequests,
+                exact ? TurnLedgerState.EXACT : TurnLedgerState.INVALID,
+                exact ? tailRowSha256 : "");
+    }
+
+    private static boolean exceedsLfDelimitedRowLimit(
+            byte[] bytes,
+            int completeLength,
+            int maxRows
+    ) {
+        int rows = 0;
+        for (int index = 0; index < completeLength; index++) {
+            if (bytes[index] == (byte) '\n' && ++rows > maxRows) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean exactCurrentTurnRowEncoding(
+            Map<String, Object> physicalRow,
+            TurnRecord decoded
+    ) throws IOException {
+        JsonNode physical = MAPPER.valueToTree(physicalRow);
+        JsonNode currentWriter = MAPPER.readTree(
+                sanitizedCompactJson(turnRow(decoded)));
+        return physical.equals(currentWriter);
+    }
+
+    private static byte[] readBoundedDiagnosticBytes(
+            NoFollowPathPolicy.GuardedRoot guard,
+            Path path,
+            int maxBytes
+    ) throws IOException {
+        try (InputStream input = guard.openRegularFile(path)) {
+            byte[] bytes = input.readNBytes(maxBytes + 1);
+            if (bytes.length > maxBytes) {
+                throw new IOException(
+                        "Diagnostic artifact exceeds its byte limit");
+            }
+            return bytes;
+        }
     }
 
     private record LoadedTurnLedger(
             List<TurnRecord> turns,
-            HistoricalRequestIndex requests
+            HistoricalRequestIndex requests,
+            TurnLedgerState state,
+            String tailRowSha256
     ) {
         private LoadedTurnLedger {
             turns = turns == null ? List.of() : List.copyOf(turns);
             requests = requests == null
                     ? new HistoricalRequestIndex()
                     : requests;
+            state = state == null ? TurnLedgerState.UNAVAILABLE : state;
+            tailRowSha256 = tailRowSha256 == null ? "" : tailRowSha256;
         }
 
-        private static LoadedTurnLedger empty() {
+        private static LoadedTurnLedger absent() {
             return new LoadedTurnLedger(
                     List.of(),
-                    new HistoricalRequestIndex());
+                    new HistoricalRequestIndex(),
+                    TurnLedgerState.ABSENT,
+                    "");
         }
+
+        private static LoadedTurnLedger invalid() {
+            return new LoadedTurnLedger(
+                    List.of(),
+                    new HistoricalRequestIndex(),
+                    TurnLedgerState.INVALID,
+                    "");
+        }
+
+        private static LoadedTurnLedger unavailable() {
+            return new LoadedTurnLedger(
+                    List.of(),
+                    new HistoricalRequestIndex(),
+                    TurnLedgerState.UNAVAILABLE,
+                    "");
+        }
+    }
+
+    private enum TurnLedgerState {
+        ABSENT,
+        EXACT,
+        INVALID,
+        UNAVAILABLE
     }
 
     private record ParsedTurnRecord(
@@ -1630,6 +1989,60 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     }
 
     @Override
+    public TraceArtifactObservation observeTraceArtifact(
+            String sessionId,
+            int turnNumber,
+            String traceId
+    ) {
+        if (!safeSessionId(sessionId) || turnNumber <= 0
+                || traceId == null
+                || !OBSERVED_TRACE_ID.matcher(traceId).matches()) {
+            return TraceArtifactObservation.unavailable();
+        }
+        Path dir = traceDirFor(sessionId);
+        Path path = dir.resolve("%06d-%s.json".formatted(
+                turnNumber, traceId));
+        try {
+            NoFollowPathPolicy.GuardedRoot guard =
+                    NoFollowPathPolicy.bindExistingDirectory(sessionsDir);
+            NoFollowPathPolicy.EntryType type = guard.inspect(path);
+            if (type == NoFollowPathPolicy.EntryType.MISSING) {
+                return TraceArtifactObservation.absent();
+            }
+            if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                return TraceArtifactObservation.unavailable();
+            }
+            byte[] bytes = readBoundedDiagnosticBytes(
+                    guard,
+                    path,
+                    diagnosticObservationLimits.maxTraceBytes());
+            LoadedTurnLedger ledger = loadObservedTurnLedger(sessionId);
+            if (ledger.state() == TurnLedgerState.UNAVAILABLE) {
+                return TraceArtifactObservation.unavailable();
+            }
+            if (ledger.state() == TurnLedgerState.INVALID) {
+                return TraceArtifactObservation.invalid();
+            }
+            TraceBindingIndex requestBindings = traceRequestBindings(
+                    ledger.turns());
+            Optional<LocalTurnTrace> loaded = readTraceBytes(
+                    sessionId, path, bytes, requestBindings, true);
+            if (loaded.isEmpty()) return TraceArtifactObservation.invalid();
+            LocalTurnTrace trace = loaded.get();
+            if (trace.turnNumber() != turnNumber
+                    || !traceId.equals(trace.traceId())
+                    || !path.getFileName().toString().equals(
+                            traceFileName(trace))) {
+                return TraceArtifactObservation.invalid();
+            }
+            return TraceArtifactObservation.exact(
+                    trace, Hash.sha256Hex(bytes));
+        } catch (Exception unavailable) {
+            return TraceArtifactObservation.unavailable();
+        }
+    }
+
+    @Override
     public Optional<LocalTurnTrace> loadLatestTrace(String sessionId) {
         if (!safeSessionId(sessionId)) return Optional.empty();
         Path dir = traceDirFor(sessionId);
@@ -1662,8 +2075,30 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             TraceBindingIndex requestBindings
     ) {
         try {
-            JsonNode root = MAPPER.readTree(
-                    NoFollowPathPolicy.readString(path, StandardCharsets.UTF_8));
+            return readTraceBytes(
+                    sessionId,
+                    path,
+                    NoFollowPathPolicy.readAllBytes(path),
+                    requestBindings,
+                    false);
+        } catch (Exception e) {
+            LOG.warn("Skipping malformed local trace {}: {}",
+                    SafeLogFormatter.value(path.getFileName()),
+                    SafeLogFormatter.throwableMessage(e));
+            return Optional.empty();
+        }
+    }
+
+    private Optional<LocalTurnTrace> readTraceBytes(
+            String sessionId,
+            Path path,
+            byte[] bytes,
+            TraceBindingIndex requestBindings,
+            boolean strictCurrentWriter
+    ) {
+        try {
+            JsonNode root = MAPPER.readTree(bytes);
+            JsonNode physicalRoot = root == null ? null : root.deepCopy();
             String traceId = root.path("traceId").isTextual()
                     ? root.path("traceId").asText()
                     : "";
@@ -1678,10 +2113,33 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             String canonicalRequest = binding == null
                     ? null
                     : binding.canonicalRequest();
-            requireExactLocalTraceEvidence(root, canonicalRequest);
-            LocalTurnTrace trace = MAPPER.treeToValue(
-                    root,
-                    LocalTurnTrace.class);
+            final LocalTurnTrace trace;
+            if (strictCurrentWriter) {
+                if (exactJsonInt(root.get("schemaVersion"), "schemaVersion")
+                                != 5
+                        || root.get("promptAudit") == null
+                        || !root.get("promptAudit").isObject()
+                        || exactJsonInt(
+                                root.get("promptAudit").get("schemaVersion"),
+                                "promptAudit.schemaVersion") != 1) {
+                    throw new IllegalArgumentException(
+                            "local trace must use the current writer schema");
+                }
+                trace = MAPPER.treeToValue(root, LocalTurnTrace.class);
+                JsonNode currentWriter = MAPPER.readTree(
+                        sanitizedTraceJson(trace, canonicalRequest));
+                if (physicalRoot == null
+                        || !physicalRoot.equals(currentWriter)) {
+                    throw new IllegalArgumentException(
+                            "local trace must use the complete current-writer schema");
+                }
+                requireExactLocalTraceEvidence(
+                        physicalRoot.deepCopy(),
+                        canonicalRequest);
+            } else {
+                requireExactLocalTraceEvidence(root, canonicalRequest);
+                trace = MAPPER.treeToValue(root, LocalTurnTrace.class);
+            }
             if (!traceSessionNamespaceMatches(
                     sessionId,
                     trace.sessionId())) {
@@ -1708,7 +2166,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             return Optional.of(trace);
         } catch (Exception e) {
             LOG.warn("Skipping malformed local trace {}: {}",
-                    SafeLogFormatter.value(path.getFileName()), SafeLogFormatter.throwableMessage(e));
+                    SafeLogFormatter.value(path.getFileName()),
+                    SafeLogFormatter.throwableMessage(e));
             return Optional.empty();
         }
     }
@@ -1891,10 +2350,16 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     private TraceBindingIndex traceRequestBindings(
             String sessionId
     ) {
+        return traceRequestBindings(loadTurnLedger(sessionId).turns());
+    }
+
+    private static TraceBindingIndex traceRequestBindings(
+            List<TurnRecord> turns
+    ) {
         LinkedHashMap<String, TraceRequestBinding> bindings =
                 new LinkedHashMap<>();
         java.util.HashSet<String> conflicts = new java.util.HashSet<>();
-        for (TurnRecord record : loadTurnLedger(sessionId).turns()) {
+        for (TurnRecord record : turns == null ? List.<TurnRecord>of() : turns) {
             String traceId = record.traceId();
             if (traceId == null || traceId.isBlank() || conflicts.contains(traceId)) {
                 continue;
@@ -4012,8 +4477,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     "Session reservation marker is missing");
         }
         try {
-            byte[] observed = NoFollowPathPolicy.readAllBytes(reservation);
-            if (!java.util.Arrays.equals(observed, reservationMarker(sessionId))) {
+            byte[] expected = reservationMarker(sessionId);
+            byte[] observed;
+            try (InputStream input =
+                         NoFollowPathPolicy.openUnlinkedRegularFile(reservation)) {
+                observed = input.readNBytes(expected.length + 1);
+            }
+            if (!java.util.Arrays.equals(observed, expected)) {
                 throw new SessionWriterUnavailableException(
                         SessionWriterUnavailableException.Reason.RESERVATION_IO,
                         "Session reservation marker does not match its identity");
@@ -4127,6 +4597,88 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         return sessionIdFor(workspace)
                 + "-" + INSTANCE_ID_TIMESTAMP.format(createdAt)
                 + "-" + HexFormat.of().formatHex(requireEntropy(entropy));
+    }
+
+    @Override
+    public TurnLogInventoryObservation observeTurnLogInventory(
+            String workspaceId
+    ) {
+        if (!safeSessionId(workspaceId)) {
+            return TurnLogInventoryObservation.unavailable();
+        }
+        java.util.LinkedHashSet<String> turnLogIds =
+                new java.util.LinkedHashSet<>();
+        try {
+            NoFollowPathPolicy.GuardedRoot guard =
+                    NoFollowPathPolicy.bindExistingDirectory(sessionsDir);
+            int entries = 0;
+            try (var stream = Files.list(guard.path())) {
+                for (Path path : (Iterable<Path>) stream::iterator) {
+                    entries++;
+                    if (entries
+                            > diagnosticObservationLimits.maxSessionEntries()) {
+                        return TurnLogInventoryObservation.unavailable();
+                    }
+                    String name = path.getFileName().toString();
+                    if (!hasTurnLogSuffix(name)) continue;
+                    String id = name.substring(
+                            0,
+                            name.length() - TURNS_SUFFIX.length());
+                    if (!belongsToInventoryNamespace(id, workspaceId)) {
+                        continue;
+                    }
+                    if (!name.endsWith(TURNS_SUFFIX)) {
+                        return TurnLogInventoryObservation.unavailable();
+                    }
+                    if (!safeSessionId(id)
+                            || guard.inspect(path)
+                                    != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                        return TurnLogInventoryObservation.unavailable();
+                    }
+                    if (!turnLogIds.add(id)) {
+                        return TurnLogInventoryObservation.unavailable();
+                    }
+                    if (turnLogIds.size()
+                            > diagnosticObservationLimits.maxSessionLogs()) {
+                        return TurnLogInventoryObservation.unavailable();
+                    }
+                }
+            }
+        } catch (IOException | java.io.UncheckedIOException unavailable) {
+            return TurnLogInventoryObservation.unavailable();
+        }
+        return TurnLogInventoryObservation.exact(
+                turnLogIds.stream().sorted().toList());
+    }
+
+    private static boolean hasTurnLogSuffix(String name) {
+        return name != null
+                && name.length() >= TURNS_SUFFIX.length()
+                && name.regionMatches(
+                        true,
+                        name.length() - TURNS_SUFFIX.length(),
+                        TURNS_SUFFIX,
+                        0,
+                        TURNS_SUFFIX.length());
+    }
+
+    private static boolean belongsToInventoryNamespace(
+            String sessionId,
+            String workspaceId
+    ) {
+        if (sessionId == null || workspaceId == null
+                || sessionId.length() < workspaceId.length()
+                || !sessionId.regionMatches(
+                        true,
+                        0,
+                        workspaceId,
+                        0,
+                        workspaceId.length())) {
+            return false;
+        }
+        return sessionId.length() == workspaceId.length()
+                || sessionId.length() > workspaceId.length()
+                        && sessionId.charAt(workspaceId.length()) == '-';
     }
 
     @Override

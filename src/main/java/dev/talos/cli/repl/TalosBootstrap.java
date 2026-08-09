@@ -205,6 +205,12 @@ public final class TalosBootstrap {
         // listing prefix; everything this process WRITES (close snapshot,
         // turn log, traces) goes under a fresh per-run instance id.
         String workspaceId = JsonSessionStore.sessionIdFor(workspace);
+        ExplainLastTurnCommand.SavedTerminalTurnReference savedTerminalTurn =
+                sessionPersistenceEnabled
+                        ? unambiguousSavedTerminalTurnAtStartup(
+                                sessionArchive, workspaceId)
+                                .orElse(null)
+                        : null;
 
         RestoreSummary restoreSummary = new RestoreSummary(0, null, "");
         RestoreSummary savedSessionSummary = new RestoreSummary(0, null, "");
@@ -430,7 +436,8 @@ public final class TalosBootstrap {
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
                 sessionStore, checkpointService, runtimeSession.startedAt(), out,
                 terminalCapabilities, terminalWidth,
-                sessionId, assistModeCompaction);
+                sessionId, savedTerminalTurn, runtimeSession::turnCount,
+                assistModeCompaction);
         // T806: workspace template commands load AFTER registration so the
         // collision guard sees every built-in name and alias (builtin-wins;
         // a workspace help.md can never shadow /help). The templates-aware
@@ -499,6 +506,9 @@ public final class TalosBootstrap {
                                           TerminalCapabilities terminalCapabilities,
                                           java.util.function.IntSupplier terminalWidth,
                                           String activeSessionId,
+                                          ExplainLastTurnCommand.SavedTerminalTurnReference
+                                                  savedTerminalTurn,
+                                          java.util.function.IntSupplier activeTurnCount,
                                           boolean assistModeCompaction) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
@@ -524,7 +534,8 @@ public final class TalosBootstrap {
         // T799: /last must read the ACTIVE session's log - the injected id,
         // not a re-derived workspace hash (the pre-T799 silent breaker).
         registry.register(new ExplainLastTurnCommand(workspace, sessionStore,
-                activeSessionStartedAt, activeSessionId));
+                activeSessionStartedAt, activeSessionId, savedTerminalTurn,
+                activeTurnCount));
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new PromptDebugCommand());
         registry.register(new WorkspaceCommand(workspace));
@@ -583,6 +594,97 @@ public final class TalosBootstrap {
     static String latestSessionId(SessionStore store, String workspaceId) {
         var sessions = store.listSessions(workspaceId);
         return sessions.isEmpty() ? workspaceId : sessions.get(0).sessionId();
+    }
+
+    /**
+     * Freeze one unambiguous prior session's exact physical append-tail turn
+     * before a new active session is allocated. Only an exact abnormal status
+     * is eligible. Multiple competing session tails, a newer ordinary tail,
+     * or any degraded listed log fails closed; no wall clock or filename is
+     * promoted into a workspace-global order.
+     */
+    static java.util.Optional<ExplainLastTurnCommand.SavedTerminalTurnReference>
+            unambiguousSavedTerminalTurnAtStartup(
+                    SessionStore store,
+                    String workspaceId
+            ) {
+        if (store == null || workspaceId == null || workspaceId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        final dev.talos.runtime.TurnLogInventoryObservation inventory;
+        try {
+            inventory = store.observeTurnLogInventory(workspaceId);
+        } catch (RuntimeException unavailable) {
+            return java.util.Optional.empty();
+        }
+        if (inventory == null || !inventory.exact()
+                || inventory.sessionIds().size() != 1) {
+            return java.util.Optional.empty();
+        }
+        ExplainLastTurnCommand.SavedTerminalTurnReference observedTail = null;
+        for (String storageSessionId : inventory.sessionIds()) {
+            if (!belongsToWorkspace(storageSessionId, workspaceId)) {
+                continue;
+            }
+            final dev.talos.runtime.TerminalTurnPairObservation pair;
+            try {
+                pair = store.observeTerminalTurnPair(storageSessionId);
+            } catch (RuntimeException unavailable) {
+                return java.util.Optional.empty();
+            }
+            if (pair == null || !pair.exact()) {
+                return java.util.Optional.empty();
+            }
+            final dev.talos.runtime.TurnLogInventoryObservation
+                    inventoryAfterPair;
+            try {
+                inventoryAfterPair = store.observeTurnLogInventory(workspaceId);
+            } catch (RuntimeException unavailable) {
+                return java.util.Optional.empty();
+            }
+            if (inventoryAfterPair == null || !inventoryAfterPair.exact()
+                    || !inventory.sessionIds().equals(
+                            inventoryAfterPair.sessionIds())) {
+                return java.util.Optional.empty();
+            }
+            var observation = pair.rowObservation();
+            if (observation == null || !observation.exact()) {
+                return java.util.Optional.empty();
+            }
+            if (observation.turn() == null
+                    || !terminalStatus(observation.turn().status())) {
+                return java.util.Optional.empty();
+            }
+            var reference = ExplainLastTurnCommand.SavedTerminalTurnReference.from(
+                    storageSessionId,
+                    observation,
+                    pair.traceObservation());
+            if (reference == null || observedTail != null) {
+                // No workspace-global sequence exists yet. More than one
+                // competing session tail is ambiguous, regardless of wall
+                // clock or filename ordering.
+                return java.util.Optional.empty();
+            }
+            observedTail = reference;
+        }
+        return observedTail != null && terminalStatus(observedTail.status())
+                ? java.util.Optional.of(observedTail)
+                : java.util.Optional.empty();
+    }
+
+    private static boolean belongsToWorkspace(
+            String sessionId,
+            String workspaceId
+    ) {
+        return sessionId != null
+                && (sessionId.equals(workspaceId)
+                        || sessionId.startsWith(workspaceId + "-"));
+    }
+
+    private static boolean terminalStatus(String status) {
+        return "failed".equals(status)
+                || "cancelled".equals(status)
+                || "no_result".equals(status);
     }
 
     /** Live-memory twin of {@link #hasSavedActiveContext}: is there context worth saving? */

@@ -250,6 +250,38 @@ class ExplainLastTurnFailedSettlementTest {
             assertTrue(text.contains("Settlement: FAILED at ASSISTANT_PREPARATION"), text);
             assertTrue(text.contains("Evidence projection: INVALID/UNKNOWN"), text);
             assertTrue(text.contains("retrieval: INVALID/UNKNOWN"), text);
+            assertFalse(text.contains("Local trace:"), text);
+            assertNoHostileCanary(text);
+        }
+    }
+
+    @Test
+    void activeRowStatusMustMatchItsTypedSettlementForEveryView(
+            @TempDir Path dir
+    ) {
+        String sessionId = storageSessionId(dir);
+        String traceId = "trc-active-status-mismatch";
+        JsonSessionStore store = persist(
+                dir,
+                sessionId,
+                hostileRow(traceId, "", "cancelled"),
+                terminalTrace(
+                        traceId,
+                        JsonSessionStore.sessionIdFor(dir),
+                        "UNAVAILABLE",
+                        MarkerShape.VALID,
+                        "FAILED",
+                        "ASSISTANT_EXECUTION",
+                        "UNEXPECTED",
+                        "java.lang.IllegalStateException"));
+
+        for (String view : VIEWS) {
+            String text = execute(dir, store, sessionId, view);
+            assertTrue(text.contains("Trace pair: VALID"), text);
+            assertTrue(text.contains("Settlement: INVALID/UNKNOWN"), text);
+            assertTrue(text.contains(
+                    "Evidence projection: INVALID/UNKNOWN"), text);
+            assertFalse(text.contains("Local trace:"), text);
             assertNoHostileCanary(text);
         }
     }
@@ -336,6 +368,7 @@ class ExplainLastTurnFailedSettlementTest {
             assertTrue(text.contains("Trace pair: INVALID/UNKNOWN"), text);
             assertTrue(text.contains("Settlement: INVALID/UNKNOWN"), text);
             assertTrue(text.contains("Evidence projection: INVALID/UNKNOWN"), text);
+            assertFalse(text.contains("Local trace:"), text);
             assertNoHostileCanary(text);
         }
     }

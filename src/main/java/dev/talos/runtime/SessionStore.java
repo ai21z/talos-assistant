@@ -55,6 +55,46 @@ public interface SessionStore {
         return List.of();
     }
 
+    /**
+     * Fail-closed physical-tail observation for diagnostic selection. Stores
+     * that cannot prove a complete exact append tail must remain unavailable.
+     */
+    default TurnLogTailObservation observeTurnLogTail(String sessionId) {
+        return TurnLogTailObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed physical trace observation for a named turn coordinate.
+     * Stores that cannot validate and hash the exact artifact stay unavailable.
+     */
+    default TraceArtifactObservation observeTraceArtifact(
+            String sessionId,
+            int turnNumber,
+            String traceId
+    ) {
+        return TraceArtifactObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed observation of one exact physical tail/trace pair. Stores
+     * that cannot provide an append-coherent pair remain unavailable.
+     */
+    default TerminalTurnPairObservation observeTerminalTurnPair(
+            String sessionId
+    ) {
+        return TerminalTurnPairObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed physical turn-log inventory for cross-session diagnostics.
+     * Stores that cannot inspect every matching candidate remain unavailable.
+     */
+    default TurnLogInventoryObservation observeTurnLogInventory(
+            String workspaceId
+    ) {
+        return TurnLogInventoryObservation.unavailable();
+    }
+
     /** Persist the redacted local trace artifact for a terminal turn. */
     default void saveTrace(String sessionId, LocalTurnTrace trace) {
         // no-op by default

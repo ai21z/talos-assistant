@@ -4,6 +4,9 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionStore;
+import dev.talos.runtime.TraceArtifactObservation;
+import dev.talos.runtime.TerminalTurnPairObservation;
+import dev.talos.runtime.TurnLogTailObservation;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.TraceRedactor;
@@ -21,7 +24,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * /explain-last-turn - render the latest structured turn audit for this workspace.
+ * /explain-last-turn - render the active turn audit or one explicitly bounded
+ * startup-observed terminal diagnostic.
  */
 public final class ExplainLastTurnCommand implements Command {
     private static final int PREVIEW_LIMIT = 240;
@@ -30,6 +34,8 @@ public final class ExplainLastTurnCommand implements Command {
     private final String sessionId;
     private final String traceWorkspaceId;
     private final java.time.Instant activeSessionStartedAt;
+    private final SavedTerminalTurnReference savedTerminalTurn;
+    private final java.util.function.IntSupplier activeTurnCount;
 
     public ExplainLastTurnCommand(Path workspace, SessionStore store) {
         this(workspace, store, null);
@@ -55,6 +61,24 @@ public final class ExplainLastTurnCommand implements Command {
             java.time.Instant activeSessionStartedAt,
             String sessionId
     ) {
+        this(workspace, store, activeSessionStartedAt, sessionId, null, () -> -1);
+    }
+
+    /**
+     * T1190: the composition root may freeze one exact prior terminal-turn
+     * coordinate before allocating the active session. It remains evidence
+     * only: this command never restores it into conversation memory and never
+     * acquires a writer for its storage session. The runtime-owned turn count
+     * is mandatory for this cross-session diagnostic capability.
+     */
+    public ExplainLastTurnCommand(
+            Path workspace,
+            SessionStore store,
+            java.time.Instant activeSessionStartedAt,
+            String sessionId,
+            SavedTerminalTurnReference savedTerminalTurn,
+            java.util.function.IntSupplier activeTurnCount
+    ) {
         Path resolvedWorkspace = workspace == null ? Path.of(".") : workspace;
         this.store = store;
         this.sessionId = sessionId == null || sessionId.isBlank()
@@ -62,6 +86,13 @@ public final class ExplainLastTurnCommand implements Command {
                 : sessionId;
         this.traceWorkspaceId = JsonSessionStore.sessionIdFor(resolvedWorkspace);
         this.activeSessionStartedAt = activeSessionStartedAt;
+        this.savedTerminalTurn = savedTerminalTurn != null
+                        && savedTerminalTurn.belongsTo(this.traceWorkspaceId)
+                        && savedTerminalTurn.validIdentity()
+                        && savedTerminalTurn.terminalStatus()
+                ? savedTerminalTurn
+                : null;
+        this.activeTurnCount = activeTurnCount == null ? () -> -1 : activeTurnCount;
     }
 
     @Override
@@ -77,18 +108,23 @@ public final class ExplainLastTurnCommand implements Command {
     @Override
     public Result execute(String args, Context ctx) {
         String view = normalizeView(args);
-        if (!isSupportedView(view)) return new Result.Error("Usage: /last [summary|tools|sources|trace]", 200);
+        if (!isSupportedView(view)) {
+            return new Result.Error(
+                    "Usage: /last [summary|tools|sources|trace]", 200);
+        }
         if (store == null) {
             return new Result.Info("No session store is available in this process.");
         }
 
-        List<TurnRecord> turns = store.loadTurns(sessionId);
-        if (turns == null || turns.isEmpty()) {
-            return new Result.Info("No completed turn has been recorded for this workspace yet.");
+        if (savedTerminalTurn != null && startupFallbackStillEligible()) {
+            return renderSavedTerminalTurn(view);
         }
 
+        List<TurnRecord> turns = store.loadTurns(sessionId);
+        if (turns == null) turns = List.of();
         List<TurnRecord> activeTurns = filterActiveTurns(turns);
-        if (activeTurns.isEmpty() && activeSessionStartedAt != null && !turns.isEmpty()) {
+        if (activeTurns.isEmpty() && activeSessionStartedAt != null
+                && !turns.isEmpty()) {
             return new Result.Info(
                     "No completed turn has been recorded in this active process yet. "
                     + "Saved turn history exists for this workspace, but it was not loaded.");
@@ -102,7 +138,118 @@ public final class ExplainLastTurnCommand implements Command {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
         return new Result.TrustedInfo(renderView(
-                latest, view, store, sessionId, traceWorkspaceId));
+                latest,
+                view,
+                store,
+                sessionId,
+                traceWorkspaceId));
+    }
+
+    private Result renderSavedTerminalTurn(String view) {
+        if (!startupFallbackStillEligible()) {
+            return new Result.Info(
+                    "No completed turn has been recorded in this active process yet.");
+        }
+        SavedTerminalObservation observed = observeSavedTerminalProjection();
+        if (observed == null) {
+            return savedStartupObservationUnavailable();
+        }
+        TurnRecord turn = observed.turn();
+        LocalTurnTrace trace = observed.trace();
+        String rendered = "Saved Startup Terminal-Turn Observation\n\n"
+                + "  Session: " + savedTerminalTurn.displayId(traceWorkspaceId)
+                + "\n  Trace: " + safeTraceToken(
+                        trace.traceId(), 128, "invalid identity")
+                + "\n\n"
+                + renderTerminalOnly(turn, trace, view, traceWorkspaceId);
+        if (!startupFallbackStillEligible()) {
+            return new Result.Info(
+                    "No completed turn has been recorded in this active process yet.");
+        }
+        if (observeSavedTerminalProjection() == null) {
+            return savedStartupObservationUnavailable();
+        }
+        if (!startupFallbackStillEligible()) {
+            return new Result.Info(
+                    "No completed turn has been recorded in this active process yet.");
+        }
+        if (observeSavedTerminalProjection() == null) {
+            return savedStartupObservationUnavailable();
+        }
+        return new Result.TrustedInfo(rendered);
+    }
+
+    private SavedTerminalObservation observeSavedTerminalProjection() {
+        if (!savedInventoryStillUnambiguous()) {
+            return null;
+        }
+        final TerminalTurnPairObservation observedPair;
+        try {
+            observedPair = store.observeTerminalTurnPair(
+                    savedTerminalTurn.storageSessionId());
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
+        if (observedPair == null || !observedPair.exact()) {
+            return null;
+        }
+        if (!savedInventoryStillUnambiguous()) {
+            return null;
+        }
+        TurnLogTailObservation observedRow = observedPair.rowObservation();
+        TraceArtifactObservation observedTrace =
+                observedPair.traceObservation();
+        if (!savedTerminalTurn.matches(observedRow, observedTrace)) {
+            return null;
+        }
+        TurnRecord turn = observedRow.turn();
+        LocalTurnTrace trace = observedTrace.trace();
+        if (!validSavedTerminalProjection(turn, trace, traceWorkspaceId)) {
+            return null;
+        }
+        return new SavedTerminalObservation(turn, trace);
+    }
+
+    private boolean savedInventoryStillUnambiguous() {
+        try {
+            var inventory = store.observeTurnLogInventory(traceWorkspaceId);
+            return inventory != null
+                    && inventory.exact()
+                    && inventory.sessionIds().equals(
+                            List.of(savedTerminalTurn.storageSessionId()));
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private record SavedTerminalObservation(
+            TurnRecord turn,
+            LocalTurnTrace trace
+    ) {}
+
+    private static Result.Info savedStartupObservationUnavailable() {
+        return new Result.Info(
+                "The saved terminal-turn observation selected at startup "
+                        + "is unavailable.");
+    }
+
+    private boolean startupFallbackStillEligible() {
+        if (!noActiveTurnHasBegun()) return false;
+        try {
+            TurnLogTailObservation activeTail = store.observeTurnLogTail(sessionId);
+            return activeTail != null
+                    && activeTail.state() == TurnLogTailObservation.State.ABSENT;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private boolean noActiveTurnHasBegun() {
+        try {
+            return activeTurnCount.getAsInt() == 0;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
     }
 
     private List<TurnRecord> filterActiveTurns(List<TurnRecord> turns) {
@@ -123,7 +270,12 @@ public final class ExplainLastTurnCommand implements Command {
     ) {
         LocalTurnTrace localTrace = loadLocalTrace(store, sessionId, latest).orElse(null);
         if (requiresTerminalOnlyRendering(latest, localTrace)) {
-            return renderTerminalOnly(latest, localTrace, view, traceWorkspaceId);
+            return renderTerminalOnly(
+                    latest,
+                    localTrace,
+                    view,
+                    traceWorkspaceId,
+                    true);
         }
         LocalTurnTrace pairedTrace = validTracePair(latest, localTrace, traceWorkspaceId)
                 ? localTrace
@@ -302,6 +454,16 @@ public final class ExplainLastTurnCommand implements Command {
             String view,
             String expectedSessionId
     ) {
+        return renderTerminalOnly(turn, trace, view, expectedSessionId, false);
+    }
+
+    private static String renderTerminalOnly(
+            TurnRecord turn,
+            LocalTurnTrace trace,
+            String view,
+            String expectedSessionId,
+            boolean includeLocalTraceIdentity
+    ) {
         StringBuilder sb = new StringBuilder();
         sb.append(switch (view) {
             case "tools" -> "Last Turn Tools";
@@ -317,14 +479,17 @@ public final class ExplainLastTurnCommand implements Command {
         TurnEvidenceProjectionTraceEvent.Decoded projection = paired
                 ? TurnEvidenceProjectionTraceEvent.decode(trace)
                 : null;
-        boolean settlementValid = settlement != null && settlement.valid();
+        boolean settlementValid = settlement != null
+                && settlement.valid()
+                && settlementMatchesRowStatus(turn, settlement);
         boolean rowRetrievalObserved = turn != null
                 && !turn.retrievalTraceSummary().isBlank();
         boolean retrievalConsistent = projection != null
                 && projection.valid()
                 && ("CAPTURE_OBSERVED_UNBOUND".equals(projection.retrieval())
                         == rowRetrievalObserved);
-        boolean projectionValid = projection != null
+        boolean projectionValid = settlementValid
+                && projection != null
                 && projection.valid()
                 && retrievalConsistent;
 
@@ -363,6 +528,12 @@ public final class ExplainLastTurnCommand implements Command {
         }
         sb.append("  Tools: unavailable in terminal projection\n");
         sb.append("  Sources: unavailable in terminal projection\n");
+        if (includeLocalTraceIdentity
+                && "trace".equals(view)
+                && projectionValid) {
+            sb.append("  Local trace: ").append(safeTraceToken(
+                    trace.traceId(), 128, "invalid identity")).append('\n');
+        }
         return sb.toString();
     }
 
@@ -378,6 +549,44 @@ public final class ExplainLastTurnCommand implements Command {
                 && turn.turnNumber() == trace.turnNumber()
                 && (expectedSessionId == null
                         || expectedSessionId.equals(trace.sessionId()));
+    }
+
+    private static boolean settlementMatchesRowStatus(
+            TurnRecord turn,
+            TurnSettlementTraceEvent.Decoded settlement
+    ) {
+        if (turn == null || settlement == null || !settlement.valid()) {
+            return false;
+        }
+        String status = turn.status() == null
+                ? ""
+                : turn.status().strip().toLowerCase(Locale.ROOT);
+        return switch (settlement.kind()) {
+            case FAILED -> "failed".equals(status);
+            case CANCELLED -> "cancelled".equals(status);
+            case NO_RESULT -> "no_result".equals(status);
+            case COMPLETED -> false;
+        };
+    }
+
+    private static boolean validSavedTerminalProjection(
+            TurnRecord turn,
+            LocalTurnTrace trace,
+            String expectedSessionId
+    ) {
+        if (!validTracePair(turn, trace, expectedSessionId)) return false;
+        TurnSettlementTraceEvent.Decoded settlement =
+                TurnSettlementTraceEvent.decode(trace);
+        if (settlement == null || !settlement.valid()
+                || !settlementMatchesRowStatus(turn, settlement)) {
+            return false;
+        }
+        TurnEvidenceProjectionTraceEvent.Decoded projection =
+                TurnEvidenceProjectionTraceEvent.decode(trace);
+        if (projection == null || !projection.valid()) return false;
+        boolean rowRetrievalObserved = !turn.retrievalTraceSummary().isBlank();
+        return "CAPTURE_OBSERVED_UNBOUND".equals(projection.retrieval())
+                == rowRetrievalObserved;
     }
 
     private static String terminalStatus(TurnSettlementTraceEvent.Decoded settlement) {
@@ -791,13 +1000,118 @@ public final class ExplainLastTurnCommand implements Command {
     private static String normalizeView(String args) {
         String view = args == null ? "" : args.trim().toLowerCase(Locale.ROOT);
         while (view.startsWith("/")) view = view.substring(1);
-        if ("--verbose".equals(view) || "-v".equals(view) || "verbose".equals(view)) {
+        if ("--verbose".equals(view) || "-v".equals(view)
+                || "verbose".equals(view)) {
             return "trace";
         }
         return view.isBlank() ? "summary" : view;
     }
 
     private static boolean isSupportedView(String view) {
-        return "summary".equals(view) || "tools".equals(view) || "sources".equals(view) || "trace".equals(view);
+        return "summary".equals(view) || "tools".equals(view)
+                || "sources".equals(view) || "trace".equals(view);
+    }
+
+    public record SavedTerminalTurnReference(
+            String storageSessionId,
+            int appendOrdinal,
+            String rowSha256,
+            String traceSha256,
+            int turnNumber,
+            java.time.Instant timestamp,
+            String traceId,
+            String status
+    ) {
+        public SavedTerminalTurnReference {
+            storageSessionId = storageSessionId == null ? "" : storageSessionId;
+            rowSha256 = rowSha256 == null ? "" : rowSha256;
+            traceSha256 = traceSha256 == null ? "" : traceSha256;
+            timestamp = timestamp == null ? java.time.Instant.EPOCH : timestamp;
+            traceId = traceId == null ? "" : traceId;
+            status = status == null ? "" : status;
+        }
+
+        public static SavedTerminalTurnReference from(
+                String storageSessionId,
+                TurnLogTailObservation rowObservation,
+                TraceArtifactObservation traceObservation
+        ) {
+            if (rowObservation == null || !rowObservation.exact()
+                    || traceObservation == null || !traceObservation.exact()) {
+                return null;
+            }
+            TurnRecord turn = rowObservation.turn();
+            LocalTurnTrace trace = traceObservation.trace();
+            if (turn == null || trace == null
+                    || turn.turnNumber() != trace.turnNumber()
+                    || !turn.traceId().equals(trace.traceId())) {
+                return null;
+            }
+            SavedTerminalTurnReference reference = new SavedTerminalTurnReference(
+                    storageSessionId,
+                    rowObservation.appendOrdinal(),
+                    rowObservation.rowSha256(),
+                    traceObservation.artifactSha256(),
+                    turn.turnNumber(),
+                    turn.timestamp(),
+                    turn.traceId(),
+                    turn.status());
+            return reference.validIdentity() ? reference : null;
+        }
+
+        private boolean belongsTo(String workspaceId) {
+            return !storageSessionId.isBlank()
+                    && workspaceId != null
+                    && (storageSessionId.equals(workspaceId)
+                            || storageSessionId.startsWith(workspaceId + "-"));
+        }
+
+        private boolean matches(
+                TurnLogTailObservation rowObservation,
+                TraceArtifactObservation traceObservation
+        ) {
+            if (rowObservation == null || !rowObservation.exact()
+                    || traceObservation == null || !traceObservation.exact()
+                    || appendOrdinal != rowObservation.appendOrdinal()
+                    || !rowSha256.equals(rowObservation.rowSha256())
+                    || !traceSha256.equals(
+                            traceObservation.artifactSha256())) {
+                return false;
+            }
+            TurnRecord turn = rowObservation.turn();
+            LocalTurnTrace trace = traceObservation.trace();
+            return turn != null
+                    && trace != null
+                    && turnNumber == turn.turnNumber()
+                    && turnNumber == trace.turnNumber()
+                    && timestamp.equals(turn.timestamp())
+                    && traceId.equals(turn.traceId())
+                    && traceId.equals(trace.traceId())
+                    && status.equals(turn.status());
+        }
+
+        private boolean terminalStatus() {
+            return "failed".equals(status)
+                    || "cancelled".equals(status)
+                    || "no_result".equals(status);
+        }
+
+        private boolean validIdentity() {
+            return appendOrdinal > 0
+                    && turnNumber > 0
+                    && !java.time.Instant.EPOCH.equals(timestamp)
+                    && rowSha256.matches("[0-9a-f]{64}")
+                    && traceSha256.matches("[0-9a-f]{64}")
+                    && !traceId.isBlank();
+        }
+
+        private String displayId(String workspaceId) {
+            if (storageSessionId.startsWith(workspaceId + "-")) {
+                return storageSessionId.substring(workspaceId.length() + 1);
+            }
+            return storageSessionId.length() <= 8
+                    ? storageSessionId
+                    : storageSessionId.substring(0, 8) + "…";
+        }
     }
 }

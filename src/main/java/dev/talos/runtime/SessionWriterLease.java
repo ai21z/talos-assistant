@@ -89,6 +89,35 @@ public final class SessionWriterLease implements SessionStore, AutoCloseable {
     }
 
     @Override
+    public TurnLogTailObservation observeTurnLogTail(String requestedSessionId) {
+        return owner.observeTurnLogTail(requestedSessionId);
+    }
+
+    @Override
+    public TraceArtifactObservation observeTraceArtifact(
+            String requestedSessionId,
+            int turnNumber,
+            String traceId
+    ) {
+        return owner.observeTraceArtifact(
+                requestedSessionId, turnNumber, traceId);
+    }
+
+    @Override
+    public TerminalTurnPairObservation observeTerminalTurnPair(
+            String requestedSessionId
+    ) {
+        return owner.observeTerminalTurnPair(requestedSessionId);
+    }
+
+    @Override
+    public TurnLogInventoryObservation observeTurnLogInventory(
+            String workspaceId
+    ) {
+        return owner.observeTurnLogInventory(workspaceId);
+    }
+
+    @Override
     public void saveTrace(String requestedSessionId, LocalTurnTrace trace) {
         requireBound(requestedSessionId);
         owner.saveTrace(this, requestedSessionId, trace);
