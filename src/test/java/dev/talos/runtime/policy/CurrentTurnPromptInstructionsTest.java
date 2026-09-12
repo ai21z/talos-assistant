@@ -208,7 +208,8 @@ class CurrentTurnPromptInstructionsTest {
         assertEquals(3, messages.size());
         String instruction = messages.get(1).content();
         assertTrue(instruction.contains("type: SMALL_TALK"));
-        assertTrue(instruction.contains("Answer directly"));
+        assertTrue(instruction.contains("Answer the user's requested topic directly"));
+        assertFalse(instruction.contains("Talos product identity/capability only"));
         assertTrue(instruction.contains("Do not call tools"));
         assertFalse(instruction.contains("Use talos.list_dir"));
     }

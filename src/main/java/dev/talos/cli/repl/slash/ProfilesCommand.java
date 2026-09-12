@@ -205,10 +205,14 @@ public final class ProfilesCommand implements Command {
     }
 
     private Result revoke(WorkspaceProfileTrustStore.TrustState state) {
-        if (state == WorkspaceProfileTrustStore.TrustState.NONE_DECLARED) {
-            return new Result.Info("No workspace profiles are declared. Nothing to revoke.");
+        try {
+            trustStore.unpin(workspace);
+        } catch (IllegalStateException e) {
+            return new Result.Error(e.getMessage(), 500);
         }
-        trustStore.unpin(workspace);
+        if (state == WorkspaceProfileTrustStore.TrustState.NONE_DECLARED) {
+            return new Result.Info("No workspace profiles are declared. Any existing trust pin was removed.");
+        }
         return new Result.Info("Workspace profile trust revoked. Declared profiles are"
                 + " untrusted until /profiles trust pins them again.");
     }

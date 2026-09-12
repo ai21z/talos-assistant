@@ -32,7 +32,7 @@ public final class ToolCallExecutionStage {
     /**
      * Outcome of one tool-call iteration.
      *
-     * @param mutationsThisIteration count of successful mutating tool calls
+     * @param mutationsThisIteration count of mutating calls that succeeded or reported effects
      * @param mutationSummaries      short human-readable summaries of the
      *                               successful mutations
      * @param failuresThisIteration  count of failed tool calls in this
@@ -323,12 +323,21 @@ public final class ToolCallExecutionStage {
                 resultText = resultText + readBeforeWriteNudge;
             }
             appendResultMessage(state, parsed.useNativePath(), i, resultText);
+            if (result.success() && parsed.useNativePath()) {
+                int resultIndex = state.messages.size() - 1;
+                state.readEvidence.bindToolResult(effective, resultIndex, state.messages.get(resultIndex));
+            }
 
             LOG.debug("  Tool {} -> {}", effective.toolName(),
                     result.success()
                             ? "success (" + SafeLogFormatter.text(
                                     ToolCallSupport.truncateForLog(result.output())) + ")"
                             : "error: " + SafeLogFormatter.text(result.errorMessage()));
+            if (!rawResult.success() && rawResult.mutationEffects().hasEffects()) {
+                // Preserve this result and its trace, but do not execute later proposals
+                // or automatically retry a mutation whose effects are already uncertain.
+                break;
+            }
         }
 
         return new IterationOutcome(

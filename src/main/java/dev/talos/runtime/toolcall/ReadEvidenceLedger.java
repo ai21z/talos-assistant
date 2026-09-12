@@ -36,6 +36,7 @@ public final class ReadEvidenceLedger {
 
     private final Path workspaceRoot;
     private final List<ReadEvidence> entries = new ArrayList<>();
+    private final Map<Long, BoundToolResult> toolResults = new LinkedHashMap<>();
     private long nextSequence = 1;
     private long reusableWatermark = 1;
 
@@ -78,6 +79,32 @@ public final class ReadEvidenceLedger {
 
     public boolean isEmpty() {
         return entries.isEmpty();
+    }
+
+    /** Bind at execution time, after privacy handling and final tool formatting. */
+    void bindToolResult(ToolCall call, int messageIndex, dev.talos.spi.types.ChatMessage message) {
+        ReadEvidence evidence = latestIdenticalCall(call, true);
+        if (evidence == null || !evidence.readFile() || message == null
+                || !"tool".equals(message.role()) || message.toolCallId() == null
+                || message.toolCallId().isBlank() || message.content() == null) return;
+        toolResults.put(evidence.sequence(), new BoundToolResult(messageIndex, message));
+    }
+
+    BoundToolResult toolResult(ReadEvidence evidence) {
+        return evidence == null ? null : toolResults.get(evidence.sequence());
+    }
+
+    record BoundToolResult(int index, dev.talos.spi.types.ChatMessage message) {}
+
+    /** Import only the opaque handoff's authenticated typed evidence into a fresh loop. */
+    void importReusable(ReadEvidence evidence, BoundToolResult result) {
+        ReadEvidence imported = new ReadEvidence(
+                nextSequence++, evidence.rawTool(), evidence.canonicalTool(), evidence.rawParams(),
+                evidence.effectivePath(), evidence.canonicalPathKey(), evidence.readFile(),
+                evidence.ranged(), evidence.truncated(), evidence.body(), evidence.contentHash(),
+                evidence.redacted());
+        entries.add(imported);
+        toolResults.put(imported.sequence(), result);
     }
 
     /**
@@ -174,7 +201,7 @@ public final class ReadEvidenceLedger {
         return Map.copyOf(out);
     }
 
-    private boolean sameEffectivePath(String evidencePath, String requestedPath) {
+    boolean sameEffectivePath(String evidencePath, String requestedPath) {
         String leftKey = ToolCallSupport.canonicalizeReadPath(evidencePath);
         String rightKey = ToolCallSupport.canonicalizeReadPath(requestedPath);
         if (leftKey.isBlank() || rightKey.isBlank()) return false;

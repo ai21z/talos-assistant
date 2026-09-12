@@ -2,6 +2,8 @@
 
 Each natural-language turn moves through a fixed pipeline. The exact class names change over time, but the ownership boundaries should stay stable: classification and policy decide what is allowed; tools perform bounded work; verification decides what can be claimed.
 
+Verification classifies supported action evidence; it does not establish the truth of every model explanation. Read-only prose may remain unverified, and incomplete or unsupported verification stays explicit.
+
 ## Turn Pipeline
 
 ```mermaid
@@ -26,7 +28,7 @@ sequenceDiagram
     P->>T: execute only approved/allowed action
     T->>V: provide tool results and final state
     V->>A: write trace and prompt-debug evidence
-    V->>R: grounded outcome
+    V->>R: evidence-classified outcome
     R->>U: answer with limits and evidence pointers
 ```
 

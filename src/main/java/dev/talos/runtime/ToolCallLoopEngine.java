@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.LoopState;
+import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
@@ -46,6 +47,14 @@ final class ToolCallLoopEngine {
             Path workspace,
             RuntimeTurnContext ctx
     ) {
+        return run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx,
+                ReadOnlyEvidenceHandoff.empty());
+    }
+
+    ToolCallLoop.LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff) {
         return run(
                 initialAnswer,
                 nativeToolCalls,
@@ -54,7 +63,8 @@ final class ToolCallLoopEngine {
                 LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE,
                 messages,
                 workspace,
-                ctx);
+                ctx,
+                handoff);
     }
 
     ToolCallLoop.LoopResult runRuntimeDeterministic(
@@ -73,7 +83,8 @@ final class ToolCallLoopEngine {
                 reason,
                 messages,
                 workspace,
-                ctx);
+                ctx,
+                ReadOnlyEvidenceHandoff.empty());
     }
 
     private ToolCallLoop.LoopResult run(
@@ -84,7 +95,8 @@ final class ToolCallLoopEngine {
             LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeReason,
             List<ChatMessage> messages,
             Path workspace,
-            RuntimeTurnContext ctx
+            RuntimeTurnContext ctx,
+            ReadOnlyEvidenceHandoff handoff
     ) {
         if (initialAnswer == null) initialAnswer = "";
 
@@ -96,7 +108,9 @@ final class ToolCallLoopEngine {
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new ToolCallLoop.LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0,
-                    List.of(), 0, 0, 0, 0, List.of());
+                    List.of(), 0, 0, 0, 0, null, List.of(), java.util.Map.of(),
+                    responseReceipt != null && responseReceipt.completion()
+                            == ProviderResponseCapture.Completion.PROVIDER_LENGTH);
         }
 
         Session toolSession = new Session(workspace, ctx.cfg());
@@ -110,6 +124,7 @@ final class ToolCallLoopEngine {
                 toolSession,
                 maxIterations,
                 turnProcessor.toolRegistry().aliasRescueCount());
+        state.seedReadOnlyEvidence(handoff);
         if (initialSource == LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC) {
             state.setRuntimeNativeCalls(initialAnswer, nativeToolCalls, runtimeReason);
         }
@@ -159,7 +174,7 @@ final class ToolCallLoopEngine {
         }
 
         boolean hitIterLimit = repromptStage.hitIterationLimit(state);
-        if (hitIterLimit) {
+        if (hitIterLimit && state.readOnlySynthesisStatus != ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED) {
             LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
             state.transformAnswer(
                     ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText),
@@ -170,7 +185,8 @@ final class ToolCallLoopEngine {
                 state.currentText,
                 state.totalToolsInvoked,
                 state.contentWithheldFromModelContext,
-                state.userVisiblePrivacyNotices);
+                state.userVisiblePrivacyNotices,
+                state.currentResponseReceipt);
         if (ToolLoopFinalAnswerFinalizer.shouldSuppressUnfinishedToolContinuation(
                 state.currentText,
                 state.totalToolsInvoked)
@@ -195,6 +211,7 @@ final class ToolCallLoopEngine {
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
-                state.readEvidence.latestReadFileBodiesByNormalizedPath());
+                state.readEvidence.latestReadFileBodiesByNormalizedPath(), state.currentAnswerOutputLimitReached,
+                state.readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.capture(state));
     }
 }

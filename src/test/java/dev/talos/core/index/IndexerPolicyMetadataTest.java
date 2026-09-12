@@ -95,7 +95,7 @@ class IndexerPolicyMetadataTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> rebuilt = JSON.readValue(metadata.toFile(), Map.class);
-        assertEquals(4, ((Number) rebuilt.get("schemaVersion")).intValue());
+        assertEquals(5, ((Number) rebuilt.get("schemaVersion")).intValue());
         assertEquals(
                 "native-leading-recursive-zero-directory-v1",
                 rebuilt.get("fileGlobSemanticsVersion"));
@@ -118,7 +118,7 @@ class IndexerPolicyMetadataTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> wrongSemantics = JSON.readValue(metadata.toFile(), Map.class);
-        wrongSemantics.put("schemaVersion", 4);
+        wrongSemantics.put("schemaVersion", 5);
         wrongSemantics.put("fileGlobSemanticsVersion", "host-native-leading-recursive-v0");
         JSON.writerWithDefaultPrettyPrinter().writeValue(metadata.toFile(), wrongSemantics);
 

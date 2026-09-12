@@ -40,7 +40,8 @@ final class EditFailureRepairStateAccounting {
             ToolResult result,
             boolean strict
     ) {
-        if (state == null || call == null || result == null || result.success()) {
+        if (state == null || call == null || result == null || result.success()
+                || result.mutationEffects().hasEffects()) {
             return new Result(result);
         }
         if (!"talos.edit_file".equals(call.canonicalToolName())) {

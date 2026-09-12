@@ -12,10 +12,21 @@ public record ToolResult(
         String output,
         ToolError error,
         VerificationStatus verification,
-        ToolContentMetadata contentMetadata) {
+        ToolContentMetadata contentMetadata,
+        ToolMutationEffects mutationEffects) {
 
     public ToolResult {
         contentMetadata = contentMetadata == null ? ToolContentMetadata.normal() : contentMetadata;
+        mutationEffects = mutationEffects == null ? ToolMutationEffects.none() : mutationEffects;
+    }
+
+    public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification,
+                      ToolContentMetadata contentMetadata) {
+        this(success, output, error, verification, contentMetadata, ToolMutationEffects.none());
+    }
+
+    public ToolResult withMutationEffects(ToolMutationEffects effects) {
+        return new ToolResult(success, output, error, verification, contentMetadata, effects);
     }
 
     public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification) {

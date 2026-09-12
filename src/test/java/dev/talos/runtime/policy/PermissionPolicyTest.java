@@ -377,6 +377,27 @@ class PermissionPolicyTest {
         assertEquals("WORKSPACE_ESCAPE", decision.reasonCode());
     }
 
+    @Test
+    void commandPathAliasesCannotSatisfyFileAllowRulesOrSessionMemory() {
+        SessionApprovalPolicy memory = new SessionApprovalPolicy();
+        memory.rememberApproval(workspace,
+                new ToolCall("talos.write_file", Map.of("path", "src/remembered.txt", "content", "x")),
+                ToolRiskLevel.WRITE);
+        PermissionPolicy policy = new DeclarativePermissionPolicy(memory);
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of(), List.of("WRITE"), List.of("VERIFY"), List.of("src/**"))));
+        assertEquals("CONFIG_ALLOW", policy.decide(request(cfg,
+                new ToolCall("talos.write_file", Map.of("path", "src/remembered.txt", "content", "x")),
+                ToolRiskLevel.WRITE, ExecutionPhase.VERIFY)).reasonCode());
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+            ToolCall command = new ToolCall("talos.run_command", Map.of("profile", "gradle_test", key, "src/remembered.txt"));
+            PermissionDecision decision = policy.decide(request(cfg, command, ToolRiskLevel.WRITE, ExecutionPhase.VERIFY));
+            assertEquals(PermissionAction.ASK, decision.action(), key);
+            assertFalse(decision.rememberEligible(), key);
+            assertFalse(ProtectedPathPolicy.classify(workspace, command).hasPath(), key);
+        }
+    }
+
     private PermissionRequest request(Config cfg, ToolCall call, ToolRiskLevel risk, ExecutionPhase phase) {
         return new PermissionRequest(workspace, cfg, call, risk, phase);
     }

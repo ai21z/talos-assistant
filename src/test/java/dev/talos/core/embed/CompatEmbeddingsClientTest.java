@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Path;
+import dev.talos.core.cache.CacheDb;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -26,6 +31,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompatEmbeddingsClientTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @TempDir Path temporary;
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"data\":[{\"index\":1,\"embedding\":[3,4]},{\"index\":0,\"embedding\":[1,2]}]}",
+            "{\"embeddings\":[[1,2],[3,4]]}"
+    })
+    void completeBatchBindsEachVectorToItsInput(String response) throws Exception {
+        HttpServer server = server(new AtomicReference<>(""), new AtomicReference<>(""), response);
+        try (CompatEmbeddingsClient client = new CompatEmbeddingsClient(config(server, "batch"),
+                new CacheDb(temporary.resolve("cache.db")), HttpClient.newHttpClient(), MAPPER)) {
+            List<float[]> result = client.embedBatch(List.of("first", "second"));
+            assertEquals(2, result.size());
+            assertArrayEquals(new float[]{1, 2}, result.get(0));
+            assertArrayEquals(new float[]{3, 4}, result.get(1));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"data\":[{\"embedding\":[1,2]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[3,4]},{\"embedding\":[5,6]}]}",
+            "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":0,\"embedding\":[3,4]}]}",
+            "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":2,\"embedding\":[3,4]}]}",
+            "{\"data\":[{\"index\":-1,\"embedding\":[1,2]},{\"index\":1,\"embedding\":[3,4]}]}",
+            "{\"data\":[{\"index\":0.0,\"embedding\":[1,2]},{\"index\":1,\"embedding\":[3,4]}]}",
+            "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"embedding\":[3,4]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[3]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[3,\"text\"]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[3,null]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[0,0]}]}",
+            "{\"data\":[{\"embedding\":[1,2]},{\"embedding\":[1e100,4]}]}",
+            "{\"embeddings\":[[1,2]]}",
+            "null"
+    })
+    void rejectsUnboundOrMalformedBatchWithoutReturningPartialVectors(String response) throws Exception {
+        HttpServer server = server(new AtomicReference<>(""), new AtomicReference<>(""), response);
+        try (CompatEmbeddingsClient client = new CompatEmbeddingsClient(config(server, "batch"),
+                new CacheDb(temporary.resolve("cache.db")), HttpClient.newHttpClient(), MAPPER)) {
+            assertThrows(IllegalStateException.class, () -> client.embedBatch(List.of("first", "second")));
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void embedPostsOpenAiCompatibleRequestAndParsesDataEmbedding() throws Exception {

@@ -719,6 +719,9 @@ public record MutationRecoveryAssessment(
             List<ToolCallLoop.ToolOutcome> denied
     ) {
         boolean mutationRequested = contract != null && contract.mutationRequested();
+        if (failed.stream().anyMatch(outcome -> !outcome.mutationEffects().appliedPaths().isEmpty())) {
+            return MutationOutcomeStatus.PARTIAL;
+        }
         if (mutatingOutcomeCount == 0 && totalSuccesses == 0) {
             return mutationRequested
                     ? MutationOutcomeStatus.NOT_ATTEMPTED

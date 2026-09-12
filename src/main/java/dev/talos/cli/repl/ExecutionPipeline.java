@@ -79,7 +79,7 @@ public final class ExecutionPipeline {
      *   <li>502 - malformed backend response</li>
      *   <li>503 - connection failed or transient backend error</li>
      *   <li>400 - illegal argument / validation</li>
-     *   <li>500 - everything else (unexpected)</li>
+     *   <li>500 - repetition abort, cancellation/interruption, or other failure</li>
      * </ul>
      */
     static int classifyError(Throwable ex) {

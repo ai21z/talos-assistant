@@ -3,8 +3,6 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.verification.StaticTaskVerifier;
-import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -13,10 +11,20 @@ import java.util.Locale;
 
 /** Selects deterministic terminal answers after read-only tool evidence is already gathered. */
 public final class TerminalReadOnlyStopAnswer {
+    public static final String SYNTHESIS_UNAVAILABLE_REASON = "READ_ONLY_SYNTHESIS_UNAVAILABLE";
     private TerminalReadOnlyStopAnswer() {
     }
 
-    record Answer(String text, String logMessage) {}
+    record Answer(String text, String logMessage, boolean synthesisIncomplete) {
+        Answer(String text, String logMessage) {
+            this(text, logMessage, false);
+        }
+    }
+
+    public static boolean synthesisUnavailable(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return result != null && result.failureDecision().action() == dev.talos.runtime.failure.FailureAction.ASK_USER
+                && SYNTHESIS_UNAVAILABLE_REASON.equals(result.failureDecision().reason());
+    }
 
     public static String tryAnswer(
             LoopState state,
@@ -30,12 +38,9 @@ public final class TerminalReadOnlyStopAnswer {
             LoopState state,
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
-        String webDiagnostics = readOnlyWebDiagnosticStopAnswer(state, outcome);
-        if (webDiagnostics != null) {
-            return new Answer(
-                    webDiagnostics,
-                    "Stopping read-only web diagnostic loop with deterministic static diagnostics.");
-        }
+        // Reading a web surface proves evidence availability, not completion of
+        // the requested explanation. Let the provider synthesize; finalization
+        // still contains unsupported claims using static diagnostics.
 
         String unsupportedDocument = unsupportedDocumentStopAnswer(state, outcome);
         if (unsupportedDocument != null) {
@@ -62,7 +67,7 @@ public final class TerminalReadOnlyStopAnswer {
         if (multiTargetEvidenceComplete != null) {
             return new Answer(
                     multiTargetEvidenceComplete,
-                    "Stopping read-only multi-target loop after all requested files were read.");
+                    "Stopping read-only multi-target loop without a final synthesis.", true);
         }
 
         return null;
@@ -271,47 +276,6 @@ public final class TerminalReadOnlyStopAnswer {
         String name = slash >= 0 ? normalized.substring(slash + 1) : normalized;
         int dot = name.lastIndexOf('.');
         return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
-    }
-
-    private static String readOnlyWebDiagnosticStopAnswer(
-            LoopState state,
-            ToolCallExecutionStage.IterationOutcome outcome
-    ) {
-        if (state == null || outcome == null) return null;
-        if (state.workspace == null) return null;
-        if (state.totalToolsInvoked <= 0) return null;
-        if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
-
-        TaskContract contract =
-                TurnTaskContractCapture.currentOrResolve(state.messages);
-        if (contract == null || contract.type() == TaskType.WORKSPACE_EXPLAIN) {
-            return null;
-        }
-        String userTask = contract.originalUserRequest();
-        String retryTaskType = ToolCallSupport.embeddedRetryTaskType(userTask);
-        if ("WORKSPACE_EXPLAIN".equals(retryTaskType)) return null;
-        String intentUserTask = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(userTask);
-        if (!WebDiagnosticIntent.matchesReadOnlyRequest(intentUserTask)) return null;
-        if (!readStaticWebDiagnosticSurface(state)) return null;
-
-        String diagnostics = StaticTaskVerifier.renderWebDiagnostics(state.workspace);
-        return diagnostics == null || diagnostics.isBlank() ? null : diagnostics;
-    }
-
-    private static boolean readStaticWebDiagnosticSurface(LoopState state) {
-        if (state == null || state.pathsReadThisTurn.isEmpty()) return false;
-        boolean readHtml = false;
-        boolean readScript = false;
-        for (String path : state.pathsReadThisTurn) {
-            String lower = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
-            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-                readHtml = true;
-            }
-            if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-                readScript = true;
-            }
-        }
-        return readHtml && readScript;
     }
 
 }

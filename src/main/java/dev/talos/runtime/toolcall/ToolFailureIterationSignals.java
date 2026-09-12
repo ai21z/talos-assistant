@@ -47,6 +47,11 @@ final class ToolFailureIterationSignals {
         }
 
         boolean mutating = call != null && ToolCallSupport.isMutatingTool(call.toolName());
+        if (mutating && result != null && result.mutationEffects().hasEffects() && state != null) {
+            state.failureDecision = FailureDecision.stop(FailureAction.ASK_USER,
+                    "Tool execution failed after applied or uncertain mutation effects. "
+                            + "Do not retry automatically; inspect the affected targets before explicit recovery.");
+        }
         boolean mutatingDenied = classification.mutatingDenied();
         boolean approvalDenied = classification.userApprovalDenial() && mutating;
         boolean pathPolicyBlocked = classification.preApprovalPathPolicyBlock() && mutating;

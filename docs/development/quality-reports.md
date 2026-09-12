@@ -70,10 +70,12 @@ The checked-in `qodana.yaml` uses Qodana Community. The Gradle Qodana tasks also
 
 The website uses its own npm tests and build checks. It is not part of the Qodana JVM scan.
 
-The summary gate rejects missing, incomplete, stale, malformed, or critical Qodana evidence. It does not reject `qodana-provenance-incomplete` by itself because the local Community path can produce SARIF without VCS metadata. When that status appears, keep the Qodana Markdown report with the reviewer packet and state the limitation.
+The summary gate accepts only `qodana-results-match-current-candidate`, together with the exact current-source snapshot, authenticated run/artifact binding, consistent result schemas, required observed source roots, the configured analysis engine, and zero critical issues. Missing, incomplete, stale, malformed, conflicting, or critical evidence is rejected; `qodana-provenance-incomplete` is not an accepted status.
+
+Native Qodana branch/revision fields may be absent on the local Community path. Their absence is informational only when the exact source snapshot and the other required bindings establish the accepted status. Explicit native branch/revision conflicts still reject the evidence even if the wrapper's source snapshot and artifact hashes match. The Markdown reviewer signal follows the accepted summary status; generating a report is not itself a passing quality gate.
 
 ## Reading the evidence
 
 Use generated reports as pointers to primary evidence. If a report says a lane passed, confirm the matching test output, workflow run, staged artifact, installed binary, or manual audit packet before making a release decision.
 
-If generated evidence was produced from a dirty tree, wrong branch, wrong executable, or stale artifact directory, discard it and rerun from the intended state.
+Retain source-bound dirty-tree results as local diagnostic evidence, not as qualification of a clean, exact release candidate. Rerun the required release gates from the intended committed state. Results from a wrong branch, wrong executable, or stale artifact directory do not qualify that candidate either; preserve their provenance rather than deleting historical evidence.

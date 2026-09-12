@@ -205,6 +205,29 @@ public final class StaticTaskVerifier {
         }
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
+        List<ToolCallLoop.ToolOutcome> failedWithEffects = outcomes.stream()
+                .filter(outcome -> outcome != null && outcome.mutating() && !outcome.success()
+                        && outcome.mutationEffects().hasEffects()).toList();
+        if (!failedWithEffects.isEmpty()) {
+            List<String> effectFacts = new ArrayList<>();
+            List<String> effectProblems = new ArrayList<>();
+            for (ToolCallLoop.ToolOutcome failed : failedWithEffects) {
+                for (String path : failed.mutationEffects().appliedPaths()) {
+                    effectFacts.add(path + ": mutation was applied before tool failure; completion is unverified.");
+                }
+                for (String path : failed.mutationEffects().uncertainPaths()) {
+                    effectFacts.add(path + ": mutation state is UNKNOWN after tool failure.");
+                }
+                effectProblems.add(failed.toolName() + ": failed with applied or uncertain effects at "
+                        + String.join(", ", failed.mutationEffects().affectedPaths())
+                        + ". Final state requires explicit recovery verification.");
+            }
+            // A successful later call is recorded separately. Its matching path alone
+            // cannot prove that a partial operation or unknown commit was recovered.
+            return TaskVerificationEvidence.postApply(TaskVerificationResult.failed(
+                    "Mutation effects remain after failed execution; no successful completion is certified.",
+                    effectFacts, effectProblems), VerificationReport.empty());
+        }
         List<ToolCallLoop.ToolOutcome> successfulMutations = outcomes.stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(ToolCallLoop.ToolOutcome::success)
@@ -967,13 +990,24 @@ public final class StaticTaskVerifier {
             Collection<String> readPaths,
             String userRequest
     ) {
+        return renderReadOnlyWebDiagnostics(workspace, readPaths, userRequest, null);
+    }
+
+    public static String renderReadOnlyWebDiagnostics(
+            Path workspace,
+            Collection<String> readPaths,
+            String userRequest,
+            String modelAnswer
+    ) {
         if (workspace == null
                 || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         List<String> inspected = inspectedStaticWebReadFiles(workspace, readPaths);
         if (inspected.isEmpty()) return null;
         Path root = workspace.toAbsolutePath().normalize();
         if (!hasReadFileWithExtension(inspected, ".js", ".jsx", ".ts", ".tsx")) {
-            return renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
+            String diagnostic = renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
+            return modelAnswer == null || diagnostic == null ? diagnostic
+                    : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic;
         }
         StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyzeFunctional(
                 root,
@@ -995,6 +1029,9 @@ public final class StaticTaskVerifier {
         out.append('\n');
 
         List<String> problems = readOnlyWebDiagnosticProblems(facts, cssInspected, jsInspected, userRequest);
+        if (ReadOnlyWebDiagnosticAnswer.canPreserve(modelAnswer, readPaths, facts, problems)) {
+            return modelAnswer;
+        }
         boolean planRequest = looksLikePlanRequest(userRequest);
         if (problems.isEmpty() && !planRequest) {
             return null;
@@ -1011,7 +1048,8 @@ public final class StaticTaskVerifier {
             appendReadOnlyWebPlan(out, facts, cssInspected, jsInspected, problems);
         }
         out.append("\nNo files were changed.");
-        return out.toString().stripTrailing();
+        String diagnostic = out.toString().stripTrailing();
+        return modelAnswer == null ? diagnostic : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic;
     }
 
     private static String renderHtmlOnlyReadOnlyWebDiagnostics(

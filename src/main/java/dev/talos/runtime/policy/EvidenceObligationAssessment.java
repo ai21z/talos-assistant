@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 
 import java.nio.file.Path;
@@ -51,8 +52,16 @@ public record EvidenceObligationAssessment(
                 obligation,
                 targets,
                 evidenceOutcomes(loopResult),
-                workspace);
+                workspace,
+                explicitReadOnlyTargets(plan.taskContract(), targets));
         return new EvidenceObligationAssessment(obligation, result);
+    }
+
+    private static Set<String> explicitReadOnlyTargets(TaskContract contract, Set<String> evidenceTargets) {
+        if (contract == null || contract.mutationRequested() || contract.mutationAllowed()) return Set.of();
+        Set<String> named = TaskContractResolver.extractExpectedTargets(contract.originalUserRequest());
+        return evidenceTargets.stream().filter(named::contains)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     public boolean missingEvidence() {

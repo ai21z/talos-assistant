@@ -45,6 +45,29 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void acceptedReadOnlySynthesisCannotOverrideDeniedProtectedReadContainment() {
+        var messages = List.of(ChatMessage.system("sys"),
+                ChatMessage.user("Read .env and tell me what it says."));
+        String candidate = "The file says SECRET=original.";
+        var loop = new ToolCallLoop.LoopResult(candidate, 10, 1,
+                List.of("talos.read_file"), messages, 1, 0, true, 0, List.of(),
+                0, 0, 0, 0, FailureDecision.continueLoop(),
+                List.of(new ToolCallLoop.ToolOutcome("talos.read_file", ".env", false, false, true,
+                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)),
+                Map.of(), false, ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loop, null, 0);
+
+        assertTrue(loop.hitIterLimit());
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("Protected content was not read"));
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    @Test
     void toolLoopDeniedMutationIsClassifiedAsBlocked() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -1542,6 +1565,8 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
         assertTrue(outcome.partialMutation());
         assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION));
+        assertEquals(AnswerOutputLimit.CLEAR, outcome.outputLimit(),
+                "a deterministic partial-mutation summary does not inherit provider truncation");
         assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.PARTIAL, outcome.taskOutcome().mutationOutcome().status());
         assertEquals(1, outcome.taskOutcome().mutationOutcome().successful().size());
@@ -2125,7 +2150,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void selectorGroundedOverrideIsClassifiedAsGrounded() throws Exception {
+    void selectorDiagnosticFallbackIsGroundedButDoesNotClaimCompleteAnswerOwnership() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2176,11 +2201,12 @@ class ExecutionOutcomeTest {
                     0);
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
-            assertTrue(outcome.selectorGroundedOverride());
-            assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.finalAnswer().contains("Static web diagnostics found:"));
+            assertTrue(outcome.finalAnswer().contains(".cta-button"));
             assertFalse(outcome.finalAnswer().contains("#ff4500"));
-            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.SELECTOR_GROUNDED_OVERRIDE));
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -3758,6 +3784,8 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
         assertTrue(outcome.finalAnswer().contains(limitation));
+        assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit(),
+                "an evidence prefix retains the selected capability-limitation answer and its truncation");
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }

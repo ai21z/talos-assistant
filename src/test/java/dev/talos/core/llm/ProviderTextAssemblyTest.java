@@ -1,6 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.tool.ToolProtocolText;
+import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.ToolCallParser;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +19,187 @@ final class ProviderTextAssemblyTest {
             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
     private static final String READ_SHA256 =
             "afc75168a955846e5f8869beef57313540b707925e166d7e7da1078e69dfec19";
+
+    @Test
+    void completeRecordedMixedAnswerIsExactAcrossEveryChunkBoundary() throws Exception {
+        String source = RecordedMixedCodeAnswer.text();
+        assertEquals(RecordedMixedCodeAnswer.SHA256, HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8))));
+        assertExactAcrossPartitions(source);
+    }
+
+    @Test
+    void inertInlineHtmlLiteralRemainsExactAcrossEveryPartition() {
+        String source = "Verified: `<button id=\"calculate\">Calculate</button>`; "
+                + "replace `\"#calc\"` with `\"#calculate\"`.";
+        for (int split = 0; split <= source.length(); split++) {
+            ProviderTextAssembly assembly = new ProviderTextAssembly(1_000);
+            StringBuilder emitted = new StringBuilder();
+            assembly.append(source.substring(0, split));
+            assembly.emitStable(emitted::append);
+            assembly.append(source.substring(split));
+            assembly.emitStable(emitted::append);
+            String terminal = assembly.finalText();
+            assembly.emitTerminal(terminal, emitted::append);
+            assertEquals(source, terminal, "partition " + split);
+            assertEquals(source, emitted.toString(), "partition " + split);
+            assertFalse(assembly.normalized(terminal), "partition " + split);
+        }
+        assertFalse(Sanitize.sanitizeForOutput(source).contains("<button"),
+                "the existing shared terminal/prompt sanitizer is not relaxed");
+    }
+
+    @Test
+    void inertFencedHtmlRemainsExactAcrossEveryPartitionWithOtherCodeContexts() {
+        String source = "The selector in `script.js` is `#calc`. The button is:\n\n"
+                + "```html\n<button id=\"calculate\">Calculate</button>\n```\n\n"
+                + "Use this selector:\n```js\nconst selector = `#calculate`;\n```\n"
+                + "The BMI is:\n```\n72 / (1.8 * 1.8) = 22.222\n```\n"
+                + "Keep `scripts.js` unchanged.";
+        assertExactAcrossPartitions(source);
+        assertFalse(Sanitize.sanitizeForOutput(source).contains("<button"),
+                "only the provider-EOS literal projection changes, not the shared sanitizer");
+    }
+
+    @Test
+    void closedCodeRegionsPreserveMarkupByStructureNotTagOrLanguage() {
+        for (String source : List.of(
+                "```jsx\n<script src=\"script.js\"></script><p id=\"result\">\n```",
+                "~~~html\n<button onclick=\"run()\">Run</button>\n~~~",
+                "````text\n<button style=\"display:none\">Hidden</button>\n````",
+                "Example: `<button id=\"x\">Run</textarea>` and `<p id=\"result\">`.",
+                "Example: `<script src=\"script.js\"></script>` and `<script src=\"scripts.js\">`.",
+                "Example: ``<button title=\"`literal`\">Run</button>``.",
+                "```\n<textarea name='note'>Draft text</textarea>\n```",
+                "```HTML\n\n  <button title=\"Next step\">Continue</button>\t\n\n```\n",
+                "Inline `<button id=\"one\">One</button>`.\n"
+                        + "```html\n<button id=\"two\">Two</button>\n```\n"
+                        + "```text\nordinary `quoted` text\n```\n")) {
+            assertExactAcrossPartitions(source);
+        }
+    }
+
+    @Test
+    void unsafeMalformedOrAmbiguousFencesRetainTheExistingProjection() {
+        String safe = "<button id=\"x\">Run</button>";
+        for (String source : List.of(
+                "```html\n<button id=\"x\"><think>hidden</think></button>\n```",
+                "```html\n<button id=\"x\">\\u003cthink\\u003ehidden</button>\n```",
+                "```html\n<button id=\"x\">\u001b[31mRun</button>\n```",
+                "```html\n" + safe + "\n```\n<think>hidden</think>",
+                "```html\n" + safe + "\n```\n\u0001control",
+                "```html\r\n" + safe + "\r\n```",
+                "```html\n" + safe + "\n``` trailing",
+                "```html\n" + safe + "\n~~~",
+                "```html\n" + safe,
+                "prefix ```html\n" + safe + "\n```",
+                "```html\n<button>Run\n```\n</button>",
+                "```html\n" + safe + "\n```js\nnested\n```\n```",
+                "```html\n" + safe + "\n```\n```json\n" + READ + "\n```")) {
+            ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+            for (String chunk : source.chars().mapToObj(value -> Character.toString((char) value)).toList()) {
+                assembly.append(chunk);
+                assembly.emitStable(null);
+            }
+            String expected = ToolProtocolText.unsettledJsonProtocolTailStart(source) >= 0
+                    ? assembly.nonAuthoritativeText()
+                    : Sanitize.sanitizeForOutputPreservingToolCalls(source);
+            assertEquals(expected, assembly.finalText(), source);
+            assertEquals(!source.equals(expected), assembly.normalized(assembly.finalText()), source);
+        }
+    }
+
+    @Test
+    void fencedLiteralDoesNotGainAnExceptionWithoutProviderEos() {
+        String source = "Example:\n```html\n<button id=\"x\">Run</button>\n```\nDone.";
+        ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+        StringBuilder emitted = new StringBuilder();
+        assembly.append(source);
+        assembly.emitStable(emitted::append);
+        String projected = assembly.nonAuthoritativeText();
+        assembly.emitTerminal(projected, emitted::append);
+        assertEquals(Sanitize.sanitizeForOutputPreservingToolCalls(source), projected);
+        assertFalse(projected.contains("<button"));
+        assertEquals(projected, emitted.toString());
+        assertTrue(assembly.normalized(projected));
+    }
+
+    @Test
+    void fencedLiteralRetainsTheBoundedCodePayloadSizeLimit() {
+        for (int length : List.of(4_096, 4_097)) {
+            String literal = "<button>" + "x".repeat(length - 17) + "</button>";
+            String source = "```html\n" + literal + "\n```";
+            ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+            assembly.append(source);
+            assertEquals(length == 4_096 ? source
+                    : Sanitize.sanitizeForOutputPreservingToolCalls(source), assembly.finalText());
+            assertEquals(length != 4_096, assembly.normalized(assembly.finalText()));
+        }
+    }
+
+    @Test
+    void unsafeOrAmbiguousQuotedHtmlKeepsExistingProjection() {
+        List<String> sources = List.of(
+                "`<button id=\"x\">\\u003cthink\\u003ehidden</button>`",
+                "`<button id=\"x\">Run</button>",
+                "\\`<button id=\"x\">Run</button>`",
+                "```html\n<button id=\"x\">Run</button>\n``",
+                "<button>outside `<button id=\"x\">Run</button>` tail</button>",
+                "`<button id=\"x\">Run</button>`<script>secret()</script>",
+                "`<button id=\"x\">Run</button>`<think>hidden</think>",
+                "`<button id=\"x\">\u001b[31mRun</button>`",
+                "`<button id=\"x\"><tool_call>" + READ + "</tool_call></button>`",
+                "`<button id=\"x\">Run</button>`\n```json\n" + READ + "\n```",
+                "<button>\n```json\n" + READ + "\n```\n`</button>`");
+        for (String hostile : sources) {
+            // Ordinary suffix also exercises settled EOS; a trailing backtick
+            // alone can take the older unsettled-protocol branch instead.
+            for (String source : List.of(hostile, hostile + " End.")) {
+                ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+                assembly.append(source);
+                String originalProjection = ToolProtocolText.unsettledJsonProtocolTailStart(source) >= 0
+                        ? assembly.nonAuthoritativeText()
+                        : Sanitize.sanitizeForOutputPreservingToolCalls(source);
+                assertEquals(originalProjection, assembly.finalText(), source);
+                assertEquals(!source.equals(originalProjection),
+                        assembly.normalized(assembly.finalText()), source);
+            }
+        }
+    }
+
+    @Test
+    void literalRecognitionIsNotBoundToTheCapturedElementNameOrIdentifier() {
+        for (String source : List.of(
+                "Example: `<textarea id='message'>Draft text</textarea>`.",
+                "Example: `<button class=\"secondary\" title=\"Next step\">Continue</button>`.",
+                "Examples: `<button id=\"one\">One</button>` and `<textarea name=\"note\">Two</textarea>`.")) {
+            ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+            for (int index = 0; index < source.length(); index++) {
+                assembly.append(source.substring(index, index + 1));
+                assembly.emitStable(null);
+            }
+            assertEquals(source, assembly.finalText());
+            assertFalse(assembly.normalized(assembly.finalText()));
+        }
+    }
+
+    @Test
+    void quotedHtmlDoesNotRewriteExecutableJsonArguments() {
+        String root = "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
+                + "\"old_string\":\"<button id=\\\"old\\\">Old</button>\","
+                + "\"new_string\":\"<button id=\\\"new\\\">New</button>\"}}";
+        for (String example : List.of("Example: `<button id=\"new\">New</button>`.\n",
+                "Example:\n```html\n<button id=\"new\">New</button>\n```\n")) {
+            String source = example + "```json\n" + root + "\n```\n";
+            ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+            assembly.append(source);
+            String projected = assembly.finalText();
+            assertEquals(Sanitize.sanitizeForOutputPreservingToolCalls(source), projected);
+            assertEquals(root, ToolProtocolText.selectExecutableJsonProposals(projected)
+                    .executionOrder().getFirst().rootFrom(projected));
+            assertTrue(assembly.normalized(projected), "textual tools do not get a new normalization waiver");
+        }
+    }
 
     @Test
     void ordinaryProseKeepsStreamingPastOrdinaryOBackslashBacktickAndInlineBrace() {
@@ -418,6 +600,33 @@ final class ProviderTextAssemblyTest {
                     assembledFinal(source, oneCharacterChunks),
                     "one-character tail=" + tail);
         }
+    }
+
+    private static void assertExactAcrossPartitions(String source) {
+        for (int split = 0; split <= source.length(); split++) {
+            ProviderTextAssembly assembly = new ProviderTextAssembly(10_000);
+            StringBuilder emitted = new StringBuilder();
+            assembly.append(source.substring(0, split));
+            assembly.emitStable(emitted::append);
+            assembly.append(source.substring(split));
+            assembly.emitStable(emitted::append);
+            String terminal = assembly.finalText();
+            assembly.emitTerminal(terminal, emitted::append);
+            assertEquals(source, terminal, "partition " + split);
+            assertEquals(source, emitted.toString(), "emitted partition " + split);
+            assertFalse(assembly.normalized(terminal), "partition " + split);
+        }
+        ProviderTextAssembly characterAssembly = new ProviderTextAssembly(10_000);
+        StringBuilder emitted = new StringBuilder();
+        source.chars().forEach(value -> {
+            characterAssembly.append(Character.toString((char) value));
+            characterAssembly.emitStable(emitted::append);
+        });
+        String terminal = characterAssembly.finalText();
+        characterAssembly.emitTerminal(terminal, emitted::append);
+        assertEquals(source, terminal, "single-character chunks");
+        assertEquals(source, emitted.toString(), "single-character emission");
+        assertFalse(characterAssembly.normalized(terminal));
     }
 
     private static String assembledFinal(String source, List<String> chunks) {

@@ -40,8 +40,13 @@ final class InspectCompletenessRetry {
     record Result(
             String answer,
             ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
+            String extraSummary,
+            AnswerOutputLimit outputLimit
+    ) {
+        Result(String answer, ToolCallLoop.LoopResult loopResult, String extraSummary) {
+            this(answer, loopResult, extraSummary, AnswerOutputLimit.KEEP_ORIGINAL);
+        }
+    }
 
     static List<String> missingReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
         return missingReads(workspace, null, loopResult);
@@ -86,6 +91,11 @@ final class InspectCompletenessRetry {
         if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || chat == null) {
             return new Result(answer, null, null);
         }
+        // Missing evidence cannot reopen an explicit terminal stop or a spent synthesis attempt.
+        if (loopResult.failureDecision().shouldStop()
+                || loopResult.readOnlySynthesisStatus() != ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED) {
+            return new Result(answer, null, null);
+        }
         String userRequest = plan == null ? "" : plan.originalUserRequest();
         TaskContract contract = plan == null ? null : plan.taskContract();
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
@@ -111,12 +121,15 @@ final class InspectCompletenessRetry {
         dev.talos.runtime.TurnExecutionStage priorStage =
                 LocalTurnTraceCapture.currentExecutionStage();
         try {
-            LlmClient.StreamResult retry = chat.chat(retryMessages);
+            LlmClient.StreamResult retry;
+            try (var evidence = loopResult.readOnlyEvidenceHandoff().restoreForRequest(retryMessages, workspace)) {
+                retry = chat.chat(retryMessages);
+            }
             String retryText = retry.text() == null ? "" : retry.text();
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retry.provenance(),
-                        retryMessages, workspace, ctx);
+                        retryMessages, workspace, ctx, loopResult.readOnlyEvidenceHandoff());
                 ToolCallLoop.LoopResult groundedRetryLoop = mergeReadOnlyRetryEvidence(loopResult, retryLoop);
                 String mergedAnswer = retryLoop.finalAnswer();
                 boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
@@ -132,10 +145,12 @@ final class InspectCompletenessRetry {
                 return new Result(
                         emptyFallback ? answer : mergedAnswer,
                         groundedRetryLoop,
-                        groundedRetryLoop == null ? retryLoop.summary() : groundedRetryLoop.summary());
+                        groundedRetryLoop == null ? retryLoop.summary() : groundedRetryLoop.summary(),
+                        emptyFallback || equalFallback ? AnswerOutputLimit.KEEP_ORIGINAL
+                                : AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached()));
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new Result(retryText, null, null);
+                return new Result(retryText, null, null, AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
             restoreOriginalCandidate(
                     originalCandidate,
@@ -200,7 +215,22 @@ final class InspectCompletenessRetry {
                 original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
                 original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
                 retry.failureDecision(),
-                mergedOutcomes);
+                mergedOutcomes,
+                retry.readFileBodies(),
+                retry.finalAnswerOutputLimitReached(),
+                selectedRetrySynthesisStatus(original, retry),
+                retry.readOnlyEvidenceHandoff());
+    }
+
+    static ToolCallLoop.ReadOnlySynthesisStatus selectedRetrySynthesisStatus(
+            ToolCallLoop.LoopResult original, ToolCallLoop.LoopResult retry) {
+        // The retry owns the selected answer. An older accepted candidate cannot
+        // exempt different text from containment, but its attempt must not vanish.
+        if (retry.readOnlySynthesisStatus() != ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED)
+            return retry.readOnlySynthesisStatus();
+        return original.readOnlySynthesisStatus() == ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED
+                ? ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED
+                : ToolCallLoop.ReadOnlySynthesisStatus.REJECTED;
     }
 
     private static List<String> missingPrimaryReads(Path workspace, ToolCallLoop.LoopResult loopResult) {

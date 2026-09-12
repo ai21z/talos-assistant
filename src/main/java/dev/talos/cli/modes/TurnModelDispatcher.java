@@ -386,7 +386,8 @@ final class TurnModelDispatcher {
                 tags,
                 safe.sampling(),
                 safe.maxOutputTokens(),
-                safe.toolAuthorityMode());
+                safe.toolAuthorityMode(),
+                safe.singleAttempt());
     }
 
     private static List<ToolSpec> retryToolSpecs(

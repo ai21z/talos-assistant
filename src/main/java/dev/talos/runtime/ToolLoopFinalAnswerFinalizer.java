@@ -1,8 +1,11 @@
 package dev.talos.runtime;
 
+import dev.talos.core.llm.ProviderInlineHtmlLiteralProjection;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.trace.PromptAuditRedactor;
+import dev.talos.spi.types.ProviderResponseCapture;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -30,9 +33,32 @@ final class ToolLoopFinalAnswerFinalizer {
             boolean contentWithheldFromModelContext,
             List<String> userVisiblePrivacyNotices
     ) {
-        String answer = shouldSuppressUnfinishedToolContinuation(currentText, toolsInvoked)
-                ? unresolvedContinuationFallback()
-                : Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentText));
+        return finalizeAnswer(currentText, toolsInvoked, contentWithheldFromModelContext,
+                userVisiblePrivacyNotices, ProviderResponseCapture.Receipt.none());
+    }
+
+    static String finalizeAnswer(
+            String currentText,
+            int toolsInvoked,
+            boolean contentWithheldFromModelContext,
+            List<String> userVisiblePrivacyNotices,
+            ProviderResponseCapture.Receipt receipt
+    ) {
+        String answer;
+        if (shouldSuppressUnfinishedToolContinuation(currentText, toolsInvoked)) {
+            answer = unresolvedContinuationFallback();
+        } else {
+            String withoutTools = ToolCallParser.stripToolCalls(currentText);
+            answer = Sanitize.stripSuspiciousHtml(withoutTools);
+            // This is only preservation of an exact, already selected provider
+            // answer. Any tool removal/layout change, absent or detached receipt,
+            // non-EOS response or changed text retains the existing finalizer.
+            if (currentText != null && withoutTools.equals(currentText)
+                    && receipt != null && receipt.providerTerminalEligible()
+                    && receipt.assistantHash().equals(PromptAuditRedactor.hash(currentText))) {
+                answer = ProviderInlineHtmlLiteralProjection.preserveIfInert(currentText, answer);
+            }
+        }
         String safeAnswer = contentWithheldFromModelContext
                 ? ProtectedContentPolicy.sanitizeText(answer)
                 : answer;

@@ -6,6 +6,7 @@ import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
+import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -29,6 +30,12 @@ public final class ProtectedPathPolicy {
 
     public static List<ResourceDecision> classifyAll(Path workspace, ToolCall call) {
         if (call == null) return List.of(ResourceDecision.noPath());
+        // A command's authority is its profile, not arbitrary unused file-path
+        // parameters. Those must not satisfy file ALLOW rules or write memory.
+        // The command planner independently validates the actual working directory.
+        if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
+            return List.of(ResourceDecision.noPath());
+        }
         var decisions = new java.util.ArrayList<ResourceDecision>();
         if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {

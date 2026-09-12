@@ -143,6 +143,9 @@ public final class FileEditTool implements TalosTool {
         }
 
         // --- Read, validate uniqueness, replace ---
+        String effectPath = ctx.workspace().toAbsolutePath().normalize()
+                .relativize(resolved.toAbsolutePath().normalize()).toString();
+        ToolMutationEffects effects = ToolMutationEffects.none();
         try {
             AtomicFileWriter.ReadSnapshot snapshot = atomicFileWriter.readSnapshot(resolved);
             byte[] sourceBytes = snapshot.bytes();
@@ -186,6 +189,7 @@ public final class FileEditTool implements TalosTool {
                     resolved,
                     StrictUtf8.encode(updated),
                     snapshot.preimage());
+            effects = ToolMutationEffects.applied(effectPath);
 
             // Report what changed
             long oldLines = oldString.chars().filter(c -> c == '\n').count() + 1;
@@ -195,9 +199,11 @@ public final class FileEditTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, updated);
-            return FileVerificationToolResult.from(base, vr);
+            return FileVerificationToolResult.from(base, vr)
+                    .withMutationEffects(effects);
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()));
+            return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()))
+                    .withMutationEffects(effects.plus(FileVerificationToolResult.failedWriteEffects(e, effectPath)));
         }
     }
 

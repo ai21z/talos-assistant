@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolMutationEffects;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.ArrayList;
@@ -113,15 +114,22 @@ public final class TurnAuditCapture {
             List<String> pathHints,
             boolean success,
             String reason) {
+        recordExecutedToolCall(call, pathHints, success, reason, ToolMutationEffects.none());
+    }
+
+    public static void recordExecutedToolCall(
+            ToolCall call, List<String> pathHints, boolean success, String reason,
+            ToolMutationEffects effects) {
         String primary = pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
         recordToolCallSummary(
                 call == null ? "" : call.toolName(),
                 primary,
                 pathHints,
                 success,
-                reason);
+                reason,
+                effects);
         LocalTurnTraceCapture.recordToolExecuted(
-                "", call, success, reason == null ? "" : reason.strip(), pathHints);
+                "", call, success, reason == null ? "" : reason.strip(), pathHints, effects);
     }
 
     private static void recordToolCall(
@@ -178,10 +186,16 @@ public final class TurnAuditCapture {
             boolean success,
             String reason
     ) {
+        return recordToolCallSummary(name, pathHint, pathHints, success, reason, ToolMutationEffects.none());
+    }
+
+    private static boolean recordToolCallSummary(
+            String name, String pathHint, List<String> pathHints, boolean success,
+            String reason, ToolMutationEffects effects) {
         Bag b = HOLDER.get();
         if (b == null) return false;
         String normalizedReason = reason == null ? "" : reason.strip();
-        b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason));
+        b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason, effects));
         if (!success && !normalizedReason.isBlank()) {
             b.policyBlocks.add(normalizedReason);
         }

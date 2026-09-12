@@ -16,6 +16,13 @@ public final class ToolCallRepromptStage {
     private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (state.toolOutcomes.stream().anyMatch(result -> result.mutating() && !result.success()
+                && result.mutationEffects().hasEffects())) {
+            FailureDecision decision = FailureDecision.stop(FailureAction.ASK_USER,
+                    "Mutation execution failed after applied or uncertain effects; automatic recovery is stopped.");
+            state.stopWithFailure(decision, ToolFailurePolicyStopAnswer.render(state, decision));
+            return false;
+        }
         if (outcome != null
                 && outcome.executionAuthorityRejectedThisIteration()) {
             FailureDecision decision = FailureDecision.stop(
@@ -60,10 +67,19 @@ public final class ToolCallRepromptStage {
             return staleRereadStop.get();
         }
 
+        Optional<Boolean> readOnlySynthesis = ReadOnlyEvidenceSynthesizer.tryHandle(state, outcome);
+        if (readOnlySynthesis.isPresent()) return readOnlySynthesis.get();
+
         TerminalReadOnlyStopAnswer.Answer terminalReadOnlyAnswer =
                 TerminalReadOnlyStopAnswer.select(state, outcome);
         if (terminalReadOnlyAnswer != null) {
-            state.finishWithToolAnswer(terminalReadOnlyAnswer.text());
+            if (terminalReadOnlyAnswer.synthesisIncomplete()) {
+                state.stopWithFailure(dev.talos.runtime.failure.FailureDecision.stop(
+                        dev.talos.runtime.failure.FailureAction.ASK_USER,
+                        TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON), terminalReadOnlyAnswer.text());
+            } else {
+                state.finishWithToolAnswer(terminalReadOnlyAnswer.text());
+            }
             LOG.debug(terminalReadOnlyAnswer.logMessage());
             return false;
         }
@@ -106,6 +122,9 @@ public final class ToolCallRepromptStage {
             return false;
         }
 
+        Optional<Boolean> pendingDiagnosisReads = ReadOnlyEvidenceContinuation.tryHandle(state);
+        if (pendingDiagnosisReads.isPresent()) return pendingDiagnosisReads.get();
+
         if (state.iterations >= 3) {
             ToolCallSupport.compactOlderToolResultsInPlace(
                     state.messages, state.compactedToolResultOriginals);
@@ -139,7 +158,7 @@ public final class ToolCallRepromptStage {
     }
 
     public boolean hitIterationLimit(LoopState state) {
-        return state.iterations >= state.maxIterations
+        return state.readOnlySynthesisAtLimit || state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
     }
 

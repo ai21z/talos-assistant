@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -14,8 +15,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +30,124 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualificationProcessCleanupTest {
 
     private static final Duration NO_WAIT = Duration.ZERO;
+
+    @Test
+    void nativeDeadRootCannotAdoptMisleadingLiveDescendants() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+        root.alive = false;
+        // The numeric handle deliberately looks live: it is not the owned Process.
+        assertTrue(root.rootHandle.isAlive());
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(0, root.descendantCalls);
+        assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome());
+        assertRejectedNativeDescendant(root, result);
+        assertEquals("", root.inputText());
+    }
+
+    @Test
+    void nativeRootExitDuringDiscoveryDiscardsNewDescendants() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+        root.afterDiscovery = () -> root.alive = false;
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(1, root.descendantCalls);
+        assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome());
+        assertRejectedNativeDescendant(root, result);
+        assertEquals("", root.inputText());
+    }
+
+    @Test
+    void nativeRootStartChangeDuringDiscoveryDiscardsNewDescendants() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+        root.afterDiscovery = () -> root.rootHandle.started = root.rootHandle.started.plusSeconds(1);
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(1, root.descendantCalls);
+        assertEquals(QualificationProcessCleanup.Outcome.GRACEFUL, result.outcome());
+        assertRejectedNativeDescendant(root, result);
+    }
+
+    @Test
+    void nativeMissingRootStartDoesNotEnumerateDescendants() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+        root.rootHandle.started = null;
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(0, root.descendantCalls);
+        assertEquals(QualificationProcessCleanup.Outcome.GRACEFUL, result.outcome());
+        assertRejectedNativeDescendant(root, result);
+    }
+
+    @Test
+    void nativeMissingOrPredatingChildStartDoesNotAuthorizeTermination() {
+        for (boolean missing : List.of(true, false)) {
+            NativeCleanupProcess root = new NativeCleanupProcess();
+            root.child.started = missing ? null : root.rootHandle.started.minusSeconds(1);
+
+            QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+            assertEquals(1, root.descendantCalls);
+            assertEquals(QualificationProcessCleanup.Outcome.GRACEFUL, result.outcome());
+            assertRejectedNativeDescendant(root, result);
+        }
+    }
+
+    @Test
+    void nativeLiveRootCapturesChildBeforeGracefulExitAndStopsIt() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(1, root.descendantCalls);
+        assertEquals("/exit\r", root.inputText());
+        assertEquals(QualificationProcessCleanup.Outcome.TERMINATED, result.outcome());
+        assertEquals(List.of(root.child.pid()), result.capturedDescendantPids());
+        assertEquals(List.of(root.child.pid()), result.normalStopPids());
+        assertTrue(result.forcedStopPids().isEmpty());
+        assertTrue(result.survivingPids().isEmpty());
+        assertTrue(result.errors().isEmpty());
+        assertEquals(1, root.child.destroyCalls);
+        assertEquals(0, root.child.forceCalls);
+        assertEquals(0, root.destroyCalls + root.forceCalls);
+        assertFalse(root.child.isAlive());
+        assertFalse(root.isAlive());
+    }
+
+    @Test
+    void nativeCapturedChildIdentityChangeBeforeStopFailsClosed() {
+        NativeCleanupProcess root = new NativeCleanupProcess();
+        root.afterExitCommand = () -> root.child.started = root.child.started.plusSeconds(1);
+
+        QualificationProcessCleanup.Result result = nativeCleanup(root);
+
+        assertEquals(QualificationProcessCleanup.Outcome.FAILED, result.outcome());
+        assertEquals(List.of(root.child.pid()), result.capturedDescendantPids());
+        assertEquals(List.of(root.child.pid()), result.survivingPids());
+        assertTrue(result.errors().stream().anyMatch(error -> error.contains("identity changed")));
+        assertTrue(result.normalStopPids().isEmpty());
+        assertTrue(result.forcedStopPids().isEmpty());
+        assertEquals(0, root.child.destroyCalls + root.child.forceCalls);
+        assertTrue(root.child.isAlive());
+    }
+
+    private static QualificationProcessCleanup.Result nativeCleanup(NativeCleanupProcess root) {
+        // Null notBefore disables campaign discovery before any platform query.
+        return QualificationProcessCleanup.stop(root, null, null, 0, null);
+    }
+
+    private static void assertRejectedNativeDescendant(
+            NativeCleanupProcess root, QualificationProcessCleanup.Result result) {
+        assertTrue(result.capturedDescendantPids().isEmpty());
+        assertTrue(result.normalStopPids().isEmpty());
+        assertTrue(result.forcedStopPids().isEmpty());
+        assertEquals(0, root.child.destroyCalls + root.child.forceCalls);
+        assertTrue(root.child.isAlive());
+    }
 
     @Test
     void absentCampaignListenerIsVerifiedCleanState() throws Exception {
@@ -282,6 +405,104 @@ class QualificationProcessCleanupTest {
             assumeTrue(false, "symbolic-link fixture unavailable: "
                     + unavailable.getClass().getSimpleName());
         }
+    }
+
+    private static final class NativeCleanupProcess extends Process {
+        private final FakeNativeHandle rootHandle = new FakeNativeHandle(
+                900L, Instant.parse("2026-09-05T00:00:00Z"));
+        private final FakeNativeHandle child = new FakeNativeHandle(
+                901L, rootHandle.started.plusSeconds(1));
+        private final ByteArrayOutputStream input = new ByteArrayOutputStream();
+        private boolean alive = true;
+        private int descendantCalls;
+        private int destroyCalls;
+        private int forceCalls;
+        private Runnable afterDiscovery = () -> {};
+        private Runnable afterExitCommand = () -> {};
+
+        @Override public long pid() { return rootHandle.pid(); }
+        @Override public boolean isAlive() { return alive; }
+        @Override public ProcessHandle toHandle() { return rootHandle; }
+        @Override public Stream<ProcessHandle> descendants() {
+            descendantCalls++;
+            return Stream.<ProcessHandle>of(child).onClose(afterDiscovery);
+        }
+        @Override public InputStream getInputStream() { return InputStream.nullInputStream(); }
+        @Override public InputStream getErrorStream() { return InputStream.nullInputStream(); }
+        @Override public OutputStream getOutputStream() {
+            return new OutputStream() {
+                @Override public void write(int value) { input.write(value); }
+                @Override public void flush() {
+                    alive = false;
+                    rootHandle.alive = false;
+                    afterExitCommand.run();
+                }
+            };
+        }
+        @Override public int waitFor() { return 0; }
+        @Override public boolean waitFor(long timeout, TimeUnit unit) { return !alive; }
+        @Override public int exitValue() {
+            if (alive) throw new IllegalThreadStateException("synthetic process is alive");
+            return 0;
+        }
+        @Override public void destroy() {
+            destroyCalls++;
+            alive = false;
+            rootHandle.alive = false;
+        }
+        @Override public Process destroyForcibly() {
+            forceCalls++;
+            alive = false;
+            rootHandle.alive = false;
+            return this;
+        }
+        private String inputText() { return input.toString(StandardCharsets.UTF_8); }
+    }
+
+    private static final class FakeNativeHandle implements ProcessHandle {
+        private final long pid;
+        private Instant started;
+        private boolean alive = true;
+        private int destroyCalls;
+        private int forceCalls;
+
+        private FakeNativeHandle(long pid, Instant started) {
+            this.pid = pid;
+            this.started = started;
+        }
+
+        @Override public long pid() { return pid; }
+        @Override public boolean isAlive() { return alive; }
+        @Override public Optional<ProcessHandle> parent() { return Optional.empty(); }
+        @Override public Stream<ProcessHandle> children() { return Stream.empty(); }
+        @Override public Stream<ProcessHandle> descendants() { return Stream.empty(); }
+        @Override public Info info() {
+            Instant capturedStart = started;
+            return new Info() {
+                @Override public Optional<String> command() { return Optional.empty(); }
+                @Override public Optional<String> commandLine() { return Optional.empty(); }
+                @Override public Optional<String[]> arguments() { return Optional.empty(); }
+                @Override public Optional<Instant> startInstant() { return Optional.ofNullable(capturedStart); }
+                @Override public Optional<Duration> totalCpuDuration() { return Optional.empty(); }
+                @Override public Optional<String> user() { return Optional.empty(); }
+            };
+        }
+        @Override public CompletableFuture<ProcessHandle> onExit() {
+            // Deterministic non-blocking wait model; the caller separately checks alive.
+            return CompletableFuture.completedFuture(this);
+        }
+        @Override public boolean supportsNormalTermination() { return true; }
+        @Override public boolean destroy() {
+            destroyCalls++;
+            alive = false;
+            return true;
+        }
+        @Override public boolean destroyForcibly() {
+            forceCalls++;
+            alive = false;
+            return true;
+        }
+        @Override public int compareTo(ProcessHandle other) { return Long.compare(pid, other.pid()); }
     }
 
     private static final class FakeTarget implements QualificationProcessCleanup.Target {

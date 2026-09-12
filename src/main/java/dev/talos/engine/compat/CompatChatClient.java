@@ -11,6 +11,7 @@ import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportTokenStream;
@@ -53,6 +54,9 @@ import java.util.stream.StreamSupport;
 public final class CompatChatClient {
     static final String PROVIDER_BODY_STAGE = "COMPAT_CHAT_HTTP_BODY";
 
+    /** Provider-local compatibility selected from the prepared engine identity, never model output. */
+    public enum NativeToolPrefill { NONE, QWEN25_REQUIRED }
+
     private static final Logger LOG = LoggerFactory.getLogger(CompatChatClient.class);
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
     private static final Pattern CONTEXT_SIZE_PATTERN = Pattern.compile(
@@ -86,9 +90,17 @@ public final class CompatChatClient {
             ChatRequest request,
             RequestMessageLayout layout,
             ProviderTransportHandoff handoff) throws Exception {
+        return chat(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public String chat(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
-        String json = mapper.writeValueAsString(buildBody(req, false, selected));
+        String json = mapper.writeValueAsString(buildBody(req, false, selected, prefill));
         recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
@@ -137,9 +149,17 @@ public final class CompatChatClient {
             ChatRequest request,
             RequestMessageLayout layout,
             ProviderTransportHandoff handoff) throws Exception {
+        return chatStream(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
-        String json = mapper.writeValueAsString(buildBody(req, true, selected));
+        String json = mapper.writeValueAsString(buildBody(req, true, selected, prefill));
         recordProviderBody(req, true, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, true)
@@ -199,9 +219,17 @@ public final class CompatChatClient {
             ChatRequest request,
             RequestMessageLayout layout,
             ProviderTransportHandoff handoff) throws Exception {
+        return chatStreamNonStreaming(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
-        String json = mapper.writeValueAsString(buildBody(req, false, selected));
+        String json = mapper.writeValueAsString(buildBody(req, false, selected, prefill));
         recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
@@ -241,11 +269,28 @@ public final class CompatChatClient {
             ChatRequest req,
             boolean stream,
             RequestMessageLayout layout) {
+        return buildBody(req, stream, layout, NativeToolPrefill.NONE);
+    }
+
+    Map<String, Object> buildBody(
+            ChatRequest req,
+            boolean stream,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill) {
         String model = req.model == null || req.model.isBlank() ? defaultModel : req.model;
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", serializeMessages(req, safeLayout(layout)));
+        List<Map<String, Object>> messages = serializeMessages(req, safeLayout(layout));
+        body.put("messages", messages);
         body.put("stream", stream);
+
+        if (shouldPrefillNativeToolCall(req, messages, prefill)) {
+            // Only the serialized provider body gains a format prefix. Logical history,
+            // tool names, arguments and execution authority are not supplied or changed.
+            messages.add(serializeMessage(ChatMessage.assistant("<tool_call>\n")));
+            body.put("continue_final_message", "content");
+            body.put("add_generation_prompt", false);
+        }
 
         List<Map<String, Object>> tools = convertToolSpecs(req.tools);
         if (!tools.isEmpty()) {
@@ -275,6 +320,35 @@ public final class CompatChatClient {
         }
 
         return body;
+    }
+
+    private static boolean shouldPrefillNativeToolCall(
+            ChatRequest req,
+            List<Map<String, Object>> messages,
+            NativeToolPrefill prefill) {
+        if (prefill != NativeToolPrefill.QWEN25_REQUIRED
+                || req.tools.isEmpty()
+                || req.controls.toolAuthorityMode() != ToolAuthorityMode.PROVIDER_NATIVE
+                || req.controls.responseFormat() != ResponseFormatMode.TEXT
+                || messages.isEmpty()) {
+            return false;
+        }
+        ToolChoiceMode choice = req.controls.toolChoice();
+        if (choice != ToolChoiceMode.REQUIRED && choice != ToolChoiceMode.NAMED) {
+            return false;
+        }
+        if (choice == ToolChoiceMode.NAMED
+                && (req.tools.size() != 1
+                || !req.controls.namedTool().equals(req.tools.getFirst().name()))) {
+            return false;
+        }
+        Map<String, Object> last = messages.getLast();
+        if (last.containsKey("tool_calls")) {
+            return false;
+        }
+        return "user".equals(last.get("role"))
+                || "tool".equals(last.get("role"))
+                && last.get("tool_call_id") instanceof String id && !id.isBlank();
     }
 
     List<Map<String, Object>> convertToolSpecs(List<ToolSpec> specs) {

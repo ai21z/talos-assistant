@@ -474,14 +474,31 @@ final class QualificationProcessCleanup {
 
         @Override
         public List<Target> descendants() {
+            // A fresh numeric-PID snapshot cannot establish ownership after the
+            // native Process exits. Bind discovery to this still-live root.
+            if (!process.isAlive()) return List.of();
+            ProcessHandle root = process.toHandle();
+            Instant rootStart = root.info().startInstant().orElse(null);
+            if (rootStart == null || !root.isAlive()) return List.of();
+            List<Target> captured;
             try (var handles = process.descendants()) {
-                return handles
-                        .map(handle -> new HandleTarget(
-                                handle, handle.info().startInstant().orElse(null)))
+                captured = handles
+                        .map(handle -> {
+                            Instant started = handle.info().startInstant().orElse(null);
+                            if (handle.pid() == root.pid() || !handle.isAlive()
+                                    || started == null || started.isBefore(rootStart)) return null;
+                            return new HandleTarget(handle, started);
+                        })
+                        .filter(java.util.Objects::nonNull)
                         .sorted(Comparator.comparingLong(Target::pid))
                         .map(target -> (Target) target)
                         .toList();
             }
+            // Closing the snapshot and rechecking the owned Process prevents
+            // mid-enumeration exit/replacement from authorizing new descendants.
+            return process.isAlive() && root.isAlive()
+                    && root.info().startInstant().filter(rootStart::equals).isPresent()
+                    ? captured : List.of();
         }
 
         @Override public OutputStream input() { return process.getOutputStream(); }

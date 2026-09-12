@@ -28,6 +28,10 @@ public final class LoopState {
     public String currentText;
     public List<NativeToolCall> currentNativeCalls;
     public ProviderResponseCapture.Receipt currentResponseReceipt;
+    public boolean currentAnswerOutputLimitReached;
+    public dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus readOnlySynthesisStatus =
+            dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED;
+    public boolean readOnlySynthesisAtLimit;
     public LocalTurnTraceCapture.ToolCallSource currentToolCallSource;
     public LocalTurnTraceCapture.RuntimeToolAuthorityReason currentRuntimeToolAuthorityReason;
 
@@ -106,6 +110,8 @@ public final class LoopState {
                 ? ProviderResponseCapture.Receipt.none()
                 : initialResponseReceipt;
         this.currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE;
+        this.currentAnswerOutputLimitReached = this.currentResponseReceipt.completion()
+                == ProviderResponseCapture.Completion.PROVIDER_LENGTH;
         this.currentRuntimeToolAuthorityReason =
                 LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         this.messages = messages;
@@ -115,6 +121,11 @@ public final class LoopState {
         this.toolSession = toolSession;
         this.maxIterations = maxIterations;
         this.aliasRescueBaseline = aliasRescueBaseline;
+    }
+
+    /** Revalidates an opaque same-turn handoff before the first nested-loop operation. */
+    public void seedReadOnlyEvidence(ReadOnlyEvidenceHandoff handoff) {
+        if (handoff != null) handoff.seed(this);
     }
 
     public void setPendingActionObligation(PendingActionObligation obligation) {
@@ -149,6 +160,7 @@ public final class LoopState {
     }
 
     public void finishWithAnswer(String answer) {
+        currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
@@ -172,6 +184,8 @@ public final class LoopState {
         currentResponseReceipt = receipt == null
                 ? ProviderResponseCapture.Receipt.none()
                 : receipt;
+        currentAnswerOutputLimitReached = currentResponseReceipt.completion()
+                == ProviderResponseCapture.Completion.PROVIDER_LENGTH;
         currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE;
         currentRuntimeToolAuthorityReason =
                 LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
@@ -182,6 +196,7 @@ public final class LoopState {
     }
 
     public void finishWithToolAnswer(String answer) {
+        currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
@@ -192,6 +207,7 @@ public final class LoopState {
     }
 
     public void finishWithOperatorAnswer(String answer) {
+        currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
@@ -212,6 +228,7 @@ public final class LoopState {
     }
 
     public void applyProviderResult(dev.talos.core.llm.LlmClient.StreamResult result) {
+        currentAnswerOutputLimitReached = result != null && result.outputLimitReached();
         currentText = result == null ? "" : result.text();
         currentNativeCalls = result == null ? List.of() : result.toolCalls();
         currentResponseReceipt = result == null
@@ -227,6 +244,7 @@ public final class LoopState {
             List<NativeToolCall> nativeCalls,
             LocalTurnTraceCapture.RuntimeToolAuthorityReason reason
     ) {
+        currentAnswerOutputLimitReached = false;
         currentText = text == null ? "" : text;
         currentNativeCalls = nativeCalls == null ? List.of() : List.copyOf(nativeCalls);
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();

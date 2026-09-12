@@ -221,6 +221,7 @@ public final class WorkspaceTargetReconciler {
             String conventional,
             String observedAlternate
     ) {
+        if (explicitReadOnlyPair(contract, conventional, observedAlternate)) return false;
         if (!containsTarget(expected, conventional) && !containsTarget(expected, observedAlternate)) {
             return false;
         }
@@ -252,6 +253,7 @@ public final class WorkspaceTargetReconciler {
             String conventional,
             String observedAlternate
     ) {
+        if (explicitReadOnlyPair(contract, conventional, observedAlternate)) return false;
         if (!containsTarget(expected, conventional)) {
             return false;
         }
@@ -284,6 +286,14 @@ public final class WorkspaceTargetReconciler {
             return true;
         }
         return false;
+    }
+
+    private static boolean explicitReadOnlyPair(TaskContract contract, String first, String second) {
+        // Linkage may select an inferred asset, but is not authority to rename a
+        // user's read target. Mutation-target reconciliation is deliberately unchanged.
+        if (contract == null || contract.mutationRequested() || contract.mutationAllowed()) return false;
+        Set<String> named = TaskContractResolver.extractExpectedTargets(contract.originalUserRequest());
+        return containsTarget(named, first) || containsTarget(named, second);
     }
 
     private static String linkedPairTarget(

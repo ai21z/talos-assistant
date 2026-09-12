@@ -29,8 +29,13 @@ final class ReadEvidenceHandoff {
     record Result(
             String answer,
             ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
+            String extraSummary,
+            AnswerOutputLimit outputLimit
+    ) {
+        Result(String answer, ToolCallLoop.LoopResult loopResult, String extraSummary) {
+            this(answer, loopResult, extraSummary, AnswerOutputLimit.KEEP_ORIGINAL);
+        }
+    }
 
     static Result unsupportedCapabilityPreflightIfNeeded(
             List<ChatMessage> messages,
@@ -111,7 +116,9 @@ final class ReadEvidenceHandoff {
             return new Result(
                     mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
                     loop,
-                    loop.summary());
+                    loop.summary(),
+                    mergedAnswer == null || mergedAnswer.isBlank() ? AnswerOutputLimit.KEEP_ORIGINAL
+                            : AnswerOutputLimit.selected(loop.finalAnswerOutputLimitReached()));
         } catch (Exception e) {
             if (dev.talos.runtime.TurnFailureClassifier.isCancellation(e)
                     || dev.talos.runtime.TurnFailureClassifier.isInterruption(e)) {

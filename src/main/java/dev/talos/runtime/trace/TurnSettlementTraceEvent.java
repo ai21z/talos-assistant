@@ -152,7 +152,7 @@ public final class TurnSettlementTraceEvent {
             case ENGINE_RESPONSE_ERROR -> code >= 100 && code <= 599;
             case TIMEOUT -> code == 408;
             case VALIDATION -> code == 400;
-            case CANCELLATION, INTERRUPTION, UNEXPECTED -> code == 500;
+            case REPETITION_LOOP, CANCELLATION, INTERRUPTION, UNEXPECTED -> code == 500;
         };
     }
 

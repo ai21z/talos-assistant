@@ -160,9 +160,8 @@ public final class TalosBootstrap {
         // an approval prompt.
         var workspaceProfilesLoaded = WorkspaceCommandProfilesLoader.load(workspace);
         var profileTrustStore = new WorkspaceProfileTrustStore();
-        var profileTrustState = profileTrustStore.state(workspace, workspaceProfilesLoaded);
         CommandProfileRegistry commandProfiles = CommandProfileRegistry.defaultRegistry()
-                .withWorkspaceDeclaration(workspaceProfilesLoaded.profiles(), profileTrustState);
+                .withWorkspaceDeclaration(workspace, workspaceProfilesLoaded, profileTrustStore);
 
         // ── Tools ────────────────────────────────────────────────────────
         ToolRegistry toolRegistry = new ToolRegistry();
@@ -756,6 +755,8 @@ public final class TalosBootstrap {
         }
         memory.setActiveTaskContext(data.activeTaskContext());
         memory.setArtifactGoal(data.artifactGoal());
+        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(
+                store.loadTurns(sessionId)));
         return new RestoreSummary(pairs, data.createdAt(), data.model(), pairs > 0 || hasSavedActiveContext(data));
     }
 
@@ -788,6 +789,7 @@ public final class TalosBootstrap {
     static int replayTurnLog(SessionStore store, String sessionId, SessionMemory memory) {
         var records = store.loadTurns(sessionId);
         if (records == null || records.isEmpty()) return 0;
+        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(records));
         int replayed = 0;
         for (var rec : records) {
             if (!isReplayableTurnRecord(rec)) continue;

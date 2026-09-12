@@ -194,7 +194,8 @@ final class ToolOutcomeFactory {
                         ? ToolFailureReason.NONE
                         : result.error().reason(),
                 evidenceSourcePaths(call, pathHint, result),
-                toolCallId(permit));
+                toolCallId(permit),
+                result == null ? null : result.mutationEffects());
     }
 
     private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {

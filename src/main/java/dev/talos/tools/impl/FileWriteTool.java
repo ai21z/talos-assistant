@@ -112,6 +112,10 @@ public final class FileWriteTool implements TalosTool {
                     UnsupportedDocumentFormats.writeCapabilityMessage(resolved)));
         }
 
+        ToolMutationEffects effects = ToolMutationEffects.none();
+        String effectPath = ctx.workspace().toAbsolutePath().normalize()
+                .relativize(resolved.toAbsolutePath().normalize()).toString();
+        String parentCreationAttempt = null;
         try {
             // Create parent directories if needed
             Path parent = resolved.getParent();
@@ -121,7 +125,11 @@ public final class FileWriteTool implements TalosTool {
                     return ToolResult.fail(ToolError.invalidParams(
                             "Parent directory not allowed: " + ctx.sandbox().explain(parent)));
                 }
+                parentCreationAttempt = ctx.workspace().toAbsolutePath().normalize()
+                        .relativize(parent.toAbsolutePath().normalize()).toString();
                 Files.createDirectories(parent);
+                effects = effects.plus(ToolMutationEffects.applied(parentCreationAttempt));
+                parentCreationAttempt = null;
             }
 
             AtomicFileWriter.Preimage preimage = atomicFileWriter.capture(resolved);
@@ -133,6 +141,7 @@ public final class FileWriteTool implements TalosTool {
                     resolved,
                     StrictUtf8.encode(content),
                     preimage);
+            effects = ToolMutationEffects.applied(effectPath).plus(effects);
 
             long lines = content.chars().filter(c -> c == '\n').count() + (content.isEmpty() ? 0 : 1);
             String verb = existed ? "Updated" : "Created";
@@ -140,9 +149,14 @@ public final class FileWriteTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, content);
-            return FileVerificationToolResult.from(base, vr);
+            return FileVerificationToolResult.from(base, vr).withMutationEffects(effects);
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()));
+            effects = FileVerificationToolResult.failedWriteEffects(e, effectPath).plus(effects);
+            if (parentCreationAttempt != null) {
+                effects = effects.plus(ToolMutationEffects.uncertain(parentCreationAttempt));
+            }
+            return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()))
+                    .withMutationEffects(effects);
         }
     }
 

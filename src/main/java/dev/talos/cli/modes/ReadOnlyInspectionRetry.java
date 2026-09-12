@@ -35,8 +35,13 @@ final class ReadOnlyInspectionRetry {
     record Result(
             String answer,
             ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
+            String extraSummary,
+            AnswerOutputLimit outputLimit
+    ) {
+        Result(String answer, ToolCallLoop.LoopResult loopResult, String extraSummary) {
+            this(answer, loopResult, extraSummary, AnswerOutputLimit.KEEP_ORIGINAL);
+        }
+    }
 
     static Result retryIfNeeded(
             String answer,
@@ -88,7 +93,9 @@ final class ReadOnlyInspectionRetry {
                 return new Result(
                         emptyFallback ? answer : mergedAnswer,
                         retryLoop,
-                        retryLoop.summary());
+                        retryLoop.summary(),
+                        emptyFallback || equalFallback ? AnswerOutputLimit.KEEP_ORIGINAL
+                                : AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached()));
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
                 String stripped = ToolCallParser.stripToolCalls(retryText);
@@ -102,7 +109,8 @@ final class ReadOnlyInspectionRetry {
                             stripped,
                             LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
                 }
-                return new Result(stripped, null, null);
+                return new Result(stripped, null, null, stripped.equals(answer)
+                        ? AnswerOutputLimit.KEEP_ORIGINAL : AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
             restoreOriginalCandidate(
                     originalCandidate,

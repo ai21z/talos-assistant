@@ -29,6 +29,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,6 +50,155 @@ class InspectCompletenessRetryTest {
     void clearTrace() {
         LocalTurnTraceCapture.clear();
         TurnTaskContractCapture.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void verificationDiagnosisRetainsReadBodiesAcrossGenericRetryAndRecompactsOnFailure(boolean failRetry)
+            throws Exception {
+        beginTrace("cross-loop-read-evidence-" + failRetry);
+        Path workspace = lineageWorkspace;
+        Map<String, String> bodies = Map.of(
+                "README.md", "README_EVIDENCE says script.js is loaded.\n",
+                "index.html", "<button id=\"calculate\">INDEX_EVIDENCE</button><script src=\"script.js\"></script>\n",
+                "script.js", "const SCRIPT_EVIDENCE = document.querySelector('#calc');\n",
+                "scripts.js", "const SCRIPTS_EVIDENCE = 'not loaded';\n");
+        for (var entry : bodies.entrySet()) Files.writeString(workspace.resolve(entry.getKey()), entry.getValue());
+        String request = "Read README.md, index.html, script.js and scripts.js. Explain why the Calculate "
+                + "button fails, give the correct selector and the BMI for 72 kg and 1.8 m, and distinguish "
+                + "the two JavaScript files. Do not edit files or claim tests were run.";
+        // Explicit verification stays outside the new non-verifying REQUIRED-read continuation.
+        // Preserve coverage of the generic retry's real compaction and cross-loop evidence handoff.
+        var contract = new TaskContract(TaskType.DIAGNOSE_ONLY, false, false, true,
+                bodies.keySet(), java.util.Set.of(), request);
+        var plan = plan(contract);
+        var messages = messages(request);
+        TurnTaskContractCapture.set(contract);
+        List<ChatMessage.NativeToolCall> firstReads = List.of("README.md", "index.html", "script.js").stream()
+                .map(path -> new ChatMessage.NativeToolCall("original-" + path, "talos.read_file",
+                        Map.<String, Object>of("path", path))).toList();
+        String early = "script.js selects #calc, but index.html defines #calculate. Read the remaining sentinel.";
+        String finalAnswer = "README.md identifies script.js as loaded. index.html defines #calculate, "
+                + "not #calc. scripts.js is the unrelated sentinel. BMI is 22.2. No files edited or tests run.\n\n"
+                + "```html\n<button id=\"calculate\">Calculate</button>\n```";
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                new LlmClient.StreamResult("", List.of(firstReads.get(0))),
+                new LlmClient.StreamResult("", List.of(firstReads.get(1))),
+                new LlmClient.StreamResult("", List.of(firstReads.get(2))),
+                new LlmClient.StreamResult(early, List.of()),
+                new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                        "missing-scripts", "talos.read_file", Map.of("path", "scripts.js")))),
+                new LlmClient.StreamResult(finalAnswer, List.of())), 16_384);
+        try (LlmClient llm = recorded.client()) {
+            Context ctx = providerContext(workspace, llm);
+            var initial = TurnModelDispatcher.dispatchBuffered(ctx, messages, plan);
+            var original = ctx.toolCallLoop().run(initial.text(), initial.toolCalls(), initial.provenance(),
+                    messages, workspace, ctx);
+            assertEquals(3, original.toolsInvoked());
+            assertEquals(List.of("scripts.js"), InspectCompletenessRetry.missingReads(workspace, plan, original));
+            var before = List.copyOf(messages);
+            var readme = messages.stream().filter(m -> "original-README.md".equals(m.toolCallId())).findFirst().orElseThrow();
+            assertTrue(readme.content().startsWith("[compacted:"), "fixture must cross the real compaction boundary");
+            AtomicReference<List<ChatMessage>> retryCarrier = new AtomicReference<>();
+            var result = InspectCompletenessRetry.retryIfNeeded(early, messages, plan, original, workspace, ctx,
+                    sent -> {
+                        retryCarrier.set(sent);
+                        assertEvidenceBodies(sent, List.of("README_EVIDENCE", "INDEX_EVIDENCE", "SCRIPT_EVIDENCE"));
+                        assertEquals(3, sent.stream().filter(m -> "tool".equals(m.role())).count());
+                        if (failRetry) throw new IllegalStateException("bounded fixture failure");
+                        return TurnModelDispatcher.dispatchBuffered(ctx, sent, plan);
+                    });
+            assertEquals(before, messages, "the caller history must not become permanently expanded");
+            assertTrue(retryCarrier.get().stream().filter(m -> "original-README.md".equals(m.toolCallId()))
+                    .findFirst().orElseThrow().content().startsWith("[compacted:"));
+            if (failRetry) {
+                assertEquals(early, result.answer());
+                assertNull(result.loopResult());
+                assertEquals(4, recorded.requests().size());
+            } else {
+                assertEquals(finalAnswer, result.answer());
+                assertEquals(4, result.loopResult().toolsInvoked(), "prior reads are imported, never rerun or double-counted");
+                assertEquals(4, result.loopResult().toolOutcomes().size());
+                assertEquals(bodies.keySet(), java.util.Set.copyOf(result.loopResult().readPaths()));
+                assertEquals(bodies.keySet(), result.loopResult().readFileBodies().keySet());
+                assertEquals(6, recorded.requests().size());
+                var finalRequest = recorded.requests().getLast().messages;
+                assertEvidenceBodies(finalRequest, List.of("README_EVIDENCE", "INDEX_EVIDENCE", "SCRIPT_EVIDENCE", "SCRIPTS_EVIDENCE"));
+                assertEquals(4, finalRequest.stream().filter(m -> "tool".equals(m.role())).count());
+                for (var call : firstReads) {
+                    assertEquals(1, finalRequest.stream().filter(m -> call.id().equals(m.toolCallId())).count());
+                    assertEquals(1, finalRequest.stream().filter(ChatMessage::hasNativeToolCalls)
+                            .flatMap(m -> m.toolCalls().stream()).filter(c -> c.id().equals(call.id())).count());
+                }
+                LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+                var trace = LocalTurnTraceCapture.complete();
+                var terminal = events(trace, "TERMINAL_ANSWER_SELECTED").getFirst();
+                assertEquals("MODEL_PROVIDER", terminal.data().get("origin"),
+                        "exact fenced answer must survive the real loop finalizer with its provider lineage");
+                assertFalse(events(trace, "ANSWER_TRANSFORMED").stream()
+                        .anyMatch(event -> "TOOL_LOOP_FINALIZATION".equals(event.data().get("reasonCode"))),
+                        "the answer must not be destructively re-projected after client EOS");
+            }
+            for (var entry : bodies.entrySet()) assertEquals(entry.getValue(), Files.readString(workspace.resolve(entry.getKey())));
+        }
+    }
+
+    private static void assertEvidenceBodies(List<ChatMessage> messages, List<String> markers) {
+        for (String marker : markers) {
+            assertEquals(1, messages.stream().filter(m -> "tool".equals(m.role())
+                    && m.content().contains(marker)).count(), marker + " must remain in its real tool carrier");
+            assertFalse(messages.stream().filter(m -> "system".equals(m.role()))
+                    .anyMatch(m -> m.content().contains(marker)), "file bytes never gain system authority");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ToolCallLoop.ReadOnlySynthesisStatus.class, names = {"ACCEPTED", "REJECTED"})
+    void completedSynthesisCannotBeResetByDirectCompletenessRetry(ToolCallLoop.ReadOnlySynthesisStatus status)
+            throws Exception {
+        var fixture = inspectLineageFixture(lineageWorkspace);
+        var original = fixture.originalLoop();
+        var attempted = new ToolCallLoop.LoopResult(original.finalAnswer(), original.iterations(),
+                original.toolsInvoked(), original.toolNames(), original.messages(), original.failedCalls(),
+                original.retriedCalls(), original.hitIterLimit(), original.mutatingToolSuccesses(),
+                original.readPaths(), 0, 0, 0, 0, original.failureDecision(), original.toolOutcomes(),
+                original.readFileBodies(), false, status);
+        var ctx = context(lineageWorkspace, "must not be consumed");
+        try (var llm = ctx.llm()) {
+            var result = InspectCompletenessRetry.retryIfNeeded(fixture.answer(), messages(fixture.request()),
+                    plan(fixture.request()), attempted, lineageWorkspace, ctx,
+                    ignored -> { throw new AssertionError("a prior synthesis forbids another dispatch"); });
+            assertEquals(fixture.answer(), result.answer());
+            assertNull(result.loopResult());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"READ_ONLY_INSPECTION_UNAVAILABLE",
+            "required diagnosis reads reached the tool iteration limit",
+            "tool-call execution authority was rejected"})
+    void terminalInspectionStopCannotBeReopenedByMissingEvidence(String reason) throws Exception {
+        var fixture = inspectLineageFixture(lineageWorkspace);
+        var original = fixture.originalLoop();
+        var stopped = new ToolCallLoop.LoopResult(original.finalAnswer(), original.iterations(),
+                original.toolsInvoked(), original.toolNames(), original.messages(), original.failedCalls(),
+                original.retriedCalls(), original.hitIterLimit(), original.mutatingToolSuccesses(),
+                original.readPaths(), 0, 0, 0, 0,
+                dev.talos.runtime.failure.FailureDecision.stop(
+                        dev.talos.runtime.failure.FailureAction.ASK_USER, reason),
+                original.toolOutcomes(), original.readFileBodies(), false,
+                ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED);
+        var retryPlan = plan(fixture.request());
+        assertFalse(InspectCompletenessRetry.missingReads(lineageWorkspace, retryPlan, stopped).isEmpty(),
+                "The fixture must still have evidence that would otherwise trigger a retry");
+        var ctx = context(lineageWorkspace, "must not be consumed");
+        try (var llm = ctx.llm()) {
+            var result = InspectCompletenessRetry.retryIfNeeded(fixture.answer(), messages(fixture.request()),
+                    retryPlan, stopped, lineageWorkspace, ctx,
+                    ignored -> { throw new AssertionError("an explicit stop forbids another dispatch"); });
+            assertEquals(fixture.answer(), result.answer());
+            assertNull(result.loopResult());
+        }
     }
 
     @Test

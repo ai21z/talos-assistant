@@ -64,8 +64,14 @@ final class MissingMutationRetry {
             int mutationsInRetry,
             String extraSummary,
             ToolCallLoop.LoopResult retryLoopResult,
-            boolean actionObligationFailed
+            boolean actionObligationFailed,
+            AnswerOutputLimit outputLimit
     ) {
+        Result(String answer, int mutationsInRetry, String extraSummary,
+               ToolCallLoop.LoopResult retryLoopResult, boolean actionObligationFailed) {
+            this(answer, mutationsInRetry, extraSummary, retryLoopResult, actionObligationFailed,
+                    AnswerOutputLimit.KEEP_ORIGINAL);
+        }
         Result(String answer, int mutationsInRetry, String extraSummary) {
             this(answer, mutationsInRetry, extraSummary, null, false);
         }
@@ -128,7 +134,8 @@ final class MissingMutationRetry {
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
                 .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace, answer);
         if (conditionalNoChange.isPresent()) {
-            return new Result(selectDeterministicAnswer(conditionalNoChange.get()), 0, null);
+            return new Result(selectDeterministicAnswer(conditionalNoChange.get()), 0, null, null, false,
+                    AnswerOutputLimit.CLEAR);
         }
         ActionObligation obligation = safePlan.actionObligation();
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
@@ -189,6 +196,7 @@ final class MissingMutationRetry {
                         retryText, retry.toolCalls(), retry.provenance(),
                         retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
+                AnswerOutputLimit retryOutputLimit = AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached());
                 String summary = retryLoop.summary();
                 boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
                         .anyMatch(ToolCallLoop.ToolOutcome::mutating);
@@ -198,6 +206,7 @@ final class MissingMutationRetry {
                             mergedAnswer, safePlan, messages, retryLoop, 0);
                     if (!Objects.equals(mergedAnswer, deniedAnswer)) {
                         selectDeterministicAnswer(deniedAnswer);
+                        retryOutputLimit = AnswerOutputLimit.CLEAR;
                     }
                     mergedAnswer = deniedAnswer;
                 }
@@ -219,7 +228,7 @@ final class MissingMutationRetry {
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 } else if (retryLoop.mutatingToolSuccesses() > 0) {
                     if (!retryLoop.failureDecision().shouldStop()) {
                         ToolCallLoop.LoopResult continued =
@@ -233,6 +242,7 @@ final class MissingMutationRetry {
                         if (continued != retryLoop) {
                             retryLoop = continued;
                             mergedAnswer = retryLoop.finalAnswer();
+                            retryOutputLimit = AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached());
                             summary = retryLoop.summary();
                         }
                     }
@@ -259,7 +269,7 @@ final class MissingMutationRetry {
                                 retryLoop.mutatingToolSuccesses(),
                                 summary,
                                 retryLoop,
-                                true);
+                                true, AnswerOutputLimit.CLEAR);
                     }
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
@@ -285,7 +295,8 @@ final class MissingMutationRetry {
                                 0,
                                 summary,
                                 retryLoop,
-                                false);
+                                false, mergedAnswer == null || mergedAnswer.isBlank()
+                                        ? AnswerOutputLimit.KEEP_ORIGINAL : retryOutputLimit);
                     }
                     List<String> failedTargets = failedMutatingToolTargets(retryLoop);
                     LocalTurnTraceCapture.recordActionObligation(
@@ -303,7 +314,7 @@ final class MissingMutationRetry {
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 } else {
                     boolean repairInspectionOnly = isRepairInspectionOnlyRetry(safePlan, retryLoop);
                     String failureReason = repairInspectionOnly
@@ -333,13 +344,14 @@ final class MissingMutationRetry {
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 }
                 return new Result(
                         fallbackAnswerIfBlank(mergedAnswer, answer, fallbackCheckpoint),
                         retryLoop.mutatingToolSuccesses(),
                         summary,
-                        retryLoop);
+                        retryLoop, false, mergedAnswer == null || mergedAnswer.isBlank()
+                                ? AnswerOutputLimit.KEEP_ORIGINAL : retryOutputLimit);
             }
 
             if (!retryText.isBlank() && !retryText.equals(answer)) {
@@ -350,7 +362,7 @@ final class MissingMutationRetry {
                         "retry response still had no " + requiredToolCallLabel(obligation, retryToolNames));
                 return new Result(
                         selectDeterministicAnswer(deterministic),
-                        0, null, null, true);
+                        0, null, null, true, AnswerOutputLimit.CLEAR);
             }
         } catch (EngineException.ContextBudgetExceeded budget) {
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
@@ -370,7 +382,7 @@ final class MissingMutationRetry {
                     0,
                     null,
                     null,
-                    true);
+                    true, AnswerOutputLimit.CLEAR);
         } catch (Exception e) {
             rethrowControlFlow(e);
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
@@ -386,7 +398,7 @@ final class MissingMutationRetry {
                 0,
                 null,
                 null,
-                true);
+                true, AnswerOutputLimit.CLEAR);
     }
 
     private static String fallbackAnswerIfBlank(
@@ -551,7 +563,8 @@ final class MissingMutationRetry {
                 original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
                 retry.failureDecision(),
                 mergedOutcomes,
-                mergedReadFileBodies);
+                mergedReadFileBodies, retry.finalAnswerOutputLimitReached(),
+                InspectCompletenessRetry.selectedRetrySynthesisStatus(original, retry));
     }
 
     private static ToolCallLoop.LoopResult continueRemainingExpectedTargetsAfterPartialRetry(

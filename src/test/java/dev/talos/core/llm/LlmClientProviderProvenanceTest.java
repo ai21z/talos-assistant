@@ -343,6 +343,75 @@ class LlmClientProviderProvenanceTest {
     }
 
     @Test
+    void inertFencedExampleKeepsExactProviderEosLineageWithoutToolAuthority() {
+        String source = RecordedMixedCodeAnswer.text();
+        for (int split : List.of(0, source.indexOf("<button") + 1,
+                source.indexOf("</button>") + 4, source.length())) {
+            beginTrace("trace-fenced-literal-eos-" + split);
+            try {
+                try (LlmClient client = new LlmClient(engineConfig(4_096),
+                        new FixedResolver(List.of(TokenChunk.of(source.substring(0, split)),
+                                TokenChunk.of(source.substring(split)), TokenChunk.eos("stop"))))) {
+                    LlmClient.StreamResult result = client.chatFull(
+                            List.of(ChatMessage.user("explain the selector without tools")));
+                    assertEquals(source, result.text(), "partition " + split);
+                    assertEquals(ProviderResponseCapture.Completion.PROVIDER_EOS, result.completion());
+                    assertFalse(result.normalized());
+                    assertFalse(result.truncated());
+                    assertTrue(result.toolCalls().isEmpty());
+                    assertTrue(result.provenance().providerTerminalEligible());
+                    assertFalse(result.provenance().providerToolCallEligible());
+                    assertEquals(ProviderResponseCapture.ToolAuthorityMode.NONE,
+                            result.provenance().toolAuthorityMode());
+                    assertEquals(0, result.provenance().capturedToolProposalCount());
+                    LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.text());
+                }
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+                TurnTraceEvent response = event(trace, "GENERATION_RESPONSE_CAPTURED");
+                assertEquals(false, response.data().get("normalized"));
+                assertEquals(true, response.data().get("completedNormally"));
+                assertEquals("MODEL_PROVIDER", event(trace, "TERMINAL_ANSWER_SELECTED")
+                        .data().get("origin"));
+                assertEquals(1, events(trace, "GENERATION_REQUEST_DISPATCHED").size());
+            } finally {
+                ProviderResponseCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+        }
+    }
+
+    @Test
+    void fencedExamplesCannotLaunderMissingEosLengthOrNormalizedContent() {
+        String safe = "Example:\n```html\n<button id=\"x\">Run</button>\n```\nDone.";
+        List<List<TokenChunk>> cases = List.of(
+                List.of(TokenChunk.of(safe), TokenChunk.eos("length")),
+                List.of(TokenChunk.of(safe), TokenChunk.transportEof("stop")),
+                List.of(TokenChunk.of(safe + "<think>hidden</think>"), TokenChunk.eos("stop")),
+                List.of(TokenChunk.of(safe + "\u0001control"), TokenChunk.eos("stop")),
+                List.of(TokenChunk.of("<button onclick=\"run()\">Run</button>\n"),
+                        TokenChunk.eos("stop")));
+        for (List<TokenChunk> chunks : cases) {
+            Capture capture = new Capture();
+            ProviderResponseCapture.begin(capture);
+            try (LlmClient client = new LlmClient(engineConfig(1_000), new FixedResolver(chunks))) {
+                LlmClient.StreamResult result = client.chatFull(
+                        List.of(ChatMessage.user("explain without tools")), List.of(),
+                        ChatRequestControls.defaults().withSingleAttempt(true));
+                assertFalse(result.provenance().providerTerminalEligible());
+                assertFalse(result.provenance().providerToolCallEligible());
+                assertEquals(ProviderResponseCapture.ToolAuthorityMode.NONE,
+                        result.provenance().toolAuthorityMode());
+                assertFalse(result.text().contains("<button"));
+                assertTrue(result.toolCalls().isEmpty());
+                assertFalse(capture.onlyResponse().completedNormally());
+                assertEquals(1, capture.dispatches.size());
+            } finally {
+                ProviderResponseCapture.clear();
+            }
+        }
+    }
+
+    @Test
     void traceNeverPersistsProviderFinishOrFailureProse() throws Exception {
         beginTrace("trace-provider-metadata-redaction");
         try (LlmClient client = new LlmClient(

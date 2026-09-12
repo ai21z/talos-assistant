@@ -15,6 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TurnSettlementTraceEventTest {
 
     @Test
+    void repetitionHasItsOwnClosedKindAndCannotUseTimeoutCode() {
+        var failure = TurnFailureClassifier.classify(new dev.talos.runtime.GenerationWatchdogException(
+                dev.talos.spi.types.ProviderResponseCapture.Abandonment.REPETITION_LOOP));
+        var event = TurnSettlementTraceEvent.create("2026-07-21T00:00:01Z",
+                TurnSettlement.Kind.FAILED, TurnExecutionStage.GENERATION_COORDINATION, failure);
+        assertEquals(TurnFailureClassifier.ErrorKind.REPETITION_LOOP, failure.kind());
+        assertEquals(500, failure.code());
+        assertTrue(TurnSettlementTraceEvent.decode(builder().event(event).event(completed()).build()).valid());
+        Map<String, Object> forged = new LinkedHashMap<>(event.data());
+        forged.put("errorCode", 408);
+        assertFalse(TurnSettlementTraceEvent.decode(
+                builder().event(raw(forged)).event(completed()).build()).valid());
+    }
+
+    @Test
     void exactTerminalEventDecodesThroughClosedVocabulary() {
         TurnFailureClassifier.Classification failure =
                 TurnFailureClassifier.classify(new IllegalStateException("not persisted"));

@@ -1156,11 +1156,33 @@ public final class LocalTurnTraceCapture {
 
     /** Records bounded abort metadata without persisting provider or model text. */
     public static void recordModelGenerationAborted(String abortReason, boolean partialOutput) {
+        recordModelGenerationAbortedCode(canonicalAbortReason(abortReason), partialOutput);
+    }
+
+    public static void recordModelGenerationAborted(
+            ProviderResponseCapture.AbortOrigin origin,
+            ProviderResponseCapture.Abandonment cause, boolean partialOutput) {
+        String reason = cause == null
+                ? origin == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT
+                        ? "TRANSPORT_FAILURE"
+                        : origin == ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL
+                                ? "INTERRUPTED" : "UNKNOWN"
+                : switch (cause) {
+            case REPETITION_LOOP -> "REPETITION_LOOP";
+            case IDLE_TIMEOUT -> "IDLE_TIMEOUT";
+            case WALL_CLOCK_TIMEOUT -> "WALL_CLOCK_BUDGET_EXCEEDED";
+            case OPERATOR_CANCELLED, INTERRUPTION_CAUSE_UNPROVEN -> "INTERRUPTED";
+            case RUNTIME_STREAM_CLOSED, SCOPE_CLOSED -> "UNKNOWN";
+        };
+        recordModelGenerationAbortedCode(reason, partialOutput);
+    }
+
+    private static void recordModelGenerationAbortedCode(String reason, boolean partialOutput) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         bag.answerCandidate = null;
         bag.builder.event(TurnTraceEvent.simple("MODEL_GENERATION_ABORTED", now(), Map.of(
-                "reasonCode", canonicalAbortReason(abortReason),
+                "reasonCode", reason,
                 "partialOutput", partialOutput)));
     }
 
@@ -2230,6 +2252,13 @@ public final class LocalTurnTraceCapture {
             boolean success,
             String reason,
             List<String> sourcePathHints) {
+        recordToolExecuted(phase, call, success, reason, sourcePathHints,
+                dev.talos.tools.ToolMutationEffects.none());
+    }
+
+    public static void recordToolExecuted(
+            String phase, ToolCall call, boolean success, String reason,
+            List<String> sourcePathHints, dev.talos.tools.ToolMutationEffects effects) {
         Bag bag = HOLDER.get();
         if (bag != null) {
             recordScoreBearingToolEvent(
@@ -2238,7 +2267,7 @@ public final class LocalTurnTraceCapture {
                     true,
                     false,
                     toolCallId -> TurnTraceEvent.toolExecuted(
-                            now(), phase, call, success, reason, sourcePathHints, toolCallId));
+                            now(), phase, call, success, reason, sourcePathHints, toolCallId, effects));
         }
     }
 

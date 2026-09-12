@@ -25,6 +25,8 @@ final class NoToolGroundingRetry {
         LlmClient.StreamResult chat(List<ChatMessage> messages) throws Exception;
     }
 
+    record Result(String answer, AnswerOutputLimit outputLimit) {}
+
     static String retryIfNeeded(
             String answer,
             CurrentTurnPlan plan,
@@ -32,13 +34,18 @@ final class NoToolGroundingRetry {
             Context ctx,
             ChatFunction chat
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (answer.length() < NoToolAnswerTruthfulnessGuard.UNGROUNDED_MIN_CHARS) return answer;
-        if (ctx == null || ctx.llm() == null || chat == null) return answer;
-        if (isDirectAnswerOnlyTurn(plan)) return answer;
+        return selectRetryIfNeeded(answer, plan, messages, ctx, chat).answer();
+    }
+
+    static Result selectRetryIfNeeded(String answer, CurrentTurnPlan plan, List<ChatMessage> messages,
+                                     Context ctx, ChatFunction chat) {
+        if (answer == null || answer.isBlank()) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (answer.length() < NoToolAnswerTruthfulnessGuard.UNGROUNDED_MIN_CHARS) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (ctx == null || ctx.llm() == null || chat == null) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (isDirectAnswerOnlyTurn(plan)) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
 
         String userRequest = latestUserRequest(plan, messages);
-        if (!NoToolAnswerTruthfulnessGuard.looksLikeEvidenceRequest(userRequest)) return answer;
+        if (!NoToolAnswerTruthfulnessGuard.looksLikeEvidenceRequest(userRequest)) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
 
         LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
                 + "user asked for evidence. Re-prompting once.", answer.length());
@@ -56,7 +63,7 @@ final class NoToolGroundingRetry {
             if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
                 LOG.info("Grounding retry produced a different answer ({} → {} chars)",
                         answer.length(), retryText.length());
-                return retryText;
+                return new Result(retryText, AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
             restoreOriginalCandidate(
                     originalCandidate,
@@ -79,7 +86,7 @@ final class NoToolGroundingRetry {
         LocalTurnTraceCapture.recordAnswerTransformedForRouting(
                 annotated,
                 LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
-        return annotated;
+        return new Result(annotated, AnswerOutputLimit.KEEP_ORIGINAL);
     }
 
     private static void rethrowControlFlow(Exception failure) {

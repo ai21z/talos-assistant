@@ -152,6 +152,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             "policyTrace", "toolCalls");
     private static final Set<String> TURN_TOOL_CALL_KEYS = Set.of(
             "name", "pathHint", "success", "reason");
+    private static final Set<String> TURN_TOOL_CALL_EFFECT_KEYS = Set.of(
+            "name", "pathHint", "pathHints", "success", "reason", "mutationEffects");
     private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
             "path", "role", "source", "reason", "sourceText",
             "confidence", "startOffset", "authorityEndOffset", "endOffset");
@@ -432,8 +434,11 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             Map<String, Object> c = new LinkedHashMap<>();
             c.put("name", s.name());
             c.put("pathHint", s.pathHint());
+            c.put("pathHints", s.pathHints());
             c.put("success", s.success());
             c.put("reason", s.reason());
+            c.put("mutationEffects", Map.of("appliedPaths", s.mutationEffects().appliedPaths(),
+                    "uncertainPaths", s.mutationEffects().uncertainPaths()));
             calls.add(c);
         }
         row.put("toolCalls", calls);
@@ -469,15 +474,33 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         }
         for (Object value : calls) {
             if (!(value instanceof Map<?, ?> call)
-                    || !TURN_TOOL_CALL_KEYS.equals(call.keySet())
-                    || !(call.get("name") instanceof String)
-                    || !(call.get("pathHint") instanceof String)
-                    || !(call.get("success") instanceof Boolean)
-                    || !(call.get("reason") instanceof String)) {
+                    || (!TURN_TOOL_CALL_KEYS.equals(call.keySet())
+                        && !TURN_TOOL_CALL_EFFECT_KEYS.equals(call.keySet()))
+                    || !exactToolCallValueTypes(call)) {
                 return false;
             }
+            if (call.containsKey("mutationEffects") && (!exactStringList(call.get("pathHints"))
+                    || !exactMutationEffects(call.get("mutationEffects")))) return false;
         }
         return true;
+    }
+
+    private static boolean exactToolCallValueTypes(Map<?, ?> call) {
+        return call.get("name") instanceof String
+                && call.get("pathHint") instanceof String
+                && call.get("success") instanceof Boolean
+                && call.get("reason") instanceof String;
+    }
+
+    private static boolean exactStringList(Object value) {
+        return value instanceof List<?> list && list.stream().allMatch(String.class::isInstance);
+    }
+
+    private static boolean exactMutationEffects(Object value) {
+        return value instanceof Map<?, ?> effects
+                && effects.keySet().equals(Set.of("appliedPaths", "uncertainPaths"))
+                && exactStringList(effects.get("appliedPaths"))
+                && exactStringList(effects.get("uncertainPaths"));
     }
 
     private static boolean canonicalInstant(String value) {
@@ -810,6 +833,22 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         JsonNode physical = MAPPER.valueToTree(physicalRow);
         JsonNode currentWriter = MAPPER.readTree(
                 sanitizedCompactJson(turnRow(decoded)));
+        // The recognized previous writer emitted exactly four tool-call fields.
+        // Compare that shape without inventing new historical effect evidence.
+        // Partial or malformed six-field rows are never treated as legacy rows.
+        JsonNode physicalCalls = physical.path("toolCalls");
+        JsonNode currentCalls = currentWriter.path("toolCalls");
+        if (physicalCalls.isArray() && currentCalls.isArray()
+                && physicalCalls.size() == currentCalls.size()) {
+            for (int index = 0; index < physicalCalls.size(); index++) {
+                JsonNode call = physicalCalls.get(index);
+                if (call.isObject() && call.size() == TURN_TOOL_CALL_KEYS.size()
+                        && TURN_TOOL_CALL_KEYS.stream().allMatch(call::has)
+                        && currentCalls.get(index) instanceof ObjectNode currentCall) {
+                    currentCall.remove(List.of("pathHints", "mutationEffects"));
+                }
+            }
+        }
         return physical.equals(currentWriter);
     }
 
@@ -1410,7 +1449,19 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             String pathHint = c.get("pathHint") == null ? "" : String.valueOf(c.get("pathHint"));
             boolean success = c.get("success") instanceof Boolean b && b;
             String reason = c.get("reason") == null ? "" : String.valueOf(c.get("reason"));
-            calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, reason));
+            dev.talos.tools.ToolMutationEffects effects = dev.talos.tools.ToolMutationEffects.none();
+            if (c.containsKey("mutationEffects") || c.containsKey("pathHints")) {
+                if (!TURN_TOOL_CALL_EFFECT_KEYS.equals(c.keySet())
+                        || !exactToolCallValueTypes(c)
+                        || !exactMutationEffects(c.get("mutationEffects")) || !exactStringList(c.get("pathHints"))) {
+                    throw new IllegalArgumentException("Invalid stored tool mutation effects");
+                }
+                Map<?, ?> storedEffects = (Map<?, ?>) c.get("mutationEffects");
+                effects = new dev.talos.tools.ToolMutationEffects(
+                        stringList(storedEffects.get("appliedPaths")), stringList(storedEffects.get("uncertainPaths")));
+            }
+            calls.add(new TurnRecord.ToolCallSummary(name, pathHint, stringList(c.get("pathHints")),
+                    success, reason, effects));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
                 calls, reqd, grnt, deny, traceSummary, status, policyTrace, traceId);

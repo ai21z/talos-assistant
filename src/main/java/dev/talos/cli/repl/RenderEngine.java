@@ -52,6 +52,8 @@ public final class RenderEngine {
     private AnswerPaneRenderer.Stream activeAnswerStream;
     private dev.talos.cli.ui.StreamShaper activeAnswerShaper;
     private Consumer<String> activeAnswerStreamWriter;
+    private AnswerCodeLiteralStreamProjection activeAnswerProjection;
+    private Consumer<String> pendingAnswerStreamWriter;
 
     // Braille spinner for Unicode-capable terminals, classic for others
     private static final String[] SPINNER_UNICODE = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
@@ -305,6 +307,7 @@ public final class RenderEngine {
      */
     public void shutdown() {
         stopSpinner();
+        closeAnswerStream("answer");
         if (statusRow != null) {
             statusRow.close();
         }
@@ -319,7 +322,7 @@ public final class RenderEngine {
         Consumer<String> writer = trustedOutput == null ? this::print : trustedOutput;
         return chunk -> {
             stopSpinner();
-            String rendered = streamChunk(sroInline(chunk), writer);
+            String rendered = projectedStreamChunk(chunk, writer);
             if (!rendered.isEmpty()) {
                 writer.accept(rendered);
             }
@@ -335,7 +338,9 @@ public final class RenderEngine {
         }
 
         if (r instanceof Result.Ok ok) {
-            printResponse(sro(ok.text));
+            closeAnswerStream("answer");
+            printResponse(redactor.redactBlock(answerTerminalText(
+                    AnswerCodeLiteralStreamProjection.complete(ok.text))));
             return;
         }
         if (r instanceof Result.Info info) {
@@ -359,13 +364,14 @@ public final class RenderEngine {
         }
         if (r instanceof Result.StreamStart ss) {
             stopSpinner();
+            closeAnswerStream("answer");
             String pf = ss.preface == null ? "" : ss.preface;
             if (!pf.isEmpty()) println(sro(pf));
             return;
         }
         if (r instanceof Result.StreamChunk chunk) {
             stopSpinner();
-            print(streamChunk(sroInline(chunk.text), null));
+            print(projectedStreamChunk(chunk.text, null));
             return;
         }
         if (r instanceof Result.StreamEnd) {
@@ -426,6 +432,21 @@ public final class RenderEngine {
         return shaped.isEmpty() ? "" : activeAnswerStream.accept(shaped);
     }
 
+    private String projectedStreamChunk(String chunk, Consumer<String> writer) {
+        if (chunk == null || chunk.isEmpty()) return "";
+        if (activeAnswerProjection == null) {
+            activeAnswerProjection = new AnswerCodeLiteralStreamProjection();
+        }
+        if (pendingAnswerStreamWriter == null && writer != null) {
+            pendingAnswerStreamWriter = writer;
+        }
+        // Redact before introducing a delimiter seam: a secret contained in
+        // one input chunk must not evade redaction by straddling the held tail.
+        // The final pass below also covers secrets wholly within that tail.
+        String projected = activeAnswerProjection.accept(redactor.redactLine(chunk));
+        return streamChunk(redactor.redactLine(answerTerminalText(projected)), writer);
+    }
+
     /**
      * Width-reactive wrapping (T776) - and from T777 markdown styling - is
      * an interactive-only enhancement. Every degraded mode (redirected,
@@ -439,8 +460,15 @@ public final class RenderEngine {
     }
 
     private void closeAnswerStream(String footer) {
-        if (activeAnswerStream == null) return;
         StringBuilder rendered = new StringBuilder();
+        if (activeAnswerProjection != null) {
+            String tail = activeAnswerProjection.finish();
+            activeAnswerProjection = null;
+            rendered.append(streamChunk(
+                    redactor.redactBlock(answerTerminalText(tail)), pendingAnswerStreamWriter));
+        }
+        pendingAnswerStreamWriter = null;
+        if (activeAnswerStream == null) return;
         if (activeAnswerShaper != null) {
             String tail = activeAnswerShaper.flush();
             if (!tail.isEmpty()) {
@@ -621,6 +649,12 @@ public final class RenderEngine {
 
     private String terminalText(String s) {
         return Sanitize.sanitizeForTerminalOutput(s == null ? "" : s, unicodeSafe());
+    }
+
+    /** HTML-bearing code has already passed the full-context presentation check. */
+    private String answerTerminalText(String s) {
+        String controlled = Sanitize.stripControl(s);
+        return unicodeSafe() ? controlled : Sanitize.toAsciiFallback(controlled);
     }
 
     private boolean unicodeSafe() {

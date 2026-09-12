@@ -51,6 +51,8 @@ final class PostToolSynthesisRetry {
         LlmClient.StreamResult chat(List<ChatMessage> messages) throws Exception;
     }
 
+    record Result(String answer, AnswerOutputLimit outputLimit) {}
+
     /**
      * If tools were used and the answer is a deflection, re-prompts the model
      * once with an instruction to synthesize from already gathered evidence.
@@ -61,8 +63,13 @@ final class PostToolSynthesisRetry {
             List<ChatMessage> messages,
             ChatFunction chatFull
     ) {
-        if (toolsInvoked <= 0) return answer;
-        if (!isDeflection(answer)) return answer;
+        return selectSynthesisIfNeeded(answer, toolsInvoked, messages, chatFull).answer();
+    }
+
+    static Result selectSynthesisIfNeeded(
+            String answer, int toolsInvoked, List<ChatMessage> messages, ChatFunction chatFull) {
+        if (toolsInvoked <= 0) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (!isDeflection(answer)) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
 
         LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
 
@@ -101,7 +108,7 @@ final class PostToolSynthesisRetry {
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
                 LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
-                return retryText;
+                return new Result(retryText, AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
             boolean empty = retryText == null || retryText.isBlank();
             LocalTurnTraceCapture.restoreExactAnswerCandidate(
@@ -125,7 +132,7 @@ final class PostToolSynthesisRetry {
                             .SPECULATIVE_RETRY_FAILED);
             LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
-        return answer;
+        return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
     }
 
     private static void rethrowControlFlow(Exception failure) {

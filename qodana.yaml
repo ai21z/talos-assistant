@@ -21,6 +21,7 @@ exclude:
     paths:
       - src/main/java/dev/talos/runtime/MutationIntent.java
   - name: AutoCloseableResource
+  - name: ExtractMethodRecommender
 
 # Qodana runs are optional local quality checks, not part of the hard Gradle
 # check. Critical findings fail the Qodana command immediately.
@@ -36,7 +37,6 @@ include:
   - name: SizeReplaceableByIsEmpty
   - name: JavaExistingMethodCanBeUsed
   - name: FieldCanBeLocal
-  - name: ExtractMethodRecommender
   - name: TrivialIf
   - name: RegExpRedundantEscape
   - name: UnnecessaryLocalVariable

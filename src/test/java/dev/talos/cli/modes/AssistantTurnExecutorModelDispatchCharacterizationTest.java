@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -1336,8 +1337,110 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
     }
 
     @Test
+    void recoveredReadAnswerDoesNotInheritInitialOutputLimit(@TempDir Path workspace) throws Exception {
+        assertReadHandoffOutputLimit(workspace, "length", "stop", false);
+    }
+
+    @Test
+    void recoveredReadAnswerKeepsItsOwnOutputLimit(@TempDir Path workspace) throws Exception {
+        assertReadHandoffOutputLimit(workspace, "stop", "length", true);
+    }
+
+    @Test
+    void nativeToolLoopFinalAnswerKeepsItsOwnOutputLimit(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "read-notes", "talos.read_file", Map.of("path", "notes.txt")))),
+                        new LlmClient.StreamResult("The observed value in notes.txt is 42.", List.of(), "length")),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+        ProviderAuthorityTestTrace.begin("selected-output-limit-native-loop", null);
+        try {
+            var out = AssistantTurnExecutor.execute(messages("Read notes.txt and tell me the observed value."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            assertEquals(2, recorded.requests().size());
+            assertTrue(out.text().contains("42"), out.text());
+            assertTrue(out.text().contains("provider reported finish_reason=length"), out.text());
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    @Test
+    void directOutputLimitWarningsDoNotRequireTraceCapture(@TempDir Path workspace) {
+        LocalTurnTraceCapture.clear();
+        for (boolean streaming : List.of(false, true)) {
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("Partial answer", List.of(), "length")), 4096);
+            var chunks = new ArrayList<String>();
+            var builder = Context.builder(new Config()).llm(recorded.client())
+                    .sandbox(new Sandbox(workspace, Map.of()));
+            if (streaming) builder.streamSink(chunks::add).onStreamComplete(() -> {});
+            var out = AssistantTurnExecutor.execute(messages("Explain briefly."), workspace,
+                    builder.build(), new AssistantTurnExecutor.Options());
+            assertEquals(streaming, out.streamed());
+            assertTrue(out.text().contains("provider reported finish_reason=length"), out.text());
+            assertEquals(1, out.text().split("provider reported finish_reason=length", -1).length - 1);
+            if (streaming) assertTrue(String.join("", chunks).contains("provider reported finish_reason=length"));
+        }
+    }
+
+    private static void assertReadHandoffOutputLimit(
+            Path workspace, String initialFinish, String finalFinish, boolean expectedNotice) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var responses = new ArrayList<LlmClient.StreamResult>();
+        responses.add(new LlmClient.StreamResult("I need the current notes.", List.of(), initialFinish));
+        if ("length".equals(initialFinish)) {
+            // The first dispatch has one internal output-cap recovery attempt;
+            // both initial attempts stop at LENGTH before the read handoff.
+            responses.add(new LlmClient.StreamResult("I still need to read the current notes.", List.of(), "length"));
+        }
+        responses.add(new LlmClient.StreamResult("The observed value in notes.txt is 42.", List.of(), finalFinish));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(responses, 4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+        ProviderAuthorityTestTrace.begin("selected-output-limit-read-handoff", null);
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Read notes.txt and tell me the observed value. Do not change files."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertEquals(responses.size(), recorded.requests().size(),
+                    "the explicit initial attempt(s) and one post-read synthesis must all be consumed");
+            assertTrue(out.text().contains("42"), out.text());
+            assertEquals(expectedNotice, out.text().contains("provider reported finish_reason=length"), out.text());
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                            && "talos.read_file".equals(event.toolName())),
+                    "this witness must execute the real deterministic read handoff");
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    @Test
     void bufferedAbortMarkerRecordsFailedOutcome(@TempDir Path workspace) {
-        var blocking = ScriptedNativeLlmClient.blockingAfterFirstChunk(5_000L);
+        // This fixture targets wall-clock propagation, not which clock wins.
+        // Disable idle extension so first-chunk timestamp granularity cannot
+        // switch the terminal cause between wall-clock and idle timeout.
+        var blocking = ScriptedNativeLlmClient.blockingAfterFirstChunk(5_000L, 0L);
         var ctx = Context.builder(new Config())
                 .llm(blocking.client())
                 .sandbox(new Sandbox(workspace, Map.of()))
@@ -1362,7 +1465,11 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                             new AssistantTurnExecutor.Options().llmTimeoutMs(150L)));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertInstanceOf(TimeoutException.class, failure.getCause());
+            var watchdog = assertInstanceOf(dev.talos.runtime.GenerationWatchdogException.class, failure);
+            assertEquals(ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT, watchdog.reason());
+            assertTrue(trace.events().stream().anyMatch(event -> "GENERATION_ABANDONED".equals(event.type())
+                            && watchdog.reason().name().equals(event.data().get("abandonment"))),
+                    "the terminal exception must retain the actual winning provider abandonment");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
         } finally {

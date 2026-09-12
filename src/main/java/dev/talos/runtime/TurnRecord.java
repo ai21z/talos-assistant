@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import dev.talos.tools.ToolMutationEffects;
 
 /**
  * Minimal, turn-centric, durable record of one terminal turn settlement.
@@ -134,13 +135,20 @@ public record TurnRecord(
             String pathHint,
             List<String> pathHints,
             boolean success,
-            String reason
+            String reason,
+            ToolMutationEffects mutationEffects
     ) {
         public ToolCallSummary {
             name = (name == null) ? "" : name;
             pathHints = normalizePathHints(pathHint, pathHints);
             pathHint = primaryPathHint(pathHint, pathHints);
             reason = (reason == null) ? "" : reason;
+            mutationEffects = mutationEffects == null ? ToolMutationEffects.none() : mutationEffects;
+        }
+
+        public ToolCallSummary(String name, String pathHint, List<String> pathHints,
+                               boolean success, String reason) {
+            this(name, pathHint, pathHints, success, reason, ToolMutationEffects.none());
         }
 
         public ToolCallSummary(String name, String pathHint, boolean success, String reason) {

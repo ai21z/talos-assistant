@@ -366,7 +366,7 @@ final class LlmCallBudget implements AutoCloseable {
                         ProviderResponseCapture.TRANSPORT_SETTLEMENT_GRACE_MS);
             }
             decision = Decision.ABORT;
-            outcome.complete(result);
+            outcome.complete(result.withAbandonment(abandonment));
             // Closing can block or be ignored by provider code. Publication
             // must not depend on close cooperation once the generation fact
             // and caller outcome agree on the winning abort.

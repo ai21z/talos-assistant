@@ -137,6 +137,7 @@ class FileWriteToolTest {
         assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
         assertTrue(result.errorMessage().contains("failed before commit"));
         assertFalse(result.errorMessage().contains("PRIVATE_WRITE_CANARY"));
+        assertFalse(result.mutationEffects().hasEffects());
         assertEquals("old content", Files.readString(target));
         try (var paths = Files.list(workspace)) {
             assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));
@@ -162,6 +163,8 @@ class FileWriteToolTest {
         assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
         assertTrue(result.errorMessage().contains("committed"), result.errorMessage());
         assertFalse(result.errorMessage().contains("PRIVATE_POST_COMMIT_WRITE_CANARY"));
+        assertEquals(java.util.List.of("existing.txt"), result.mutationEffects().appliedPaths());
+        assertTrue(result.mutationEffects().uncertainPaths().isEmpty());
         assertEquals("new content", Files.readString(target));
         try (var paths = Files.list(workspace)) {
             assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));
@@ -178,6 +181,8 @@ class FileWriteToolTest {
         assertTrue(r.success(), "Should create parent dirs: " + r.errorMessage());
         assertTrue(Files.exists(workspace.resolve("deep/nested/dir/file.txt")));
         assertEquals("nested content\n", Files.readString(workspace.resolve("deep/nested/dir/file.txt")));
+        assertEquals("deep/nested/dir/file.txt", r.mutationEffects().affectedPaths().getFirst());
+        assertTrue(r.mutationEffects().appliedPaths().contains("deep/nested/dir"));
     }
 
     @Test

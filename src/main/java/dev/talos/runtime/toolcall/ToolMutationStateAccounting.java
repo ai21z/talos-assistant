@@ -5,7 +5,7 @@ import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 
 /**
- * Owns loop-state bookkeeping for successful workspace mutations.
+ * Owns loop-state bookkeeping for successful and failed-with-effects mutations.
  */
 final class ToolMutationStateAccounting {
     static final Result NONE = new Result(false, "");
@@ -28,7 +28,8 @@ final class ToolMutationStateAccounting {
             String pathHint,
             ToolResult result
     ) {
-        if (state == null || call == null || result == null || !result.success()) {
+        if (state == null || call == null || result == null
+                || (!result.success() && !result.mutationEffects().hasEffects())) {
             return NONE;
         }
         if (!ToolCallSupport.isMutatingTool(call.toolName())) {
@@ -36,6 +37,15 @@ final class ToolMutationStateAccounting {
         }
 
         state.mutationSinceStart = true;
+        if (!result.success()) {
+            for (String affected : result.mutationEffects().affectedPaths()) {
+                state.pathsMutatedSinceRead.add(ToolCallSupport.normalizePath(affected));
+            }
+            ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
+            // Do not clear recovery guards or claim a successful mutation merely
+            // because an effect occurred before failure.
+            return new Result(true, "");
+        }
         state.mutatingToolSuccesses++;
         recordMutationSuccess(state, pathHint);
 

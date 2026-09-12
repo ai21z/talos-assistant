@@ -1,0 +1,37 @@
+The “Calculate” button doesn’t work because the JavaScript that’s actually loaded (`script.js`) is looking for a different element than the one that exists in **index.html**.
+
+| File | What it does | Why it matters |
+|------|--------------|----------------|
+| **index.html** | Provides a weight input (`#weight`), a height input (`#height`), a button (`#calculate`), and a `<p>` to display the result (`#result`). | The UI that the user interacts with. |
+| **script.js** | Attaches a click listener to `document.querySelector('#calc')`. Inside the handler it reads `#weight` and `#height`, computes BMI, and writes the value into `#result`. | This is the functional script that should drive the calculator. |
+| **scripts.js** | Contains a single sentinel variable and is **not** referenced from `index.html`. | It serves no purpose in the demo; it should remain unchanged. |
+
+### Why the button fails
+
+- The button in `index.html` has `id="calculate"`.
+- `script.js` tries to grab an element with `id="calc"` (`document.querySelector('#calc')`).
+- Since there is no element with that ID, `button` is `null`. Adding an event listener to `null` throws an exception, so nothing happens when the button is clicked.
+
+### Correct selector
+
+```js
+const button = document.querySelector('#calculate');
+```
+
+Using the correct selector (`#calculate`) will let the click handler run and display the BMI.
+
+### BMI for 72 kg and 1.8 m
+
+BMI = weight / (height²)  
+\( \displaystyle \frac{72}{1.8^2} = \frac{72}{3.24} \approx 22.22 \)
+
+Rounded to one decimal place (as the script uses `.toFixed(1)`), the result is **22.2**.
+
+---
+
+**Summary**
+
+- **Failure**: wrong button selector (`#calc` vs `#calculate`).
+- **Fix**: change the selector in `script.js` to `#calculate`.
+- **BMI**: 22.2 for 72 kg / 1.8 m.
+- **File roles**: `script.js` is the active calculator script; `scripts.js` is an unrelated, unchanged sentinel file.

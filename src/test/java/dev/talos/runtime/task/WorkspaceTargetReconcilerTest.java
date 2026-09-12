@@ -23,6 +23,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkspaceTargetReconcilerTest {
 
     @Test
+    void explicitReadOnlyPairsKeepBothIdentitiesRegardlessOfLinkage(@TempDir Path workspace) throws Exception {
+        for (String linked : Set.of("script.js", "scripts.js", "style.css", "styles.css")) {
+            Files.writeString(workspace.resolve("index.html"),
+                    "<script src=\"" + linked + "\"></script><link rel=\"stylesheet\" href=\"" + linked + "\">\n");
+            for (String name : Set.of("script.js", "scripts.js", "style.css", "styles.css")) {
+                Files.writeString(workspace.resolve(name), "sentinel " + name + "\n");
+            }
+            var contract = TaskContractResolver.fromUserRequest(
+                    "Read index.html, script.js, scripts.js, style.css and styles.css and explain this website. Do not edit files.");
+            var reconciled = WorkspaceTargetReconciler.reconcile(contract, workspace);
+
+            assertEquals(contract.expectedTargets(), reconciled.expectedTargets(), linked);
+            assertTrue(reconciled.expectedTargets().containsAll(
+                    Set.of("script.js", "scripts.js", "style.css", "styles.css")), linked);
+            assertFalse(reconciled.mutationAllowed());
+        }
+    }
+
+    @Test
+    void explicitUnlinkedReadOnlySiblingIsNotReplaced(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<script src=\"script.js\"></script>\n");
+        Files.writeString(workspace.resolve("script.js"), "linked\n");
+        Files.writeString(workspace.resolve("scripts.js"), "unlinked\n");
+        var contract = TaskContractResolver.fromUserRequest("Read scripts.js and explain it. Do not edit files.");
+
+        var reconciled = WorkspaceTargetReconciler.reconcile(contract, workspace);
+
+        assertEquals(contract.expectedTargets(), reconciled.expectedTargets());
+        assertTrue(reconciled.expectedTargets().contains("scripts.js"));
+        assertFalse(reconciled.expectedTargets().contains("script.js"));
+    }
+
+    @Test
     void aliasProjectionRetainsIndependentBlockedWorkspaceObservation(
             @TempDir Path workspace
     ) throws Exception {

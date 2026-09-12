@@ -40,21 +40,29 @@ public final class EvidenceContainmentAnswerGuard {
             EvidenceObligationVerifier.Result evidenceResult,
             AnswerMarkers markers
     ) {
+        return selectMissingEvidence(answer, plan, obligation, evidenceResult, markers).answer();
+    }
+
+    public record Containment(String answer, boolean inputRetained) {}
+
+    public static Containment selectMissingEvidence(
+            String answer, CurrentTurnPlan plan, EvidenceObligation obligation,
+            EvidenceObligationVerifier.Result evidenceResult, AnswerMarkers markers) {
         EvidenceObligation safeObligation = obligation == null ? EvidenceObligation.NONE : obligation;
         if (safeObligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
-            return protectedReadMissingEvidenceContainment(plan, evidenceResult);
+            return new Containment(protectedReadMissingEvidenceContainment(plan, evidenceResult), false);
         }
         if (isRuntimeFailureStatus(answer)) {
-            return missingEvidencePrefix(answer);
+            return new Containment(missingEvidencePrefix(answer), true);
         }
         if (isDominantRuntimeContainment(answer, markers)) {
-            return answer == null ? "" : answer;
+            return new Containment(answer == null ? "" : answer, true);
         }
-        String runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer, markers);
+        Containment runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer, markers);
         if (runtimeSafeBody != null) {
-            return missingEvidencePrefix(runtimeSafeBody);
+            return new Containment(missingEvidencePrefix(runtimeSafeBody.answer()), runtimeSafeBody.inputRetained());
         }
-        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, safeObligation, evidenceResult));
+        return new Containment(missingEvidencePrefix(missingEvidenceContainmentMessage(plan, safeObligation, evidenceResult)), false);
     }
 
     public static String missingEvidencePrefix(String answer) {
@@ -131,21 +139,21 @@ public final class EvidenceContainmentAnswerGuard {
         return false;
     }
 
-    private static String runtimeSafeBodyForMissingEvidence(String answer, AnswerMarkers markers) {
+    private static Containment runtimeSafeBodyForMissingEvidence(String answer, AnswerMarkers markers) {
         if (answer == null || answer.isBlank()) return null;
         AnswerMarkers safeMarkers = markers == null ? new AnswerMarkers(List.of(), "", "") : markers;
         if (!safeMarkers.ungroundedAnnotation().isBlank()
                 && answer.startsWith(safeMarkers.ungroundedAnnotation())) {
-            return safeMarkers.ungroundedAnnotation()
+            return new Containment(safeMarkers.ungroundedAnnotation()
                     + "I did not inspect the required workspace evidence this turn, "
-                    + "so I cannot answer from workspace facts yet.";
+                    + "so I cannot answer from workspace facts yet.", false);
         }
         if (!safeMarkers.localAccessCapabilityCorrection().isBlank()
                 && answer.startsWith(safeMarkers.localAccessCapabilityCorrection())) {
-            return safeMarkers.localAccessCapabilityCorrection();
+            return new Containment(safeMarkers.localAccessCapabilityCorrection(), false);
         }
         if (isCapabilityLimitation(answer)) {
-            return answer;
+            return new Containment(answer, true);
         }
         return null;
     }

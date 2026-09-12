@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "npm run test:static",
-    "test:static": "node --test test/site.test.js test/docs-renderer.test.js",
+    "test:static": "node --test test/site.test.js test/docs-renderer.test.js test/smoke-lifecycle.test.js",
     "test:deploy-surface": "node --test test/deploy-surface.test.js",
     "test:e2e": "playwright test"
   },
@@ -18,6 +18,6 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/spectral": "^5.2.8",
     "@playwright/test": "^1.57.0",
-    "vite": "^7.1.12"
+    "vite": "^7.3.6"
   }
 }

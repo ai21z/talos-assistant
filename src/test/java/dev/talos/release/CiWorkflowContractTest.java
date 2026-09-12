@@ -30,6 +30,28 @@ class CiWorkflowContractTest {
     }
 
     @Test
+    @DisplayName("Windows Gradle CI keeps its long-running checks inside a sufficient job timeout")
+    void windowsGradleCiHasSufficientWholeJobTimeout() throws IOException {
+        String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
+        String gradleJob = workflowJobBlock(workflow, "gradle-check");
+        Pattern timeoutPattern = Pattern.compile("(?m)^    timeout-minutes:\\s*(\\d+)\\s*$");
+        var timeoutMatches = timeoutPattern.matcher(gradleJob).results().toList();
+
+        assertEquals(1, timeoutMatches.size(),
+                "gradle-check must declare exactly one whole-job timeout");
+        int timeoutMinutes = Integer.parseInt(timeoutMatches.get(0).group(1));
+        assertTrue(timeoutMinutes >= 90,
+                "gradle-check must reserve at least 90 minutes for its Windows validation sequence");
+
+        int e2eStep = gradleJob.indexOf("run: .\\gradlew.bat e2eTest --no-daemon");
+        int finalCheckStep = gradleJob.indexOf("run: .\\gradlew.bat check --no-daemon");
+        assertTrue(e2eStep >= 0,
+                "the timed gradle-check job must retain its E2E test step");
+        assertTrue(finalCheckStep > e2eStep,
+                "the timed gradle-check job must retain its final Gradle check after E2E");
+    }
+
+    @Test
     @DisplayName("CI triggers match the public main and beta-dev branch model")
     void ciTriggersMatchPublicMainAndBetaDevBranchModel() throws IOException {
         String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
@@ -267,5 +289,26 @@ class CiWorkflowContractTest {
         }
         assertTrue(!workflow.contains("contents: write"),
                 label + " must not request contents: write while it only stages artifacts");
+    }
+
+    private static String workflowJobBlock(String workflow, String jobName) {
+        String normalized = workflow.replace("\r\n", "\n").replace('\r', '\n');
+        Pattern jobHeader = Pattern.compile("(?m)^  ([A-Za-z0-9_-]+):\\s*$");
+        var headers = jobHeader.matcher(normalized);
+        int start = -1;
+        int end = normalized.length();
+
+        while (headers.find()) {
+            if (start >= 0) {
+                end = headers.start();
+                break;
+            }
+            if (headers.group(1).equals(jobName)) {
+                start = headers.start();
+            }
+        }
+
+        assertTrue(start >= 0, "workflow must contain the " + jobName + " job");
+        return normalized.substring(start, end);
     }
 }

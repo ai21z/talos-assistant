@@ -109,6 +109,24 @@ class SessionApprovalPolicyTest {
     }
 
     @Test
+    void commandsCannotConsumeOrCreateFileWriteMemoryThroughPathAliases(@TempDir Path ws) {
+        ToolCall fileWrite = new ToolCall("talos.write_file", Map.of("path", "ordinary.txt", "content", "x"));
+        for (String name : java.util.List.of("talos.run_command", "run_command", "talos_run_command")) {
+            for (String key : java.util.List.of("path", "file_path", "filepath", "file", "filename")) {
+                ToolCall command = new ToolCall(name, Map.of("profile", "gradle_test", key, "ordinary.txt"));
+                SessionApprovalPolicy policy = new SessionApprovalPolicy();
+                policy.rememberApproval(ws, command, ToolRiskLevel.WRITE);
+                assertFalse(policy.rememberInWorkspaceWritesEnabled(), name + "/" + key);
+                policy.rememberApproval(ws, fileWrite, ToolRiskLevel.WRITE);
+                assertEquals(ApprovalPolicy.Decision.ASK,
+                        policy.decide(ws, command, ToolRiskLevel.WRITE), name + "/" + key);
+                assertEquals(ApprovalPolicy.Decision.AUTO_APPROVE,
+                        policy.decide(ws, fileWrite, ToolRiskLevel.WRITE));
+            }
+        }
+    }
+
+    @Test
     void typedWorkspaceOperationsAreAlwaysOnceOnlySessionApprovals(
             @TempDir Path ws
     ) {

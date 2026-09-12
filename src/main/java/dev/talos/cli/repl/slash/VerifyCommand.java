@@ -13,6 +13,7 @@ import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.command.ProcessCommandRunner;
 import dev.talos.runtime.command.WorkspaceCommandProfilesLoader;
 import dev.talos.runtime.command.WorkspaceProfileTrustStore;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -61,7 +62,7 @@ public final class VerifyCommand implements Command {
                 WorkspaceCommandProfilesLoader.load(workspace);
         WorkspaceProfileTrustStore.TrustState state = trustStore.state(workspace, loaded);
         CommandProfileRegistry registry = CommandProfileRegistry.defaultRegistry()
-                .withWorkspaceDeclaration(loaded.profiles(), state);
+                .withWorkspaceDeclaration(workspace, loaded, trustStore);
 
         String requested = args == null ? "" : args.strip();
         if (requested.isBlank()) {
@@ -93,6 +94,11 @@ public final class VerifyCommand implements Command {
             return new Result.Info("Verification cancelled. No command was executed.");
         }
 
+        try {
+            registry.requireCurrentWorkspaceTrust(workspace);
+        } catch (CommandPlanRejectedException e) {
+            return new Result.Error(e.getMessage() + " No command was executed.", 200);
+        }
         CommandResult result = runner.run(plan);
         return new Result.Info(renderResult(profileId, result));
     }
@@ -122,7 +128,9 @@ public final class VerifyCommand implements Command {
                     .append(" exited 0 after ").append(result.durationMs()).append("ms.");
         } else if (result.timedOut()) {
             sb.append("Verification timed out: ").append(profileId)
-                    .append(" after ").append(result.durationMs()).append("ms.");
+                    .append(" after ").append(result.durationMs()).append("ms")
+                    .append(result.killed() ? " (termination attempted)." : ".");
+            appendTail(sb, "diagnostic", SafeLogFormatter.text(result.errorMessage()));
         } else if (!result.errorMessage().isBlank()) {
             sb.append("Verification failed: ").append(profileId)
                     .append(" could not run - ").append(result.errorMessage());

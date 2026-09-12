@@ -12,23 +12,26 @@ package dev.talos.core.llm;
  * never fires. In one real transcript (gemma4:26b-a4b-it-q4_K_M, Apr 2026
  * test-output.txt), the model generated 200+ lines of nested "The user's
  * prompt is 'The user's prompt is '..." before the wall-clock finally
- * aborted at 387.8s. This detector catches that pattern in &lt;1s of
- * sustained repetition.
+ * aborted at 387.8s. This detector observes repeated decoded text rather
+ * than elapsed time; abort latency also depends on chunk delivery and
+ * watchdog polling.
  *
  * <p><b>How it works.</b> A rolling tail buffer (default 2048 chars) is
  * kept in sync with the streamed output. After each chunk, the last
  * {@code substringLen} characters of the tail are treated as a "probe" and
- * counted (non-overlapping) against the rest of the tail. If the probe
- * appears {@code maxRepeats} or more times, the breaker trips. Purely
- * lexical: no regex, no tokenization, no ML, no model-specific heuristics.
+ * counted (non-overlapping) across the entire retained tail, including
+ * the probe itself. Occurrences need not be adjacent. If the probe appears
+ * {@code maxRepeats} or more times, the breaker trips. Purely lexical:
+ * no regex, no tokenization, no ML, no model-specific heuristics.
  *
- * <p><b>Why the defaults.</b> {@code substringLen=48} × {@code maxRepeats=6}
- * means the detector only trips after at least 288 characters of back-to-back
- * identical substring. Legitimate model output - even repetitive code
- * formatting, markdown lists, or JSON arrays - does not exhibit exact
- * 48-char repeats six times in a row. The transcript's degenerate "[...]
- * The user's prompt is 'The user's prompt is '..." pattern does. Tuning
- * happens via the constructor; defaults live in
+ * <p><b>Default policy and limits.</b> {@code substringLen=48} multiplied
+ * by {@code maxRepeats=6} requires at least 288 retained UTF-16 characters,
+ * not 288 characters of consecutive identical output. The lexical threshold
+ * can also match legitimate repetitive prose, code, or structured records;
+ * it does not establish semantic degeneration. Detection is evaluated at
+ * decoded chunk boundaries, so it is not a chunk-partition-independent
+ * semantic classifier. Dimensions are supplied through the constructor;
+ * defaults live in
  * {@link #DEFAULT_SUBSTRING_LEN} / {@link #DEFAULT_MAX_REPEATS} /
  * {@link #DEFAULT_WINDOW_SIZE}.
  *
@@ -39,13 +42,13 @@ package dev.talos.core.llm;
  */
 final class RepetitionBreaker {
 
-    /** 48 characters - long enough that exact repeats don't happen in legitimate prose. */
+    /** Width of each exact probe, measured in UTF-16 characters. */
     static final int DEFAULT_SUBSTRING_LEN = 48;
 
-    /** 6 consecutive repeats - 288+ characters of sustained degenerate output. */
+    /** Six non-overlapping occurrences anywhere in the retained tail. */
     static final int DEFAULT_MAX_REPEATS = 6;
 
-    /** 2048-character rolling window - covers multiple pathological repeats without O(n²) cost. */
+    /** Bounds retained decoded text, not total generation length. */
     static final int DEFAULT_WINDOW_SIZE = 2048;
 
     private final int substringLen;
@@ -109,7 +112,7 @@ final class RepetitionBreaker {
         return false;
     }
 
-    /** True once the breaker has detected pathological repetition. Monotonic - never resets. */
+    /** True once the lexical threshold is reached. Monotonic - never resets. */
     boolean tripped() {
         return tripped;
     }

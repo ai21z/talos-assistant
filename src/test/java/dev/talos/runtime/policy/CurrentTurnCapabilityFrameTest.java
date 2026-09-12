@@ -15,10 +15,74 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CurrentTurnCapabilityFrameTest {
+
+    @Test
+    void privacyNoWorkspaceAnswersRetainTheirRequestedTopicAndNoToolBoundary() {
+        for (String request : List.of(
+                "Without reading files or using tools, write 200 distinct numbered sentences explaining "
+                        + "different features of the solar system. Use one sentence per number and continue "
+                        + "through number 200.",
+                "Without inspecting or using this workspace, explain entropy in thermodynamics.",
+                "Do not open any workspace files, answer from general knowledge.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+            String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+            assertEquals(ConversationBoundaryPolicy.Classification.PRIVACY_NO_WORKSPACE,
+                    ConversationBoundaryPolicy.classification(request), request);
+            assertEquals(TaskType.SMALL_TALK, contract.type(), request);
+            assertFalse(contract.mutationAllowed(), request);
+            assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+            assertTrue(frame.contains("mutationAllowed: false"), frame);
+            assertTrue(frame.contains("visibleTools: (none)"), frame);
+            assertTrue(frame.contains("evidenceObligation: NONE"), frame);
+            assertTrue(frame.contains("without workspace inspection"), frame);
+            assertTrue(frame.contains("Do not call tools."), frame);
+            assertTrue(frame.contains("Do not claim to have inspected files or performed workspace actions."), frame);
+            assertTrue(frame.contains("Answer the user's requested topic directly using general knowledge"), frame);
+            assertFalse(frame.contains("Talos product identity/capability only"), frame);
+        }
+    }
+
+    @Test
+    void ordinaryConversationDoesNotAssumeAProductIdentityTopic() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("hello");
+
+        String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+        assertEquals(TaskType.SMALL_TALK, contract.type());
+        assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+        assertTrue(frame.contains("Do not call tools."), frame);
+        assertTrue(frame.contains("Answer the user's requested topic directly"), frame);
+        assertFalse(frame.contains("Talos product identity/capability only"), frame);
+    }
+
+    @Test
+    void genuineIdentityAndCapabilityAnswersRetainProductGroundingWithoutTools() {
+        for (String request : List.of(
+                "Who are you?",
+                "What can you do?",
+                "Without reading files, who are you?",
+                "Without reading files, what can you do?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+            String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), request);
+            assertFalse(contract.mutationAllowed(), request);
+            assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+            assertTrue(frame.contains("visibleTools: (none)"), frame);
+            assertTrue(frame.contains("Do not call tools."), frame);
+            assertTrue(frame.contains("Do not claim to have inspected files or performed workspace actions."), frame);
+            assertTrue(frame.contains("Answer directly from Talos product identity/capability only."), frame);
+            assertFalse(frame.contains("using general knowledge"), frame);
+        }
+    }
 
     @Test
     void textFormatRequestRequiresReadThenCompleteWrite() {

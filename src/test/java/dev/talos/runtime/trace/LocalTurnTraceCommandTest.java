@@ -87,6 +87,10 @@ class LocalTurnTraceCommandTest {
         assertTrue(eventTypes.contains("COMMAND_FAILED"), eventTypes.toString());
         assertCommandEvent(trace, "COMMAND_FAILED", "exitCode", 1);
         assertCommandEvent(trace, "COMMAND_FAILED", "redactionApplied", true);
+        for (String type : List.of("COMMAND_PLAN_CREATED", "COMMAND_STARTED", "COMMAND_FAILED")) {
+            assertCommandEvent(trace, type, "networkRequirementDeclared", false);
+            assertCommandEvent(trace, type, "networkIsolation", "NOT_ENFORCED");
+        }
 
         String json = MAPPER.writeValueAsString(trace);
         assertFalse(json.contains("SECRET_TOKEN=raw-value"), "trace must not store raw command output");

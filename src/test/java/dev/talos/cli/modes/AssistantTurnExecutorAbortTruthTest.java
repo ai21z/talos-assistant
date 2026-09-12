@@ -59,7 +59,7 @@ class AssistantTurnExecutorAbortTruthTest {
             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
 
     @Test
-    void bufferedRepetitionAbortRecordsCanonicalReasonWithoutPartialOutput(@TempDir Path workspace) {
+    void legacyRepetitionProseDoesNotEstablishTypedCause(@TempDir Path workspace) {
         String marker = "[turn aborted: non-streaming chat entered a repetition loop]";
         LlmClient.StreamResult result = new LlmClient.StreamResult(
                 marker, List.of(), "", "repetition loop");
@@ -82,7 +82,7 @@ class AssistantTurnExecutorAbortTruthTest {
                     .filter(event -> "MODEL_GENERATION_ABORTED".equals(event.type()))
                     .toList();
             assertEquals(1, abortEvents.size(), trace.events().toString());
-            assertEquals("REPETITION_LOOP", abortEvents.getFirst().data().get("reasonCode"));
+            assertEquals("UNKNOWN", abortEvents.getFirst().data().get("reasonCode"));
             assertEquals(Boolean.FALSE, abortEvents.getFirst().data().get("partialOutput"));
         } finally {
             LocalTurnTraceCapture.clear();
@@ -90,17 +90,17 @@ class AssistantTurnExecutorAbortTruthTest {
     }
 
     @Test
-    void abortTraceUsesOnlyBoundedReasonCodesAndKeepsPartialOutputSeparate() {
+    void legacyAbortTraceKeepsCauseUnknownAndPartialOutputSeparate() {
         assertAbortEvent("wall-clock budget exceeded", "[turn aborted: budget]",
-                "WALL_CLOCK_BUDGET_EXCEEDED", false);
+                "UNKNOWN", false);
         assertAbortEvent("idle timeout - no tokens", "[turn aborted: idle]",
-                "IDLE_TIMEOUT", false);
+                "UNKNOWN", false);
         assertAbortEvent("interrupted", "[turn aborted: interrupted]",
-                "INTERRUPTED", false);
+                "UNKNOWN", false);
         assertAbortEvent(
                 "stream transport failed after partial output, retry skipped to avoid duplicate output",
                 PARTIAL + "\n[turn aborted: stream transport failed after partial output]",
-                "TRANSPORT_FAILURE",
+                "UNKNOWN",
                 true);
         assertAbortEvent("provider detail that must not be persisted", "[turn aborted: provider detail]",
                 "UNKNOWN", false);

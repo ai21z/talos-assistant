@@ -164,7 +164,8 @@ public final class ToolCallParser {
         return ToolProtocolText.stripToolCalls(llmResponse);
     }
 
-    static boolean looksLikeUnfinishedToolPayload(String llmResponse) {
+    /** Non-executing guard shared by loop completion and bounded response-only synthesis. */
+    public static boolean looksLikeUnfinishedToolPayload(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
             return false;
         }

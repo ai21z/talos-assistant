@@ -313,7 +313,7 @@ class JsonScenarioPackTest {
 
     @Test
     @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: selector mismatch analysis is grounded in actual files")
-    void selectorMismatchAnalysisIsGrounded() {
+    void selectorMismatchAnalysisIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/10-selector-mismatch-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
@@ -321,10 +321,34 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Mismatches found:")
+                    .assertLocalTraceRecorded()
+                    .assertAnswerContains("[Answer incomplete: static diagnostics only;")
+                    .assertAnswerContains("Static web diagnostics found:")
                     .assertAnswerContains("`.cta-button`")
+                    .assertAnswerContains("No files were changed.")
                     .assertAnswerNotContains("There are no mismatches")
                     .assertAnswerNotContains("present in both HTML and JavaScript");
+
+            var trace = result.localTrace();
+            assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            assertEquals("NOT_RUN", trace.outcome().verificationStatus());
+            assertEquals("NOT_REQUESTED", trace.outcome().mutationStatus());
+            assertFalse(trace.taskContract().mutationAllowed());
+            assertFalse(trace.taskContract().mutationRequested());
+
+            for (String path : List.of("index.html", "style.css", "script.js")) {
+                assertTrue(trace.events().stream().anyMatch(event ->
+                                "TOOL_EXECUTED".equals(event.type())
+                                        && "talos.read_file".equals(event.toolName())
+                                        && path.equals(event.data().get("pathHint"))
+                                        && Boolean.TRUE.equals(event.data().get("success"))),
+                        "Expected successful current-turn read of " + path);
+            }
+            for (var entry : loaded.definition().initialFiles().entrySet()) {
+                assertArrayEquals(entry.getValue().getBytes(StandardCharsets.UTF_8),
+                        Files.readAllBytes(result.workspace().resolve(entry.getKey())),
+                        "Read-only diagnosis changed " + entry.getKey());
+            }
         }
     }
 

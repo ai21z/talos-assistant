@@ -1,0 +1,28 @@
+**Why the “Calculate” button doesn’t work**
+
+| File | What it does | Issue found |
+|------|--------------|-------------|
+| **index.html** | Provides the UI – two `<input>`s, a `<button id="calculate">`, and a `<p id="result">`. It loads `script.js`. | – |
+| **script.js** | Adds a click listener to a button and writes the BMI to `#result`. | It looks for a button with **`id="calc"`** (`document.querySelector('#calc')`). In the page the button is actually **`id="calculate"`**, so the handler never attaches. The button is effectively “dead”. |
+| **scripts.js** | A completely unrelated file that is **not** referenced in `index.html`. It only contains a sentinel constant. | – |
+
+So the Calculate button fails because the selector in `script.js` is wrong; no event listener is bound.
+
+**Correct selector**
+
+```js
+const button = document.querySelector('#calculate');
+```
+
+**BMI for 72 kg and 1.8 m**
+
+\[
+\text{BMI} = \frac{72}{1.8^2} = \frac{72}{3.24} \approx 22.222
+\]
+
+Rounded to one decimal place (as the script does with `toFixed(1)`): **22.2**.
+
+**Distinguishing the two JavaScript files**
+
+- `script.js` – the functional file that performs the BMI calculation and is loaded by `index.html`.  
+- `scripts.js` – a placeholder/sentinel file that isn’t used by the page; its contents should remain unchanged.

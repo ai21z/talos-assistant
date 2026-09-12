@@ -133,6 +133,22 @@ public final class ScriptedNativeLlmClient {
                 config, responses, contextWindowTokens, false);
     }
 
+    /** Native/REQUIRED-capable foreground fixture that records every request, then fails once exhausted. */
+    public static RecordedClient recordingThenFailureWithContextWindow(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            RuntimeException terminalFailure) {
+        Config config = new Config();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> llm = (Map<String, Object>) config.data.computeIfAbsent(
+                "llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        llm.put("transport", "engine");
+        llm.put("default_backend", "llama_cpp");
+        RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens, false,
+                java.util.Objects.requireNonNull(terminalFailure));
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
     private static RecordedClient recordingWithContextWindow(
             Config config,
             List<LlmClient.StreamResult> responses,
@@ -229,6 +245,10 @@ public final class ScriptedNativeLlmClient {
     }
 
     public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs) {
+        return blockingAfterFirstChunk(configuredTimeoutMs, 1_000L);
+    }
+
+    public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs, long configuredIdleMs) {
         Config config = new Config();
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
@@ -242,7 +262,7 @@ public final class ScriptedNativeLlmClient {
             @SuppressWarnings("unchecked")
             Map<String, Object> limits = (Map<String, Object>) map;
             limits.put("llm_timeout_ms", configuredTimeoutMs);
-            limits.put("llm_idle_ms", 1_000L);
+            limits.put("llm_idle_ms", configuredIdleMs);
         }
         CountDownLatch firstChunkEmitted = new CountDownLatch(1);
         AtomicBoolean streamClosed = new AtomicBoolean();
@@ -328,6 +348,7 @@ public final class ScriptedNativeLlmClient {
 
     private static final class RecordingResolver implements LlmEngineResolver {
         private final List<LlmClient.StreamResult> responses;
+        private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
         private final int contextWindowTokens;
         private final boolean authoritativeNonNative;
@@ -337,11 +358,20 @@ public final class ScriptedNativeLlmClient {
                 List<LlmClient.StreamResult> responses,
                 int contextWindowTokens,
                 boolean authoritativeNonNative) {
+            this(responses, contextWindowTokens, authoritativeNonNative, null);
+        }
+
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
             this.contextWindowTokens = Math.max(256, contextWindowTokens);
             this.authoritativeNonNative = authoritativeNonNative;
+            this.terminalFailure = terminalFailure;
         }
 
         private List<ChatRequest> requests() {
@@ -370,7 +400,9 @@ public final class ScriptedNativeLlmClient {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             requests.add(request);
-            int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
+            int next = cursor.getAndIncrement();
+            if (terminalFailure != null && next >= responses.size()) throw terminalFailure;
+            int index = Math.min(next, responses.size() - 1);
             return chunks(responses.get(index));
         }
 

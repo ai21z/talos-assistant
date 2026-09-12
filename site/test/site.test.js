@@ -113,7 +113,7 @@ describe("Talos landing page static contract", () => {
     assert.equal(pkg.scripts.build, "vite build");
     assert.equal(pkg.scripts.preview, "vite preview");
     assert.equal(pkg.scripts.test, "npm run test:static");
-    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js test/docs-renderer.test.js");
+    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js test/docs-renderer.test.js test/smoke-lifecycle.test.js");
     assert.equal(pkg.scripts["test:deploy-surface"], "node --test test/deploy-surface.test.js");
     assert.equal(pkg.scripts["test:e2e"], "playwright test");
   });
@@ -242,7 +242,9 @@ describe("Talos landing page static contract", () => {
     for (const copy of [
       "Inspects before acting",
       "Asks before mutation",
-      "Verifies before claiming success",
+      "Checks supported actions against tool evidence",
+      "Read-only explanations may remain unverified",
+      "incomplete or unsupported checks stay explicit",
       "Approved writes only",
       "Interactive turns leave local trace evidence",
       "No hosted workspace handoff",
@@ -688,6 +690,35 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(smoke, /alpha:\s*false/);
     assert.match(smoke, /clearColor\(\s*0,\s*0,\s*0,\s*0\s*\)/);
     assert.match(smoke, /frag\s*=\s*vec4\(col,\s*alpha\)/);
+  });
+
+  it("defines the smoke vignette as an ordered descending smoothstep ramp", () => {
+    const fragment = read("src/smoke.js").match(/const FRAG = `([\s\S]*?)`;/)?.[1];
+    assert.ok(fragment, "missing smoke fragment shader");
+    const expression = fragment.match(/\bfloat\s+vig\s*=\s*([^;]+);/)?.[1].trim();
+    assert.ok(expression, "missing smoke vignette expression");
+    const ramp = expression.match(/^(1(?:\.0+)?\s*-\s*)?smoothstep\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*length\([\s\S]*\)\s*\)$/);
+    assert.ok(ramp, "vignette must be a radial smoothstep ramp");
+    const [edge0, edge1] = [Number(ramp[2]), Number(ramp[3])];
+    assert.ok(edge0 < edge1, "GLSL smoothstep requires edge0 < edge1");
+    assert.ok(ramp[1], "vignette must invert the ordered ramp to fade outward");
+    assert.deepEqual([edge0, edge1], [0.32, 1.3], "preserve the vignette transition distances");
+
+    // CPU reference for the GLSL expression; not a shader-execution or pixel test.
+    const descendingRamp = (distance) => {
+      const t = Math.max(0, Math.min(1, (distance - edge0) / (edge1 - edge0)));
+      return 1 - t * t * (3 - 2 * t);
+    };
+    for (const [distance, expected] of [[0, 1], [edge0, 1], [(edge0 + edge1) / 2, 0.5], [edge1, 0], [2, 0]]) {
+      assert.ok(Math.abs(descendingRamp(distance) - expected) < 1e-12, `vignette value at ${distance}`);
+    }
+    let previous = 1;
+    for (let step = 0; step <= 100; step++) {
+      const value = descendingRamp(step / 50);
+      assert.ok(value >= 0 && value <= 1, "vignette must remain bounded");
+      assert.ok(value <= previous, "vignette must not increase with radial distance");
+      previous = value;
+    }
   });
 
   it("renders the ichor vein and its vigil nail", () => {

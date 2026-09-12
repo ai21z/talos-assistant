@@ -51,7 +51,7 @@ public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int INDEX_METADATA_SCHEMA_VERSION = 4;
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 5;
     private static final String FILE_GLOB_SEMANTICS_VERSION =
             "native-leading-recursive-zero-directory-v1";
 
@@ -154,7 +154,7 @@ public class Indexer {
         if (forceFullReindex || configForceReindex || metadataRequiresFullReindex) {
             invalidateIndex(rootPath);
         }
-        final boolean skipHashing = forceFullReindex || configForceReindex;
+        final boolean forceReprocess = forceFullReindex || configForceReindex;
 
         // Accept either includes/excludes OR include/exclude
         var includeGlobs = firstNonEmptyStrList(
@@ -255,26 +255,25 @@ public class Indexer {
                         String rel = rootPath.relativize(p).toString().replace('\\','/');
 
                         try {
+                            byte[] sourceSnapshot = Files.readAllBytes(p);
+                            String sourceHash = Hash.sha256Hex(sourceSnapshot);
                             // Check if file is unchanged (unless forcing full reindex)
-                            if (!skipHashing) {
-                                String currentHash = Hash.sha256Hex(Files.readAllBytes(p));
-                                if (store.isUpToDate(rel, currentHash)) {
+                            if (!forceReprocess) {
+                                if (store.isUpToDate(rel, sourceHash)) {
                                     if (refreshSymbolsForUnchangedFiles) {
-                                        String text = parseIndexableTextWithTiming(rootPath, p, stats);
+                                        String text = parseIndexableTextWithTiming(rootPath, p, sourceSnapshot, stats);
+                                        requireUnchangedSource(p, sourceHash);
                                         refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
                                     }
                                     LOG.debug("Skipping unchanged file: {}", SafeLogFormatter.value(rel));
                                     stats.incrementFilesSkipped();
                                     return null; // Skip processing
                                 }
-                                // File has changed - remove old chunks and reprocess
-                                store.removeFileChunks(rel);
                             }
 
                             // Parse with timing
-                            String text = parseIndexableTextWithTiming(rootPath, p, stats);
-                            stats.incrementFilesEmbedded();
-                            refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
+                            String text = parseIndexableTextWithTiming(rootPath, p, sourceSnapshot, stats);
+                            requireUnchangedSource(p, sourceHash);
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
@@ -308,6 +307,8 @@ public class Indexer {
                                 }
                                 stats.addEmbedTime(System.currentTimeMillis() - embedStart);
 
+                                requireUnchangedSource(p, sourceHash);
+                                store.removeFileChunks(rel);
                                 // Store chunks with their corresponding embeddings
                                 for (int i = 0; i < chunks.size(); i++) {
                                     ParsedChunk c = chunks.get(i);
@@ -320,27 +321,30 @@ public class Indexer {
                                     }
 
                                     long luceneStart = System.currentTimeMillis();
-                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                    store.add(c.id(), c.text(), vec, currentHash, c.chunkId(), c.metadata());
+                                    store.add(c.id(), c.text(), vec, sourceHash, c.chunkId(), c.metadata());
                                     stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             } else {
+                                requireUnchangedSource(p, sourceHash);
+                                store.removeFileChunks(rel);
                                 // BM25-only processing when vectors are disabled or unavailable.
                                 for (ParsedChunk c : chunks) {
                                     long luceneStart = System.currentTimeMillis();
-                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                    store.add(c.id(), c.text(), null, currentHash, c.chunkId(), c.metadata());
+                                    store.add(c.id(), c.text(), null, sourceHash, c.chunkId(), c.metadata());
                                     stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             }
+                            stats.incrementFilesEmbedded();
+                            refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
                         } catch (PrivacyIndexingSkip ex) {
                             stats.incrementFilesSkipped();
                             stats.incrementFilesSkippedByPrivacy();
                             LOG.info("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } catch (Exception ex) {
                             propagateControlFlow(ex);
+                            stats.incrementFilesSkipped();
                             LOG.warn("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } finally {
                             listener.onFileComplete(filesCompleted.incrementAndGet(), totalFiles, rel);
@@ -616,7 +620,7 @@ public class Indexer {
         return Pattern.compile("^" + regex + "$", Pattern.CASE_INSENSITIVE);
     }
 
-    private String parseIndexableText(Path rootPath, Path path) throws IOException {
+    private String parseIndexableText(Path rootPath, Path path, byte[] sourceSnapshot) throws IOException {
         FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
                 .describe(path, cfg)
                 .orElse(null);
@@ -633,14 +637,20 @@ public class Indexer {
             }
             throw new IOException("Document extraction unavailable for index status=" + result.status());
         }
-        return ParserUtil.smartParse(path);
+        return ParserUtil.smartParse(path, sourceSnapshot);
     }
 
-    private String parseIndexableTextWithTiming(Path rootPath, Path path, IndexingStats stats) throws IOException {
+    private String parseIndexableTextWithTiming(Path rootPath, Path path, byte[] sourceSnapshot, IndexingStats stats) throws IOException {
         long parseStart = System.currentTimeMillis();
-        String text = parseIndexableText(rootPath, path);
+        String text = parseIndexableText(rootPath, path, sourceSnapshot);
         stats.addParseTime(System.currentTimeMillis() - parseStart);
         return text;
+    }
+
+    private static void requireUnchangedSource(Path path, String sourceHash) throws IOException {
+        if (!sourceHash.equals(Hash.sha256Hex(Files.readAllBytes(path)))) {
+            throw new IOException("Source changed during indexing; discarded changed source snapshot");
+        }
     }
 
     private boolean unsupportedAndNotExtractionEnabled(Path path) {

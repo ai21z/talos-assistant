@@ -19,6 +19,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalReadOnlyStopAnswerTest {
 
+    @Test
+    void staticDiagnosticsDoNotTerminateBeforeRequestedExplanationAndCalculation(@TempDir Path workspace) throws Exception {
+        writeBrokenWebFixture(workspace);
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(
+                "Inspect index.html and script.js. Explain why this website is broken, give the correct selector, "
+                        + "and calculate 18 / 3. Do not change files.")));
+        LoopState state = state(messages, workspace);
+        state.totalToolsInvoked = 2;
+        state.pathsReadThisTurn.add("index.html");
+        state.pathsReadThisTurn.add("script.js");
+
+        assertNull(TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0)));
+    }
+
     @AfterEach
     void clearTaskCapture() {
         TurnTaskContractCapture.clear();
@@ -170,7 +184,7 @@ class TerminalReadOnlyStopAnswerTest {
     }
 
     @Test
-    void rendersReadOnlyStaticWebDiagnosticsFromWorkspace(@TempDir Path workspace) throws Exception {
+    void webEvidenceAllowsModelSynthesisInsteadOfAssumingDiagnosticResponseOwnership(@TempDir Path workspace) throws Exception {
         writeBrokenWebFixture(workspace);
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
@@ -182,12 +196,11 @@ class TerminalReadOnlyStopAnswerTest {
 
         String answer = TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0));
 
-        assertTrue(answer.contains("Static web diagnostics found:"), answer);
-        assertTrue(answer.contains(".missing-button"), answer);
+        assertNull(answer);
     }
 
     @Test
-    void syntheticWorkspaceExplainMarkerCannotSuppressCapturedWebDiagnostic(
+    void syntheticWorkspaceExplainMarkerDoesNotCreateDiagnosticResponseOwnership(
             @TempDir Path workspace
     ) throws Exception {
         writeBrokenWebFixture(workspace);
@@ -208,8 +221,7 @@ class TerminalReadOnlyStopAnswerTest {
         String answer =
                 TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0));
 
-        assertTrue(answer.contains("Static web diagnostics found:"), answer);
-        assertTrue(answer.contains(".missing-button"), answer);
+        assertNull(answer);
     }
 
     @Test

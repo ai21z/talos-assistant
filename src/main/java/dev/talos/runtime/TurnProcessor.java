@@ -1132,7 +1132,9 @@ public final class TurnProcessor {
                     "Tool execution failed unexpectedly: "
                             + e.getClass().getSimpleName() + ": " + SafeLogFormatter.throwableMessage(e)));
         }
-        List<String> resultPathHints = result.success()
+        List<String> resultPathHints = result.mutationEffects().hasEffects()
+                ? result.mutationEffects().affectedPaths()
+                : result.success()
                 ? auditPathHints(call, path, result)
                 : (path == null || path.isBlank() ? List.of() : List.of(path));
         recordWorkspaceOperationLifecycle(
@@ -1146,7 +1148,8 @@ public final class TurnProcessor {
                 call,
                 resultPathHints,
                 result.success(),
-                result.success() ? "" : toolFailureReason(result));
+                result.success() ? "" : toolFailureReason(result),
+                result.mutationEffects());
         if (result.success()) {
             TurnTaskContractCapture.recordSuccessfulToolCall(call);
             if (WorkspaceOperationPlanner.isWorkspaceOperationTool(

@@ -101,11 +101,13 @@ final class ProviderTextAssembly {
      * byte-for-byte exact; sanitation applies only to surrounding prose.
      */
     String finalText() {
-        if (ToolProtocolText.unsettledJsonProtocolTailStart(rawText()) >= 0) {
+        String source = rawText();
+        if (ToolProtocolText.unsettledJsonProtocolTailStart(source) >= 0) {
             return nonAuthoritativeText();
         }
+        String sanitized = Sanitize.sanitizeForOutputPreservingToolCalls(source);
         return Sanitize.hardTruncate(
-                Sanitize.sanitizeForOutputPreservingToolCalls(rawText()),
+                ProviderInlineHtmlLiteralProjection.preserveIfInert(source, sanitized),
                 cap);
     }
 

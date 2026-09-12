@@ -673,7 +673,8 @@ public final class LlmClient implements AutoCloseable {
         final String usr = Sanitize.sanitizeForPrompt(Objects.toString(user, ""));
         List<Map<String,String>> sn = sanitizeSnippets(snippets);
 
-        return LlmRetryExecutor.executeIndexed(MAX_RETRIES, tryNumber -> {
+        return LlmRetryExecutor.executeIndexed(
+                controls != null && controls.singleAttempt() ? 0 : MAX_RETRIES, tryNumber -> {
             ChatRequest req = new ChatRequest(
                     backend, model, sys, usr, sn, timeout, List.of(), List.of(),
                     withConfigSampling(controls));
@@ -824,7 +825,7 @@ public final class LlmClient implements AutoCloseable {
                     completionFor(this.finishReason, this.abortReason),
                     false,
                     false,
-                    ProviderResponseCapture.Receipt.none()));
+                    ProviderResponseCapture.Receipt.none(), null));
         }
 
         StreamResult(
@@ -843,7 +844,7 @@ public final class LlmClient implements AutoCloseable {
                             : completion,
                     normalized,
                     truncated,
-                    ProviderResponseCapture.Receipt.none()));
+                    ProviderResponseCapture.Receipt.none(), null));
         }
 
         public StreamResult(
@@ -866,12 +867,29 @@ public final class LlmClient implements AutoCloseable {
                     truncated,
                     provenance == null
                             ? ProviderResponseCapture.Receipt.none()
-                            : provenance));
+                            : provenance, null));
         }
 
         StreamResult withProvenance(ProviderResponseCapture.Receipt receipt) {
             return new StreamResult(text, toolCalls, finishReason, abortReason,
-                    abortOrigin(), completion(), normalized(), truncated(), receipt);
+                    abortOrigin(), completion(), normalized(), truncated(), receipt)
+                    .withAbandonment(abandonment().orElse(null));
+        }
+
+        /** Only the budget's winning arbiter supplies this typed terminal cause. */
+        StreamResult withAbandonment(ProviderResponseCapture.Abandonment cause) {
+            if (cause == null) return this;
+            if (!aborted()) throw new IllegalStateException("completed result cannot carry abandonment");
+            StreamResult copy = new StreamResult(text, toolCalls, finishReason, abortReason);
+            METADATA.put(copy, new Metadata(abortOrigin(), completion(), normalized(), truncated(),
+                    provenance(), cause));
+            return copy;
+        }
+
+        /** Empty for legacy results and aborts whose precise cause was not captured. */
+        public java.util.Optional<ProviderResponseCapture.Abandonment> abandonment() {
+            Metadata metadata = METADATA.get(this);
+            return java.util.Optional.ofNullable(metadata == null ? null : metadata.abandonment());
         }
 
         public ProviderResponseCapture.AbortOrigin abortOrigin() {
@@ -954,7 +972,8 @@ public final class LlmClient implements AutoCloseable {
                 ProviderResponseCapture.Completion completion,
                 boolean normalized,
                 boolean truncated,
-                ProviderResponseCapture.Receipt provenance) {}
+                ProviderResponseCapture.Receipt provenance,
+                ProviderResponseCapture.Abandonment abandonment) {}
 
         /**
          * Weak identity sidecar keeps the established four-component public
@@ -1696,7 +1715,8 @@ public final class LlmClient implements AutoCloseable {
         final ChatRequestControls finalRequestControls = requestControls;
         final List<ChatMessage> finalRequestMessages = requestMessages;
 
-        return LlmRetryExecutor.executeIndexed(MAX_RETRIES, tryNumber -> {
+        return LlmRetryExecutor.executeIndexed(
+                finalRequestControls.singleAttempt() ? 0 : MAX_RETRIES, tryNumber -> {
             ChatRequest req = new ChatRequest(
                     backend, model, "", "", List.of(), timeout, finalRequestMessages,
                     tools, finalRequestControls);
@@ -1918,6 +1938,7 @@ public final class LlmClient implements AutoCloseable {
 
     private static boolean shouldDeferVisibleChunksForCapRetry(ChatRequest request) {
         if (request == null || request.controls == null) return false;
+        if (request.controls.singleAttempt()) return false;
         if (request.controls.maxOutputTokens() <= 0) return false;
         if (request.tools == null || request.tools.isEmpty()) return false;
         ToolChoiceMode mode = request.controls.toolChoice();
@@ -2150,6 +2171,7 @@ public final class LlmClient implements AutoCloseable {
             EngineException.MalformedResponse malformed,
             ChatRequest request) {
         if (malformed == null || request == null) return false;
+        if (request.controls != null && request.controls.singleAttempt()) return false;
         if (!"compat chat stream tool arguments".equals(malformed.context())) return false;
         if (request.tools == null || request.tools.isEmpty()) return false;
         ToolChoiceMode mode = request.controls == null
@@ -2171,6 +2193,7 @@ public final class LlmClient implements AutoCloseable {
     private static boolean shouldRetryCapTruncatedToolResult(ChatRequest request, StreamResult result) {
         if (request == null || result == null) return false;
         if (request.controls == null || request.controls.maxOutputTokens() <= 0) return false;
+        if (request.controls.singleAttempt()) return false;
         if (request.tools == null || request.tools.isEmpty()) return false;
         ToolChoiceMode mode = request.controls.toolChoice();
         if (mode != ToolChoiceMode.REQUIRED && mode != ToolChoiceMode.NAMED) return false;
@@ -2227,7 +2250,8 @@ public final class LlmClient implements AutoCloseable {
                 tags,
                 safe.sampling(),
                 safe.maxOutputTokens(),
-                safe.toolAuthorityMode());
+                safe.toolAuthorityMode(),
+                safe.singleAttempt());
     }
 
     /** Layers llm.sampling config values under turn-level sampling decisions (set fields win). */

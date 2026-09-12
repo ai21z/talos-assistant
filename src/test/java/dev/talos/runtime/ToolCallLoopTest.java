@@ -4823,7 +4823,10 @@ class ToolCallLoopTest {
                     ws,
                     ctx);
 
-            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON,
+                    result.failureDecision().reason());
+            assertEquals(dev.talos.runtime.failure.FailureAction.ASK_USER, result.failureDecision().action());
             assertFalse(result.finalAnswer().contains("failure policy stopped"), result.finalAnswer());
             assertTrue(result.finalAnswer().contains("Read evidence complete"), result.finalAnswer());
             assertTrue(result.finalAnswer().contains("budget.xlsx"), result.finalAnswer());

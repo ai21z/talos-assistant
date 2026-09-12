@@ -5,6 +5,11 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.htmlunit.BrowserVersion;
+import org.htmlunit.WebClient;
+import org.htmlunit.html.HtmlPage;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -101,13 +106,45 @@ class StaticWebBrowserBehaviorVerifierTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"const", "let"})
+    void htmlUnitGlobalStatusBindingCompatibilityWitness(String declaration) throws Exception {
+        try (WebClient client = new WebClient(BrowserVersion.CHROME)) {
+            client.getOptions().setCssEnabled(false);
+            HtmlPage page = client.loadHtmlCodeIntoCurrentWindow("""
+                    <!doctype html><html><body>
+                    <button id="probe">Click</button><p id="out">Waiting</p>
+                    <script>
+                    %s status = document.getElementById('out');
+                    const outputNode = document.getElementById('out');
+                    document.body.setAttribute('data-original-type', typeof status);
+                    document.body.setAttribute('data-unshadowed-type', typeof outputNode);
+                    document.getElementById('probe').addEventListener('click', function () {
+                      document.body.setAttribute('data-click-type', typeof status);
+                      document.body.setAttribute('data-click-value', String(status));
+                      status.textContent = 'Clicked';
+                    });
+                    </script></body></html>
+                    """.formatted(declaration));
+            page.getElementById("probe").click();
+            // Pinned-engine witness, not the expected product behavior. Native Chrome
+            // observes object|object|object|Clicked for this unchanged page.
+            assertEquals("string|object|string|Waiting",
+                    page.getBody().getAttribute("data-original-type") + "|"
+                            + page.getBody().getAttribute("data-unshadowed-type") + "|"
+                            + page.getBody().getAttribute("data-click-type") + "|"
+                            + page.getElementById("out").getTextContent(), page.asXml());
+        }
+    }
+
     @Test
     void clickUpdatingOutputTextProducesAuthoritativeBrowserBehaviorProof() throws Exception {
         writeWebFixture("""
+                window.teaserLoads = (window.teaserLoads || 0) + 1;
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  if (window.teaserLoads === 1) statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -126,6 +163,68 @@ class StaticWebBrowserBehaviorVerifierTest {
                         && fact.contains("index.html")
                         && fact.contains("scripts.js")),
                 report.facts().toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "const status = document.getElementById('teaser-status');",
+            "const {output: status} = {output: document.getElementById('teaser-status')};"
+    })
+    void originalGlobalStatusBindingIsUnavailableNotAProductFailureOrSuccess(String declaration) throws Exception {
+        // Preserve the valid original page that the previous duplicate-eval fallback
+        // masked. A simulation capability gap must not certify or condemn the page.
+        writeWebFixture("""
+                const trigger = document.getElementById('teaser-button');
+                %s
+                trigger.addEventListener('click', function() {
+                  status.textContent = 'Teaser ready';
+                });
+                """.formatted(declaration));
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.", selectors());
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+        assertTrue(report.hasRequiredUnavailable(), report.toString());
+        assertFalse(report.hasRequiredFailure(), report.toString());
+        assertFalse(report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()));
+        assertTrue(report.limitations().stream().anyMatch(text -> text.contains("Window.status")),
+                report.toString());
+    }
+
+    @Test
+    void inlineGlobalStatusBindingAlsoRemainsUnavailable() throws Exception {
+        writeWebFixture("""
+                <!doctype html><html><body>
+                <button id="teaser-button">Click</button><p id="teaser-status">Waiting</p>
+                <script>const status = document.getElementById('teaser-status');</script>
+                <script src="scripts.js"></script></body></html>
+                """, """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  status.textContent = 'Clicked';
+                });
+                """);
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.", selectors());
+        assertTrue(report.hasRequiredUnavailable(), report.toString());
+        assertFalse(report.hasRequiredFailure(), report.toString());
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+    }
+
+    @Test
+    void compatibilityObservationRecognizesBindingsNotLookalikeText() {
+        for (String source : List.of("const status = {};", "let status;",
+                "const \\u0073tatus = {};", "const {value: status} = {};",
+                "const {status} = {};", "let [status] = [];",
+                "const {nested: [status]} = {};", "const [status = {}] = [];",
+                "const {value: status = {}} = {};", "const [...status] = [];", "const {...status} = {};")) {
+            assertTrue(StaticWebJavaScriptSyntaxVerifier.hasUnsupportedGlobalStatusBinding(source), source);
+        }
+        for (String source : List.of("// const status = {};", "'const status = {}';",
+                "function bind() { const status = {}; }", "{ let status; }",
+                "const {status: outputNode} = {};", "const {value: outputNode} = {value: status};",
+                "const [outputNode = status] = [];", "const {value: outputNode = status} = {};",
+                "const outputNode = {};", "var status = '';")) {
+            assertFalse(StaticWebJavaScriptSyntaxVerifier.hasUnsupportedGlobalStatusBinding(source), source);
+        }
     }
 
     @Test
@@ -148,7 +247,7 @@ class StaticWebBrowserBehaviorVerifierTest {
     }
 
     @Test
-    void fallbackLoadTimeMutationWithoutClickChangeFailsBrowserBehaviorProof() throws Exception {
+    void loadTimeMutationWithoutClickChangeFailsWithoutReexecutingScripts() throws Exception {
         writeWebFixture("""
                 window.teaserLoads = (window.teaserLoads || 0) + 1;
                 document.getElementById('teaser-status').textContent = 'Loaded ' + window.teaserLoads;
@@ -164,8 +263,7 @@ class StaticWebBrowserBehaviorVerifierTest {
 
         assertFalse(report.requiredClaimsSatisfied(), report.toString());
         assertTrue(report.hasRequiredFailure(), report.toString());
-        assertTrue(report.limitations().stream().anyMatch(limit -> limit.contains("executing linked workspace JavaScript")),
-                report.limitations().toString());
+        assertFalse(report.facts().stream().anyMatch(fact -> fact.contains("executed the linked")), report.toString());
         assertTrue(report.problems().stream().anyMatch(problem -> problem.contains("did not change")),
                 report.problems().toString());
     }
@@ -288,7 +386,7 @@ class StaticWebBrowserBehaviorVerifierTest {
     }
 
     @Test
-    void fallbackVerifiesWhenInlineEvalMutatesAndClickChangesOutputFurther() throws Exception {
+    void pageRequiringASecondScriptEvaluationCannotReceiveAuthoritativeSuccess() throws Exception {
         writeWebFixture("""
                 window.teaserLoads = (window.teaserLoads || 0) + 1;
                 document.getElementById('teaser-status').textContent = 'Loaded ' + window.teaserLoads;
@@ -304,11 +402,13 @@ class StaticWebBrowserBehaviorVerifierTest {
                 "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
                 selectors());
 
-        assertTrue(report.requiredClaimsSatisfied(), report.toString());
-        assertEquals(0, report.unsatisfiedRequiredClaimCount());
-        assertTrue(report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()));
-        assertTrue(report.limitations().stream().anyMatch(limit -> limit.contains("executing linked workspace JavaScript")),
-                report.limitations().toString());
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+        assertEquals(1, report.unsatisfiedRequiredClaimCount());
+        assertTrue(report.hasRequiredFailure(), report.toString());
+        assertFalse(report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()));
+        assertEquals(TaskVerificationStatus.FAILED,
+                VerificationOutcomeGate.compatibilityOverride(report, List.of()).orElseThrow().status());
+        assertFalse(report.facts().stream().anyMatch(fact -> fact.contains("executed the linked")), report.toString());
     }
 
     @Test

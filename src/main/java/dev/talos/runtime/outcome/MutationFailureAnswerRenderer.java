@@ -152,6 +152,7 @@ public final class MutationFailureAnswerRenderer {
         if (answer == null || answer.isBlank()) return answer;
         if (loopResult == null) return answer;
         int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
+        if (hasFailedMutationEffects(loopResult)) return answer;
         if (totalMutations > 0) return answer;
         if (hasDeniedMutation(loopResult)) return answer;
         if (!containsMutationClaim(answer)) return answer;
@@ -176,21 +177,67 @@ public final class MutationFailureAnswerRenderer {
             String answer,
             MutationRecoveryAssessment assessment
     ) {
-        if (assessment == null || !assessment.partial()) return answer;
+        return selectPartialMutationAnswerIfNeeded(answer, assessment).answer();
+    }
+
+    public record PartialMutationAnswer(String answer, boolean inputRetained) {}
+
+    public static PartialMutationAnswer selectPartialMutationAnswerIfNeeded(
+            String answer, MutationRecoveryAssessment assessment) {
+        if (assessment == null || !assessment.partial()) return new PartialMutationAnswer(answer, true);
         MutationOutcome mutationOutcome = assessment.mutationOutcome();
-        if (mutationOutcome.extraSuccesses() > 0) return answer;
+        if (mutationOutcome.failed().stream().anyMatch(outcome -> outcome.mutationEffects().hasEffects())) {
+            return new PartialMutationAnswer(failedMutationEffectsSummary(mutationOutcome.failed(), mutationOutcome.successful()), false);
+        }
+        if (mutationOutcome.extraSuccesses() > 0) return new PartialMutationAnswer(answer, true);
         boolean actionObligationAnswer = answer != null
                 && answer.contains("[Action obligation failed:");
 
         List<ToolCallLoop.ToolOutcome> successes = mutationOutcome.successful();
         List<ToolCallLoop.ToolOutcome> failures = assessment.unresolvedOutcomesInOrder();
-        if (successes.isEmpty() || failures.isEmpty()) return answer;
+        if (successes.isEmpty() || failures.isEmpty()) return new PartialMutationAnswer(answer, true);
 
         String partialSummary = partialMutationOutcomeSummary(successes, failures, !actionObligationAnswer);
         if (actionObligationAnswer) {
-            return answer.stripTrailing() + "\n\n" + partialSummary;
+            return new PartialMutationAnswer(answer.stripTrailing() + "\n\n" + partialSummary, true);
         }
-        return partialSummary;
+        return new PartialMutationAnswer(partialSummary, false);
+    }
+
+    public static boolean hasFailedMutationEffects(ToolCallLoop.LoopResult loopResult) {
+        return loopResult != null && loopResult.toolOutcomes().stream().anyMatch(outcome ->
+                outcome != null && outcome.mutating() && !outcome.success()
+                        && outcome.mutationEffects().hasEffects());
+    }
+
+    public static String failedMutationEffectsSummary(ToolCallLoop.LoopResult loopResult) {
+        if (!hasFailedMutationEffects(loopResult)) return "";
+        return failedMutationEffectsSummary(loopResult.toolOutcomes().stream()
+                .filter(outcome -> outcome != null && outcome.mutating() && !outcome.success()).toList(),
+                loopResult.toolOutcomes().stream()
+                        .filter(outcome -> outcome != null && outcome.mutating() && outcome.success()).toList());
+    }
+
+    private static String failedMutationEffectsSummary(List<ToolCallLoop.ToolOutcome> failures,
+                                                       List<ToolCallLoop.ToolOutcome> successes) {
+        StringBuilder out = new StringBuilder("The operation did not complete successfully. "
+                + "Applied and uncertain effects must not be treated as no changes.\n");
+        for (ToolCallLoop.ToolOutcome outcome : failures) {
+            for (String path : outcome.mutationEffects().appliedPaths()) {
+                out.append("- ").append(path).append(": APPLIED_UNVERIFIED before tool failure.\n");
+            }
+            for (String path : outcome.mutationEffects().uncertainPaths()) {
+                out.append("- ").append(path).append(": UNKNOWN; final mutation state is not established.\n");
+            }
+            out.append("- Failed ").append(outcome.toolName()).append(": ")
+                    .append(trimMixedOutcomeFailureMessage(outcome.errorMessage())).append('\n');
+        }
+        for (ToolCallLoop.ToolOutcome outcome : successes) {
+            out.append("- Separately successful call at ").append(outcome.pathHint())
+                    .append(" via ").append(outcome.toolName())
+                    .append("; matching a prior path does not by itself prove recovery.\n");
+        }
+        return out.toString().stripTrailing();
     }
 
     private static String partialMutationOutcomeSummary(
@@ -255,7 +302,7 @@ public final class MutationFailureAnswerRenderer {
     ) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
         if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -324,7 +371,7 @@ public final class MutationFailureAnswerRenderer {
     ) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
 
         TaskContract contract = safePlanFromMessages(plan, messages).taskContract();
         if (contract.mutationAllowed()) return answer;
@@ -363,7 +410,7 @@ public final class MutationFailureAnswerRenderer {
         }
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
         if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();

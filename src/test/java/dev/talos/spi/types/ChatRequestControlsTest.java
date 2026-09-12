@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,6 +25,41 @@ class ChatRequestControlsTest {
         assertEquals(
                 ProviderResponseCapture.ToolAuthorityMode.NONE,
                 controls.toolAuthorityMode());
+        assertFalse(controls.singleAttempt());
+    }
+
+    @Test
+    void legacyEightArgumentConstructorKeepsRetryPolicyUnchanged() {
+        ChatRequestControls controls = new ChatRequestControls(
+                ToolChoiceMode.NONE, "", ResponseFormatMode.TEXT, "", List.of("legacy"),
+                SamplingControls.NEAR_GREEDY, 128,
+                ProviderResponseCapture.ToolAuthorityMode.NONE);
+
+        assertFalse(controls.singleAttempt());
+    }
+
+    @Test
+    void singleAttemptIsOptInAndPreservedByEveryControlCopy() {
+        ChatRequestControls base = new ChatRequestControls(
+                ToolChoiceMode.NAMED, "talos.read_file", ResponseFormatMode.JSON_OBJECT,
+                "", List.of("bounded"), SamplingControls.NEAR_GREEDY, 128,
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
+        ChatRequestControls single = base.withSingleAttempt(true);
+
+        assertTrue(single.singleAttempt());
+        assertEquals(base, single.withSingleAttempt(false));
+        assertTrue(single.withSampling(SamplingControls.none()).singleAttempt());
+        assertTrue(single.withMaxOutputTokens(64).singleAttempt());
+        assertTrue(single.withToolAuthorityMode(
+                ProviderResponseCapture.ToolAuthorityMode.NONE).singleAttempt());
+        assertEquals(base.toolChoice(), single.toolChoice());
+        assertEquals(base.namedTool(), single.namedTool());
+        assertEquals(base.responseFormat(), single.responseFormat());
+        assertEquals(base.jsonSchema(), single.jsonSchema());
+        assertEquals(base.debugTags(), single.debugTags());
+        assertEquals(base.sampling(), single.sampling());
+        assertEquals(base.maxOutputTokens(), single.maxOutputTokens());
+        assertEquals(base.toolAuthorityMode(), single.toolAuthorityMode());
     }
 
     @Test

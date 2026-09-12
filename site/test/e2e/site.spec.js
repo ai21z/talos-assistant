@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-const widths = [320, 375, 390, 768, 1024, 1440];
+// 305px models a 320px window with a 15px classic scrollbar.
+// It does not replace a native scrollbar check on a visible browser.
+const widths = [305, 320, 375, 390, 768, 1024, 1440];
 
 // Benign GPU/WebGL lifecycle noise emitted by headless Chromium (occluded tabs
 // drop WebGL contexts; ReadPixels stalls come from screenshot readback). These
@@ -32,6 +34,30 @@ async function expectTalosPage(page, marker) {
 async function gotoTalos(page, path = "/", marker = "landing") {
   await page.goto(path);
   await expectTalosPage(page, marker);
+}
+
+async function expectPageFits(page) {
+  await page.evaluate(() => document.fonts.ready);
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    overflowX: [document.documentElement, document.body].map((node) => getComputedStyle(node).overflowX),
+  }));
+  expect(layout.clientWidth).toBeGreaterThan(0);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  for (const overflowX of layout.overflowX) {
+    expect(["hidden", "clip"]).not.toContain(overflowX);
+  }
+}
+
+async function expectInsideContentWidth(locator) {
+  await expect(locator).toBeVisible();
+  const box = await locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, clientWidth: document.documentElement.clientWidth };
+  });
+  expect(box.left, `${locator} left edge`).toBeGreaterThanOrEqual(0);
+  expect(box.right, `${locator} right edge`).toBeLessThanOrEqual(box.clientWidth + 1);
 }
 
 test("preflight verifies this is the Talos site", async ({ page }) => {
@@ -69,8 +95,7 @@ for (const width of widths) {
   test(`has no horizontal overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
+    await expectPageFits(page);
   });
 }
 
@@ -306,13 +331,44 @@ test("docs page routes render without hiding content under the sticky header", a
     return {
       h1Top: h1.top,
       headerBottom: header.bottom,
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
   expect(layout.h1Top).toBeGreaterThan(layout.headerBottom + 8);
   expect(layout.overflow).toBeLessThanOrEqual(1);
   expect(page.browserIssues).toEqual([]);
 });
+
+for (const width of [305, 320]) {
+  for (const route of ["", "getting-started/quickstart", "architecture/execution-model"]) {
+    test(`docs ${route || "overview"} fits the content width at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await gotoTalos(page, `/docs.html#/${route}`, "docs");
+      await expect(page.locator("#docs-article h1")).toBeVisible();
+      await expectPageFits(page);
+
+      const containers = page.locator(".docs-main, #docs-article, .docs-code, .docs-table-wrap, .docs-diagram");
+      const containerCount = await containers.count();
+      for (let index = 0; index < containerCount; index += 1) {
+        await expectInsideContentWidth(containers.nth(index));
+      }
+      const articleOverflow = await page.locator(".docs-main, #docs-article").evaluateAll((nodes) =>
+        nodes.map((node) => getComputedStyle(node).overflowX),
+      );
+      for (const overflowX of articleOverflow) {
+        expect(["hidden", "clip"]).not.toContain(overflowX);
+      }
+      // Wide code and tables stay locally scrollable rather than being clipped.
+      const scrollableOverflow = await page.locator(".docs-code, .docs-table-wrap").evaluateAll((nodes) =>
+        nodes.map((node) => getComputedStyle(node).overflowX),
+      );
+      for (const overflowX of scrollableOverflow) {
+        expect(["auto", "scroll"]).toContain(overflowX);
+      }
+      expect(page.browserIssues).toEqual([]);
+    });
+  }
+}
 
 test("docs code blocks expose a working copy control", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -322,6 +378,21 @@ test("docs code blocks expose a working copy control", async ({ page, context })
   await copy.click();
   await expect(copy).toHaveText("Copied");
 });
+
+for (const slug of ["constructor", "__proto__", "toString", "hasOwnProperty", "missing-review-fixture"]) {
+  test(`unknown docs route ${slug} renders not-found and recovers to a real page`, async ({ page }) => {
+    await gotoTalos(page, `/docs.html#/${slug}`, "docs");
+    await expect(page.locator("#docs-article h1")).toHaveText("Page not found");
+    await expect(page.locator("#docs-article code")).toHaveText(slug);
+    expect(page.browserIssues).toEqual([]);
+
+    await page.locator('[data-doc-slug="getting-started/quickstart"]').click();
+    await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
+    await expect(page).toHaveTitle(/Quickstart \| Talos documentation/);
+    await expect(page.locator(".docs-copy").first()).toBeVisible();
+    expect(page.browserIssues).toEqual([]);
+  });
+}
 
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
   await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
@@ -352,7 +423,7 @@ test("mobile architecture diagrams keep arrows visible and sequence cards readab
 
     return {
       flowArrow: measure(flowArrow),
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       sequenceArrow: measure(sequenceArrow),
       sequenceStep: measure(sequenceStep),
     };
@@ -388,7 +459,7 @@ test("desktop architecture sequence diagrams keep actor transitions compact", as
       arrowToTargetGap: target.left - arrow.right,
       sourceToArrowGap: arrow.left - source.right,
       messageBelowActors: message.top > source.bottom,
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
 
@@ -399,25 +470,31 @@ test("desktop architecture sequence diagrams keep actor transitions compact", as
   expect(page.browserIssues).toEqual([]);
 });
 
-test("mobile header and nav remain usable", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 780 });
-  await gotoTalos(page);
-  const menuTrigger = page.getByRole("button", { name: "Open menu" });
-  await expect(menuTrigger).toBeVisible();
-  await menuTrigger.click();
+for (const width of [305, 320]) {
+  test(`mobile header and nav remain usable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 780 });
+    await gotoTalos(page);
+    await expectPageFits(page);
+    const menuTrigger = page.getByRole("button", { name: "Open menu" });
+    await expectInsideContentWidth(menuTrigger);
+    await menuTrigger.click();
 
-  const menu = page.getByRole("dialog", { name: "Talos sections" });
-  await expect(menu).toBeVisible();
-  await expect(menu.locator('a[href="#overview"]')).toBeVisible();
-  await expect(menu.locator('a[href="#docs"]')).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
-  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
-  await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
+    const menu = page.getByRole("dialog", { name: "Talos sections" });
+    await expect(menu).toBeVisible();
+    await expectInsideContentWidth(menu);
+    await expectInsideContentWidth(menu.locator('a[href="#overview"]'));
+    await expectInsideContentWidth(menu.locator('a[href="#docs"]'));
+    await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
+    await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
+    await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
 
-  await menu.locator('a[href="#docs"]').click();
-  await expect(page.locator("#docs")).toBeInViewport();
-  await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
-});
+    await menu.locator('a[href="#docs"]').click();
+    await expect(page.locator("#docs")).toBeInViewport();
+    await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toBeHidden();
+    await expectPageFits(page);
+  });
+}
 
 test("small tablet header uses the compact menu instead of an empty top bar", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
@@ -440,8 +517,7 @@ test("small tablet header uses the compact menu instead of an empty top bar", as
 test("mobile hero content fits without horizontal clipping", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await gotoTalos(page);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  await expectPageFits(page);
 
   for (const selector of [
     "h1",
@@ -451,24 +527,38 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
     ".live-terminal",
     ".hero-inscription",
   ]) {
-    const box = await page.locator(selector).boundingBox();
-    expect(box, `${selector} should render`).not.toBeNull();
-    expect(box.x, `${selector} left edge`).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390 + 1);
+    await expectInsideContentWidth(page.locator(selector));
   }
 });
 
-test("mobile public beta tooltip stays inside the viewport", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 780 });
-  await gotoTalos(page);
-  await page.locator(".setup-info").focus();
-  const tooltip = await page.locator(".setup-tooltip").boundingBox();
-  expect(tooltip, "setup tooltip should render").not.toBeNull();
-  expect(tooltip.x, "tooltip left edge").toBeGreaterThanOrEqual(0);
-  expect(tooltip.x + tooltip.width, "tooltip right edge").toBeLessThanOrEqual(320 + 1);
-});
+for (const width of [305, 320]) {
+  test(`mobile public beta tooltip stays inside the content width at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 780 });
+    await gotoTalos(page);
+    await page.locator(".setup-info").focus();
+    const tooltip = page.getByRole("tooltip");
+    await expect.poll(() => tooltip.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0.9);
+    // The hero clips overflow, so a fitting document alone cannot prove this.
+    const bounds = await tooltip.evaluate((node) => {
+      const tooltipRect = node.getBoundingClientRect();
+      const strip = node.closest(".setup-strip");
+      const stripRect = strip.getBoundingClientRect();
+      const stripStyle = getComputedStyle(strip);
+      return {
+        left: tooltipRect.left,
+        right: tooltipRect.right,
+        contentLeft: stripRect.left + parseFloat(stripStyle.borderLeftWidth) + parseFloat(stripStyle.paddingLeft),
+        contentRight: stripRect.right - parseFloat(stripStyle.borderRightWidth) - parseFloat(stripStyle.paddingRight),
+      };
+    });
+    expect(bounds.left, "tooltip stays inside the setup strip content box").toBeGreaterThanOrEqual(bounds.contentLeft - 1);
+    expect(bounds.right, "tooltip stays inside the setup strip content box").toBeLessThanOrEqual(bounds.contentRight + 1);
+    await expectInsideContentWidth(tooltip);
+    await expectPageFits(page);
+  });
+}
 
-for (const width of [320, 390, 768, 1024, 1440]) {
+for (const width of [305, 320, 390, 768, 1024, 1440]) {
   test(`install command wraps without an internal horizontal scrollbar at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
@@ -482,7 +572,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
   });
 }
 
-for (const width of [320, 375, 390]) {
+for (const width of [305, 320, 375, 390]) {
   test(`mobile live terminal fits after answer renders at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
@@ -497,10 +587,7 @@ for (const width of [320, 375, 390]) {
       ".live-terminal .terminal-foot",
       "#live-terminal-caption",
     ]) {
-      const box = await page.locator(selector).boundingBox();
-      expect(box, `${selector} should render`).not.toBeNull();
-      expect(box.x, `${selector} left edge at ${width}px`).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width, `${selector} right edge at ${width}px`).toBeLessThanOrEqual(width + 1);
+      await expectInsideContentWidth(page.locator(selector));
     }
 
     const terminalOverflow = await page.locator(".live-terminal .terminal-screen").evaluate((node) =>

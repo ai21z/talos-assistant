@@ -72,6 +72,17 @@ public final class EvidenceObligationVerifier {
             List<ToolCallLoop.ToolOutcome> outcomes,
             Path workspace
     ) {
+        return verify(obligation, expectedTargets, outcomes, workspace, Set.of());
+    }
+
+    /** Explicit reads are additional obligations; inferred web assets remain governed by linkage. */
+    public static Result verify(
+            EvidenceObligation obligation,
+            Set<String> expectedTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes,
+            Path workspace,
+            Set<String> explicitReadTargets
+    ) {
         EvidenceObligation safeObligation = obligation == null ? EvidenceObligation.NONE : obligation;
         Set<String> targets = expectedTargets == null ? Set.of() : expectedTargets;
         List<ToolCallLoop.ToolOutcome> safeOutcomes = outcomes == null ? List.of() : outcomes;
@@ -83,11 +94,26 @@ public final class EvidenceObligationVerifier {
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
             case FILE_CONTENT_LOOKUP_REQUIRED -> verifyFileContentLookup(safeOutcomes);
             case PROJECT_SUMMARY_EVIDENCE_REQUIRED -> verifyProjectSummaryEvidence(safeOutcomes, workspace);
-            case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes, workspace);
+            case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosisWithExplicitReads(
+                    targets, explicitReadTargets, safeOutcomes, workspace);
             case WORKSPACE_INSPECTION_REQUIRED, VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     verifyAnyReadOnlyEvidence(safeOutcomes);
             case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED -> verifyUnsupportedCapability(targets, safeOutcomes);
         };
+    }
+
+    private static Result verifyStaticWebDiagnosisWithExplicitReads(
+            Set<String> expectedTargets, Set<String> explicitReadTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes, Path workspace
+    ) {
+        Result web = verifyStaticWebDiagnosis(expectedTargets, outcomes, workspace);
+        if (explicitReadTargets == null || explicitReadTargets.isEmpty()) return web;
+        Result explicit = aggregateTargetResults(explicitReadTargets,
+                target -> verifyReadTarget(target, outcomes, true),
+                "All explicit static-web diagnosis sources were read.");
+        if (explicit.status() == Status.BLOCKED) return explicit;
+        if (web.status() == Status.BLOCKED) return web;
+        return explicit.status() == Status.SATISFIED ? web : explicit;
     }
 
     public static List<String> missingLinkedScriptReadTargets(

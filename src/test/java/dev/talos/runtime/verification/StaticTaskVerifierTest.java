@@ -3193,9 +3193,9 @@ class StaticTaskVerifierTest {
         Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -3611,9 +3611,9 @@ class StaticTaskVerifierTest {
                 """);
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -3686,9 +3686,9 @@ class StaticTaskVerifierTest {
         Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 

@@ -13,6 +13,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UnsupportedDocumentAnswerGuardTest {
 
     @Test
+    void searchNoteRetainsInputButDoesNotInventInputWhenAllClaimsWereRemoved() {
+        var searchMessages = List.of(ChatMessage.assistant(
+                "[tool_result: talos.grep]\nSearch was limited: skipped unsupported files."));
+        var prefixed = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "No matches were found.", loopResult(searchMessages, grepOutcome()));
+        assertTrue(prefixed.inputRetained());
+        assertTrue(prefixed.answer().contains("No matches were found."));
+
+        var removed = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "sample.pdf is empty with no matches.", loopResult(searchMessages, grepOutcome(),
+                        readOutcome("sample.pdf", false, "", "Unsupported binary document format", ToolError.UNSUPPORTED_FORMAT)));
+        assertFalse(removed.inputRetained(), "the generated search note is not retained provider prose");
+        assertFalse(removed.answer().contains("sample.pdf is empty"));
+        assertTrue(removed.answer().contains("Search was limited"));
+    }
+
+    @Test
+    void survivingSupportedFragmentRetainsLimitButPureFallbackDoesNot() {
+        var evidence = loopResult(List.of(), readOutcome("notes.txt", true, "notes read", "", null),
+                readOutcome("sample.pdf", false, "", "Unsupported binary document format", ToolError.UNSUPPORTED_FORMAT));
+        var partial = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "notes.txt says the value is 42. sample.pdf is empty.", evidence);
+        assertTrue(partial.inputRetained());
+        assertTrue(partial.answer().contains("notes.txt says the value is 42."));
+        var fallback = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded("sample.pdf is empty.", evidence);
+        assertFalse(fallback.inputRetained());
+        assertTrue(fallback.answer().contains("Talos inspected the supported text files"));
+    }
+
+    @Test
     void unsupportedDocumentReadRemovesContentClaimsAndKeepsSupportedTextEvidence() {
         ToolCallLoop.LoopResult loopResult = loopResult(
                 List.of(),

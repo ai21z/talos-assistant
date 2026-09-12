@@ -556,6 +556,8 @@ class FileEditToolTest {
         assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
         assertTrue(result.errorMessage().contains("committed"), result.errorMessage());
         assertFalse(result.errorMessage().contains("PRIVATE_POST_COMMIT_EDIT_CANARY"));
+        assertEquals(java.util.List.of("post-commit.txt"), result.mutationEffects().appliedPaths());
+        assertTrue(result.mutationEffects().uncertainPaths().isEmpty());
         assertEquals("status=new\n", Files.readString(target));
         try (var paths = Files.list(workspace)) {
             assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));

@@ -36,6 +36,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
             boolean staticRepairObligationActive
     ) {
         ToolRepromptMessageOverlay overlay = new ToolRepromptMessageOverlay(state);
+        overlay.applyReadOnlyEvidence();
         overlay.applyStaleEditRepair();
         overlay.applyEmptyEditRepair();
         // An active static-repair obligation REPLACES the request messages
@@ -143,6 +144,15 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         if (original == null) return;
         restoredToolResults.add(new RestoredToolResult(index, current.content()));
         state.messages.set(index, ChatMessage.toolResult(current.toolCallId(), original));
+    }
+
+    private void applyReadOnlyEvidence() {
+        for (var carrier : ReadOnlyEvidenceContext.select(state).carriers()) {
+            ChatMessage current = state.messages.get(carrier.index());
+            if (current.equals(carrier.message())) continue;
+            restoredToolResults.add(new RestoredToolResult(carrier.index(), current.content()));
+            state.messages.set(carrier.index(), carrier.message());
+        }
     }
 
     private void applyStaleEditRepair() {

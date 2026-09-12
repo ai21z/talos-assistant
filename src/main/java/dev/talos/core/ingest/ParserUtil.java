@@ -11,6 +11,22 @@ public final class ParserUtil {
     private ParserUtil() {}
 
     public static String smartParse(Path file) throws IOException {
+        if (UnsupportedDocumentFormats.isUnsupported(file)) {
+            throw new IOException(UnsupportedDocumentFormats.capabilityMessage(file));
+        }
+        // Preserve cheap rejection for path-based callers before allocating the full file.
+        try (var channel = Files.newByteChannel(file)) {
+            ByteBuffer prefix = ByteBuffer.allocate(4096);
+            channel.read(prefix);
+            for (int i = 0; i < prefix.position(); i++) {
+                if (prefix.get(i) == 0) throw new IOException("Binary or unsupported file: " + file);
+            }
+        }
+        return smartParse(file, Files.readAllBytes(file));
+    }
+
+    /** Parse the same immutable bytes that the caller hashes for index freshness. */
+    public static String smartParse(Path file, byte[] snapshot) throws IOException {
         String name = file.getFileName().toString().toLowerCase();
         String ext = extOf(name);
 
@@ -19,9 +35,9 @@ public final class ParserUtil {
         }
 
         // quick binary sniff
-        if (!likelyText(file)) throw new IOException("Binary or unsupported file: " + file);
+        if (!likelyText(snapshot)) throw new IOException("Binary or unsupported file: " + file);
 
-        String raw = Files.readString(file, StandardCharsets.UTF_8);
+        String raw = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(snapshot)).toString();
 
         switch (ext) {
             case "md", "markdown" -> {
@@ -54,18 +70,11 @@ public final class ParserUtil {
         return name.substring(dot + 1);
     }
 
-    private static boolean likelyText(Path file) throws IOException {
-        try (var channel = Files.newByteChannel(file)) {
-            ByteBuffer buffer = ByteBuffer.allocate(4096);
-            channel.read(buffer);
-            buffer.flip();
-
-            while (buffer.hasRemaining()) {
-                int b = buffer.get() & 0xFF;
-                if (b == 0) return false;
-            }
-            return true;
+    private static boolean likelyText(byte[] snapshot) {
+        for (int i = 0; i < Math.min(snapshot.length, 4096); i++) {
+            if (snapshot[i] == 0) return false;
         }
+        return true;
     }
 
 }

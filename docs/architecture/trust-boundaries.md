@@ -2,6 +2,8 @@
 
 Talos treats the model as an untrusted planner. The runtime owns authority. Trust boundaries are therefore implemented as concrete checks around paths, tools, approvals, commands, artifacts, and final claims.
 
+At provider EOS, projection may retain a complete static HTML element byte-for-byte inside an unambiguous, single-line, single-backtick code span. This bounded exception excludes active tags/attributes, entities, controls, cross-boundary markup, and textual tool proposals; ambiguous input retains the existing sanitizer behavior. Shared prompt and terminal sanitizers are unchanged. Receipt completion, normalization, selected native proposal identity, tool surface, one-use authority, mode/path policy, and approval remain independent requirements: preserving an inert prose literal grants no execution permission by itself.
+
 ## Boundary Map
 
 ```mermaid

@@ -19,7 +19,7 @@ Denials are valid outcomes. A denied mutation should be reported as denied, not 
 | Outcome | Meaning |
 |---|---|
 | Approved | Talos may perform the specific proposed action and then verify the result. |
-| Denied | Talos must not perform the action and should report that nothing was changed. |
+| Denied | The denied action is not performed. Any earlier applied or uncertain effects remain reported; denial does not roll them back. |
 | Not offered | The current mode, task, policy, or profile did not allow the action to reach approval. |
 
 Do not approve a write unless the target path and proposed effect match what you asked for.

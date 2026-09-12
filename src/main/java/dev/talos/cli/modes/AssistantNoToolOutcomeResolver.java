@@ -14,7 +14,7 @@ final class AssistantNoToolOutcomeResolver {
     private AssistantNoToolOutcomeResolver() {
     }
 
-    record Resolution(String answer, String extraSummary) {
+    record Resolution(String answer, String extraSummary, boolean outputLimitReached) {
     }
 
     @FunctionalInterface
@@ -36,6 +36,17 @@ final class AssistantNoToolOutcomeResolver {
         String shape(String answer, boolean actionObligationFailed);
     }
 
+    @FunctionalInterface
+    interface SelectedToolAnswerShaper {
+        AnswerOutputLimit.Presentation shape(String answer, ToolCallLoop.LoopResult loopResult,
+                                             int extraMutationSuccesses, boolean actionObligationFailed);
+    }
+
+    @FunctionalInterface
+    interface SelectedNoToolAnswerShaper {
+        AnswerOutputLimit.Presentation shape(String answer, boolean actionObligationFailed);
+    }
+
     static Resolution resolve(
             String answer,
             List<ChatMessage> messages,
@@ -46,6 +57,16 @@ final class AssistantNoToolOutcomeResolver {
             ToolAnswerShaper toolAnswerShaper,
             NoToolAnswerShaper noToolAnswerShaper
     ) {
+        return resolveSelected(answer, false, messages, plan, workspace, ctx, phaseTransition,
+                (text, loop, mutations, failed) -> new AnswerOutputLimit.Presentation(
+                        toolAnswerShaper.shape(text, loop, mutations, failed), true),
+                (text, failed) -> new AnswerOutputLimit.Presentation(noToolAnswerShaper.shape(text, failed), true));
+    }
+
+    static Resolution resolveSelected(
+            String answer, boolean initialOutputLimitReached, List<ChatMessage> messages, CurrentTurnPlan plan,
+            Path workspace, Context ctx, PhaseTransition phaseTransition,
+            SelectedToolAnswerShaper toolAnswerShaper, SelectedNoToolAnswerShaper noToolAnswerShaper) {
         if (plan == null) {
             throw new IllegalArgumentException(
                     "captured retry plan is required");
@@ -76,21 +97,22 @@ final class AssistantNoToolOutcomeResolver {
                             ? debrisRetry.mutationsInRetry()
                             : 0;
                     phaseTransition.moveToVerify(verificationLoop, extraMutationSuccesses);
-                    return new Resolution(
+                    return resolution(
                             toolAnswerShaper.shape(
                                     debrisRetry.answer(),
                                     verificationLoop,
                                     extraMutationSuccesses,
                                     debrisRetry.actionObligationFailed()),
-                            debrisRetry.extraSummary());
+                            debrisRetry.extraSummary(), debrisRetry.outputLimit().apply(initialOutputLimitReached));
                 }
             }
-            return new Resolution(noToolAnswerShaper.shape(answer, false), null);
+            return resolution(noToolAnswerShaper.shape(answer, false), null, initialOutputLimitReached);
         }
 
         ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
         MissingMutationRetry.Result mutationRetry = mutationRetryIfNeeded(
                 answer, messages, safePlan, noToolLoopResult, workspace, ctx);
+        boolean outputLimitReached = mutationRetry.outputLimit().apply(initialOutputLimitReached);
         if (mutationRetry.extraSummary() != null || mutationRetry.mutationsInRetry() > 0) {
             ToolCallLoop.LoopResult verificationLoop = mutationRetry.retryLoopResult() == null
                     ? noToolLoopResult
@@ -99,26 +121,27 @@ final class AssistantNoToolOutcomeResolver {
                     ? mutationRetry.mutationsInRetry()
                     : 0;
             phaseTransition.moveToVerify(verificationLoop, extraMutationSuccesses);
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             mutationRetry.answer(),
                             verificationLoop,
                             extraMutationSuccesses,
                             mutationRetry.actionObligationFailed()),
-                    mutationRetry.extraSummary());
+                    mutationRetry.extraSummary(), outputLimitReached);
         }
 
         ReadEvidenceHandoff.Result readEvidenceHandoff = ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
                 mutationRetry.answer(), messages, safePlan, workspace, ctx);
         if (readEvidenceHandoff.loopResult() != null) {
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             readEvidenceHandoff.answer(),
                             readEvidenceHandoff.loopResult(),
                             0,
                             false),
                     AnswerGroundingDisclosure.toolLoopSummary(
-                            readEvidenceHandoff.loopResult(), safePlan, workspace, messages));
+                            readEvidenceHandoff.loopResult(), safePlan, workspace, messages),
+                    readEvidenceHandoff.outputLimit().apply(outputLimitReached));
         }
 
         ReadOnlyInspectionRetry.Result inspectionRetry = ReadOnlyInspectionRetry.retryIfNeeded(
@@ -133,21 +156,27 @@ final class AssistantNoToolOutcomeResolver {
                         safePlan,
                         RetryDispatchPurpose.READ_ONLY_INSPECTION));
         if (inspectionRetry.loopResult() != null) {
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             inspectionRetry.answer(),
                             inspectionRetry.loopResult(),
                             0,
                             false),
                     AnswerGroundingDisclosure.toolLoopSummary(
-                            inspectionRetry.loopResult(), safePlan, workspace, messages));
+                            inspectionRetry.loopResult(), safePlan, workspace, messages),
+                    inspectionRetry.outputLimit().apply(outputLimitReached));
         }
 
-        return new Resolution(
+        return resolution(
                 noToolAnswerShaper.shape(
                         inspectionRetry.answer(),
                         mutationRetry.actionObligationFailed()),
-                AnswerGroundingDisclosure.zeroReadWorkspaceNote(safePlan));
+                AnswerGroundingDisclosure.zeroReadWorkspaceNote(safePlan),
+                inspectionRetry.outputLimit().apply(outputLimitReached));
+    }
+
+    private static Resolution resolution(AnswerOutputLimit.Presentation shaped, String summary, boolean reached) {
+        return new Resolution(shaped.answer(), summary, shaped.outputLimit().apply(reached));
     }
 
     private static MissingMutationRetry.Result mutationRetryIfNeeded(

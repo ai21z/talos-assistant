@@ -6,8 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -15,70 +14,93 @@ import java.util.Optional;
 
 /** Writes redacted prompt-debug artifacts while preserving the CLI command output contract. */
 public final class PromptDebugArtifactWriter {
-    private static final DateTimeFormatter FILE_TS =
-            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-
     private PromptDebugArtifactWriter() {}
 
     public static LatestArtifact writeLatest(Path directory, PromptDebugSnapshot snapshot) throws IOException {
+        return writeLatest(directory, snapshot, PromptDebugArtifactWriter::writeNewFile);
+    }
+
+    static LatestArtifact writeLatest(Path directory, PromptDebugSnapshot snapshot, ArtifactWrite writer)
+            throws IOException {
         Objects.requireNonNull(snapshot, "snapshot");
-        Path dir = prepareDirectory(directory);
-
-        String ts = FILE_TS.format(LocalDateTime.now());
-        Path render = dir.resolve("prompt-debug-" + ts + ".md");
-        Files.writeString(render, PromptDebugInspector.format(snapshot), StandardCharsets.UTF_8);
-
-        Path providerBody = null;
-        if (!snapshot.providerBodyJson().isBlank()) {
-            providerBody = dir.resolve("prompt-debug-" + ts + ".provider-body.json");
-            Files.writeString(providerBody, PromptDebugInspector.redactedProviderBodyJson(snapshot),
-                    StandardCharsets.UTF_8);
-        }
-        return new LatestArtifact(render, Optional.ofNullable(providerBody));
+        HistoryArtifact group = writeGroup(directory, List.of(snapshot), writer);
+        CaptureArtifact capture = group.captures().getFirst();
+        return new LatestArtifact(capture.renderPath(), capture.providerBodyPath(), group.indexPath());
     }
 
     public static HistoryArtifact writeHistory(Path directory, List<PromptDebugSnapshot> snapshots)
             throws IOException {
-        Objects.requireNonNull(snapshots, "snapshots");
-        Path dir = prepareDirectory(directory);
+        return writeHistory(directory, snapshots, PromptDebugArtifactWriter::writeNewFile);
+    }
 
-        String ts = FILE_TS.format(LocalDateTime.now());
+    static HistoryArtifact writeHistory(Path directory, List<PromptDebugSnapshot> snapshots, ArtifactWrite writer)
+            throws IOException {
+        return writeGroup(directory, snapshots, writer);
+    }
+
+    private static HistoryArtifact writeGroup(Path directory, List<PromptDebugSnapshot> snapshots,
+                                               ArtifactWrite writer) throws IOException {
+        List<PromptDebugSnapshot> selected = List.copyOf(Objects.requireNonNull(snapshots, "snapshots"));
+        Objects.requireNonNull(writer, "writer");
+        Path dir = prepareGroup(directory);
         List<CaptureArtifact> captures = new ArrayList<>();
         List<String> indexLines = new ArrayList<>();
-        for (int i = 0; i < snapshots.size(); i++) {
-            PromptDebugSnapshot snapshot = snapshots.get(i);
-            String prefix = "prompt-debug-" + ts + "-" + String.format("%02d", i + 1);
+        for (int i = 0; i < selected.size(); i++) {
+            PromptDebugSnapshot snapshot = selected.get(i);
+            String prefix = "capture-" + (i + 1);
             Path render = dir.resolve(prefix + ".md");
-            Files.writeString(render, PromptDebugInspector.format(snapshot), StandardCharsets.UTF_8);
-            indexLines.add((i + 1) + ". " + render.toAbsolutePath().normalize());
+            writer.write(render, PromptDebugInspector.format(snapshot));
+            indexLines.add((i + 1) + ". render: " + render.getFileName());
 
             Path providerBody = null;
             if (!snapshot.providerBodyJson().isBlank()) {
                 providerBody = dir.resolve(prefix + ".provider-body.json");
-                Files.writeString(providerBody, PromptDebugInspector.redactedProviderBodyJson(snapshot),
-                        StandardCharsets.UTF_8);
-                indexLines.add("   provider: " + providerBody.toAbsolutePath().normalize());
+                writer.write(providerBody, PromptDebugInspector.redactedProviderBodyJson(snapshot));
+                indexLines.add("   provider: " + providerBody.getFileName());
+            } else {
+                indexLines.add("   provider: absent");
             }
             captures.add(new CaptureArtifact(render, Optional.ofNullable(providerBody)));
         }
 
-        Path index = dir.resolve("prompt-debug-" + ts + "-index.md");
-        Files.writeString(index,
-                "# Talos Prompt Debug History\n\n" + String.join("\n", indexLines) + "\n",
-                StandardCharsets.UTF_8);
+        // Listed members must finish writing before the index is exposed. On failure, retain
+        // this partial group and all prior groups; this is not crash-atomic multi-file storage.
+        Path index = dir.resolve("index.md");
+        writer.write(index, "# Talos Prompt Debug Export\n\n"
+                + "Capture count: " + captures.size() + "\n"
+                + "Member paths are relative to this index. Provider bodies are redacted.\n\n"
+                + String.join("\n", indexLines) + "\n");
         return new HistoryArtifact(captures, index);
     }
 
-    private static Path prepareDirectory(Path directory) throws IOException {
+    private static Path prepareGroup(Path directory) throws IOException {
         Path dir = Objects.requireNonNull(directory, "directory");
         Files.createDirectories(dir);
-        return dir;
+        // The directory is a persistent export, despite the JDK allocator's name. Allocation
+        // is atomic/no-clobber and does not depend on a timestamp or shared process counter.
+        return Files.createTempDirectory(dir, "prompt-debug-");
     }
 
-    public record LatestArtifact(Path renderPath, Optional<Path> providerBodyPath) {
+    static void writeNewFile(Path path, String content) throws IOException {
+        Files.writeString(path, content, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+    }
+
+    @FunctionalInterface
+    interface ArtifactWrite {
+        void write(Path path, String content) throws IOException;
+    }
+
+    public record LatestArtifact(Path renderPath, Optional<Path> providerBodyPath, Path indexPath) {
+        public LatestArtifact(Path renderPath, Optional<Path> providerBodyPath) {
+            this(renderPath, providerBodyPath,
+                    Objects.requireNonNull(renderPath, "renderPath").resolveSibling("index.md"));
+        }
+
         public LatestArtifact {
             Objects.requireNonNull(renderPath, "renderPath");
             providerBodyPath = Objects.requireNonNullElse(providerBodyPath, Optional.empty());
+            Objects.requireNonNull(indexPath, "indexPath");
         }
     }
 

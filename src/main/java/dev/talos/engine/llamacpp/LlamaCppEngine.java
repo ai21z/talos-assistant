@@ -1,6 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.engine.compat.CompatChatClient;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import dev.talos.spi.EngineException;
@@ -16,6 +17,10 @@ import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.TokenChunk;
 
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -24,6 +29,13 @@ import java.util.stream.Stream;
 
 final class LlamaCppEngine implements ModelEngine {
     static final String BACKEND = "llama_cpp";
+    private static final String QWEN25_PREFILL_ALIAS = "qwen2.5-coder-14b";
+    private static final String QWEN25_PREFILL_MODEL_SHA256 =
+            "c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940";
+    private static final String QWEN25_PREFILL_EXECUTABLE_SHA256 =
+            "ec94260223a88aa87a48fbbefa35d16a217a7df18da35eab9eef3e8790ceeb33";
+    private static final String QWEN25_PREFILL_TEMPLATE_SHA256 =
+            "55b2f4a26ac9ee719330a61a0c39d9e538b0e9322212f048326318cff4f8674a";
 
     private final LlamaCppConfig config;
     private final LlamaCppServerManager serverManager;
@@ -117,21 +129,21 @@ final class LlamaCppEngine implements ModelEngine {
     public String chat(ChatRequest req) throws Exception {
         prepareCapabilities();
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
-        return invocation.client().chat(req, requestLayout(), invocation.handoff());
+        return invocation.client().chat(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
     public String chat(ChatRequest req, ProviderTransportHandoff handoff) throws Exception {
         prepareCapabilities();
         ChatInvocation invocation = invocation(handoff);
-        return invocation.client().chat(req, requestLayout(), invocation.handoff());
+        return invocation.client().chat(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
         prepareCapabilities();
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
-        return invocation.client().chatStream(req, requestLayout(), invocation.handoff());
+        return invocation.client().chatStream(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
@@ -140,7 +152,7 @@ final class LlamaCppEngine implements ModelEngine {
             ProviderTransportHandoff handoff) throws Exception {
         prepareCapabilities();
         ChatInvocation invocation = invocation(handoff);
-        return invocation.client().chatStream(req, requestLayout(), invocation.handoff());
+        return invocation.client().chatStream(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
@@ -148,7 +160,7 @@ final class LlamaCppEngine implements ModelEngine {
         prepareCapabilities();
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
         return invocation.client().chatStreamNonStreaming(
-                req, requestLayout(), invocation.handoff());
+                req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
@@ -158,7 +170,7 @@ final class LlamaCppEngine implements ModelEngine {
         prepareCapabilities();
         ChatInvocation invocation = invocation(handoff);
         return invocation.client().chatStreamNonStreaming(
-                req, requestLayout(), invocation.handoff());
+                req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
@@ -194,6 +206,71 @@ final class LlamaCppEngine implements ModelEngine {
         return snapshot == null
                 ? RequestMessageLayout.PRESERVE_AS_WRITTEN
                 : snapshot.profile().effectiveRequestLayout();
+    }
+
+    private CompatChatClient.NativeToolPrefill nativeToolPrefill(ChatRequest request) {
+        return nativeToolPrefill(config, preparedProfile, request);
+    }
+
+    /**
+     * Selects only the demonstrated managed compatibility envelope. These are prepared
+     * profile facts, not a per-request runtime-DLL attestation. The client independently
+     * restricts the option to eligible required native-tool requests before serialization.
+     */
+    static CompatChatClient.NativeToolPrefill nativeToolPrefill(
+            LlamaCppConfig config,
+            LlamaCppResolvedProfileService.Snapshot snapshot,
+            ChatRequest request) {
+        if (config == null || !config.managed() || !config.nativeCallingRequested()
+                || !config.jinja() || !HostLocalityPolicy.isLoopback(config.baseUrl())
+                || snapshot == null || request == null
+                || !BACKEND.equals(request.backend)
+                || snapshot.propsState() != LlamaCppPropsClient.State.AVAILABLE
+                || !snapshot.chatAvailable()
+                || !"b9918-0512ef1e5".equals(snapshot.engineBuildInfo())) {
+            return CompatChatClient.NativeToolPrefill.NONE;
+        }
+        String outboundModel = request.model.isBlank()
+                ? config.catalogFallbackModel()
+                : request.model;
+        LlamaCppProfileResolver.ResolvedLlamaCppProfile profile = snapshot.profile();
+        LlamaCppProfileResolver.ArtifactIdentity artifact = profile.artifactIdentity();
+        LlamaCppProfileResolver.EngineFacts engine = profile.engineFacts();
+        LlamaCppProfileResolver.ObservedServerFacts observed = profile.observedFacts();
+        if (!QWEN25_PREFILL_ALIAS.equals(outboundModel)
+                || !QWEN25_PREFILL_ALIAS.equals(config.model())
+                || !QWEN25_PREFILL_ALIAS.equals(profile.declaredAlias())
+                || !QWEN25_PREFILL_ALIAS.equals(profile.configuredFacts().alias())
+                || !profile.configuredFacts().managed()
+                || profile.resolution() != LlamaCppProfileResolver.ResolutionState.QUALIFIED
+                || profile.effectiveToolMode() != LlamaCppProfileResolver.ToolMode.NATIVE
+                || profile.artifactState() != LlamaCppProfileResolver.ArtifactState.EXACT
+                || artifact.state() != LlamaCppProfileResolver.ArtifactState.EXACT
+                || artifact.actualSize() != 8_988_110_272L
+                || artifact.expectedSize() != artifact.actualSize()
+                || !QWEN25_PREFILL_MODEL_SHA256.equals(artifact.actualSha256())
+                || !QWEN25_PREFILL_MODEL_SHA256.equals(artifact.expectedSha256())
+                || profile.servedIdentity() != LlamaCppProfileResolver.MatchState.MATCHED
+                || profile.engineCompatibility() != LlamaCppProfileResolver.MatchState.MATCHED
+                || engine.executableVerification() != LlamaCppProfileResolver.MatchState.MATCHED
+                || !"win-x64-cuda-13.3:b9918".equals(engine.lane())
+                || !QWEN25_PREFILL_EXECUTABLE_SHA256.equals(engine.executableIdentity())
+                || observed.state() != LlamaCppProfileResolver.ObservationState.AVAILABLE
+                || !BACKEND.equals(observed.backend())
+                || observed.templateIdentity() != LlamaCppProfileResolver.MatchState.MATCHED
+                || observed.toolMode() != LlamaCppProfileResolver.ToolMode.NATIVE) {
+            return CompatChatClient.NativeToolPrefill.NONE;
+        }
+        byte[] template = observed.chatTemplate().getBytes(StandardCharsets.UTF_8);
+        if (template.length != 2506) return CompatChatClient.NativeToolPrefill.NONE;
+        try {
+            String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(template));
+            return QWEN25_PREFILL_TEMPLATE_SHA256.equals(hash)
+                    ? CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED
+                    : CompatChatClient.NativeToolPrefill.NONE;
+        } catch (NoSuchAlgorithmException unavailable) {
+            return CompatChatClient.NativeToolPrefill.NONE;
+        }
     }
 
     private ChatInvocation invocation(ProviderTransportHandoff handoff) {

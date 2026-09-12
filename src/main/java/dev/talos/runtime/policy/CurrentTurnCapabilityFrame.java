@@ -144,11 +144,22 @@ public final class CurrentTurnCapabilityFrame {
                     Use read-only evidence or prior verified outcomes.
                     Do not call mutating tools.
                     If you identify a possible fix, describe it and wait for an explicit change request before editing.""");
-            case DIRECT_ANSWER_ONLY -> frame.append("""
-                    This turn is conversational or capability-oriented.
-                    No workspace tools are visible.
-                    Do not call tools.
-                    Answer directly from Talos product identity/capability only.""");
+            case DIRECT_ANSWER_ONLY -> {
+                frame.append("""
+                        This turn requires a direct answer without workspace inspection.
+                        No workspace tools are visible.
+                        Do not call tools.
+                        Do not claim to have inspected files or performed workspace actions.
+                        """);
+                if (type == TaskType.SMALL_TALK
+                        && (CapabilityAnswerPolicy.looksLikeIdentityTurn(contract.originalUserRequest())
+                        || CapabilityAnswerPolicy.looksLikeCapabilityTurn(contract.originalUserRequest()))) {
+                    frame.append("Answer directly from Talos product identity/capability only.");
+                } else {
+                    frame.append("Answer the user's requested topic directly using general knowledge "
+                            + "and information already provided in the conversation.");
+                }
+            }
             case REPAIR_FROM_VERIFIER_FINDINGS -> frame.append("""
                     Repair must be based on previous verifier findings and remain bounded.
                     Use the visible file tools only if mutation is allowed.""");

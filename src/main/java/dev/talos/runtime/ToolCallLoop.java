@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolLoopResultSummaryFormatter;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
@@ -60,6 +61,9 @@ public final class ToolCallLoop {
         this(turnProcessor, DEFAULT_MAX_ITERATIONS, null);
     }
 
+    /** Outcome of the one bounded response-only read synthesis, independent of tool-loop limits. */
+    public enum ReadOnlySynthesisStatus { NOT_ATTEMPTED, REJECTED, ACCEPTED }
+
     public record LoopResult(
             String finalAnswer,
             int iterations,
@@ -77,7 +81,10 @@ public final class ToolCallLoop {
             int cushionFiresE1Suggestion,
             FailureDecision failureDecision,
             List<ToolOutcome> toolOutcomes,
-            Map<String, String> readFileBodies
+            Map<String, String> readFileBodies,
+            boolean finalAnswerOutputLimitReached,
+            ReadOnlySynthesisStatus readOnlySynthesisStatus,
+            ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff
     ) {
         public LoopResult {
             toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
@@ -88,6 +95,52 @@ public final class ToolCallLoop {
                     : failureDecision;
             toolOutcomes = toolOutcomes == null ? List.of() : List.copyOf(toolOutcomes);
             readFileBodies = readFileBodies == null ? Map.of() : Map.copyOf(readFileBodies);
+            readOnlySynthesisStatus = readOnlySynthesisStatus == null
+                    ? ReadOnlySynthesisStatus.NOT_ATTEMPTED : readOnlySynthesisStatus;
+            readOnlyEvidenceHandoff = readOnlyEvidenceHandoff == null
+                    ? ReadOnlyEvidenceHandoff.empty() : readOnlyEvidenceHandoff;
+        }
+
+        /** Legacy callers carry no trusted cross-loop read evidence. */
+        public LoopResult(
+                String finalAnswer, int iterations, int toolsInvoked, List<String> toolNames,
+                List<ChatMessage> messages, int failedCalls, int retriedCalls, boolean hitIterLimit,
+                int mutatingToolSuccesses, List<String> readPaths, int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue, int cushionFiresB3EditShortCircuit, int cushionFiresE1Suggestion,
+                FailureDecision failureDecision, List<ToolOutcome> toolOutcomes, Map<String, String> readFileBodies,
+                boolean finalAnswerOutputLimitReached, ReadOnlySynthesisStatus readOnlySynthesisStatus) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls, retriedCalls,
+                    hitIterLimit, mutatingToolSuccesses, readPaths, cushionFiresRedundantRead,
+                    cushionFiresAliasRescue, cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, readFileBodies, finalAnswerOutputLimitReached,
+                    readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.empty());
+        }
+
+        /** Compatibility shape for callers that did not attempt bounded read-only synthesis. */
+        public LoopResult(
+                String finalAnswer, int iterations, int toolsInvoked, List<String> toolNames,
+                List<ChatMessage> messages, int failedCalls, int retriedCalls, boolean hitIterLimit,
+                int mutatingToolSuccesses, List<String> readPaths, int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue, int cushionFiresB3EditShortCircuit, int cushionFiresE1Suggestion,
+                FailureDecision failureDecision, List<ToolOutcome> toolOutcomes, Map<String, String> readFileBodies,
+                boolean finalAnswerOutputLimitReached) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls, retriedCalls,
+                    hitIterLimit, mutatingToolSuccesses, readPaths, cushionFiresRedundantRead,
+                    cushionFiresAliasRescue, cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, readFileBodies, finalAnswerOutputLimitReached,
+                    ReadOnlySynthesisStatus.NOT_ATTEMPTED);
+        }
+
+        public LoopResult(
+                String finalAnswer, int iterations, int toolsInvoked, List<String> toolNames,
+                List<ChatMessage> messages, int failedCalls, int retriedCalls, boolean hitIterLimit,
+                int mutatingToolSuccesses, List<String> readPaths, int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue, int cushionFiresB3EditShortCircuit, int cushionFiresE1Suggestion,
+                FailureDecision failureDecision, List<ToolOutcome> toolOutcomes, Map<String, String> readFileBodies) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls, retriedCalls,
+                    hitIterLimit, mutatingToolSuccesses, readPaths, cushionFiresRedundantRead,
+                    cushionFiresAliasRescue, cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, readFileBodies, false);
         }
 
         public LoopResult(
@@ -181,7 +234,8 @@ public final class ToolCallLoop {
             ToolMutationEvidence mutationEvidence,
             dev.talos.tools.ToolFailureReason failureReason,
             List<String> sourcePaths,
-            String toolCallId
+            String toolCallId,
+            dev.talos.tools.ToolMutationEffects mutationEffects
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -193,6 +247,24 @@ public final class ToolCallLoop {
             failureReason = failureReason == null ? dev.talos.tools.ToolFailureReason.NONE : failureReason;
             sourcePaths = normalizeSourcePaths(sourcePaths);
             toolCallId = toolCallId == null ? "" : toolCallId.strip();
+            mutationEffects = mutationEffects == null ? dev.talos.tools.ToolMutationEffects.none() : mutationEffects;
+        }
+
+        /** Compatibility shape before effect reporting was independent of success. */
+        public ToolOutcome(String toolName, String pathHint, boolean success, boolean mutating,
+                           boolean denied, String summary, String errorMessage,
+                           dev.talos.tools.VerificationStatus fileVerificationStatus, String errorCode,
+                           WorkspaceOperationPlan workspaceOperationPlan, ToolMutationEvidence mutationEvidence,
+                           dev.talos.tools.ToolFailureReason failureReason, List<String> sourcePaths, String toolCallId) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, sourcePaths, toolCallId, dev.talos.tools.ToolMutationEffects.none());
+        }
+
+        public ToolOutcome withMutationEffects(dev.talos.tools.ToolMutationEffects effects) {
+            return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
+                    errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
+                    mutationEvidence, failureReason, sourcePaths, toolCallId, effects);
         }
 
         /** Pre-T1154 canonical shape: exact parsed-call identity was not retained. */
@@ -326,7 +398,7 @@ public final class ToolCallLoop {
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, reason, sourcePaths, toolCallId);
+                    mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects);
         }
 
         private static List<String> normalizeSourcePaths(List<String> values) {
@@ -414,6 +486,14 @@ public final class ToolCallLoop {
             RuntimeTurnContext ctx) {
         return engine.run(
                 initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx);
+    }
+
+    /** Continues only authenticated same-turn read evidence; proposal authority still requires its receipt. */
+    public LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff) {
+        return engine.run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx, handoff);
     }
 
     /**

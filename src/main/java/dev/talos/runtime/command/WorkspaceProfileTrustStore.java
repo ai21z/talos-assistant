@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.util.Hash;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Objects;
@@ -53,6 +55,13 @@ public final class WorkspaceProfileTrustStore {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final Path trustDir;
+    private final PinDeleter pinDeleter;
+
+    /** Narrow filesystem seam for deterministic revocation-failure checks. */
+    @FunctionalInterface
+    public interface PinDeleter {
+        void deleteIfExists(Path pin) throws IOException;
+    }
 
     public WorkspaceProfileTrustStore() {
         this(defaultTrustDir());
@@ -60,8 +69,13 @@ public final class WorkspaceProfileTrustStore {
 
     /** Test seam: an explicit trust directory keeps pins out of the real home. */
     public WorkspaceProfileTrustStore(Path trustDir) {
+        this(trustDir, Files::deleteIfExists);
+    }
+
+    public WorkspaceProfileTrustStore(Path trustDir, PinDeleter pinDeleter) {
         this.trustDir = Objects.requireNonNull(trustDir, "trustDir is required")
                 .toAbsolutePath().normalize();
+        this.pinDeleter = Objects.requireNonNull(pinDeleter, "pinDeleter is required");
     }
 
     static Path defaultTrustDir() {
@@ -122,13 +136,17 @@ public final class WorkspaceProfileTrustStore {
         return pin;
     }
 
-    /** Remove a recorded pin (e.g. user revokes trust). Missing pin is a no-op. */
+    /** Remove a recorded pin; success requires observed absence, not best effort. */
     public void unpin(Path workspace) {
+        Path file = pinFile(workspaceId(workspace));
         try {
-            Files.deleteIfExists(pinFile(workspaceId(workspace)));
-        } catch (Exception ignored) {
-            // Best effort - an undeletable pin keeps the stricter state only
-            // if the bytes still match; nothing fails open.
+            pinDeleter.deleteIfExists(file);
+            if (!Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Trust-pin absence could not be confirmed.");
+            }
+        } catch (IOException | SecurityException e) {
+            throw new IllegalStateException(
+                    "Could not revoke workspace profile trust; the existing pin may remain active.", e);
         }
     }
 

@@ -134,6 +134,26 @@ class ToolMutationStateAccountingTest {
         assertFalse(source.contains("state.pendingMutationSummaries.add"), source);
     }
 
+    @Test
+    void failedAppliedAndUnknownEffectsInvalidateReadsWithoutSuccessOrRecoveryCredit() {
+        LoopState state = loopState();
+        addReadEvidence(state, "README.md", "1 | old");
+        state.editRecoveryFullRewriteTargets.add("README.md");
+        ToolResult failed = ToolResult.fail("commit unknown").withMutationEffects(
+                new dev.talos.tools.ToolMutationEffects(java.util.List.of("created-dir"),
+                        java.util.List.of("README.md")));
+        var accounting = ToolMutationStateAccounting.recordSuccessfulMutation(state,
+                new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new")),
+                "README.md", failed);
+        assertTrue(accounting.mutationRecorded());
+        assertTrue(state.mutationSinceStart);
+        assertEquals(0, state.mutatingToolSuccesses);
+        assertTrue(state.pathsMutatedSinceRead.containsAll(java.util.List.of("created-dir", "README.md")));
+        assertNull(state.readEvidence.latestReadFileForPath("README.md", true));
+        assertTrue(state.editRecoveryFullRewriteTargets.contains("README.md"));
+        assertFalse(accounting.hasMutationSummary());
+    }
+
     private static LoopState loopState() {
         return new LoopState("", java.util.List.of(), java.util.List.of(), null, null, null, 5, 0);
     }

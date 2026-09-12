@@ -36,6 +36,33 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class TalosBootstrapReconcileTest {
 
+    @Test
+    void restoresTypedEffectsWithoutReplayingFailedProseThroughEitherRestoreRoute(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "effect-restore";
+        var effects = new dev.talos.tools.ToolMutationEffects(List.of("docs", "note.txt"), List.of("maybe.txt"));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "safe question"),
+                            new SessionData.Turn("assistant", "safe answer"))));
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "failed mutation", "DO_NOT_REPLAY_FAILED_MODEL_PROSE",
+                    List.of(new TurnRecord.ToolCallSummary("talos.apply_workspace_batch", "docs",
+                            List.of("docs", "note.txt", "maybe.txt"), false, "partial", effects)),
+                    1, 1, 0, "", "error"));
+        }
+        SessionMemory snapshot = new SessionMemory();
+        TalosBootstrap.replaySnapshot(store, sid, snapshot, cm(snapshot));
+        assertFalse(snapshot.get().contains("DO_NOT_REPLAY_FAILED_MODEL_PROSE"));
+        assertEquals(List.of("docs", "note.txt", "maybe.txt"), snapshot.changeSummaryContext()
+                .changedFiles().stream().map(dev.talos.runtime.context.ChangeSummaryContext.FileChange::path).toList());
+        assertTrue(snapshot.changeSummaryContext().renderForChangeSummaryQuestion().contains("UNKNOWN"));
+        SessionMemory crash = new SessionMemory();
+        assertEquals(0, TalosBootstrap.replayTurnLog(store, sid, crash));
+        assertTrue(crash.get() == null || !crash.get().contains("DO_NOT_REPLAY_FAILED_MODEL_PROSE"));
+        assertEquals(snapshot.changeSummaryContext(), crash.changeSummaryContext());
+    }
+
     private static ConversationManager cm(SessionMemory mem) {
         return new ConversationManager(mem, new TokenBudget());
     }

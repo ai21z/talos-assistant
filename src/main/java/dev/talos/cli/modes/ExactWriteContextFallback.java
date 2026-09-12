@@ -175,6 +175,7 @@ final class ExactWriteContextFallback {
                 tags,
                 safe.sampling(),
                 0,
-                safe.toolAuthorityMode());
+                safe.toolAuthorityMode(),
+                safe.singleAttempt());
     }
 }

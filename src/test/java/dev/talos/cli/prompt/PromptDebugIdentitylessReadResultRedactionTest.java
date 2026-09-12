@@ -359,8 +359,16 @@ class PromptDebugIdentitylessReadResultRedactionTest {
                 List.of(ChatMessage.user(readResult)),
                 providerBody("user", readResult));
 
-        PromptDebugArtifactWriter.writeLatest(tempDir.resolve("latest"), snapshot);
-        PromptDebugArtifactWriter.writeHistory(tempDir.resolve("history"), List.of(snapshot, snapshot));
+        var latest = PromptDebugArtifactWriter.writeLatest(tempDir.resolve("latest"), snapshot);
+        var history = PromptDebugArtifactWriter.writeHistory(tempDir.resolve("history"), List.of(snapshot, snapshot));
+        Set<Path> indexes = Set.of(latest.indexPath(), history.indexPath());
+        Set<Path> expected = new LinkedHashSet<>(indexes);
+        expected.add(latest.renderPath());
+        expected.add(latest.providerBodyPath().orElseThrow());
+        for (var capture : history.captures()) {
+            expected.add(capture.renderPath());
+            expected.add(capture.providerBodyPath().orElseThrow());
+        }
 
         byte[] rawCanary = CANARY.getBytes(StandardCharsets.UTF_8);
         byte[] redactionMarker = PromptDebugInspector.PROTECTED_TOOL_RESULT_REDACTION
@@ -369,11 +377,11 @@ class PromptDebugIdentitylessReadResultRedactionTest {
         try (var paths = Files.walk(tempDir)) {
             files = paths.filter(Files::isRegularFile).sorted().toList();
         }
-        assertTrue(files.size() == 7, files.toString());
+        assertTrue(Set.copyOf(files).equals(expected), files.toString());
         for (Path file : files) {
             byte[] bytes = Files.readAllBytes(file);
             assertFalse(containsBytes(bytes, rawCanary), file.toString());
-            if (!file.getFileName().toString().endsWith("-index.md")) {
+            if (!indexes.contains(file)) {
                 assertTrue(containsBytes(bytes, redactionMarker), file.toString());
             }
         }

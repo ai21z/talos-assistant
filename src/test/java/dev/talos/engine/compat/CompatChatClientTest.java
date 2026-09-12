@@ -20,6 +20,8 @@ import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -39,6 +41,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -221,6 +224,335 @@ class CompatChatClientTest {
         assertEquals(streaming.get("messages"), nonStreaming.get("messages"));
         assertEquals(true, streaming.get("stream"));
         assertEquals(false, nonStreaming.get("stream"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "stream", "non-stream"})
+    void nativePrefillAllTransportsCaptureAndAdmitTheExactOutboundBody(String transport) throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        boolean streaming = "stream".equals(transport);
+        String response = streaming
+                ? "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"
+                + "data: [DONE]\n\n"
+                : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},"
+                + "\"finish_reason\":\"stop\"}]}";
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, response,
+                streaming ? "text/event-stream" : "application/json");
+        try {
+            CompatChatClient client = client(server);
+            List<ChatMessage> logicalMessages = List.of(
+                    ChatMessage.system("base policy"),
+                    ChatMessage.user("workspace context"),
+                    ChatMessage.system("current authority"),
+                    ChatMessage.user("Read README.md"));
+            ChatRequest request = nativePrefillRequest(
+                    logicalMessages, ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+            DispatchCapture handoff = new DispatchCapture();
+
+            if ("chat".equals(transport)) {
+                assertEquals("ok", client.chat(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff));
+            } else {
+                try (var chunks = streaming
+                        ? client.chatStream(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff)
+                        : client.chatStreamNonStreaming(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff)) {
+                    assertEquals("ok", chunks.toList().getFirst().text());
+                }
+            }
+
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            assertEquals(4, body.path("messages").size());
+            assertEquals("base policy\n\ncurrent authority",
+                    body.path("messages").get(0).path("content").asText());
+            assertEquals("assistant", body.path("messages").get(3).path("role").asText());
+            assertEquals("<tool_call>\n", body.path("messages").get(3).path("content").asText());
+            assertEquals(2, body.path("messages").get(3).size(), "prefix supplies no call metadata");
+            assertEquals("content", body.path("continue_final_message").asText());
+            assertFalse(body.path("add_generation_prompt").asBoolean(true));
+            assertEquals(streaming, body.path("stream").asBoolean());
+            assertEquals("required", body.path("tool_choice").asText());
+            assertEquals(0, handoff.unboundDispatches);
+            assertEquals(1, handoff.evidence.size());
+            assertEquals(sha256Utf8(bodyRef.get()), handoff.evidence.getFirst().providerBodyHash());
+            assertEquals(List.of("talos.read_file"), handoff.evidence.getFirst().nativeTools());
+
+            var snapshot = PromptDebugCapture.latest().orElseThrow();
+            assertEquals(bodyRef.get(), snapshot.providerBodyJson());
+            assertEquals(logicalMessages, snapshot.messages());
+            assertEquals(logicalMessages, request.messages);
+            assertEquals(request.controls, snapshot.controls());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void nativePrefillIsRequestLocalReversibleAndPreservesToolsControlsAndHistory() {
+        CompatChatClient client = bodyOnlyClient();
+        for (ToolChoiceMode choice : List.of(ToolChoiceMode.REQUIRED, ToolChoiceMode.NAMED)) {
+            ChatRequest request = nativePrefillRequest(
+                    List.of(ChatMessage.system("policy"), ChatMessage.user("Read README.md")),
+                    choice, ResponseFormatMode.TEXT);
+            List<ChatMessage> history = List.copyOf(request.messages);
+            for (RequestMessageLayout layout : RequestMessageLayout.values()) {
+                Map<String, Object> before = client.buildBody(request, true, layout);
+                Map<String, Object> transformed = client.buildBody(request, true, layout,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED);
+                assertEquals(transformed, client.buildBody(request, true, layout,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED));
+                assertEquals(before, client.buildBody(request, true, layout), "no sticky opt-in");
+                assertEquals(before, client.buildBody(request, true, layout, null));
+                assertEquals(history, request.messages);
+                assertEquals(before.get("tools"), transformed.get("tools"));
+                assertEquals("required", transformed.get("tool_choice"));
+
+                Map<String, Object> reversed = new LinkedHashMap<>(transformed);
+                reversed.remove("continue_final_message");
+                reversed.remove("add_generation_prompt");
+                List<?> messages = (List<?>) transformed.get("messages");
+                assertEquals(Map.of("role", "assistant", "content", "<tool_call>\n"), messages.getLast());
+                reversed.put("messages", messages.subList(0, messages.size() - 1));
+                assertEquals(before, reversed, "only the three proven provider fields change");
+            }
+        }
+    }
+
+    @Test
+    void nativePrefillExcludesNonRequiredNonNativeAndStructuredResponseRequests() {
+        CompatChatClient client = bodyOnlyClient();
+        for (ToolChoiceMode choice : ToolChoiceMode.values()) {
+            for (ResponseFormatMode format : ResponseFormatMode.values()) {
+                for (ProviderResponseCapture.ToolAuthorityMode authority
+                        : ProviderResponseCapture.ToolAuthorityMode.values()) {
+                    ChatRequest base = nativePrefillRequest(
+                            List.of(ChatMessage.user("Read README.md")), choice, format);
+                    ChatRequest request = withControls(base, base.controls.withToolAuthorityMode(authority));
+                    if ((choice == ToolChoiceMode.REQUIRED || choice == ToolChoiceMode.NAMED)
+                            && format == ResponseFormatMode.TEXT
+                            && authority == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE) {
+                        continue;
+                    }
+                    assertEquals(client.buildBody(request, false), client.buildBody(request, false,
+                                    RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                                    CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED),
+                            choice + "/" + format + "/" + authority);
+                }
+            }
+        }
+    }
+
+    @Test
+    void nativePrefillExcludesEmptyToolsAndMismatchedNamedSurface() {
+        CompatChatClient client = bodyOnlyClient();
+        ChatRequest base = nativePrefillRequest(
+                List.of(ChatMessage.user("Read README.md")), ToolChoiceMode.NAMED, ResponseFormatMode.TEXT);
+        for (List<ToolSpec> tools : List.<List<ToolSpec>>of(
+                List.of(),
+                List.of(new ToolSpec("talos.list_dir", "List", "{}")),
+                List.of(base.tools.getFirst(), new ToolSpec("talos.list_dir", "List", "{}")))) {
+            ChatRequest request = new ChatRequest(base.backend, base.model, "", "", List.of(), base.timeout,
+                    base.messages, tools, base.controls);
+            assertEquals(client.buildBody(request, false), client.buildBody(request, false,
+                    RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED));
+        }
+    }
+
+    @Test
+    void nativePrefillExcludesUnsupportedFinalHistoryShapesAndExistingContinuation() {
+        CompatChatClient client = bodyOnlyClient();
+        var call = new ChatMessage.NativeToolCall("call_1", "talos.read_file", Map.of("path", "README.md"));
+        for (List<ChatMessage> messages : List.<List<ChatMessage>>of(
+                List.of(),
+                List.of(ChatMessage.system("policy only")),
+                List.of(ChatMessage.user("read"), ChatMessage.assistant("<tool_call>\n")),
+                List.of(ChatMessage.user("read"), ChatMessage.assistantWithToolCalls("", List.of(call))),
+                List.of(new ChatMessage("developer", "unsupported final role")),
+                List.of(ChatMessage.toolResult("", "missing correlation")),
+                List.of(new ChatMessage("tool", "result", List.of(call), "call_1")),
+                List.of(new ChatMessage("user", "read", List.of(call), null)))) {
+            ChatRequest request = nativePrefillRequest(messages, ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+            assertEquals(client.buildBody(request, false), client.buildBody(request, false,
+                    RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED), messages.toString());
+        }
+    }
+
+    @Test
+    void nativePrefillSupportsToolResultTailWithoutChangingItsCorrelationOrPriorCalls() {
+        CompatChatClient client = bodyOnlyClient();
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("Read the next file"),
+                ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                        "call_1", "talos.read_file", Map.of("path", "README.md")))),
+                ChatMessage.toolResult("call_1", "read result"));
+        ChatRequest request = nativePrefillRequest(messages, ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+        JsonNode body = MAPPER.valueToTree(client.buildBody(request, true,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED));
+        assertEquals(4, body.path("messages").size());
+        assertEquals("call_1", body.path("messages").get(1).path("tool_calls").get(0).path("id").asText());
+        assertEquals("call_1", body.path("messages").get(2).path("tool_call_id").asText());
+        assertEquals("read result", body.path("messages").get(2).path("content").asText());
+        assertEquals("<tool_call>\n", body.path("messages").get(3).path("content").asText());
+        assertEquals(messages, request.messages);
+    }
+
+    @Test
+    void nativePrefillCanUseExistingUnstructuredUserFallbackWithoutChangingLogicalRequest() {
+        CompatChatClient client = bodyOnlyClient();
+        ChatRequest controls = nativePrefillRequest(List.of(), ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+        ChatRequest request = new ChatRequest("llama_cpp", "agent.gguf", "policy", "Read README.md",
+                List.of(), Duration.ofSeconds(5), List.of(), controls.tools, controls.controls);
+        JsonNode body = MAPPER.valueToTree(client.buildBody(request, false,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED));
+        assertEquals(3, body.path("messages").size());
+        assertEquals("Read README.md", body.path("messages").get(1).path("content").asText());
+        assertEquals("<tool_call>\n", body.path("messages").get(2).path("content").asText());
+        assertEquals(List.of(), request.messages);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "stream", "non-stream"})
+    void nativePrefillStillRequiresTransportAdmissionBeforeAnyPhysicalSend(String transport) {
+        ThrowingSendHttpClient http = new ThrowingSendHttpClient();
+        CompatChatClient client = new CompatChatClient("http://127.0.0.1:1", "agent.gguf", http, MAPPER);
+        ChatRequest request = nativePrefillRequest(List.of(ChatMessage.user("Read README.md")),
+                ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+        AtomicReference<ProviderTransportHandoff.DispatchEvidence> rejectedBody = new AtomicReference<>();
+        ProviderTransportHandoff handoff = new ProviderTransportHandoff() {
+            @Override
+            public void requestDispatched() {
+                throw new AssertionError("unbound handoff");
+            }
+
+            @Override
+            public void requestDispatched(DispatchEvidence evidence) {
+                rejectedBody.set(evidence);
+                throw new DispatchRejected();
+            }
+        };
+        assertThrows(ProviderTransportHandoff.DispatchRejected.class, () -> {
+            switch (transport) {
+                case "chat" -> client.chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff);
+                case "stream" -> client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff);
+                case "non-stream" -> client.chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff);
+                default -> throw new AssertionError(transport);
+            }
+        });
+        assertEquals(0, http.sendCalls.get());
+        assertEquals(sha256Utf8(PromptDebugCapture.latest().orElseThrow().providerBodyJson()),
+                rejectedBody.get().providerBodyHash());
+        assertEquals(List.of("talos.read_file"), rejectedBody.get().nativeTools());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void nativePrefillLeavesNativeCallParsingAndProviderTerminalFactsIntact(boolean streaming) throws Exception {
+        String function = "{\"name\":\"talos.read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}";
+        String call = "{\"index\":0,\"id\":\"server-call-1\",\"type\":\"function\",\"function\":" + function + "}";
+        String response = streaming
+                ? "data: {\"choices\":[{\"delta\":{\"tool_calls\":[" + call
+                + "]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+                : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
+                + call + "]},\"finish_reason\":\"tool_calls\"}]}";
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), response,
+                streaming ? "text/event-stream" : "application/json");
+        try {
+            ChatRequest request = nativePrefillRequest(List.of(ChatMessage.user("Read README.md")),
+                    ToolChoiceMode.NAMED, ResponseFormatMode.TEXT);
+            CompatChatClient client = client(server);
+            try (var stream = streaming
+                    ? client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                            CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, ProviderTransportHandoff.none())
+                    : client.chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                            CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, ProviderTransportHandoff.none())) {
+                List<TokenChunk> chunks = stream.toList();
+                assertEquals(2, chunks.size());
+                assertEquals(List.of(new ChatMessage.NativeToolCall(
+                        "server-call-1", "talos.read_file", Map.of("path", "README.md"))),
+                        chunks.getFirst().toolCalls());
+                assertEquals("tool_calls", chunks.getLast().finishReason());
+                assertEquals(TokenChunk.TerminalSignal.PROVIDER_SENTINEL, chunks.getLast().terminalSignal());
+                assertTrue(chunks.stream().allMatch(chunk -> chunk.text().isEmpty()), "no synthetic prefix echo");
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"length", "raw-eof", "ordinary-text", "malformed"})
+    void nativePrefillDoesNotPromoteIncompleteOrTextualResponses(String condition) throws Exception {
+        String nativeDelta = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"talos.read_file\","
+                + "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}]}}]}\n\n";
+        String response = switch (condition) {
+            case "length" -> nativeDelta
+                    + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n";
+            case "raw-eof" -> nativeDelta;
+            case "ordinary-text" -> "data: {\"choices\":[{\"delta\":{\"content\":\"<tools>not a native call</tools>\"},"
+                    + "\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+            case "malformed" -> nativeDelta.replace("README.md\\\"}", "README.md\\\"")
+                    + "data: [DONE]\n\n";
+            default -> throw new AssertionError(condition);
+        };
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, response, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+            ChatRequest request = nativePrefillRequest(List.of(ChatMessage.user("Read README.md")),
+                    ToolChoiceMode.REQUIRED, ResponseFormatMode.TEXT);
+            if ("malformed".equals(condition)) {
+                assertThrows(EngineException.MalformedResponse.class, () -> client.chatStream(request,
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED,
+                        ProviderTransportHandoff.none()).toList());
+            } else {
+                try (var stream = client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, ProviderTransportHandoff.none())) {
+                    List<TokenChunk> chunks = stream.toList();
+                    TokenChunk terminal = chunks.getLast();
+                    switch (condition) {
+                        case "length" -> assertEquals("length", terminal.finishReason());
+                        case "raw-eof" -> assertEquals(TokenChunk.TerminalSignal.TRANSPORT_EOF,
+                                terminal.terminalSignal());
+                        case "ordinary-text" -> assertFalse(chunks.stream().anyMatch(TokenChunk::hasToolCalls));
+                        default -> throw new AssertionError(condition);
+                    }
+                    assertFalse(chunks.stream().anyMatch(chunk -> "tool_calls".equals(chunk.finishReason())));
+                }
+            }
+            assertEquals("content", MAPPER.readTree(bodyRef.get()).path("continue_final_message").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static ChatRequest nativePrefillRequest(
+            List<ChatMessage> messages, ToolChoiceMode choice, ResponseFormatMode format) {
+        return new ChatRequest("llama_cpp", "agent.gguf", "", "", List.of(), Duration.ofSeconds(5),
+                messages, List.of(new ToolSpec("talos.read_file", "Read file",
+                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}")),
+                new ChatRequestControls(choice, choice == ToolChoiceMode.NAMED ? "talos.read_file" : "",
+                        format, format == ResponseFormatMode.JSON_SCHEMA ? "{\"type\":\"object\"}" : "", List.of())
+                        .withToolAuthorityMode(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE)
+                        .withMaxOutputTokens(512).withSampling(new SamplingControls(0.2, 0.8, 20, 42L)));
+    }
+
+    private static ChatRequest withControls(ChatRequest base, ChatRequestControls controls) {
+        return new ChatRequest(base.backend, base.model, base.systemPrompt, base.userPrompt, base.snippets,
+                base.timeout, base.messages, base.tools, controls);
+    }
+
+    private static CompatChatClient bodyOnlyClient() {
+        return new CompatChatClient("http://127.0.0.1:1", "agent.gguf", HttpClient.newHttpClient(), MAPPER);
     }
 
     @Test

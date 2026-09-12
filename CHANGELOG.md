@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+- Read-only web diagnostics preserve supported explanations within a bounded
+  selector-checking path instead of always replacing them with a static summary.
+  Limited fallback answers and stops without final synthesis remain explicitly
+  incomplete. Explicit read targets retain their distinct filenames, and missing
+  or denied reads cannot be hidden by linked-page evidence.
+- Output-limit notices now follow the selected final answer: a successful
+  continuation no longer inherits an earlier truncation warning, while relevant
+  warnings remain visible.
+- A bounded subset of inert, quoted inline HTML survives normal provider-response
+  projection without invalidating an otherwise intact native tool proposal.
+  Tool authority, approval and abnormal-completion guards remain required.
+- Repetition watchdog failures retain their typed cause through terminal output,
+  traces and restored history instead of being reported as timeouts.
+- Prompt-debug saves create separate export groups with an explicit completed
+  member index. Repeated saves preserve earlier groups; failed saves may leave a
+  partial new group and are not reported as successful.
+- Command execution no longer borrows remembered file-write approval. Workspace
+  profile trust is rechecked before execution, failed revocation is reported,
+  and network requirement metadata is no longer described as network isolation.
+- Applied and uncertain effects of failed writes and partial workspace batches
+  remain visible through verification, traces, and restored history. Such failures
+  stop automatic same-turn retries. Browser interaction checks no longer execute
+  linked scripts a second time to manufacture a passing result.
+- Indexing binds text chunks to one source snapshot and rejects files changed
+  during embedding. Embedding batches require complete, correctly ordered valid
+  vectors before cache writes. Prior index/cache generations are rebuilt or missed
+  on demand, without deleting historical cache rows. The public full-reindex API
+  now forces rebuilding unchanged files while retaining privacy guards.
+- Command pipe draining and cleanup no longer wait indefinitely on executor
+  disposal. Windows uninstallers bind process selection to the selected install
+  and exclude the uninstaller and its ancestors instead of using broad substrings.
+- Release-summary headlines honor the enforcing Qodana status, negative gate
+  fixtures reject false passes, unavailable PowerShell fixtures skip explicitly,
+  and reserved documentation routes recover safely. Public architecture and
+  quality-report documentation now describe the implemented boundaries.
+- Public-site build tooling now uses Vite 7.3.6 with its corresponding locked
+  transitive dependency refresh; this does not change the Talos Java runtime.
+- Failed-turn lifecycle state now persists under exclusive session-writer
+  ownership, while provider-transport attempts settle explicitly. Unsettled
+  provider processes remain owned through bounded cleanup, and failure
+  diagnostics survive a restart without being mistaken for completed turns.
+- Request obligations remain typed end to end across runtime and model
+  qualification, and tool execution requires selected-provider authority.
+  Combined read and mutation requests and sequential workspace operations
+  retain their explicit constraints; unsupported compound model surfaces fail
+  closed instead of widening authority.
+- Executable JSON tool proposals preserve their exact selected source bytes
+  through sanitization, and recovered mutations remain bound to the exact
+  causal failed call. Primary file replacement is atomic and fail-closed;
+  preview, application, and verification use the same replacement-match
+  decision. Linked external trust paths and unmatched leading-backslash
+  escapes are rejected; recursive index globs include root files; grep orders
+  candidates before applying result caps; and tool-span sanitizer searches
+  remain bounded.
+- Model-qualification failures bind to their causal owner, trials bind to the
+  active provider process, and legacy protocol-v1 through protocol-v5
+  identities are checkout-independent. Coerced evidence is rejected, and
+  completed qualification evidence is published transactionally.
+- Protected-read diagnostics without an authenticated source identity now
+  redact path and content details instead of presenting unbound evidence.
 - [T1148] Tool continuations now keep the bounded current-task reminder in
   user role. Raw user request bytes no longer gain system authority when an
   evidence-gated provider layout merges Talos policy frames.
@@ -142,11 +202,12 @@
   contract applies one glob to filenames only. Failed or denied read/list
   calls no longer satisfy generic workspace-inspection or list-only evidence
   gates, while command failures and denials remain truthful outcome evidence.
-- [T1063] Model-qualification read grounding now uses structured source paths
-  from successful direct reads, grep matches, and retrieval snippets instead
-  of the scenario's preferred-tool score. Query tools with no source result do
-  not establish grounding, every source is checked against allowed and
-  forbidden targets, and tool-choice accuracy remains unchanged.
+- [T1063/T1053] Model-qualification read grounding now uses structured source
+  paths from successful direct reads, grep matches, and retrieval snippets
+  rather than preferred-tool scoring. Queries with no source result do not
+  establish grounding; every source is checked against allowed and forbidden
+  targets. Tool-choice accuracy and unnecessary calls remain independently
+  scored.
 - [T1062] Windows model-qualification startup now records and sends one blank
   wakeup line when a live WinPTY session withholds its initial prompt until
   input arrives. Only the typed initial-prompt timeout is recoverable; process
@@ -165,10 +226,6 @@
   scenario to state an explicit agreement verdict, report the shared endpoint,
   and name both source files. Protocols v1 through v4 remain byte-pinned and
   retain their original scoring semantics.
-- [T1053] Model-qualification read grounding no longer requires every scored
-  decision to be correct. Tool-choice accuracy and unnecessary calls remain
-  independently scored. T1063 completes the separation by replacing the
-  remaining preferred-tool coupling with structured source provenance.
 - [T1052] Windows model-qualification PTY capture now recognizes the exact
   JLine startup prompt that toggles cursor visibility around column positioning.
   Command echoes, partial frames, reordered controls, and altered columns remain
@@ -325,196 +382,76 @@
   their intended access. A stale caller-provided tool surface is cleared for
   direct-answer turns, and backend-supplied out-of-surface calls cannot reach
   tool execution.
-- [T1014 follow-up] Mutation authority now consumes the typed request-shape
-  decision in production. Contradictory change and read-only instructions
-  stop before model or tool execution with a deterministic clarification,
-  and the local trace records the decision, stable reason, and only a hash
-  and size summary of matched evidence. Direct normalize/convert requests
-  for named text files now route as mutations without treating reported
-  documentation or how-to questions as mutation authority. Scoped limits
-  such as `do not create extra files` remain limits, and no downstream
-  intent layer upgrades a read-only classifier decision into mutation.
-  Ambiguous turns prepare as target-free read-only QA instead of unrelated
-  static-web diagnosis. Explicit text-format turns expose only read_file and
-  whole-file write_file, with read-then-complete-write prompt guidance.
-- [T1013 follow-up] Read evidence now uses filesystem-aware path identity.
-  Existing paths use the filesystem provider's same-file result, preserving
-  Windows casing aliases without binding case-distinct Linux/WSL files such
-  as `A.md` and `a.md` to the same read content. Unknown or unresolvable
-  workspace paths fall back conservatively instead of global case folding.
-- [T1012 follow-up] Existing-file write fidelity now closes the remaining
-  review gaps. The format policy recognizes filename-first requests such as
-  `Normalize notes.txt line endings to LF` without treating the extension dot
-  as a sentence boundary; EOL-only requests preserve unrequested BOM and
-  terminal-newline state before approval; explicit LF/CRLF/CR targets are
-  checked against the final proposed content before approval; unsupported non-UTF-8 encoding
-  targets fail closed; MIXED-to-MIXED separator redistribution is detected
-  by ordered EOL position rather than counts alone and therefore forces an
-  approval even under AUTO_ALLOW; and whole-file replacement of an existing
-  file above the 2 MiB review limit is refused before approval because Talos
-  cannot render an informed full diff for that mutation.
-- [T1012/T1013/T1011/T1014] Adversarial-review hardening on the trust
-  batch: files with no line-ending evidence (empty, BOM-only,
-  single-line) are never re-joined to a fabricated style and a
-  newline-only proposal no longer collapses to an empty write; a write
-  whose format changes remain undisclosed is forced to the approval
-  window even when a permission rule or remembered approval would
-  auto-allow it; post-write verification parses BOM-prefixed
-  JSON/YAML/XML byte-faithfully instead of reporting a standing false
-  failure; the format-directive detection no longer treats a casual
-  "encoding" mention as a normalization request; redundancy identity
-  canonicalizes only path-valued parameters so two different grep
-  patterns are never one search; the newest PARSEABLE complete read is
-  the evidence owner so a truncated re-read cannot poison the append
-  guard, named-target guard, recovery, or mutation evidence; the
-  old-string-not-found repair frame carries a bounded failure reason
-  (the edit tool's file snippet stays out of system role) and skips
-  sensitive paths; scoped-prefix classification requires an imperative
-  verb clause (verbs as nouns, passives, and question sentences stay
-  read-only) and a definite typed scope ("a large module" is guidance);
-  the scoped-prefix phrasing now resolves the same deterministic
-  replacement and append expectations as the trailing form so
-  preserve-rest and steering engage for both; the [ProjectMemory]
-  user-role block is never scanned as a prior user request; the
-  duplicate-failed-edit signature uses canonical tool and path identity;
-  and approval line counts handle CR-only content.
-- [T1014] Mutation-request classification is shape-based and typed. A
-  scoped-prefix imperative ("In notes.md, replace beta with BETA.",
-  "Inside src/app.js, rename reset to resetAll.", "In the tracker module,
-  rename shippedCount to shippedTotal.") now classifies as an explicit
-  mutation for every canonical mutation verb, closing the false negative
-  where the model printed the corrected content as prose because the turn
-  stayed read-only. Reported speech and advisory framing ("The migration
-  guide says, rename oldName to newName.", "The docs recommend, ...",
-  "For readability, ...") no longer classify as rename requests: a bare
-  comma, colon, or semicolon is not an imperative clause start, so the
-  clause must open with a sentence boundary, an assistant-directed
-  filler, or a concrete file or typed scope anchor. The classifier also
-  exposes a typed surface (EXECUTE_MUTATION / READ_ONLY / AMBIGUOUS with
-  the stable reason string and the matched evidence span for trace);
-  AMBIGUOUS marks a mutation-shaped request under an explicit global
-  read-only negation and keeps the read-only tool surface, so the runtime
-  asks for an explicit change request instead of silently mutating or
-  silently dropping the edit. A scope restriction such as "Change nothing
-  else." keeps the mutation classification.
-- [T1011] The workspace-data role separation now covers every censused
-  system-message construction. A full census found four remaining
-  mechanisms that granted raw workspace bytes system-role authority, and
-  all four are closed (bounded verifier-authored diagnostic strings and
-  charset-validated selector tokens remain in system frames as bounded
-  metadata by design): the compact source-evidence repair frames and the compact
-  mutation continuation now carry readbacks and required evidence phrases
-  as structurally encoded JSON data inside the user message (and never
-  inside tool schema descriptions, which providers render into the prompt
-  template); the base-prompt workspace manifest lists paths only and no
-  longer inlines a README excerpt (the model reads the README on demand);
-  project-memory file content rides in user role with its untrusted
-  framing; and workspace-derived static selector facts are validated to a
-  strict selector-shaped charset before entering a system frame. Role
-  placement and JSON encoding are containment, not proof, so the enforced
-  boundary stays structural and outside the model: contract-derived tool
-  surfaces and expected targets, pre-approval target validation,
-  permission policy, and the approval gate - pinned by tests that inject
-  instruction-shaped file content and assert no system-role carriage, no
-  approval card for an unauthorized target, and no mutation outside the
-  contract.
-- [T1013] Read evidence is now a typed, ordered ledger bound to the
-  effective execution path. The flattened `tool:key=value;` signature maps
-  are gone: their unescaped substring identity let a hedged alias key
-  (`file_path=a.md` beside `path=b.md`) or a legal filename containing `;`
-  or `=` bind one file's content to another path, and their HashMap storage
-  made "latest readback" hash-order dependent across seven consumers.
-  Every consumer (mutation evidence, named-target existence, source
-  evidence, compact repair and continuation readbacks, read-display
-  containment, redaction writeback, redundant-read suppression) now
-  queries the ledger: identity is the effective path, recency is a
-  monotonic sequence, a later fresh complete read supersedes an older one
-  deterministically, a ranged read never displaces complete-read
-  evidence, and exact-source consumers keep disk agreement as the
-  fail-closed arbiter. Raw call names and parameters are preserved on
-  each entry for trace and redundancy identity (path-canonicalized, so
-  spelling variants of one call stay one identity) but are never parsed
-  for policy path decisions. Redaction state is typed on the entry, and
-  the truncated-log fallback that could serve 80-character log lines as
-  readback evidence is removed.
-- [T1012] Approved existing-file writes are now byte-faithful and approvals
-  are format-honest. A whole-file write derived from the LF-normalized read
-  surface is re-joined to the existing file's format (uniform line-ending
-  style, terminal-newline state, UTF-8 BOM) before pre-approval validation,
-  the approval preview, checkpoint capture, and execution, so the exact
-  bytes approved are the exact bytes written. Mixed-ending sources,
-  malformed encodings, explicit user-requested normalization, and
-  exact-literal write contracts are never silently transformed; any format
-  change that remains is rendered in a bounded "Format changes:" section of
-  the approval window, and a byte-different write whose visible lines match
-  no longer renders as "no changes". Exact append requests now recognize
-  the natural "append exactly the line X to FILE" phrasing and steer to a
-  byte-preserving edit derived from the current disk bytes, which also
-  covers files without a terminal newline and refuses stale read evidence.
-- [T1011] Workspace file bytes no longer occupy system-role messages on
-  either readback path. System messages carry policy and recovery
-  instructions only. The invalid-edit recovery references the real
-  talos.read_file result as the content carrier, temporarily restoring it
-  from tool-result compaction for the recovery request (same message, same
-  id) and re-compacting it afterwards, so instruction-like file content
-  such as "Ignore the requested repair" never gains system authority and
-  no temporary readback persists in post-turn history. Static-repair
-  readbacks travel inside the user-role instruction as structurally
-  encoded JSON with a data-not-instructions preamble, so delimiter text,
-  marker text, and content without a terminal newline are carried exactly
-  and cannot forge entries or run into any closing frame. The now-obsolete
-  framing-marker refusals are removed, which also widens recovery
-  eligibility to files that merely contain marker-shaped text. All
-  existing gates (exact source binding, protected paths, redaction, size
-  caps, disk freshness, one-shot recovery, approval, verification, trace,
-  cleanup) are unchanged.
-- [T1010] Static-repair readbacks are now gated like every other elevation
-  of file content into model context: protected paths and workspace
-  escapes never inline, and bodies that collide with the readback block's
-  own framing tokens are skipped so file content cannot forge additional
-  readback entries. Readback content binds to the exact effective target:
-  the current classified disk bytes are the single owner, replacing a
-  cached-read branch that matched flattened call signatures by substring
-  (a hedged alias key such as file_path=a.css on a read of b.css could
-  render another file's bytes under this target's label) and that let a
-  stale same-turn read shadow newer disk bytes. Missing or unreadable disk
-  evidence fails closed. Skipped targets keep the existing behavior of
-  simply not being inlined; the repair instruction itself is unchanged.
-- [T1003] Repeated invalid edit_file calls on a small, completely read text
-  file now recover through one bounded full-rewrite instead of ending the
-  turn with only "copy the exact old_string". When a weak model spends both
-  empty-old_string strikes (even inside the same generation batch as the
-  read), Talos plans a deterministic recovery: the retry surface narrows to
-  talos.write_file for that exact path, the temporary recovery prompt
-  references the real same-turn read result as the content carrier (later
-  amended by T1011: bytes stay in the restored tool result, never in a
-  system message), and the write goes through the normal approval card
-  with a full diff plus unchanged verification and readback. Every gate
-  fails closed: recovery source content only ever comes from a complete
-  read (offset or truncated reads never count; per T1013, the newest
-  parseable complete read is the evidence and current disk agreement
-  remains the arbiter), protected paths and workspace escapes are excluded
-  by path classification independent of redaction sentinels, redacted,
-  oversized, or non-text targets, read-only contracts, and turns whose
-  native tool surface does not expose talos.write_file keep the existing
-  truthful stop, and the recovery is one-shot per path so a failed
-  recovery still ends truthfully. (The framing-marker refusal this entry
-  originally added was removed by T1011: JSON-encoded user-role data made
-  it obsolete.) Read evidence binds to the effective execution path, so a
-  hedged alias key (file_path=a.md on a read of b.md) can never make
-  another file's content count as evidence, and the current disk content
-  must still agree with the read before recovery is offered, so approved
-  workspace commands or external edits between the read and the recovery
-  refuse instead of steering a reverting rewrite. The model-visible
-  carrier is the line-numbered read rendering; the write pipeline's
-  format preservation (T1012) restores the target's real byte format
-  before approval. Recoveries prompt one target per generation,
-  never during an active static-repair continuation, and an approved
-  recovery write settles the strike ledger so later failures cannot claim
-  no file was changed. Trace records now cover PLANNED, PROMPTED, and
-  REFUSED so the turn evidence never claims a recovery that did not run,
-  and a blocked edit on a recovery target names the recovery, not
-  static-web repair.
+- [T1014] Mutation authority now consumes a typed request-shape decision.
+  Concrete imperative file or typed-scope requests route to mutation, including
+  normalize/convert and scoped-prefix forms, while reported speech, advice,
+  documentation, how-to questions, and verbs used as nouns remain read-only.
+  Scoped-prefix forms derive the same deterministic replacement and append
+  expectations, preserve-rest verification, and steering as trailing-target
+  forms.
+  Contradictory mutation and global read-only instructions stop before model or
+  tool execution with one deterministic clarification; scoped limits remain
+  limits. Ambiguous turns prepare as target-free read-only QA, and explicit
+  text-format turns expose only `read_file` plus whole-file `write_file` with
+  read-then-write guidance. Downstream intent layers cannot upgrade a read-only
+  decision, and traces retain only the stable decision, reason, and a bounded
+  hash/size summary of matched evidence.
+- [T1013] Read evidence is a typed, ordered ledger bound to the effective
+  execution path. Existing paths use the filesystem provider's same-file
+  identity, preserving Windows casing aliases without merging case-distinct
+  Linux/WSL files; unresolved paths fall back conservatively. The latest
+  parseable complete read owns evidence, ranged or truncated reads cannot
+  displace it, and exact-source consumers still require current-disk agreement.
+  Raw tool names and parameters remain available for trace and redundancy
+  identity, but only path-valued parameters are canonicalized, so distinct grep
+  patterns stay distinct. Redaction is typed, and truncated log renderings can
+  never become readback evidence.
+- [T1012] Approved existing-file writes are byte-faithful and format-honest.
+  Whole-file proposals derived from normalized reads are restored to the
+  source's line endings, terminal-newline state, and UTF-8 BOM before
+  validation, approval, checkpointing, execution, and verification. Empty,
+  BOM-only, and single-line files do not acquire a fabricated style; newline-
+  only proposals do not collapse to empty content. Mixed endings, malformed or
+  unsupported encodings, exact-literal contracts, and explicit normalization
+  requests are never silently transformed. Filename-first format requests are
+  recognized, requested LF/CRLF/CR outcomes are checked before approval,
+  unrequested BOM/newline state is preserved, mixed-separator positions are
+  compared in order, and undisclosed format changes force an approval even
+  under auto-allow. Approval shows bounded format changes when bytes differ but
+  visible lines do not; CR-only line counts and BOM-prefixed JSON/YAML/XML
+  verification remain correct. Natural `append exactly the line X to FILE`
+  requests steer to a byte-preserving edit from authenticated current-disk
+  bytes, including files without a terminal newline; stale read evidence is
+  rejected. Existing files above the 2 MiB review limit are refused before
+  whole-file replacement because an informed full diff cannot be rendered.
+- [T1011/T1010] Workspace bytes no longer occupy system-role messages. Compact
+  source repair, mutation continuation, static readback, and project-memory
+  content travel as structurally encoded untrusted user-role data; the base
+  manifest carries paths only, and only charset-validated selector metadata may
+  enter system frames. `[ProjectMemory]` and `[PinnedFiles]` blocks are never
+  scanned as prior user requests. Invalid-edit recovery temporarily restores
+  the original `talos.read_file` result as the same tool-result message and
+  recompacts it
+  afterward, so no temporary readback persists. JSON framing carries delimiter
+  and marker-shaped text exactly, so the obsolete marker-collision refusal is
+  removed. Protected paths and workspace escapes never inline; readbacks bind
+  to the exact current target and fail closed on missing, unreadable, stale,
+  redacted, oversized, or otherwise ineligible evidence. Contract-derived tool
+  surfaces, target validation, permission policy, approval, verification,
+  trace, and cleanup remain structural enforcement outside the model.
+- [T1003] Two invalid empty-`old_string` edit attempts on one small, completely
+  read text file may trigger one bounded full-rewrite recovery for that exact
+  path. The retry exposes only `talos.write_file`, carries source bytes through
+  the authenticated read result, restores the target's real byte format, and
+  uses the normal full-diff approval, checkpoint, execution, readback, and
+  verification path. Only the newest parseable complete read may supply source
+  evidence, and current disk bytes must still agree. Protected, escaping,
+  redacted, oversized, non-text, stale, read-only, or no-write-surface cases
+  fail closed. Recovery is one-shot, and failed-edit identity is canonicalized
+  by tool and path so alias or path respelling cannot evade the duplicate-
+  failure guard. Recovery prompts one target per generation, never overlaps an
+  active static-repair continuation, and records PLANNED, PROMPTED, or REFUSED
+  truthfully; an approved recovery settles the mutation ledger.
 - [T1009] Mid-sentence rename requests ("In src/app.js, rename the function
   reset to resetAll.") now classify as mutation like their fix/change/update
   siblings, so the model gets edit tools instead of running read-only and
@@ -533,50 +470,37 @@
   would I" phrasings for every mutation verb, and a sentence-initial
   imperative mutation request outranks a trailing instructional question
   so compound prompts keep their mutation contract.
-- [T1008] Named tool forcing now actually enforces on the managed backend.
-  llama-server (pinned b9918) parses tool_choice as a string only, and the
-  OpenAI named-function object form silently degraded to "auto", so every
-  NAMED enforcement was a no-op. Talos only selects NAMED when the visible
-  surface exposes exactly one tool, so the wire format now sends the
-  enforceable string "required", which the server honors and which makes
-  the tool grammar non-lazy from the first token.
-- [T1007] Surgical edits are now grammar-floored and idiom-taught for weak
-  local models. The edit_file schema (and the compact retry spec, which
-  previously stripped it) declares minLength 1 on old_string and path, which
-  llama.cpp compiles into the sampling grammar so the observed
-  empty-old_string failure shape is unproducible on the managed backend.
-  Every writable prompt surface and the empty-edit repair instruction now
-  teach the append anchor idiom (old_string = an existing anchor line,
-  new_string = that line plus the added text) and read-before-edit, closing
-  the gap that made append-shaped edits fail nondeterministically.
-- Final branch-review blockers fixed: aborted turns are classified before
+- [T1008] Managed llama.cpp named-tool selection now serializes the single
+  visible-tool constraint as the string `required`, matching the pinned b9918
+  parser. The unsupported OpenAI named-function object form is no longer sent,
+  so it cannot silently degrade to `auto`; Talos selects NAMED only when the
+  visible surface contains exactly one tool.
+- [T1007] Surgical edits now require non-empty `path` and `old_string` values in
+  both the full tool schema and compact retry schema, so the managed llama.cpp
+  grammar rejects the observed empty-`old_string` shape. Writable prompts and
+  the empty-edit recovery instruction also teach read-before-edit and the
+  append-anchor idiom: replace an existing anchor line with that line plus the
+  requested addition.
+- Additional branch-review fixes: aborted turns are classified before
   text-tool routing on both provider paths, so abort markers cannot be
   mistaken for executable tool calls, and inline code-generation prompts no
   longer treat abbreviations such as "D.C." as `.c` file targets while real
   C files such as `alloc.c` still route as file mutations.
-- `talos tune` now works on Ubuntu and WSL. The tune snapshot carries the
-  real distro identity (reusing the setup wizard's /etc/os-release
-  detection instead of a hardcoded blank), so Ubuntu/WSL x64 selects the
-  shipped ubuntu-x64-cpu lane instead of reporting that no pinned lane
-  exists. Installed-lane detection now recognizes the actual install
-  layout through the installer's own recursive executable search (the
-  Ubuntu tar nests the binary under build/bin), so an already-installed
-  lane is no longer re-prompted for install and the proposal carries the
-  executable path that actually exists. Windows lane planning is
-  unchanged, and unsupported distros still get the honest no-pinned-lane
-  answer.
-- Ordinary managed llama.cpp sessions no longer run at debug log verbosity.
-  The previous default `-lv 4` wrote prompt and workspace content into the
-  plaintext server log on every session. Debug verbosity is now scoped to
-  verification launches: `talos doctor --start` (and `talos tune` through
-  it) marks its in-memory config so offload and rate evidence still lands
-  in the server log, ordinary launches stay at llama.cpp's normal
-  verbosity, and a user-configured verbosity in `server_args` always wins.
-  Evidence stays honest when verbosity is insufficient: doctor reports
-  rates as not measured and tune refuses to verify a GPU lane without
-  offload evidence. Docs corrected to match: `doctor --start` verifies
-  start, smoke, and rates, `talos tune` verifies GPU offload, and a docs
-  test now pins that attribution.
+- `talos tune` now detects Ubuntu and WSL distro identity through the setup
+  wizard's `/etc/os-release` path and selects the pinned `ubuntu-x64-cpu` lane
+  when its platform requirements match. Installed-lane detection reuses the
+  installer's recursive executable search, including Ubuntu's nested
+  `build/bin` layout, so an existing executable is selected instead of being
+  offered for reinstall. Windows planning is unchanged, and unsupported or
+  unidentified distributions still receive the no-pinned-lane result.
+- Ordinary managed llama.cpp sessions no longer enable debug verbosity by
+  default, preventing routine prompt and workspace content from being written
+  to the plaintext server log. Verification launches from `talos doctor
+  --start` and `talos tune` may opt into `-lv 4`; a user-supplied verbosity
+  argument always wins. The shared pinned-b9918 log parser supplies offload,
+  fit, buffer, and timing evidence to doctor/tune. When verbosity or evidence
+  is insufficient, doctor reports rates as unmeasured and tune refuses to
+  claim verified GPU offload.
 - Tool-outcome evidence summaries now key on the canonical tool name, so
   accepted list_dir aliases ("ls", "list_dir", "list_directory") carry the
   same full directory evidence as "talos.list_dir" instead of collapsing
@@ -615,17 +539,13 @@
   filename. The signal is phrase-anchored and conservative: naming a target
   file keeps mutation routing, and the write boundary is unchanged for every
   shape without an inline phrase.
-- Branch regression-review hardening: cap-truncated tool-required generations
-  recover with one cap-lifted retry instead of surfacing a backend-blaming
-  malformed-response error; resolved tool-loop answers no longer inherit the
-  first generation's output-limit notice; the no-first-token wall clock can
-  no longer be defeated by thread-start latency and clock skew; XML tool
-  blocks pass the same recognized-name gate as code fences; the
-  example/sample/template target suppression no longer eats explicitly
-  commanded targets; cuda lane matching is token-anchored (a "barracuda"
-  path is not a CUDA lane) with family-correct driver floors; and
-  `talos status --verbose` reports the effective context the server
-  launches with, not just the configured number.
+- Runtime regression hardening makes the no-first-token timeout independent of
+  worker-start latency and coarse clock steps, applies the recognized-tool-name
+  gate equally to XML blocks and code fences, keeps explicitly commanded
+  example/sample/template filenames as targets, token-anchors CUDA lane
+  detection with family-correct driver floors, and makes `talos status
+  --verbose` report the effective managed context rather than only the raw
+  configured value.
 - [T987] Added `talos tune`: detect, propose, approve, verify. Detection is
   read-only (shared nvidia-smi primitive, assume-no-GPU degradation), the
   proposal is an exact config diff that only touches the engine lane,
@@ -649,7 +569,7 @@
   resolution, and verification requires the managed server log to have
   been refreshed by the run it just started so stale evidence or a
   pre-existing server on the port can never produce "Verified".
-- [T986] Shipped pinned GPU-capable llama.cpp engine lanes. The setup manifest
+- [T986] Added pinned GPU-capable llama.cpp engine lanes. The setup manifest
   now carries Windows x64 CPU, CUDA 12.4, and CUDA 13.3 lanes from llama.cpp
   `b9918` (SHA-256 pinned, cudart driver-runtime companion archives modeled
   with their own digests and extracted beside `llama-server.exe`), next to the
@@ -659,23 +579,26 @@
   driver evidence, an unparseable version, or a companion digest mismatch all
   fail safe to the CPU lane with no partial install. The wizard states tag,
   assets, digests, and the driver floor, and still asks before downloading.
-- [T989] Added provider-neutral per-request output-token caps and mapped them
-  to llama.cpp/OpenAI-compatible `max_tokens` on the compat transport. Initial
-  inspection and command tool-obligation requests now cap at 512 tokens, while
-  initial mutation and workspace-operation requests cap at 1024 tokens instead
-  of burning the managed server `--predict 2048` backstop. Prompt-debug renders
-  the cap when present, and streamed text-form tool calls now close generation
-  once a complete Talos tool payload is detected. Provider `finish_reason=length`
-  now propagates into turn output/trace as an output-limit warning, exact-write
-  compact fallback clears the first-request cap so complete file bodies can be
-  produced, and ordinary fenced JSON such as `package.json` examples no longer
-  enters the text-tool parser or stream-stop path.
+- [T989] Provider-neutral per-request output-token caps now map to
+  OpenAI-compatible `max_tokens`: initial inspection and command obligations use
+  512 tokens and initial mutation/workspace obligations use 1024, below the
+  managed server's 2048-token backstop. Prompt debug records the cap, and a
+  complete streamed Talos tool payload may stop generation early. A cap-
+  truncated tool-required generation receives one bounded cap-lifted retry;
+  exact-write compact fallback also clears the initial cap. Output-limit status
+  remains visible in the surfaced turn and trace when applicable, but
+  presentation chrome is not persisted as conversation content or inherited by
+  a later tool-loop answer. Ordinary fenced JSON examples remain outside the
+  text-tool parser and stream-stop path.
 - [T991] Made managed llama.cpp setup choose the context window through a
   bounded selector instead of a hard-coded `8192`: the Qwen 14B profile can
   select `16384` when measured CUDA VRAM or system RAM meets the documented
   headroom floor, while unverified or under-measured lanes stay at `8192`.
   Setup writes the selected value and estimate reason into config, and
   `talos status --verbose` now displays both.
+- Workspace-backed answers now disclose the successful read sources that
+  grounded them. Candidate paths must exist before disclosure, so a plausible
+  but unobserved filename is never presented as evidence.
 - [T992] Made `talos doctor` report read-only GPU facts from `nvidia-smi`
   when available, including adapter name, VRAM totals, free VRAM, driver
   version, probe source, and the configured llama.cpp server lane. CUDA lanes
@@ -688,81 +611,26 @@
   likely too slow for practical edit work. Missing or too-small timing samples
   now stay honest as unmeasured, and connect-only checks no longer claim a
   managed server was released.
-- [T996] Made managed llama.cpp launches capture GPU/offload ground truth by
-  default with `-lv 4`, while respecting user verbosity overrides. Added a
-  shared b9918 log parser for offload, fit, buffer, and timing evidence used by
-  doctor/tuning follow-up work.
-- [T963] Made `talos setup models --profile gpt-oss-20b` fail truthfully unless
-  it can write a startable local GGUF config. The setup path now honors an
-  explicit `--model-path`, resolves an exact `gpt-oss-20b-mxfp4.gguf` from the
-  standard Hugging Face cache, writes `model_path` instead of remote preset
-  metadata when resolved, and refuses before writing config when no local
-  source is available. Help and public setup docs now point GPT-OSS users to
-  the wizard or an explicit local GGUF path.
-- [T961] Blocked redacted-read writeback corruption before approval:
-  append-line requests such as `Append the line ... to notes.md` now derive an
-  append expectation, and mutating payloads that try to write Talos redaction
-  placeholders from same-turn redacted read evidence are rejected before
-  session approval, checkpointing, or disk mutation.
-- [T954] Tightened release-staging provenance truth: the workflow now rejects
-  dual-SHA staging where `target_sha` differs from GitHub's attested workflow
-  source digest, and staging manifests/docs now name
-  `artifactBuildCheckoutSha` and `attestationSourceRepositoryDigest`
-  explicitly. Fresh staging attestation verification is still required before
-  closing the blocker.
-- [T955] Routed all jpackage app images through the shared Talos runtime JVM
-  options, including UTF-8 stdout/stderr and
-  `--enable-native-access=ALL-UNNAMED`, so staged Windows/Linux launchers
-  should preserve the same quiet startup contract as `installDist`. Fresh
-  staged artifact smoke is still required before closing the blocker.
-- [T923] Closed the Windows DPAPI custody-transport follow-up as a documented
-  beta boundary instead of an unreviewed native dependency change. Public
-  privacy docs now state that the PowerShell DPAPI bridge can move raw key
-  bytes across Java/helper process pipes under the same user, and a new
-  architecture note records the future hardening bar for any native/JNA custody
-  redesign.
-- [T927] Fixed the saved-session startup notice and `/session clear` wording so
-  they no longer imply that the current-session clear command deletes an older
-  saved session. Startup now points to `/session load` and `/session list`;
-  clear results explicitly target the current saved session.
-- [T937] Made the Windows public beta distribution policy explicit and pinned
-  it in release packaging tests: Windows public beta is signed-only,
-  `-AllowUnsigned` is local development/manual QA only, and winget remains
-  planned until signed GitHub Release assets and a manifest exist.
-- [T953] Terminal ASCII fallback now maps U+202F narrow no-break space to a
-  normal ASCII space, so model-authored inline code spans such as
-  `` `medical-notes.docx` `` no longer render with `?` replacement glyphs in
-  Unicode-unsafe terminal/capture paths.
-- [T950] Private-document model handoff approval windows now render the
-  non-mutating `sensitive read` risk label even when the approval detail
-  includes a `target:` line. The fix preserves once-only approval semantics for
-  private-document handoff and keeps write/edit approvals labeled as `write`.
-- [T951] Synchronized approval summaries now distinguish proven protected-read
-  config/policy denial from missing approval evidence. Audit transcripts carry
-  redacted permission-decision summaries, and the summary scorer now labels
-  `protected-read-denied` config-deny bundles as `PASS_WITH_POLICY_DENY` only
-  when durable trace-derived evidence shows a protected `talos.read_file`
-  denial before approval; ask-policy lanes still fail when an expected approval
-  prompt is genuinely missing.
-- [T952] Tightened manual PTY release evidence capture: the generated manual
-  PTY packet and release QA runbooks now warn that PowerShell
-  `Start-Transcript` may capture only the tail of JLine sessions, and the PTY
-  validator now emits a capture-specific failure when a PowerShell transcript
-  lacks the complete prompt/window sequence required for release evidence. The
-  validator also accepts the current once-only protected-read approval prompt
-  when it appears in the `.env` denial segment, so completed Qwen/GPT-OSS
-  packet evidence validates against the live UI contract.
-- [T941] Added a manual Cloudflare Pages staging workflow for the
-  `taloslocal` project. The workflow checks out an exact SHA, verifies the
-  requested Talos version, runs site tests/build/deploy-surface leak scanning,
-  and deploys only to the `site-staging` preview branch when the required
-  Cloudflare GitHub credentials are present.
-- [T940] Added the first Cloudflare site deployment hygiene guardrail:
-  Cloudflare now has a manually created Pages project named exactly
-  `taloslocal` with no Git auto-deploy source or production domain binding, and
-  release staging now builds the Vite site and scans `site/dist` for forbidden
-  assistant provenance markers (`codex`, `claude`, `copilot`) before any staged
-  site output can be treated as deployable.
+- Setup and first-run UX now distinguishes configured/selectable models from a
+  ready runtime, exposes standard `talos setup --help`, reports the selected
+  llama.cpp model file, and marks incomplete managed setup with platform guide
+  links instead of a false ready state. Added current-user Windows and Linux
+  uninstall helpers: normal removal deletes the app and command shim while
+  preserving `~/.talos` and external engines/models; user data is removed only
+  with an explicit purge option. Installer and first-run terminal output keep
+  an ASCII-safe fallback.
+- Core runtime and recovery paths now recreate an engine when either backend or
+  model identity changes, reject a named-profile GGUF whose filename does not
+  match that profile, deny paths that cannot be resolved safely inside the
+  workspace, preflight and hash-check checkpoint blobs before restoration, and
+  verify exact edit replacements without false failures on overlapping text.
+  REPL reindex progress uses the selected terminal stream and sanitizes the
+  displayed path.
+- Public installation guidance now matches the published 0.10.8 developer-beta
+  artifacts and supersedes the earlier signed-only pre-release policy: Windows
+  and Ubuntu/WSL x64 install from pinned GitHub Release assets, Windows requires
+  `-AllowUnsigned` because those assets are unsigned, and winget remains
+  unavailable. Upgrade examples use an exact version and `--force`.
 
 ## [0.10.8] - 2026-07-03
 
@@ -850,6 +718,85 @@
   `--enable-native-access=ALL-UNNAMED`, suppressing Java FFM native-access
   warnings from bundled JLine/Lucene paths during normal Linux/WSL status and
   REPL startup.
+
+### Post-tag changelog correction (added 2026-09-03)
+
+The following changes are present in the immutable `v0.10.8` tag, but its
+tagged changelog mistakenly left them under `Unreleased`. They are listed here
+as a later ledger correction; the tag and its original release notes remain
+unchanged.
+
+- [T963] Made `talos setup models --profile gpt-oss-20b` fail truthfully unless
+  it can write a startable local GGUF config. The setup path now honors an
+  explicit `--model-path`, resolves an exact `gpt-oss-20b-mxfp4.gguf` from the
+  standard Hugging Face cache, writes `model_path` instead of remote preset
+  metadata when resolved, and refuses before writing config when no local
+  source is available. Help and public setup docs now point GPT-OSS users to
+  the wizard or an explicit local GGUF path.
+- [T961] Blocked redacted-read writeback corruption before approval:
+  append-line requests such as `Append the line ... to notes.md` now derive an
+  append expectation, and mutating payloads that try to write Talos redaction
+  placeholders from same-turn redacted read evidence are rejected before
+  session approval, checkpointing, or disk mutation.
+- [T954] Tightened release-staging provenance truth: the workflow now rejects
+  dual-SHA staging where `target_sha` differs from GitHub's attested workflow
+  source digest, and staging manifests/docs now name
+  `artifactBuildCheckoutSha` and `attestationSourceRepositoryDigest`
+  explicitly. Fresh staging attestation verification is still required before
+  closing the blocker.
+- [T955] Routed all jpackage app images through the shared Talos runtime JVM
+  options, including UTF-8 stdout/stderr and
+  `--enable-native-access=ALL-UNNAMED`, so staged Windows/Linux launchers
+  should preserve the same quiet startup contract as `installDist`. Fresh
+  staged artifact smoke is still required before closing the blocker.
+- [T923] Closed the Windows DPAPI custody-transport follow-up as a documented
+  beta boundary instead of an unreviewed native dependency change. Public
+  privacy docs now state that the PowerShell DPAPI bridge can move raw key
+  bytes across Java/helper process pipes under the same user, and a new
+  architecture note records the future hardening bar for any native/JNA custody
+  redesign.
+- [T927] Fixed the saved-session startup notice and `/session clear` wording so
+  they no longer imply that the current-session clear command deletes an older
+  saved session. Startup now points to `/session load` and `/session list`;
+  clear results explicitly target the current saved session.
+- [T937] Made the Windows public beta distribution policy explicit and pinned
+  it in release packaging tests: Windows public beta is signed-only,
+  `-AllowUnsigned` is local development/manual QA only, and winget remains
+  planned until signed GitHub Release assets and a manifest exist.
+- [T953] Terminal ASCII fallback now maps U+202F narrow no-break space to a
+  normal ASCII space, so model-authored inline code spans such as
+  `` `medical-notes.docx` `` no longer render with `?` replacement glyphs in
+  Unicode-unsafe terminal/capture paths.
+- [T950] Private-document model handoff approval windows now render the
+  non-mutating `sensitive read` risk label even when the approval detail
+  includes a `target:` line. The fix preserves once-only approval semantics for
+  private-document handoff and keeps write/edit approvals labeled as `write`.
+- [T951] Synchronized approval summaries now distinguish proven protected-read
+  config/policy denial from missing approval evidence. Audit transcripts carry
+  redacted permission-decision summaries, and the summary scorer now labels
+  `protected-read-denied` config-deny bundles as `PASS_WITH_POLICY_DENY` only
+  when durable trace-derived evidence shows a protected `talos.read_file`
+  denial before approval; ask-policy lanes still fail when an expected approval
+  prompt is genuinely missing.
+- [T952] Tightened manual PTY release evidence capture: the generated manual
+  PTY packet and release QA runbooks now warn that PowerShell
+  `Start-Transcript` may capture only the tail of JLine sessions, and the PTY
+  validator now emits a capture-specific failure when a PowerShell transcript
+  lacks the complete prompt/window sequence required for release evidence. The
+  validator also accepts the current once-only protected-read approval prompt
+  when it appears in the `.env` denial segment, so completed Qwen/GPT-OSS
+  packet evidence validates against the live UI contract.
+- [T941] Added a manual Cloudflare Pages staging workflow for the
+  `taloslocal` project. The workflow checks out an exact SHA, verifies the
+  requested Talos version, runs site tests/build/deploy-surface leak scanning,
+  and deploys only to the `site-staging` preview branch when the required
+  Cloudflare GitHub credentials are present.
+- [T940] Added the first Cloudflare site deployment hygiene guardrail:
+  Cloudflare now has a manually created Pages project named exactly
+  `taloslocal` with no Git auto-deploy source or production domain binding, and
+  release staging now builds the Vite site and scans `site/dist` for forbidden
+  assistant provenance markers (`codex`, `claude`, `copilot`) before any staged
+  site output can be treated as deployable.
 
 ## [0.10.7] - 2026-07-02
 

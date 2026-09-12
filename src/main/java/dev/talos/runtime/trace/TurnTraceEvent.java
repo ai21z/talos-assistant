@@ -199,11 +199,23 @@ public record TurnTraceEvent(
             String reason,
             List<String> sourcePathHints,
             String toolCallId) {
+        return toolExecuted(timestamp, phase, call, success, reason, sourcePathHints, toolCallId,
+                dev.talos.tools.ToolMutationEffects.none());
+    }
+
+    public static TurnTraceEvent toolExecuted(
+            String timestamp, String phase, ToolCall call, boolean success, String reason,
+            List<String> sourcePathHints, String toolCallId, dev.talos.tools.ToolMutationEffects effects) {
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("success", success);
         if (reason != null && !reason.isBlank()) extra.put("reason", reason.strip());
         List<String> redactedPaths = redactedPathHints(sourcePathHints);
         if (!redactedPaths.isEmpty()) extra.put("pathHints", redactedPaths);
+        if (effects != null && effects.hasEffects()) {
+            extra.put("mutationEffects", Map.of(
+                    "appliedPaths", redactedPathHints(effects.appliedPaths()),
+                    "uncertainPaths", redactedPathHints(effects.uncertainPaths())));
+        }
         addToolCallId(extra, toolCallId);
         return toolCallEvent("TOOL_EXECUTED", timestamp, phase, call, extra);
     }

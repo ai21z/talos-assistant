@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolRiskLevel;
@@ -71,6 +72,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
 
         boolean typedWorkspaceOperation = WorkspaceOperationPlanner
                 .isWorkspaceOperationTool(request.call().toolName());
+        boolean commandExecution = CommandToolPlanner.isRunCommandTool(request.call().toolName());
         ApprovalPolicy.Decision sessionDecision = sessionApprovalPolicy.decide(
                 request.workspace(), request.call(), risk);
         if (sessionDecision == ApprovalPolicy.Decision.DENY) {
@@ -78,7 +80,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     "Permission policy denied the tool call through the active approval policy.",
                     resource);
         }
-        if (typedWorkspaceOperation
+        if ((typedWorkspaceOperation || commandExecution)
                 && sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
             sessionDecision = ApprovalPolicy.Decision.ASK;
         }
@@ -88,6 +90,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
 
         boolean rememberEligible = risk == ToolRiskLevel.WRITE
                 && !typedWorkspaceOperation
+                && !commandExecution
                 && resource.hasPath()
                 && resource.insideWorkspace()
                 && !resource.protectedPath();

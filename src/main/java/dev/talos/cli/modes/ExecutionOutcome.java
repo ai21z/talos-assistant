@@ -27,6 +27,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligationFailureAssessment;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationAssessment;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
@@ -70,7 +71,8 @@ record ExecutionOutcome(
         boolean selectorGroundedOverride,
         boolean noToolMutationReplaced,
         boolean malformedProtocolDebrisReplaced,
-        boolean advisoryOnly
+        boolean advisoryOnly,
+        AnswerOutputLimit outputLimit
 ) {
 
     private static final EvidenceContainmentAnswerGuard.AnswerMarkers EVIDENCE_CONTAINMENT_MARKERS =
@@ -201,8 +203,9 @@ record ExecutionOutcome(
                 || commandRequiredButNotRun
                 || unsupportedCommandRequiredButNotRun;
 
-        String shaped = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
+        UnsupportedDocumentAnswerGuard.DocumentAnswer documentAnswer = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
+        String shaped = documentAnswer.answer();
         boolean unsupportedDocumentCapabilityOverride = !Objects.equals(current, shaped);
         current = shaped;
 
@@ -214,6 +217,8 @@ record ExecutionOutcome(
         shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
                 current, safePlan, messages, loopResult, workspace);
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
+        boolean limitedWebDiagnosticAnswer = shaped != null && shaped.startsWith(
+                dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX);
         current = shaped;
 
         shaped = AssistantTurnExecutor.overrideStaticSelectorSearchAnswerIfNeeded(
@@ -246,6 +251,9 @@ record ExecutionOutcome(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean invalidMutation = !Objects.equals(current, shaped);
         current = shaped;
+        boolean outputLimitRelevant = documentAnswer.inputRetained() && !(staticWebImportGroundedOverride
+                || webDiagnosticGroundedOverride || selectorGroundedOverride || deniedProtectedRead || invalidMutation
+                || (deniedMutation && !readOnlyDeniedMutation));
 
         MutationRecoveryAssessment provisionalMutationAssessment =
                 MutationRecoveryAssessment.provisional(
@@ -272,14 +280,19 @@ record ExecutionOutcome(
         current = shaped;
 
         if (commandDenied || commandFailed) {
+            outputLimitRelevant = false;
             current = CommandOutcomeRenderer.failureReplacement(commandConclusion);
         } else if (commandVerificationSucceeded) {
+            outputLimitRelevant = false;
             current = CommandOutcomeRenderer.successReplacement(commandConclusion);
         } else if (commandRequiredButNotRun) {
+            outputLimitRelevant = false;
             current = CommandOutcomeRenderer.requiredButNotRunReplacement();
         } else if (unsupportedCommandRequiredButNotRun) {
+            outputLimitRelevant = false;
             current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement(contract);
         } else if (unsupportedPythonCommandRequiredButNotRun) {
+            outputLimitRelevant = false;
             current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
         CommandOutputTruthfulnessGuard.Result commandOutputTruthfulness =
@@ -287,6 +300,7 @@ record ExecutionOutcome(
                         current, safePlan, loopResult);
         boolean unsupportedCommandOutputClaim = commandOutputTruthfulness.unsupportedCommandOutputClaim();
         if (unsupportedCommandOutputClaim) {
+            outputLimitRelevant = false;
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "unsupported command/tool output claim withheld: shape="
                             + commandOutputTruthfulness.shape()
@@ -300,15 +314,19 @@ record ExecutionOutcome(
         EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
         var evidenceResult = evidenceAssessment.result();
         boolean missingEvidence = evidenceAssessment.missingEvidence();
+        boolean readEvidencePolicyBlocked = evidenceResult.status() == EvidenceObligationVerifier.Status.BLOCKED
+                && !deniedProtectedRead;
         boolean protectedReadApprovalMissing = evidenceAssessment.protectedReadApprovalMissing();
         boolean approvedProtectedReadPostcondition = false;
         if (missingEvidence) {
-            current = EvidenceContainmentAnswerGuard.containMissingEvidence(
+            EvidenceContainmentAnswerGuard.Containment containment = EvidenceContainmentAnswerGuard.selectMissingEvidence(
                     current,
                     safePlan,
                     evidenceObligation,
                     evidenceResult,
                     EVIDENCE_CONTAINMENT_MARKERS);
+            current = containment.answer();
+            if (!containment.inputRetained()) outputLimitRelevant = false;
             LocalTurnTraceCapture.recordProtocolSanitized(
                     EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
@@ -320,11 +338,14 @@ record ExecutionOutcome(
                             messages);
             current = protectedReadPostcondition.answer();
             approvedProtectedReadPostcondition = protectedReadPostcondition.repaired();
-            current = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
+            if (approvedProtectedReadPostcondition) outputLimitRelevant = false;
+            shaped = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
                     current,
                     messages,
                     loopResult,
                     workspace);
+            if (!Objects.equals(current, shaped)) outputLimitRelevant = false;
+            current = shaped;
             current = PathExistenceAnswerRenderer.prependVerifiedStatusIfNeeded(
                     current,
                     safePlan,
@@ -339,14 +360,22 @@ record ExecutionOutcome(
             }
             current = shaped;
         }
+        if (readEvidencePolicyBlocked && !contract.mutationRequested() && !contract.mutationAllowed()
+                && (loopResult == null || loopResult.mutatingToolSuccesses() == 0)) {
+            outputLimitRelevant = false;
+            current = "[Read evidence blocked: a required source read was blocked. "
+                    + "The requested answer could not be completed.]";
+        }
         ReadOnlyToolLimitOutcome readOnlyToolLimit = ReadOnlyToolLimitOutcome.assess(
                 contract,
                 loopResult,
                 staticWebImportGroundedOverride
-                        || webDiagnosticGroundedOverride
-                        || selectorGroundedOverride);
+                        || selectorGroundedOverride,
+                current);
         boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimit.withoutRuntimeAnswer();
-        if (readOnlyToolLimit.shouldReplaceAnswer()) {
+        boolean readOnlySynthesisUnavailable = dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailable(loopResult);
+        if (readOnlyToolLimit.shouldReplaceAnswer() && !readEvidencePolicyBlocked && !deniedProtectedRead) {
+            outputLimitRelevant = false;
             current = readOnlyToolLimit.replacementAnswer();
         }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
@@ -363,12 +392,14 @@ record ExecutionOutcome(
                 provisionalPartialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
+                readOnlyToolLimitWithoutRuntimeAnswer || readOnlySynthesisUnavailable || limitedWebDiagnosticAnswer || unsupportedCommandOutputClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
                 VerificationStatus.NOT_RUN);
+        preVerificationDecision = OutcomeDominancePolicy.withReadEvidencePolicyBlock(
+                preVerificationDecision, readEvidencePolicyBlocked);
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             current = EvidenceContainmentAnswerGuard.missingEvidencePrefix(current);
@@ -452,17 +483,20 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
+                readOnlyToolLimitWithoutRuntimeAnswer || readOnlySynthesisUnavailable || limitedWebDiagnosticAnswer || unsupportedCommandOutputClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
                 verificationStatus);
+        finalDecision = OutcomeDominancePolicy.withReadEvidencePolicyBlock(finalDecision, readEvidencePolicyBlocked);
         completionStatus = finalDecision.completionStatus();
 
-        current = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
+        MutationFailureAnswerRenderer.PartialMutationAnswer partialAnswer = MutationFailureAnswerRenderer.selectPartialMutationAnswerIfNeeded(
                 current,
                 mutationAssessment);
+        current = partialAnswer.answer();
+        if (!partialAnswer.inputRetained()) outputLimitRelevant = false;
         if (verificationStatus == VerificationStatus.FAILED) {
             if (usingEmbeddedVerification) {
                 // The tool loop already rendered the static-verification failure alongside
@@ -472,6 +506,7 @@ record ExecutionOutcome(
                 current = StaticVerificationAnswerRenderer.partialFailedAnnotation(taskVerification) + current;
             } else {
                 current = StaticVerificationAnswerRenderer.failedReplacement(taskVerification, loopResult);
+                outputLimitRelevant = false;
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
             current = StaticVerificationAnswerRenderer.unavailableAnnotation(taskVerification) + current;
@@ -492,8 +527,16 @@ record ExecutionOutcome(
             }
         }
         if (unsupportedDocumentCapabilityLimited) {
-            current = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
+            documentAnswer = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
                     current, loopResult);
+            current = documentAnswer.answer();
+            if (!documentAnswer.inputRetained()) outputLimitRelevant = false;
+        }
+        if (MutationFailureAnswerRenderer.hasFailedMutationEffects(loopResult)) {
+            outputLimitRelevant = false;
+            // Never leave contradictory model prose (including 'no changes') next
+            // to authoritative effect evidence. This is not a successful retry.
+            current = MutationFailureAnswerRenderer.failedMutationEffectsSummary(loopResult);
         }
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
@@ -565,7 +608,8 @@ record ExecutionOutcome(
                 selectorGroundedOverride,
                 false,
                 false,
-                completionStatus == CompletionStatus.ADVISORY_ONLY
+                completionStatus == CompletionStatus.ADVISORY_ONLY,
+                outputLimitRelevant ? AnswerOutputLimit.KEEP_ORIGINAL : AnswerOutputLimit.CLEAR
         );
     }
 
@@ -597,6 +641,7 @@ record ExecutionOutcome(
             boolean failedActionObligation
     ) {
         String shaped = answer == null ? "" : answer;
+        AnswerOutputLimit outputLimit = AnswerOutputLimit.KEEP_ORIGINAL;
         boolean capturedPlanPresent = plan != null;
         CurrentTurnPlan safePlan = capturedPlanPresent
                 ? plan
@@ -641,8 +686,11 @@ record ExecutionOutcome(
                             NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
                     shaped = replaced;
                 } else if (capturedPlanPresent) {
-                    shaped = AssistantTurnExecutor.groundingRetryIfNeeded(
-                            shaped, safePlan, messages, ctx);
+                    NoToolGroundingRetry.Result grounding = NoToolGroundingRetry.selectRetryIfNeeded(
+                            shaped, safePlan, messages, ctx, retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
+                                    ctx, retryMessages, safePlan, RetryDispatchPurpose.NO_TOOL_GROUNDING));
+                    shaped = grounding.answer();
+                    outputLimit = grounding.outputLimit();
                 }
             }
         }
@@ -670,21 +718,26 @@ record ExecutionOutcome(
         var evidenceResult = evidenceAssessment.result();
         boolean missingEvidence = evidenceAssessment.missingEvidence();
         boolean protectedReadApprovalMissing = evidenceAssessment.protectedReadApprovalMissing();
+        boolean missingEvidenceReplaced = false;
         if (missingEvidence && !commandRequiredButNotRun && !unsupportedCommandNotAvailable) {
-            shaped = EvidenceContainmentAnswerGuard.containMissingEvidence(
+            EvidenceContainmentAnswerGuard.Containment containment = EvidenceContainmentAnswerGuard.selectMissingEvidence(
                     shaped,
                     safePlan,
                     evidenceObligation,
                     evidenceResult,
                     EVIDENCE_CONTAINMENT_MARKERS);
+            shaped = containment.answer();
+            missingEvidenceReplaced = !containment.inputRetained();
             LocalTurnTraceCapture.recordProtocolSanitized(
                     EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
-            shaped = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
+            String historySafeAnswer = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
                     shaped,
                     messages,
                     null,
                     null);
+            if (!Objects.equals(shaped, historySafeAnswer)) outputLimit = AnswerOutputLimit.CLEAR;
+            shaped = historySafeAnswer;
         }
         OutcomeDominancePolicy.Decision decision = outcomeDecision(
                 contract,
@@ -768,7 +821,10 @@ record ExecutionOutcome(
                 false,
                 noToolMutationReplaced,
                 malformedProtocolDebrisReplaced,
-                advisoryOnly
+                advisoryOnly,
+                noToolMutationReplaced || malformedProtocolDebrisReplaced || localAccessCapabilityCorrected
+                        || mutationCapabilityCorrected || negativeWorkspaceResultCorrected || commandRequiredButNotRun
+                        || unsupportedCommandNotAvailable || missingEvidenceReplaced ? AnswerOutputLimit.CLEAR : outputLimit
         );
     }
 
@@ -785,6 +841,7 @@ record ExecutionOutcome(
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        if (MutationFailureAnswerRenderer.hasFailedMutationEffects(loopResult)) return true;
         if (completionStatus != CompletionStatus.COMPLETE
                 && completionStatus != CompletionStatus.PARTIAL) return false;
         if (loopResult == null) return false;

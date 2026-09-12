@@ -30,6 +30,295 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LlamaCppEngineProviderTest {
 
+    // Exact normalized embedded template from the isolated native-prefill diagnostic.
+    private static final String QWEN25_TEMPLATE = """
+            {%- if tools %}
+                {{- '<|im_start|>system\\n' }}
+                {%- if messages[0]['role'] == 'system' %}
+                    {{- messages[0]['content'] }}
+                {%- else %}
+                    {{- 'You are Qwen, created by Alibaba Cloud. You are a helpful assistant.' }}
+                {%- endif %}
+                {{- "\\n\\n# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>" }}
+                {%- for tool in tools %}
+                    {{- "\\n" }}
+                    {{- tool | tojson }}
+                {%- endfor %}
+                {{- "\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\"name\\": <function-name>, \\"arguments\\": <args-json-object>}\\n</tool_call><|im_end|>\\n" }}
+            {%- else %}
+                {%- if messages[0]['role'] == 'system' %}
+                    {{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}
+                {%- else %}
+                    {{- '<|im_start|>system\\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\\n' }}
+                {%- endif %}
+            {%- endif %}
+            {%- for message in messages %}
+                {%- if (message.role == "user") or (message.role == "system" and not loop.first) or (message.role == "assistant" and not message.tool_calls) %}
+                    {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}
+                {%- elif message.role == "assistant" %}
+                    {{- '<|im_start|>' + message.role }}
+                    {%- if message.content %}
+                        {{- '\\n' + message.content }}
+                    {%- endif %}
+                    {%- for tool_call in message.tool_calls %}
+                        {%- if tool_call.function is defined %}
+                            {%- set tool_call = tool_call.function %}
+                        {%- endif %}
+                        {{- '\\n<tool_call>\\n{"name": "' }}
+                        {{- tool_call.name }}
+                        {{- '", "arguments": ' }}
+                        {{- tool_call.arguments | tojson }}
+                        {{- '}\\n</tool_call>' }}
+                    {%- endfor %}
+                    {{- '<|im_end|>\\n' }}
+                {%- elif message.role == "tool" %}
+                    {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != "tool") %}
+                        {{- '<|im_start|>user' }}
+                    {%- endif %}
+                    {{- '\\n<tool_response>\\n' }}
+                    {{- message.content }}
+                    {{- '\\n</tool_response>' }}
+                    {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
+                        {{- '<|im_end|>\\n' }}
+                    {%- endif %}
+                {%- endif %}
+            {%- endfor %}
+            {%- if add_generation_prompt %}
+                {{- '<|im_start|>assistant\\n' }}
+            {%- endif %}\
+            """;
+
+    @Test
+    void nativePrefillSelectsOnlyExactManagedPreparedIdentityAndOutboundModel() {
+        PrefillFixture fixture = new PrefillFixture();
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), prefillRequest(fixture.alias)));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), prefillRequest("")));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), prefillRequest("gpt-oss-20b")));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), prefillRequest("qwen2.5-coder-14b ")));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(null, fixture.snapshot(), prefillRequest(fixture.alias)));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), null, prefillRequest(fixture.alias)));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), null));
+        ChatRequest crossBackend = new ChatRequest(
+                "ollama", fixture.alias, "", "", List.of(), Duration.ofSeconds(5));
+        assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), crossBackend));
+    }
+
+    @Test
+    void nativePrefillRejectsEveryIndividualIdentityMismatchEvenIfResolutionSaysQualified() {
+        Map<String, java.util.function.Consumer<PrefillFixture>> mutations = Map.ofEntries(
+                Map.entry("connect-only", f -> f.mode = "connect_only"),
+                Map.entry("remote managed endpoint", f -> f.host = "http://remote.example"),
+                Map.entry("native configuration disabled", f -> f.nativeCalling = false),
+                Map.entry("jinja disabled", f -> f.jinja = false),
+                Map.entry("GPT-OSS configured", f -> f.alias = "gpt-oss-20b"),
+                Map.entry("declared alias", f -> f.declaredAlias = "qwen3-8b"),
+                Map.entry("prepared configured alias", f -> f.configuredAlias = "qwen3-8b"),
+                Map.entry("prepared connect-only", f -> f.preparedManaged = false),
+                Map.entry("unavailable props", f -> f.propsState = LlamaCppPropsClient.State.UNAVAILABLE),
+                Map.entry("unavailable chat", f -> f.chatAvailable = false),
+                Map.entry("wrong build", f -> f.build = "b9918-0512ef1e6"),
+                Map.entry("build suffix", f -> f.build += "-other"),
+                Map.entry("unqualified", f -> f.resolution = LlamaCppProfileResolver.ResolutionState.UNVERIFIED),
+                Map.entry("effective text tools", f -> f.toolMode = LlamaCppProfileResolver.ToolMode.TEXT_TOOL_PROMPT),
+                Map.entry("profile artifact state", f -> f.artifactState = LlamaCppProfileResolver.ArtifactState.CUSTOM),
+                Map.entry("artifact identity state", f -> f.identityState = LlamaCppProfileResolver.ArtifactState.UNCHECKED),
+                Map.entry("actual model size", f -> f.actualSize--),
+                Map.entry("expected model size", f -> f.expectedSize--),
+                Map.entry("actual model hash", f -> f.actualHash = "a".repeat(64)),
+                Map.entry("expected model hash", f -> f.expectedHash = "a".repeat(64)),
+                Map.entry("served model binding", f -> f.served = LlamaCppProfileResolver.MatchState.MISMATCHED),
+                Map.entry("engine compatibility", f -> f.compatibility = LlamaCppProfileResolver.MatchState.UNVERIFIED),
+                Map.entry("executable verification", f -> f.executableMatch = LlamaCppProfileResolver.MatchState.UNVERIFIED),
+                Map.entry("runtime lane", f -> f.lane = "win-x64-cuda-13.2:b9918"),
+                Map.entry("launcher hash", f -> f.executableHash = "a".repeat(64)),
+                Map.entry("observations unavailable", f -> f.observation = LlamaCppProfileResolver.ObservationState.UNAVAILABLE),
+                Map.entry("observed backend", f -> f.backend = "ollama"),
+                Map.entry("template match state", f -> f.templateMatch = LlamaCppProfileResolver.MatchState.UNVERIFIED),
+                Map.entry("observed text tools", f -> f.observedToolMode = LlamaCppProfileResolver.ToolMode.TEXT_TOOL_PROMPT),
+                Map.entry("template missing", f -> f.template = ""),
+                Map.entry("template length", f -> f.template += "x"),
+                Map.entry("template same-size alteration", f -> f.template = f.template.replace("You are Qwen", "You are TEST")));
+        for (Map.Entry<String, java.util.function.Consumer<PrefillFixture>> entry : mutations.entrySet()) {
+            PrefillFixture fixture = new PrefillFixture();
+            entry.getValue().accept(fixture);
+            assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
+                    LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(),
+                            prefillRequest("qwen2.5-coder-14b")), entry.getKey());
+        }
+    }
+
+    @Test
+    void exactManagedQwenPrefillReachesAllSixTransportRoutesWithoutChangingLogicalHistory() throws Exception {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        HttpServer server = startLayoutServer(bodies);
+        OwnedTestProcess process = new OwnedTestProcess();
+        try {
+            PrefillFixture fixture = new PrefillFixture();
+            var directory = java.nio.file.Files.createTempDirectory("talos-qwen25-prefill");
+            fixture.modelPath = directory.resolve("model.gguf").toString();
+            java.nio.file.Files.writeString(java.nio.file.Path.of(fixture.modelPath), "fixture", StandardCharsets.UTF_8);
+            fixture.serverPath = tempFilePath("llama-server.exe");
+            fixture.port = server.getAddress().getPort();
+            LlamaCppConfig llamaCfg = fixture.config();
+            var service = new LlamaCppResolvedProfileService(
+                    llamaCfg, directory,
+                    (path, alias, expected, home, verify) -> fixture.artifact(),
+                    base -> LlamaCppPropsClient.Result.available(new LlamaCppPropsClient.Props(
+                            fixture.modelPath, fixture.template, true, true, false, false,
+                            16384, fixture.build, "props-hash")),
+                    (config, declared, observed, verify) -> fixture.engineFacts());
+            try (LlamaCppServerManager manager = new LlamaCppServerManager(
+                    llamaCfg, (command, logPath) -> process, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), directory.resolve("logs"))) {
+                LlamaCppEngine engine = new LlamaCppEngine(llamaCfg, manager, HttpClient.newHttpClient(), service);
+                ChatRequest request = prefillRequest(fixture.alias);
+                List<ChatMessage> logicalMessages = List.copyOf(request.messages);
+                AtomicInteger handoffs = new AtomicInteger();
+                dev.talos.spi.types.ProviderTransportHandoff handoff = handoffs::incrementAndGet;
+
+                assertEquals("ok", engine.chat(request));
+                assertEquals("ok", engine.chat(request, handoff));
+                try (var chunks = engine.chatStream(request)) {
+                    assertEquals("ok", chunks.filter(chunk -> chunk.text() != null)
+                            .map(dev.talos.spi.types.TokenChunk::text).reduce("", String::concat));
+                }
+                try (var chunks = engine.chatStream(request, handoff)) {
+                    assertEquals("ok", chunks.filter(chunk -> chunk.text() != null)
+                            .map(dev.talos.spi.types.TokenChunk::text).reduce("", String::concat));
+                }
+                try (var chunks = engine.chatStreamNonStreaming(request)) {
+                    assertEquals("ok", chunks.filter(chunk -> chunk.text() != null)
+                            .map(dev.talos.spi.types.TokenChunk::text).reduce("", String::concat));
+                }
+                try (var chunks = engine.chatStreamNonStreaming(request, handoff)) {
+                    assertEquals("ok", chunks.filter(chunk -> chunk.text() != null)
+                            .map(dev.talos.spi.types.TokenChunk::text).reduce("", String::concat));
+                }
+
+                assertEquals("QUALIFIED", engine.modelIdentity().resolution());
+                assertEquals(6, bodies.size());
+                assertEquals(3, handoffs.get());
+                assertEquals(logicalMessages, request.messages);
+                for (String body : bodies) {
+                    var json = new ObjectMapper().readTree(body);
+                    var messages = json.path("messages");
+                    assertEquals(3, messages.size(), body);
+                    assertEquals("assistant", messages.get(2).path("role").asText(), body);
+                    assertEquals("<tool_call>\n", messages.get(2).path("content").asText(), body);
+                    assertEquals("content", json.path("continue_final_message").asText(), body);
+                    assertFalse(json.path("add_generation_prompt").asBoolean(true), body);
+                    assertEquals("required", json.path("tool_choice").asText(), body);
+                    assertEquals("talos.read_file", json.path("tools").get(0).path("function").path("name").asText(), body);
+                }
+
+                // A request routed through the same cached prepared engine cannot borrow this option
+                // for another outbound model or for an ordinary response-only request.
+                assertEquals("ok", engine.chat(prefillRequest("gpt-oss-20b")));
+                assertEquals("ok", engine.chat(new ChatRequest(
+                        "llama_cpp", fixture.alias, "", "Explain recursion.", List.of(), Duration.ofSeconds(5))));
+                for (String body : bodies.subList(6, 8)) {
+                    var json = new ObjectMapper().readTree(body);
+                    assertFalse(json.has("continue_final_message"), body);
+                    assertFalse(json.has("add_generation_prompt"), body);
+                }
+            }
+            assertFalse(process.isAlive());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static ChatRequest prefillRequest(String model) {
+        var controls = new dev.talos.spi.types.ChatRequestControls(
+                dev.talos.spi.types.ToolChoiceMode.REQUIRED, "",
+                dev.talos.spi.types.ResponseFormatMode.TEXT, "", List.of())
+                .withToolAuthorityMode(dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
+        return new ChatRequest(
+                "llama_cpp", model, "", "", List.of(), Duration.ofSeconds(5),
+                List.of(ChatMessage.system("You are a helpful assistant."),
+                        ChatMessage.user("Read README.md using talos.read_file.")),
+                List.of(new dev.talos.spi.types.ToolSpec("talos.read_file", "Read a file.",
+                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}")),
+                controls);
+    }
+
+    private static final class PrefillFixture {
+        private String alias = "qwen2.5-coder-14b";
+        private String declaredAlias = alias;
+        private String configuredAlias = alias;
+        private String mode = "managed";
+        private String host = "http://127.0.0.1";
+        private int port = 8080;
+        private boolean nativeCalling = true;
+        private boolean jinja = true;
+        private boolean preparedManaged = true;
+        private boolean chatAvailable = true;
+        private String modelPath = "C:\\fixture\\qwen.gguf";
+        private String serverPath = "C:\\fixture\\llama-server.exe";
+        private String build = "b9918-0512ef1e5";
+        private String lane = "win-x64-cuda-13.3:b9918";
+        private String template = QWEN25_TEMPLATE;
+        private String backend = "llama_cpp";
+        private long expectedSize = 8_988_110_272L;
+        private long actualSize = expectedSize;
+        private String expectedHash = "c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940";
+        private String actualHash = expectedHash;
+        private String executableHash = "ec94260223a88aa87a48fbbefa35d16a217a7df18da35eab9eef3e8790ceeb33";
+        private LlamaCppPropsClient.State propsState = LlamaCppPropsClient.State.AVAILABLE;
+        private LlamaCppProfileResolver.ResolutionState resolution = LlamaCppProfileResolver.ResolutionState.QUALIFIED;
+        private LlamaCppProfileResolver.ToolMode toolMode = LlamaCppProfileResolver.ToolMode.NATIVE;
+        private LlamaCppProfileResolver.ToolMode observedToolMode = LlamaCppProfileResolver.ToolMode.NATIVE;
+        private LlamaCppProfileResolver.ArtifactState artifactState = LlamaCppProfileResolver.ArtifactState.EXACT;
+        private LlamaCppProfileResolver.ArtifactState identityState = LlamaCppProfileResolver.ArtifactState.EXACT;
+        private LlamaCppProfileResolver.MatchState compatibility = LlamaCppProfileResolver.MatchState.MATCHED;
+        private LlamaCppProfileResolver.MatchState served = LlamaCppProfileResolver.MatchState.MATCHED;
+        private LlamaCppProfileResolver.MatchState executableMatch = LlamaCppProfileResolver.MatchState.MATCHED;
+        private LlamaCppProfileResolver.MatchState templateMatch = LlamaCppProfileResolver.MatchState.MATCHED;
+        private LlamaCppProfileResolver.ObservationState observation = LlamaCppProfileResolver.ObservationState.AVAILABLE;
+
+        private LlamaCppConfig config() {
+            Config config = LlamaCppEngineProviderTest.config(Map.of(
+                    "mode", mode, "host", host, "port", port, "model", alias,
+                    "model_path", modelPath, "server_path", serverPath, "jinja", jinja, "context", 16384));
+            config.data.put("tools", Map.of("native_calling", nativeCalling));
+            return LlamaCppConfig.from(config);
+        }
+
+        private LlamaCppProfileResolver.ArtifactIdentity artifact() {
+            return new LlamaCppProfileResolver.ArtifactIdentity(
+                    identityState, modelPath, expectedSize, actualSize, expectedHash, actualHash, "verified-record");
+        }
+
+        private LlamaCppProfileResolver.EngineFacts engineFacts() {
+            return new LlamaCppProfileResolver.EngineFacts(lane, executableHash, executableMatch);
+        }
+
+        private LlamaCppResolvedProfileService.Snapshot snapshot() {
+            var configured = new LlamaCppProfileResolver.ConfiguredFacts(
+                    configuredAlias, modelPath, 16384, "native", "", List.of(), preparedManaged);
+            var observed = new LlamaCppProfileResolver.ObservedServerFacts(
+                    observation, modelPath, "", backend, template, templateMatch,
+                    observedToolMode, 16384, java.util.Set.of(LlamaCppProfileResolver.Modality.TEXT), "props-hash");
+            var resolved = new LlamaCppProfileResolver.ResolvedLlamaCppProfile(
+                    declaredAlias, configured, artifact(), engineFacts(), observed, null,
+                    artifactState, compatibility, served, toolMode, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    "", 16384, List.of(), java.util.Set.of(LlamaCppProfileResolver.Modality.TEXT),
+                    LlamaCppProfileResolver.HardwareSupportState.UNVERIFIED,
+                    LlamaCppModelCatalog.Disposition.ACCEPTED_BETA, resolution, List.of());
+            return new LlamaCppResolvedProfileService.Snapshot(
+                    resolved, propsState, "", "props-hash", modelPath, build, chatAvailable, false);
+        }
+    }
+
+
     @Test
     void providerIdIsLlamaCpp() {
         assertEquals("llama_cpp", new LlamaCppEngineProvider().id());

@@ -15,13 +15,13 @@ const docModules = import.meta.glob("../../docs/**/*.md", {
 });
 
 // Map slug -> raw markdown text. "index" becomes the docs landing page.
-const docsBySlug = {};
+const docsBySlug = new Map();
 const docsRootPrefix = "../../docs/";
 for (const [path, raw] of Object.entries(docModules)) {
   const slug = path.startsWith(docsRootPrefix)
     ? path.slice(docsRootPrefix.length).replace(/\.md$/, "")
     : path.replace(/^.*\//, "").replace(/\.md$/, "");
-  docsBySlug[slug] = raw;
+  docsBySlug.set(slug, raw);
 }
 
 // --- Routing --------------------------------------------------------------
@@ -80,8 +80,8 @@ function renderRoute() {
     return;
   }
 
-  const md = docsBySlug[slug];
-  if (!md) {
+  const md = docsBySlug.get(slug);
+  if (typeof md !== "string") {
     article.innerHTML = `
 <h1>Page not found</h1>
 <p>The documentation page <code>${escapeHtml(slug)}</code> does not exist.</p>

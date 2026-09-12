@@ -291,12 +291,8 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            // The output-limit notice describes the surfaced text.
-                            // A resolved tool-loop answer comes from later
-                            // uncapped generations, so the first request's
-                            // finish_reason must not annotate it (the trace
-                            // warning still records the truncation).
-                            out.append(resolution.answer());
+                            out.append(withOutputLimitNotice(resolution.answer(),
+                                    resolution.outputLimitReached(), ctx, false));
                         }
                     } else {
                         // No tool calls - content was streamed; record full text for memory.
@@ -305,10 +301,13 @@ public final class AssistantTurnExecutor {
                         // must be enforced by visible annotation of high-risk shapes.
                         streamed = true;
                         String rawAnswer = answer;
-                        answer = shapeAnswerWithoutTools(answer, messages, currentTurnPlan, ctx, true, opts);
+                        AnswerOutputLimit.Presentation presentation = shapeAnswerWithoutToolsSelected(
+                                answer, messages, currentTurnPlan, ctx, true, false, opts);
+                        answer = presentation.answer();
                         emitStreamingNoToolCorrectionIfNeeded(rawAnswer, answer, ctx);
                         emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
-                        out.append(withOutputLimitNotice(answer, streamResult, ctx, true));
+                        out.append(withOutputLimitNotice(answer,
+                                presentation.outputLimit().apply(streamResult.outputLimitReached()), ctx, true));
                     }
                 } else {
                     out.append("(no answer)");
@@ -350,10 +349,8 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            // See the streaming branch: resolved tool-loop
-                            // answers do not inherit the first generation's
-                            // output-limit notice.
-                            answer = resolution.answer();
+                            answer = withOutputLimitNotice(resolution.answer(),
+                                    resolution.outputLimitReached(), ctx, false);
                         }
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
@@ -361,9 +358,9 @@ public final class AssistantTurnExecutor {
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
                         ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
-                                answer, messages, currentTurnPlan, workspace, ctx, opts);
+                                answer, streamResult.outputLimitReached(), messages, currentTurnPlan, workspace, ctx, opts);
                         appendExtraSummary(out, resolution.extraSummary());
-                        answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
+                        answer = withOutputLimitNotice(resolution.answer(), resolution.outputLimitReached(), ctx, false);
                     }
                     out.append(answer);
                 } else {
@@ -411,8 +408,12 @@ public final class AssistantTurnExecutor {
         return switch (origin) {
             case OPERATOR_EXTERNAL -> new java.util.concurrent.CancellationException(
                     "turn generation cancelled");
-            case RUNTIME_WATCHDOG -> new RuntimeException(
-                    new java.util.concurrent.TimeoutException("turn generation timed out"));
+            case RUNTIME_WATCHDOG -> result.abandonment()
+                    .<RuntimeException>map(cause -> switch (cause) {
+                        case REPETITION_LOOP, IDLE_TIMEOUT, WALL_CLOCK_TIMEOUT ->
+                                new dev.talos.runtime.GenerationWatchdogException(cause);
+                        default -> new GenerationAbortedException();
+                    }).orElseGet(GenerationAbortedException::new);
             case RUNTIME_THREAD_INTERRUPT -> new RuntimeException(
                     new InterruptedException("turn generation interrupted"));
             case NONE, RUNTIME_STREAM_CLOSE, PROVIDER_TRANSPORT ->
@@ -441,12 +442,12 @@ public final class AssistantTurnExecutor {
 
     private static String withOutputLimitNotice(
             String answer,
-            LlmClient.StreamResult result,
+            boolean outputLimitReached,
             Context ctx,
             boolean alreadyStreamed
     ) {
         String safeAnswer = answer == null ? "" : answer;
-        if (result == null || !result.outputLimitReached()) {
+        if (!outputLimitReached) {
             return safeAnswer;
         }
         String notice = "\n\n" + UiChrome.OUTPUT_LIMIT_PREFIX
@@ -470,9 +471,9 @@ public final class AssistantTurnExecutor {
     }
 
     static void recordLlmAbortOutcome(LlmClient.StreamResult result, String answer) {
-        String abortReason = result == null ? "" : result.abortReason();
         LocalTurnTraceCapture.recordModelGenerationAborted(
-                abortReason,
+                result == null ? ProviderResponseCapture.AbortOrigin.NONE : result.abortOrigin(),
+                result == null ? null : result.abandonment().orElse(null),
                 hasAbortPartialOutput(answer));
         if (result != null
                 && result.abortOrigin() == ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL
@@ -574,7 +575,7 @@ public final class AssistantTurnExecutor {
         }
     }
 
-    record ToolLoopAnswerResolution(String answer, String extraSummary) {}
+    record ToolLoopAnswerResolution(String answer, String extraSummary, boolean outputLimitReached) {}
 
     private static ToolLoopAnswerResolution resolveToolLoopAnswer(
             String answer,
@@ -585,7 +586,7 @@ public final class AssistantTurnExecutor {
             Context ctx,
             Options opts
     ) {
-        AssistantToolLoopOutcomeResolver.Resolution resolution = AssistantToolLoopOutcomeResolver.resolve(
+        AssistantToolLoopOutcomeResolver.Resolution resolution = AssistantToolLoopOutcomeResolver.resolveSelected(
                 answer,
                 messages,
                 plan,
@@ -595,7 +596,7 @@ public final class AssistantTurnExecutor {
                 (outcomeLoopResult, extraMutationSuccesses) ->
                         moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, extraMutationSuccesses),
                 (resolvedAnswer, outcomeLoopResult, extraMutationSuccesses, actionObligationFailed) ->
-                        shapeAnswerAfterToolLoop(
+                        shapeAnswerAfterToolLoopSelected(
                                 resolvedAnswer,
                                 messages,
                                 plan,
@@ -605,19 +606,21 @@ public final class AssistantTurnExecutor {
                                 actionObligationFailed,
                                 opts)
         );
-        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary());
+        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary(), resolution.outputLimitReached());
     }
 
     private static ToolLoopAnswerResolution resolveNoToolAnswer(
             String answer,
+            boolean initialOutputLimitReached,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx,
             Options opts
     ) {
-        AssistantNoToolOutcomeResolver.Resolution resolution = AssistantNoToolOutcomeResolver.resolve(
+        AssistantNoToolOutcomeResolver.Resolution resolution = AssistantNoToolOutcomeResolver.resolveSelected(
                 answer,
+                initialOutputLimitReached,
                 messages,
                 plan,
                 workspace,
@@ -625,7 +628,7 @@ public final class AssistantTurnExecutor {
                 (loopResult, extraMutationSuccesses) ->
                         moveToVerifyAfterSuccessfulMutation(ctx, loopResult, extraMutationSuccesses),
                 (resolvedAnswer, loopResult, extraMutationSuccesses, actionObligationFailed) ->
-                        shapeAnswerAfterToolLoop(
+                        shapeAnswerAfterToolLoopSelected(
                                 resolvedAnswer,
                                 messages,
                                 plan,
@@ -635,7 +638,7 @@ public final class AssistantTurnExecutor {
                                 actionObligationFailed,
                                 opts),
                 (resolvedAnswer, actionObligationFailed) ->
-                        shapeAnswerWithoutTools(
+                        shapeAnswerWithoutToolsSelected(
                                 resolvedAnswer,
                                 messages,
                                 plan,
@@ -644,7 +647,7 @@ public final class AssistantTurnExecutor {
                                 actionObligationFailed,
                                 opts)
         );
-        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary());
+        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary(), resolution.outputLimitReached());
     }
 
     static ReadEvidenceHandoff.Result unsupportedCapabilityPreflightIfNeeded(
@@ -1700,24 +1703,31 @@ public final class AssistantTurnExecutor {
             boolean failedActionObligation,
             Options opts
     ) {
+        return shapeAnswerAfterToolLoopSelected(answer, messages, plan, loopResult, workspace,
+                extraMutationSuccesses, failedActionObligation, opts).answer();
+    }
+
+    private static AnswerOutputLimit.Presentation shapeAnswerAfterToolLoopSelected(
+            String answer, List<ChatMessage> messages, CurrentTurnPlan plan, ToolCallLoop.LoopResult loopResult,
+            Path workspace, int extraMutationSuccesses, boolean failedActionObligation, Options opts) {
         String directoryListingAnswer = directoryListingAnswerIfApplicable(messages, plan, loopResult);
         if (!directoryListingAnswer.isBlank()) {
-            return sanitizeAndTruncate(directoryListingAnswer, opts);
+            return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(directoryListingAnswer, opts), false);
         }
         String verifyOnlyPathAnswer = verifyOnlyPathCheckAnswerIfApplicable(messages, plan, loopResult);
         if (!verifyOnlyPathAnswer.isBlank()) {
-            return sanitizeAndTruncate(verifyOnlyPathAnswer, opts);
+            return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(verifyOnlyPathAnswer, opts), false);
         }
         String readTargetAnswer = readTargetAnswerIfApplicable(answer, messages, plan, loopResult);
         if (!readTargetAnswer.isBlank()) {
-            return sanitizeAndTruncate(readTargetAnswer, opts);
+            return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(readTargetAnswer, opts), false);
         }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 answer, plan, messages, loopResult, workspace,
                 extraMutationSuccesses, failedActionObligation);
         String finalAnswer = groundedReadOnlyProposalAnswerIfNeeded(
                 outcome.finalAnswer(), messages, plan, loopResult);
-        return sanitizeAndTruncate(finalAnswer, opts);
+        return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(finalAnswer, opts), outcome.outputLimit());
     }
 
     static String groundedReadOnlyProposalAnswerIfNeeded(
@@ -2131,6 +2141,12 @@ public final class AssistantTurnExecutor {
             boolean failedActionObligation,
             Options opts
     ) {
+        return shapeAnswerWithoutToolsSelected(answer, messages, plan, ctx, streamed, failedActionObligation, opts).answer();
+    }
+
+    private static AnswerOutputLimit.Presentation shapeAnswerWithoutToolsSelected(
+            String answer, List<ChatMessage> messages, CurrentTurnPlan plan, Context ctx,
+            boolean streamed, boolean failedActionObligation, Options opts) {
         ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
                 answer, plan, messages, ctx, streamed, failedActionObligation);
         if (streamed && outcome.groundingStatus() == ExecutionOutcome.GroundingStatus.UNGROUNDED) {
@@ -2141,7 +2157,7 @@ public final class AssistantTurnExecutor {
             LOG.info("Streaming no-tool mutation narrative replaced: explicit mutation request, "
                     + "zero file tools, no file changed.");
         }
-        return sanitizeAndTruncate(outcome.finalAnswer(), opts);
+        return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(outcome.finalAnswer(), opts), outcome.outputLimit());
     }
 
     // ── Post-tool answer acceptance gate ─────────────────────────────────
@@ -2478,6 +2494,15 @@ public final class AssistantTurnExecutor {
                 : contract.originalUserRequest();
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
+        if (answer.startsWith(dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX)) {
+            return answer;
+        }
+        if (readStaticWebDiagnosticSurface(loopResult, workspace)
+                && answer.equals(StaticTaskVerifier.renderReadOnlyWebDiagnostics(
+                        workspace, loopResult.readPaths(), userRequest, answer))) {
+            return answer;
+        }
+
         String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
@@ -2550,7 +2575,8 @@ public final class AssistantTurnExecutor {
         String grounded = StaticTaskVerifier.renderReadOnlyWebDiagnostics(
                 workspace,
                 loopResult.readPaths(),
-                userRequest);
+                userRequest,
+                answer == null ? "" : answer);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 

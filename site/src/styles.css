@@ -58,7 +58,6 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  min-width: 320px;
   background:
     radial-gradient(1100px 560px at 14% -12%, rgba(35, 67, 60, 0.2), transparent 60%),
     radial-gradient(1000px 520px at 90% -4%, rgba(135, 160, 132, 0.06), transparent 58%),
@@ -1680,10 +1679,11 @@ html.menu-open, html.menu-open body { overflow: hidden; }
   .js section[id] { scroll-margin-top: 84px; }
   /* stop the install command and the dial labels/controls from clipping */
   .setup-command { font-size: 0.74rem; }
+  .setup-heading { display: flex; }
   .setup-tooltip {
     left: 0;
     right: auto;
-    width: min(18rem, calc(100vw - 2rem));
+    width: min(18rem, 100%);
   }
   .cycle-dial { max-width: 340px; padding-inline: 1.6rem; }
   .cycle-btn { width: 44px; height: 44px; }

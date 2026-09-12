@@ -118,6 +118,50 @@ class TrustClaimsHonestyTest {
     }
 
     @Test
+    void verificationDenialAndDiagnosticEvidenceDisclosuresRemainExplicit() throws Exception {
+        String site = read("site/index.html");
+        var hero = Pattern.compile("(?s)<h1>.*?</h1>\\s*"
+                + "<p class=\"hero-subtitle\">(.*?)</p>\\s*"
+                + "<p class=\"hero-proof\">(.*?)</p>").matcher(site);
+        assertTrue(hero.find(), "verification limits must remain adjacent to the hero claim");
+        assertContainsNormalized(hero.group(1), "Checks supported actions against tool evidence");
+        assertContainsNormalized(hero.group(2), "Read-only explanations may remain unverified");
+        assertContainsNormalized(hero.group(2), "incomplete or unsupported checks stay explicit");
+        for (String attribute : List.of("name=\"description\"", "property=\"og:description\"",
+                "name=\"twitter:description\"")) {
+            var metadata = Pattern.compile(Pattern.quote(attribute)
+                    + "\\s+content=\"([^\"]+)\"").matcher(site);
+            assertTrue(metadata.find(), "missing description metadata: " + attribute);
+            assertContainsNormalized(metadata.group(1), "checks supported actions against tool evidence");
+            assertContainsNormalized(metadata.group(1), "Read-only explanations may remain unverified");
+            assertContainsNormalized(metadata.group(1), "incomplete or unsupported checks stay explicit");
+        }
+
+        assertContainsNormalized(read("docs/architecture/overview.md"),
+                "Read-only explanations may remain unverified");
+        String execution = read("docs/architecture/execution-model.md");
+        assertContainsNormalized(execution, "Read-only prose may remain unverified");
+        assertContains(execution, "V->>R: evidence-classified outcome");
+        assertFalse(execution.contains("V->>R: grounded outcome"));
+
+        String permissions = read("docs/user/permissions-and-approvals.md");
+        assertContainsNormalized(permissions, "The denied action is not performed");
+        assertContainsNormalized(permissions,
+                "Any earlier applied or uncertain effects remain reported; denial does not roll them back");
+        assertFalse(permissions.contains("should report that nothing was changed"));
+
+        String quality = read("docs/development/quality-reports.md");
+        assertContainsNormalized(quality, "Retain source-bound dirty-tree results as local diagnostic evidence");
+        assertContainsNormalized(quality, "not as qualification of a clean, exact release candidate");
+        assertContainsNormalized(quality, "Rerun the required release gates from the intended committed state");
+        assertContainsNormalized(quality, "preserve their provenance rather than deleting historical evidence");
+
+        assertContainsNormalized(read("CHANGELOG.md"),
+                "Output-limit notices now follow the selected final answer: a successful continuation "
+                        + "no longer inherits an earlier truncation warning, while relevant warnings remain visible");
+    }
+
+    @Test
     void publicPitchSurfacesAvoidUnboundedPositioningOverclaims() throws Exception {
         String publicPitch = read("README.md") + "\n" + readMarkdownTree("docs") + "\n" + read("site/index.html");
 

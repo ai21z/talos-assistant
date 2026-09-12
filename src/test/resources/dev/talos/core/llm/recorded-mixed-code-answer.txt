@@ -1,0 +1,42 @@
+**Why the button doesn’t work**
+
+In `script.js` the code looks for a button with the selector `#calc`:
+
+```js
+const button = document.querySelector('#calc');
+```
+
+But in `index.html` the button’s id is **`calculate`**:
+
+```html
+<button id="calculate">Calculate</button>
+```
+
+Because the selector doesn’t match any element, `button` ends up as `null`. When the script later tries to attach an event listener, nothing happens, so clicking the button does nothing.
+
+**Correct selector**
+
+Use the actual id of the button:
+
+```js
+const button = document.querySelector('#calculate');
+```
+
+or, equivalently, `document.getElementById('calculate')`.
+
+**BMI for 72 kg and 1.8 m**
+
+\[
+\text{BMI} = \frac{72}{1.8^2} = \frac{72}{3.24} \approx 22.22
+\]
+
+Rounded to one decimal place (matching the `toFixed(1)` in the script) it is **22.2**.
+
+**Difference between the two JavaScript files**
+
+| File | Purpose | Loaded by `index.html`? | Key content |
+|------|---------|--------------------------|-------------|
+| **script.js** | Contains the BMI‑calculation logic that runs when the button is clicked. | **Yes** (`<script src="script.js"></script>` in the body). | Selects the button, reads weight/height inputs, writes the BMI to the `<p id="result">`. |
+| **scripts.js** | An unrelated sentinel file meant to stay unchanged; it is not referenced anywhere. | **No** – no `<script src="scripts.js">` tag. | Just a constant `sentinel = 'KEEP_UNCHANGED';`. |
+
+So the failure comes from a selector typo in `script.js`; fixing it to `#calculate` will make the button compute the BMI of 22.2 for the given values.

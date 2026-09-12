@@ -25,6 +25,7 @@ public final class TurnFailureClassifier {
         ENGINE_CONTEXT_BUDGET,
         ENGINE_MALFORMED_RESPONSE,
         ENGINE_RESPONSE_ERROR,
+        REPETITION_LOOP,
         TIMEOUT,
         VALIDATION,
         CANCELLATION,
@@ -76,6 +77,11 @@ public final class TurnFailureClassifier {
             code = responseError.httpStatus() >= 100 && responseError.httpStatus() <= 599
                     ? responseError.httpStatus()
                     : 500;
+        } else if (failure instanceof GenerationWatchdogException watchdog) {
+            boolean repetition = watchdog.reason()
+                    == dev.talos.spi.types.ProviderResponseCapture.Abandonment.REPETITION_LOOP;
+            kind = repetition ? ErrorKind.REPETITION_LOOP : ErrorKind.TIMEOUT;
+            code = repetition ? 500 : 408;
         } else if (failure instanceof TimeoutException) {
             kind = ErrorKind.TIMEOUT;
             code = 408;
@@ -141,6 +147,7 @@ public final class TurnFailureClassifier {
 
     private static boolean typedFailure(Throwable throwable) {
         return throwable instanceof EngineException
+                || throwable instanceof GenerationWatchdogException
                 || throwable instanceof TimeoutException
                 || throwable instanceof IllegalArgumentException
                 || throwable instanceof CancellationException

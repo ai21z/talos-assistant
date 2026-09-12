@@ -2,6 +2,8 @@
 
 Talos is a local-first CLI assistant for developer workspaces. The architecture is built around one rule: model output is never enough evidence by itself. A turn is useful only when policy, tools, approvals, verification, and trace records agree with the final claim.
 
+Supported action claims are checked against collected tool evidence. Read-only explanations may remain unverified, and incomplete or unsupported checks are reported explicitly.
+
 Talos is not designed as an unbounded background agent. It is a bounded execution harness:
 
 - classify the user request before selecting tools
@@ -9,7 +11,7 @@ Talos is not designed as an unbounded background agent. It is a bounded executio
 - keep filesystem operations inside the workspace boundary
 - ask before mutation and bounded command execution
 - checkpoint risky writes when policy requires rollback support
-- verify the final state before claiming success
+- verify supported final-state claims before reporting success
 - preserve trace and prompt-debug evidence for review
 
 ## System Shape

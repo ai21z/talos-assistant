@@ -34,6 +34,23 @@ class LlmCallBudgetTest {
             new LlmClient.StreamResult("reply", List.of());
 
     @Test
+    void typedAbandonmentIsIdentityMetadataAndSurvivesReceiptAttachment() {
+        var legacy = new LlmClient.StreamResult("partial", List.of(), "", "arbitrary prose",
+                ProviderResponseCapture.AbortOrigin.RUNTIME_WATCHDOG);
+        var typed = legacy.withAbandonment(ProviderResponseCapture.Abandonment.REPETITION_LOOP);
+        var rebound = typed.withProvenance(ProviderResponseCapture.Receipt.none());
+        assertTrue(legacy.abandonment().isEmpty());
+        assertEquals(ProviderResponseCapture.Abandonment.REPETITION_LOOP,
+                typed.abandonment().orElseThrow());
+        assertEquals(typed.abandonment(), rebound.abandonment());
+        assertEquals(legacy, typed, "public four-component record equality remains unchanged");
+        assertEquals(legacy.hashCode(), typed.hashCode());
+        assertEquals(legacy.toString(), typed.toString());
+        assertThrows(IllegalStateException.class,
+                () -> OK.withAbandonment(ProviderResponseCapture.Abandonment.REPETITION_LOOP));
+    }
+
+    @Test
     void provenanceMetadataPreservesThePublicFourComponentRecordContract() {
         assertArrayEquals(
                 new String[]{"text", "toolCalls", "finishReason", "abortReason"},
@@ -154,6 +171,8 @@ class LlmCallBudgetTest {
 
             assertNotNull(result);
             assertTrue(result.aborted(), "wall-clock abort must carry abort metadata");
+            assertEquals(ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT,
+                    result.abandonment().orElseThrow());
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("wall-clock"),
@@ -209,6 +228,8 @@ class LlmCallBudgetTest {
 
             assertNotNull(result);
             assertTrue(result.aborted(), "idle abort must carry abort metadata");
+            assertEquals(ProviderResponseCapture.Abandonment.IDLE_TIMEOUT,
+                    result.abandonment().orElseThrow());
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("no tokens"),
@@ -245,6 +266,8 @@ class LlmCallBudgetTest {
 
             assertNotNull(result);
             assertTrue(result.aborted(), "repetition abort must carry abort metadata");
+            assertEquals(ProviderResponseCapture.Abandonment.REPETITION_LOOP,
+                    result.abandonment().orElseThrow());
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("repetition loop"),
