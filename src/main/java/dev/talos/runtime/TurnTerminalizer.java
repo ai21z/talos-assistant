@@ -41,14 +41,17 @@ final class TurnTerminalizer {
             RetrievalTrace retrieval = consumeRetrieval();
             updateFinalPhase(ctx);
             String assistantText = MemoryUpdateListener.extractText(result);
-            String committedAssistantText = assistantText == null
+            String deliveredAssistantText = assistantText == null
                     ? ""
                     : MemoryUpdateListener.assistantTextForPersistence(
                             assistantText, TurnUserRequestCapture.get());
+            String committedAssistantText = assistantText == null
+                    ? ""
+                    : TurnAuditCapture.currentContentRestrictions().forHistory(deliveredAssistantText);
             LocalTurnTraceCapture.recordAnswerTransformedForRouting(
                     committedAssistantText,
                     LocalTurnTraceCapture.AnswerTransformationReason.SESSION_COMMIT_NORMALIZATION);
-            LocalTurnTraceCapture.recordRoutedAnswerCaptured(committedAssistantText);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(deliveredAssistantText, committedAssistantText);
             String resultStatus = JsonTurnLogAppender.statusOf(result).toUpperCase(Locale.ROOT);
             LocalTurnTraceCapture.recordOutcomeIfAbsent(
                     resultStatus,

@@ -127,21 +127,21 @@ final class LlamaCppEngine implements ModelEngine {
 
     @Override
     public String chat(ChatRequest req) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
         return invocation.client().chat(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
     public String chat(ChatRequest req, ProviderTransportHandoff handoff) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(handoff);
         return invocation.client().chat(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
         return invocation.client().chatStream(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
@@ -150,14 +150,14 @@ final class LlamaCppEngine implements ModelEngine {
     public Stream<TokenChunk> chatStream(
             ChatRequest req,
             ProviderTransportHandoff handoff) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(handoff);
         return invocation.client().chatStream(req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
     }
 
     @Override
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest req) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(ProviderTransportHandoff.none());
         return invocation.client().chatStreamNonStreaming(
                 req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
@@ -167,7 +167,7 @@ final class LlamaCppEngine implements ModelEngine {
     public Stream<TokenChunk> chatStreamNonStreaming(
             ChatRequest req,
             ProviderTransportHandoff handoff) throws Exception {
-        prepareCapabilities();
+        prepareRequest(req);
         ChatInvocation invocation = invocation(handoff);
         return invocation.client().chatStreamNonStreaming(
                 req, requestLayout(), nativeToolPrefill(req), invocation.handoff());
@@ -206,6 +206,13 @@ final class LlamaCppEngine implements ModelEngine {
         return snapshot == null
                 ? RequestMessageLayout.PRESERVE_AS_WRITTEN
                 : snapshot.profile().effectiveRequestLayout();
+    }
+
+    private void prepareRequest(ChatRequest request) {
+        boolean denied = !Objects.requireNonNull(request, "chat request").contentRestrictions.artifactAllowed();
+        if (denied) serverManager.denyOutputRetention();
+        prepareCapabilities();
+        if (denied) serverManager.requireOutputRetentionDenied();
     }
 
     private CompatChatClient.NativeToolPrefill nativeToolPrefill(ChatRequest request) {

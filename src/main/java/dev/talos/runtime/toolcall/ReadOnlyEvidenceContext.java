@@ -72,7 +72,9 @@ final class ReadOnlyEvidenceContext {
                     || !Objects.equals(current.toolCallId(), original.toolCallId())
                     || !(Objects.equals(current.content(), original.content())
                         || Objects.equals(current.content(), ToolCallSupport.summarizeToolResult(original.content())))
-                    || !original.content().contains(evidence.body())
+                    || bound.body() == null
+                    || !bound.body().observedBody().equals(evidence.body())
+                    || !bound.body().displayedBody().equals(evidence.body())
                     || original.content().contains("... (output truncated"))
                 return Selection.unavailable();
             ChatMessage.NativeToolCall call = ReadOnlyEvidenceHandoff.boundReadCall(

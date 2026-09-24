@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -28,6 +29,12 @@ public final class ForegroundProviderScriptedLlmClient {
     private ForegroundProviderScriptedLlmClient() {}
 
     public static LlmClient create(Config config, List<String> responses) {
+        return create(config, responses, ignored -> {});
+    }
+
+    /** Observes transient requests at the scripted provider send boundary without retaining them. */
+    public static LlmClient create(
+            Config config, List<String> responses, Consumer<ChatRequest> requestObserver) {
         Config effectiveConfig = config == null ? new Config() : config;
         Object llmBlock = effectiveConfig.data.get("llm");
         if (llmBlock != null && !(llmBlock instanceof Map<?, ?>)) {
@@ -41,7 +48,7 @@ public final class ForegroundProviderScriptedLlmClient {
         llm.putIfAbsent("default_backend", "foreground-provider-fixture");
         llm.putIfAbsent("model", "foreground-provider-fixture");
         effectiveConfig.data.put("llm", llm);
-        return new LlmClient(effectiveConfig, new Resolver(responses));
+        return new LlmClient(effectiveConfig, new Resolver(responses, requestObserver));
     }
 
     private static final class Resolver implements LlmEngineResolver {
@@ -49,11 +56,13 @@ public final class ForegroundProviderScriptedLlmClient {
 
         private final List<String> responses;
         private final AtomicInteger cursor = new AtomicInteger();
+        private final Consumer<ChatRequest> requestObserver;
 
-        private Resolver(List<String> responses) {
+        private Resolver(List<String> responses, Consumer<ChatRequest> requestObserver) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of("")
                     : responses.stream().map(response -> response == null ? "" : response).toList();
+            this.requestObserver = requestObserver == null ? ignored -> {} : requestObserver;
         }
 
         @Override
@@ -71,7 +80,7 @@ public final class ForegroundProviderScriptedLlmClient {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
-            return responseChunks();
+            return responseChunks(request);
         }
 
         @Override
@@ -82,7 +91,7 @@ public final class ForegroundProviderScriptedLlmClient {
                     physicalProviderBody(request),
                     request.tools,
                     handoff,
-                    this::responseChunks);
+                    () -> responseChunks(request));
         }
 
         @Override
@@ -93,10 +102,11 @@ public final class ForegroundProviderScriptedLlmClient {
                     physicalProviderBody(request),
                     request.tools,
                     handoff,
-                    this::responseChunks);
+                    () -> responseChunks(request));
         }
 
-        private Stream<TokenChunk> responseChunks() {
+        private Stream<TokenChunk> responseChunks(ChatRequest request) {
+            requestObserver.accept(request);
             int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
             String response = responses.get(index);
             List<TokenChunk> chunks = new ArrayList<>(2);

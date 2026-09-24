@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.intent.MutationActionEvidence;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -108,8 +109,7 @@ public final class MutationIntent {
             "apply the", "apply these", "apply those",
             "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
-            "refactor the ", "refactor this ", "refactor it",
-            "darker and more minimal"
+            "refactor the ", "refactor this ", "refactor it"
     );
 
     private static final Set<String> READ_ONLY_NEGATIONS = Set.of(
@@ -250,7 +250,8 @@ public final class MutationIntent {
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
 
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
-            "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+            "\\b(?:" + CORE_MUTATION_VERBS + "|improve|adjust|tweak|polish)"
+                    + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
     private static final Pattern CONTRASTIVE_MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "(?:^|[.!?;]\\s+|\\b(?:but|however)\\s+)"
@@ -526,12 +527,10 @@ public final class MutationIntent {
         }
         if (looksTerminalBuildArtifactRequest(lower)) return "explicit-terminal-build-artifact-request";
         if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
-        if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
+        FallbackEvidence fallback = fallbackMutationEvidence(original);
+        if ("explicit-mutation-verb-with-file-target".equals(fallback.reason())) return fallback.reason();
         if (looksMidSentenceRenameRequest(original)) return "explicit-rename-request";
-        for (String marker : MARKERS) {
-            if (lower.contains(marker)) return "explicit-mutation-marker";
-        }
-        return "non-mutating";
+        return fallback.reason().isEmpty() ? "non-mutating" : fallback.reason();
     }
 
     private static boolean looksInlineOutputOnlyRequest(String original, String lower) {
@@ -646,14 +645,9 @@ public final class MutationIntent {
                     Matcher m = MID_SENTENCE_RENAME_REQUEST.matcher(original);
                     if (m.find()) return m.group().strip();
                 }
-                case "explicit-mutation-verb-with-file-target" -> {
-                    Matcher m = MUTATION_VERB_WITH_FILE_TARGET.matcher(lower);
-                    if (m.find()) return m.group().strip();
-                }
-                case "explicit-mutation-marker" -> {
-                    for (String marker : MARKERS) {
-                        if (lower.contains(marker)) return marker.strip();
-                    }
+                case "explicit-mutation-verb-with-file-target", "explicit-mutation-marker" -> {
+                    FallbackEvidence fallback = fallbackMutationEvidence(original);
+                    return reason.equals(fallback.reason()) ? fallback.span() : "";
                 }
                 case "explicit-text-format-request" -> {
                     for (Pattern pattern : TEXT_FORMAT_REQUEST_PATTERNS) {
@@ -744,8 +738,34 @@ public final class MutationIntent {
                 || lower.contains("websites"));
     }
 
-    private static boolean looksExplicitFileTargetMutation(String lower) {
-        return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    private record FallbackEvidence(String reason, String span) {}
+
+    private static FallbackEvidence fallbackMutationEvidence(String original) {
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(original);
+        String folded = evidence.foldedRequest();
+        Matcher files = MUTATION_VERB_WITH_FILE_TARGET.matcher(folded);
+        while (files.find()) {
+            if (evidence.permits(files.start(), files.end())) {
+                return new FallbackEvidence("explicit-mutation-verb-with-file-target",
+                        original.substring(files.start(), files.end()).strip());
+            }
+        }
+        int selectedStart = Integer.MAX_VALUE;
+        String selectedSpan = "";
+        for (String marker : MARKERS) {
+            String completeMarker = marker.stripTrailing();
+            int start = folded.indexOf(completeMarker);
+            while (start >= 0) {
+                int end = start + completeMarker.length();
+                if (start < selectedStart && evidence.permitsMarker(start, end)) {
+                    selectedStart = start;
+                    selectedSpan = original.substring(start, end).strip();
+                }
+                start = folded.indexOf(completeMarker, end);
+            }
+        }
+        return selectedSpan.isEmpty() ? new FallbackEvidence("", "")
+                : new FallbackEvidence("explicit-mutation-marker", selectedSpan);
     }
 
     private static boolean looksTextFormatMutationRequest(String lower) {

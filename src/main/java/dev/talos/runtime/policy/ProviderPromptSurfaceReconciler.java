@@ -115,7 +115,7 @@ public final class ProviderPromptSurfaceReconciler {
                 prior.role(),
                 bounded.content(),
                 prior.toolCalls(),
-                prior.toolCallId()));
+                prior.toolCallId(), prior.contentRestrictions()));
     }
 
     private static List<String> visibleToolsBeforeReplacement(
@@ -322,7 +322,7 @@ public final class ProviderPromptSurfaceReconciler {
                 message.role(),
                 normalized,
                 message.toolCalls(),
-                message.toolCallId());
+                message.toolCallId(), message.contentRestrictions());
     }
 
     private record SpecializedCapability(

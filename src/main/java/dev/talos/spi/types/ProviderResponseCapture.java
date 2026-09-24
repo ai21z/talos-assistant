@@ -673,6 +673,7 @@ public final class ProviderResponseCapture {
         private final List<ToolProposalReceipt> toolProposals;
         private final Generation ownerGeneration;
         private final Attempt ownerAttempt;
+        private final ProviderReadInputBinding readInputBinding;
         private volatile boolean selected;
 
         public Receipt(
@@ -683,7 +684,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, false, ToolAuthorityMode.NONE,
                     ToolAuthorityContract.none(), ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", "", "", List.of(), null, null);
+                    "", "", "", List.of(), null, null, ProviderReadInputBinding.notRequested());
         }
 
         public Receipt(
@@ -696,7 +697,7 @@ public final class ProviderResponseCapture {
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE, "", "", "",
-                    List.of(), null, null);
+                    List.of(), null, null, ProviderReadInputBinding.notRequested());
         }
 
         public Receipt(
@@ -710,7 +711,7 @@ public final class ProviderResponseCapture {
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE, "", "", assistantHash,
-                    List.of(), null, null);
+                    List.of(), null, null, ProviderReadInputBinding.notRequested());
         }
 
         public Receipt(
@@ -727,7 +728,7 @@ public final class ProviderResponseCapture {
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE, "", "", assistantHash,
-                    List.of(), null, null);
+                    List.of(), null, null, ProviderReadInputBinding.notRequested());
         }
 
         private Receipt(
@@ -747,7 +748,8 @@ public final class ProviderResponseCapture {
                 String assistantHash,
                 List<ToolProposalReceipt> toolProposals,
                 Generation ownerGeneration,
-                Attempt ownerAttempt) {
+                Attempt ownerAttempt,
+                ProviderReadInputBinding readInputBinding) {
             this.generationId = safe(generationId);
             this.attemptId = safe(attemptId);
             this.attemptOrdinal = Math.max(0, attemptOrdinal);
@@ -780,6 +782,7 @@ public final class ProviderResponseCapture {
             this.toolProposals = toolProposals == null ? List.of() : List.copyOf(toolProposals);
             this.ownerGeneration = ownerGeneration;
             this.ownerAttempt = ownerAttempt;
+            this.readInputBinding = readInputBinding;
         }
 
         public String generationId() { return generationId; }
@@ -794,6 +797,20 @@ public final class ProviderResponseCapture {
         public String transportOperationId() { return transportOperationId; }
         public String processReceiptId() { return processReceiptId; }
         public String assistantHash() { return assistantHash; }
+
+        public ProviderReadInputBinding readInputBinding() {
+            return readInputBinding.forSelectedResponse(selected, providerTerminalEligible());
+        }
+
+        /** Ownership is checked against the exact active scope, not its display identity. */
+        public boolean belongsToCurrentScope() {
+            Scope current = CURRENT.get();
+            if (current == null || ownerGeneration == null || ownerAttempt == null
+                    || ownerGeneration.owner != current) return false;
+            synchronized (current) {
+                return !current.closed;
+            }
+        }
 
         /** True only after the owning generation selected this exact receipt. */
         public boolean selected() { return selected; }
@@ -835,7 +852,7 @@ public final class ProviderResponseCapture {
             return new Receipt("", "", 0, source, purposeFor(source), completion,
                     false, false, ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", "", "", List.of(), null, null);
+                    "", "", "", List.of(), null, null, ProviderReadInputBinding.notRequested());
         }
 
         public static Receipt none() {
@@ -1235,6 +1252,9 @@ public final class ProviderResponseCapture {
         private boolean transportUnobserved;
         private boolean terminal;
         private Failure failure;
+        private ProviderReadInputBinding.PreparedInputs preparedReadInputs =
+                ProviderReadInputBinding.noPreparedInputs();
+        private boolean preparedReadInputsRecorded;
 
         private Attempt(
                 Generation generation,
@@ -1257,6 +1277,19 @@ public final class ProviderResponseCapture {
 
         public void requestDispatched() {
             requestDispatched(ProviderTransportHandoff.DispatchEvidence.unbound());
+        }
+
+        /** The prepared request is captured once, before its local transport admission. */
+        public void bindPreparedReadInputs(ChatRequest request, String sanitizerVersion) {
+            Scope owner = generation.owner;
+            if (owner == null) return;
+            synchronized (owner) {
+                if (terminal || generation.terminal || requestDispatched || transportUnobserved
+                        || preparedReadInputsRecorded)
+                    throw new IllegalStateException("prepared read inputs cannot be rebound");
+                preparedReadInputs = ProviderReadInputBinding.prepare(request, sanitizerVersion);
+                preparedReadInputsRecorded = true;
+            }
         }
 
         public void requestDispatched(ProviderTransportHandoff.DispatchEvidence evidence) {
@@ -1418,7 +1451,8 @@ public final class ProviderResponseCapture {
                         sha256(response.assistantText()),
                         proposalReceipts(response.nativeToolCalls()),
                         generation,
-                        this);
+                        this,
+                        ProviderReadInputBinding.bind(preparedReadInputs, dispatchEvidence));
                 generation.selectableReceipt = receipt;
                 AttemptResponse typed = new AttemptResponse(event, response, receipt);
                 owner.listener.responseReturned(typed);

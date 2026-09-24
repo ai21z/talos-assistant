@@ -43,6 +43,8 @@ interface LlamaCppProcess {
     boolean isAlive();
     void destroy();
     boolean outputCaptureHealthy();
+    /** Raw output retention is disabled irreversibly before restricted dispatch. */
+    default boolean suppressOutputRetention() { return false; }
     default LlamaCppProcessLaunchObservation launchObservation() { return null; }
     default LlamaCppProcessTerminationOwner.Lease terminationLease() { return null; }
     default boolean waitFor(Duration timeout) throws InterruptedException {

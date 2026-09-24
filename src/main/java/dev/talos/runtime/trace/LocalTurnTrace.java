@@ -69,6 +69,27 @@ public record LocalTurnTrace(
         return new Builder(traceId, sessionId, turnNumber, timestamp);
     }
 
+    /** Derived prose and path-bearing rows are withheld without changing the terminal outcome. */
+    public LocalTurnTrace contentWithheldProjection() {
+        boolean safeTerminalEvents = TurnEvidenceProjectionTraceEvent.decode(this).valid();
+        Builder projected = builder(terminalToken(traceId, 128, ""), terminalToken(sessionId, 200, ""),
+                turnNumber, terminalToken(timestamp, 64, ""))
+                .workspaceHash(terminalToken(workspaceHash, 128, ""))
+                .mode(terminalToken(mode, 64, "unknown"))
+                .outcome(terminalToken(outcome.status(), 64, "UNKNOWN"),
+                        terminalToken(outcome.verificationStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.approvalStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.mutationStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.classification(), 128, "UNKNOWN"));
+        if (safeTerminalEvents) events.forEach(projected::event);
+        else {
+            projected.event(TurnTraceEvent.simple("DOCUMENT_CONTENT_WITHHELD", terminalToken(timestamp, 64, ""),
+                    java.util.Map.of("projection", "DOCUMENT_DERIVED_CONTENT_WITHHELD")));
+            SafeTerminalTraceProjector.project(events, traceId).events().forEach(projected::event);
+        }
+        return projected.build();
+    }
+
     /**
      * Produce the bounded trace persisted for a non-conversational settlement.
      *

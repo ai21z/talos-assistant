@@ -571,7 +571,12 @@ public final class CoordinatedMutationTailParser {
                     prefixAuthority,
                     inheritedScope == null ? null : inheritedScope.authority(),
                     visibleSuffix,
-                    boundTargets.disjunctive());
+                    boundTargets.disjunctive(),
+                    MutationPostfixOwnership.analyzeConstraint(view, suffixStart, actionEnd));
+            if (!workspaceOperation && authority != CoordinatedMutationTailPlan.Authority.FORBIDDEN
+                    && MutationPostfixOwnership.rawConstraintTainted(view, action.start())) {
+                authority = CoordinatedMutationTailPlan.Authority.NON_AUTHORITATIVE;
+            }
             if (inheritedScope != null) {
                 span = view.trimmedSpan(
                         inheritedScope.startOffset(),
@@ -1016,7 +1021,8 @@ public final class CoordinatedMutationTailParser {
             CoordinatedMutationTailPlan.Authority prefixAuthority,
             CoordinatedMutationTailPlan.Authority inheritedAuthority,
             String visibleSuffix,
-            boolean disjunctiveTargets
+            boolean disjunctiveTargets,
+            MutationPostfixOwnership.Analysis postfix
     ) {
         CoordinatedMutationTailPlan.Authority authority =
                 workspaceOperation
@@ -1056,6 +1062,13 @@ public final class CoordinatedMutationTailParser {
             authority = restrictiveAuthority(
                     authority,
                     CoordinatedMutationTailPlan.Authority.NON_AUTHORITATIVE);
+        }
+        if (!workspaceOperation) {
+            authority = restrictiveAuthority(authority, switch (postfix.kind()) {
+                case NONE -> null;
+                case OPTIONAL -> CoordinatedMutationTailPlan.Authority.OPTIONAL;
+                case REPORTED, UNSUPPORTED -> CoordinatedMutationTailPlan.Authority.NON_AUTHORITATIVE;
+            });
         }
         return authority;
     }
@@ -1623,6 +1636,7 @@ public final class CoordinatedMutationTailParser {
         int safeActionStart = Math.min(
                 view.request().length(),
                 Math.max(safeFrom, actionStart));
+        if (MutationPostfixOwnership.rawConstraintTainted(view, safeActionStart)) return false;
         int safeTargetEnd = Math.min(
                 view.request().length(),
                 Math.max(safeActionStart, boundTargetEnd));
@@ -1650,7 +1664,8 @@ public final class CoordinatedMutationTailParser {
                         prefix,
                         null,
                         visibleSuffix,
-                        false)
+                        false,
+                        MutationPostfixOwnership.analyzeConstraint(view, safeTargetEnd, safeTo))
                 == CoordinatedMutationTailPlan.Authority.REQUIRED;
     }
 

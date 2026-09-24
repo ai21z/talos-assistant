@@ -232,7 +232,7 @@ class ReadOnlyDiagnosisSynthesisIntegrationTest {
         assertEquals(ToolChoiceMode.NONE, synthesis.controls.toolChoice());
         assertEquals(ProviderResponseCapture.ToolAuthorityMode.NONE, synthesis.controls.toolAuthorityMode());
         assertTrue(synthesis.controls.singleAttempt());
-        assertEquals(2048, synthesis.controls.maxOutputTokens());
+        assertEquals(4096, synthesis.controls.maxOutputTokens());
         assertEquals(4, synthesis.messages.stream().filter(message -> "tool".equals(message.role())).count());
 
         for (String target : TARGETS) {

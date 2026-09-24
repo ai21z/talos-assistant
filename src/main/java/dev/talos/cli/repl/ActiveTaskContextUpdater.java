@@ -8,6 +8,8 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ProposalProvenance;
+import dev.talos.runtime.intent.ProposalRequestBinding;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -50,8 +52,30 @@ public final class ActiveTaskContextUpdater {
         if (result == null) {
             return new Update(preservedContext, preservedGoal);
         }
+        if (!result.audit().contentRestrictions().historyAllowed()) {
+            return new Update(preservedContext.suppressed(
+                    "Document-derived proposal content was not retained."), ArtifactGoal.none());
+        }
 
         TurnFacts facts = TurnFacts.from(result);
+        ProposalRequestBinding proposal = ProposalRequestBinding.fromRequest(userInput);
+        if (proposal.requested() && !facts.mutationAllowed() && !facts.anySuccessfulMutation()) {
+            if (!preservedContext.staticWebRequirements().isEmpty()
+                    || !preservedContext.requiredVerificationClaims().isEmpty()) {
+                return new Update(preservedContext.suppressed(
+                        "Retained requirements require explicit continuation scope."), ArtifactGoal.none());
+            }
+            if (!eligibleProposal(result, facts) || proposal.targets().isEmpty()
+                    || proposal.targets().size() > ActiveTaskContext.MAX_TARGETS
+                    || !StaticWebRequirements.explicitFacts(userInput).isEmpty()
+                    || !eligibleProposalScope(proposal, facts)) {
+                return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
+            }
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    result.turnNumber(), facts.traceId(), proposal.targets(), proposalSummary(result.result()));
+            return active(context.withProposalProvenance(
+                    ProposalProvenance.accepted(context, userInput, extractText(result.result()))));
+        }
         List<String> targets = durableStaticWebTargets(facts.targets(), preservedContext, userInput);
         StaticWebRequirements requirements = staticWebRequirements(userInput, facts, preservedContext);
 
@@ -105,7 +129,7 @@ public final class ActiveTaskContextUpdater {
                 && facts.mutationAllowed()
                 && !facts.anySuccessfulMutation()
                 && looksLikeStaticWebTargets(targets)
-                && !looksLikeProposalIntent(userInput)) {
+                && !proposal.requested()) {
             ActiveTaskContext context = ActiveTaskContext.pendingMutation(
                     result.turnNumber(),
                     facts.traceId(),
@@ -115,24 +139,10 @@ public final class ActiveTaskContextUpdater {
             return active(context);
         }
 
-        if (!targets.isEmpty()
-                && looksLikeProposalIntent(userInput)
-                && evidenceIncomplete(result.result())) {
+        if (proposal.requested() && !facts.anySuccessfulMutation()
+                && preservedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES) {
             return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
         }
-
-        if (!targets.isEmpty()
-                && !facts.mutationAllowed()
-                && !facts.successfulMutation()
-                && looksLikeProposalIntent(userInput)) {
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
-                    result.turnNumber(),
-                    facts.traceId(),
-                    targets,
-                    proposalSummary(result.result()));
-            return active(context);
-        }
-
         return new Update(preservedContext, preservedGoal);
     }
 
@@ -162,6 +172,54 @@ public final class ActiveTaskContextUpdater {
                 .startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX);
     }
 
+    private static boolean eligibleProposal(TurnResult result, TurnFacts facts) {
+        LocalTurnTrace trace = facts.localTrace();
+        if (trace == null || trace.turnNumber() != result.turnNumber() || facts.traceId().isBlank()
+                || extractText(result.result()).isBlank() || evidenceIncomplete(result.result())) return false;
+        boolean answered = "READ_ONLY_ANSWERED".equals(facts.completionStatus())
+                && "NOT_RUN".equals(facts.verificationStatus());
+        boolean verified = "COMPLETED_VERIFIED".equals(facts.completionStatus())
+                && "PASSED".equals(facts.verificationStatus());
+        return (answered || verified)
+                && "COMPLETE".equals(trace.outcome().status())
+                && facts.verificationStatus().equals(trace.outcome().verificationStatus())
+                && "NOT_REQUESTED".equals(facts.mutationStatus())
+                && "NONE".equals(trace.outcome().approvalStatus())
+                && facts.audit().approvalsDenied() == 0
+                && facts.audit().toolCalls().stream().allMatch(TurnRecord.ToolCallSummary::success)
+                && facts.unsatisfiedRequiredClaimCount() == 0
+                && trace.verification().problems().isEmpty()
+                && trace.warnings().isEmpty();
+    }
+
+    private static boolean eligibleProposalScope(
+            ProposalRequestBinding proposal, TurnFacts facts) {
+        Set<String> targets = lexicalTargetSet(proposal.targets());
+        Set<String> observed = new LinkedHashSet<>(lexicalTargetSet(facts.targets()));
+        Set<String> forbidden = lexicalTargetSet(facts.forbiddenTargets());
+        Set<String> deferred = lexicalTargetSet(proposal.deferredTargets());
+        if (deferred.isEmpty()) {
+            return observed.containsAll(targets) && forbidden.isEmpty();
+        }
+        // Each producer must retain every restriction of the fully accounted deferred request.
+        if (facts.policyTrace() == null || facts.localTrace() == null
+                || !lexicalTargetSet(facts.policyTrace().forbiddenTargets()).equals(deferred)
+                || !lexicalTargetSet(facts.localTrace().taskContract().forbiddenTargets()).equals(deferred)) return false;
+        observed.addAll(deferred);
+        return observed.containsAll(targets);
+    }
+
+    private static Set<String> lexicalTargetSet(List<String> targets) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (targets == null) return out;
+        for (String target : targets) {
+            String normalized = target == null ? "" : target.strip().replace('\\', '/');
+            while (normalized.startsWith("./")) normalized = normalized.substring(2);
+            out.add(normalized);
+        }
+        return out;
+    }
+
     private static String extractText(Result result) {
         if (result == null) return "";
         return switch (result) {
@@ -176,29 +234,6 @@ public final class ActiveTaskContextUpdater {
             case Result.StreamEnd ignored -> "";
             case Result.ToolProgress ignored -> "";
         };
-    }
-
-    private static boolean looksLikeProposalIntent(String userInput) {
-        if (userInput == null || userInput.isBlank()) return false;
-        String lower = userInput.strip().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        boolean explicitProposal = lower.contains("propose")
-                || lower.contains("proposal")
-                || lower.contains("suggest changes")
-                || lower.contains("suggest the changes")
-                || lower.contains("what would you change")
-                || lower.contains("would change");
-        boolean noMutationYet = lower.contains("before editing")
-                || lower.contains("before applying")
-                || lower.contains("do not edit")
-                || lower.contains("don't edit")
-                || lower.contains("without editing")
-                || lower.contains("without changing");
-        boolean changeIntent = lower.contains("change")
-                || lower.contains("edit")
-                || lower.contains("update")
-                || lower.contains("fix")
-                || lower.contains("apply");
-        return explicitProposal || (noMutationYet && changeIntent);
     }
 
     private static List<String> durableStaticWebTargets(

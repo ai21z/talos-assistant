@@ -1913,9 +1913,18 @@ val candidateTest by tasks.registering(Test::class) {
 }
 
 tasks.test {
-    dependsOn(tasks.jar)
     filter {
         excludeTestsMatching("dev.talos.architecture.intelligence.*")
+    }
+}
+
+listOf(tasks.test, candidateTest).forEach { lane ->
+    lane.configure {
+        dependsOn(tasks.jar)
+        inputs.file(tasks.jar.flatMap { it.archiveFile }).withPropertyName("packagedTalosJar")
+        doFirst {
+            systemProperty("talos.test.packagedJar", tasks.jar.get().archiveFile.get().asFile.absolutePath)
+        }
     }
 }
 

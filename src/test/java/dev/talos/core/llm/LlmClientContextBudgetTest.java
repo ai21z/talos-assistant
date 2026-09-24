@@ -5,6 +5,9 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -94,6 +98,127 @@ class LlmClientContextBudgetTest {
                 """));
         messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
         return messages;
+    }
+
+    @Test
+    void explicitOutputReserveHonorsTheEstimatedBoundaryForFullAndStreamingCalls() {
+        // The input allowance is 8192 - 4096 - 100, with 83 estimated framing tokens.
+        for (boolean streaming : List.of(false, true)) {
+            for (int extra : List.of(0, 4)) {
+                var resolver = resolver(8192);
+                try (var client = new LlmClient(engineConfig(8192), resolver)) {
+                    var messages = List.of(ChatMessage.user("x".repeat((3996 - 83) * 4 + extra)));
+                    if (extra == 0) {
+                        invoke(client, streaming, messages, controls(4096));
+                        assertEquals(messages, resolver.lastRequest.messages);
+                        assertEquals(4096, resolver.lastRequest.controls.maxOutputTokens());
+                        assertEquals(1, resolver.chatCalls.get());
+                    } else {
+                        assertThrows(EngineException.ContextBudgetExceeded.class,
+                                () -> invoke(client, streaming, messages, controls(4096)));
+                        assertEquals(0, resolver.chatCalls.get());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void absentOrSmallerExplicitCapsRetainTheExistingDefaultReserve() {
+        var messages = List.of(ChatMessage.user("x".repeat(20_000)));
+        for (int cap : List.of(0, 128, 2048)) {
+            var resolver = resolver(8192);
+            try (var client = new LlmClient(engineConfig(8192), resolver)) {
+                invoke(client, false, messages, controls(cap));
+                assertEquals(messages, resolver.lastRequest.messages);
+                assertEquals(cap, resolver.lastRequest.controls.maxOutputTokens());
+                assertEquals(1, resolver.chatCalls.get());
+            }
+        }
+    }
+
+    @Test
+    void outputConsumingTheContextFailsWithoutOverflowOrDispatch() {
+        for (boolean streaming : List.of(false, true)) {
+            for (int cap : List.of(8192, 8193, Integer.MAX_VALUE)) {
+                var resolver = resolver(8192);
+                try (var client = new LlmClient(engineConfig(8192), resolver)) {
+                    assertThrows(EngineException.ContextBudgetExceeded.class,
+                            () -> invoke(client, streaming, List.of(ChatMessage.user("small")), controls(cap)));
+                    assertEquals(0, resolver.chatCalls.get());
+                }
+            }
+        }
+    }
+
+    @Test
+    void engineContextLimitRemainsAuthoritativeForExplicitOutputReserve() {
+        var resolver = resolver(8192);
+        try (var client = new LlmClient(engineConfig(16384), resolver)) {
+            assertThrows(EngineException.ContextBudgetExceeded.class,
+                    () -> invoke(client, false, List.of(ChatMessage.user("x".repeat(20_000))), controls(4096)));
+            assertEquals(0, resolver.chatCalls.get());
+        }
+    }
+
+    @Test
+    void largerReserveTrimsOnlyOldHistoryAndPreservesAnchoredReadPairsAndSchema() {
+        for (boolean streaming : List.of(false, true)) {
+            var resolver = resolver(8192);
+            var current = List.of(
+                    ChatMessage.system("[CurrentTurnCapability]\nRead only."),
+                    ChatMessage.user("Explain the observed file."),
+                    ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                            "read-id", "talos.read_file", Map.of("path", "README.md")))),
+                    ChatMessage.toolResult("read-id", "observed evidence ".repeat(300)));
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("OLD_HISTORY " + "x".repeat(16_000)));
+            messages.add(ChatMessage.assistant("old answer"));
+            messages.addAll(current);
+            var controls = new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.JSON_SCHEMA,
+                    "{\"type\":\"object\"}", List.of(), null, 4096).withSingleAttempt(true);
+            try (var client = new LlmClient(engineConfig(8192), resolver)) {
+                invoke(client, streaming, messages, controls);
+                assertFalse(joinedMessageContent(resolver.lastRequest.messages).contains("OLD_HISTORY"));
+                assertTrue(resolver.lastRequest.messages.containsAll(current));
+                assertEquals(current, resolver.lastRequest.messages.subList(
+                        resolver.lastRequest.messages.size() - current.size(), resolver.lastRequest.messages.size()));
+                assertTrue(resolver.lastRequest.tools.isEmpty());
+                assertEquals(controls.jsonSchema(), resolver.lastRequest.controls.jsonSchema());
+                assertEquals(4096, resolver.lastRequest.controls.maxOutputTokens());
+                assertTrue(resolver.lastRequest.controls.singleAttempt());
+                assertEquals(1, resolver.chatCalls.get());
+            }
+        }
+    }
+
+    @Test
+    void schemaAlsoConsumesInputHeadroomAndCannotBeDroppedToFit() {
+        var resolver = resolver(8192);
+        try (var client = new LlmClient(engineConfig(8192), resolver)) {
+            var controls = new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.JSON_SCHEMA,
+                    "{\"description\":\"" + "x".repeat(16_000) + "\",\"type\":\"object\"}",
+                    List.of(), null, 4096).withSingleAttempt(true);
+            assertThrows(EngineException.ContextBudgetExceeded.class,
+                    () -> invoke(client, false, List.of(ChatMessage.user("small")), controls));
+            assertEquals(0, resolver.chatCalls.get());
+        }
+    }
+
+    private static RecordingResolver resolver(int contextTokens) {
+        return new RecordingResolver(Capabilities.of(true, true, false, contextTokens,
+                true, true, true, false, false, false, true));
+    }
+
+    private static ChatRequestControls controls(int outputTokens) {
+        return new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.TEXT, "", List.of(),
+                null, outputTokens).withSingleAttempt(true);
+    }
+
+    private static void invoke(LlmClient client, boolean streaming, List<ChatMessage> messages,
+                               ChatRequestControls controls) {
+        if (streaming) client.chatStreamFull(messages, ignored -> {}, 5_000L, List.of(), controls);
+        else client.chatFull(messages, 5_000L, List.of(), controls);
     }
 
     private static List<ChatMessage> irreduciblyLargeCurrentTurnMessages() {

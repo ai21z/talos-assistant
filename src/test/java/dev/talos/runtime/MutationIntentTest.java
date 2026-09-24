@@ -429,11 +429,7 @@ class MutationIntentTest {
                 "In Java, rename refactoring to improve clarity is common.",
                 "As a rule, rename methods to match.",
                 "By convention, rename handlers to reflect intent.",
-                // Note: a quoted example WITH a file extension ("rename
-                // foo.txt to bar.txt") classifies through the pre-existing
-                // base verb-with-file-target route, which is out of this
-                // pattern's scope. The quote character is not a clause
-                // starter for the rename pattern itself.
+                "The tutorial says \"rename foo.txt to bar.txt\" in step 3.",
                 "The tutorial says \"rename foo to bar\" in step 3.",
                 "Chapter 2 explains why teams rename modules to align with domains.")) {
             org.junit.jupiter.api.Assertions.assertFalse(

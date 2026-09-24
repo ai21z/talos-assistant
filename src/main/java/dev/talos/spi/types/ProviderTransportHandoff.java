@@ -27,13 +27,16 @@ public interface ProviderTransportHandoff {
     record DispatchEvidence(
             String providerBodyHash,
             List<String> nativeTools,
-            Optional<ProviderProcessLaunchReceipt> processReceipt) {
+            Optional<ProviderProcessLaunchReceipt> processReceipt,
+            ProviderReadInputBinding.SerializedMembership readInputMembership) {
         public DispatchEvidence {
             providerBodyHash = Objects.toString(providerBodyHash, "").strip();
             nativeTools = nativeTools == null ? List.of() : nativeTools.stream()
                     .map(tool -> Objects.requireNonNull(tool, "native tool name"))
                     .toList();
             processReceipt = processReceipt == null ? Optional.empty() : processReceipt;
+            readInputMembership = readInputMembership == null
+                    ? ProviderReadInputBinding.noSerializedMembership() : readInputMembership;
             if (!providerBodyHash.isEmpty()
                     && !providerBodyHash.matches("sha256:[0-9a-f]{64}")) {
                 throw new IllegalArgumentException(
@@ -57,6 +60,12 @@ public interface ProviderTransportHandoff {
             this(providerBodyHash, nativeTools, Optional.empty());
         }
 
+        public DispatchEvidence(String providerBodyHash, List<String> nativeTools,
+                                Optional<ProviderProcessLaunchReceipt> processReceipt) {
+            this(providerBodyHash, nativeTools, processReceipt,
+                    ProviderReadInputBinding.noSerializedMembership());
+        }
+
         public static DispatchEvidence unbound() {
             return new DispatchEvidence("", List.of());
         }
@@ -69,12 +78,19 @@ public interface ProviderTransportHandoff {
                 throw new IllegalArgumentException(
                         "dispatch evidence already carries a different process receipt");
             }
-            return new DispatchEvidence(providerBodyHash, nativeTools, Optional.of(exact));
+            return new DispatchEvidence(providerBodyHash, nativeTools, Optional.of(exact), readInputMembership);
         }
 
         public static DispatchEvidence fromProviderBody(
                 String providerBody,
                 List<ToolSpec> nativeTools) {
+            return fromProviderBody(providerBody, nativeTools, null);
+        }
+
+        public static DispatchEvidence fromProviderBody(
+                String providerBody,
+                List<ToolSpec> nativeTools,
+                ChatRequest request) {
             String body = Objects.requireNonNull(providerBody, "provider body");
             List<String> names = nativeTools == null ? List.of() : nativeTools.stream()
                     .map(tool -> Objects.requireNonNull(tool, "native tool spec").name())
@@ -82,8 +98,9 @@ public interface ProviderTransportHandoff {
             try {
                 byte[] digest = MessageDigest.getInstance("SHA-256")
                         .digest(body.getBytes(StandardCharsets.UTF_8));
-                return new DispatchEvidence(
-                        "sha256:" + HexFormat.of().formatHex(digest), names);
+                String bodyHash = "sha256:" + HexFormat.of().formatHex(digest);
+                return new DispatchEvidence(bodyHash, names, Optional.empty(),
+                        ProviderReadInputBinding.decode(body, request, bodyHash));
             } catch (NoSuchAlgorithmException impossible) {
                 throw new IllegalStateException("SHA-256 unavailable", impossible);
             }
@@ -326,6 +343,22 @@ public interface ProviderTransportHandoff {
             List<ToolSpec> nativeTools) {
         return Objects.requireNonNull(handoff, "provider transport handoff")
                 .admitTransport(DispatchEvidence.fromProviderBody(providerBody, nativeTools));
+    }
+
+    /** Dispatch is denied when artifact retention cannot be prevented. */
+    final class ArtifactRetentionRejected extends IllegalStateException {
+        public ArtifactRetentionRejected() {
+            super("Provider content was withheld because denied artifact retention could not be enforced.");
+        }
+    }
+
+    static ProviderTransportAttempt admit(
+            ProviderTransportHandoff handoff,
+            String providerBody,
+            List<ToolSpec> nativeTools,
+            ChatRequest request) {
+        return Objects.requireNonNull(handoff, "provider transport handoff")
+                .admitTransport(DispatchEvidence.fromProviderBody(providerBody, nativeTools, request));
     }
 
     static void markUnobserved(ProviderTransportHandoff handoff) {

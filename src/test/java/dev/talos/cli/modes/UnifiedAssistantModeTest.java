@@ -659,6 +659,8 @@ class UnifiedAssistantModeTest {
                     .reduce("", (left, right) -> left + "\n" + right);
             assertTrue(providerBody.contains("[CurrentTurnCapability]"), providerBody);
             assertTrue(providerBody.contains("obligation: NONE"), providerBody);
+            String capabilityFrame = soleCapabilityFrame(providerRequest.messages);
+            assertTrue(capabilityFrame.contains("mutationAllowed: false"), capabilityFrame);
             var render = LastPromptCapture.latest().orElseThrow();
             assertEquals(
                     soleCapabilityFrame(providerRequest.messages),
@@ -669,11 +671,15 @@ class UnifiedAssistantModeTest {
                     "talos.edit_file",
                     "talos.mkdir",
                     "talos.copy_path",
-                    "talos.delete_path",
-                    "You CAN create files")) {
+                    "talos.delete_path")) {
                 assertFalse(
-                        providerBody.contains(forbidden),
+                        providerBody.contains("- **" + forbidden + "**:"),
                         request + " -> " + forbidden + "\n" + providerBody);
+                assertFalse(capabilityFrame.contains(forbidden), capabilityFrame);
+            }
+            for (String positiveClaim : List.of("You CAN create files", "Available mutating tools:",
+                    "Use file tools to apply")) {
+                assertFalse(providerBody.contains(positiveClaim), providerBody);
             }
         }
     }

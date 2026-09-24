@@ -212,6 +212,7 @@ final class ToolCallLoopEngine {
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
                 state.readEvidence.latestReadFileBodiesByNormalizedPath(), state.currentAnswerOutputLimitReached,
-                state.readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.capture(state));
+                state.readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.capture(state),
+                state.readOnlyFinalizationEvidence);
     }
 }

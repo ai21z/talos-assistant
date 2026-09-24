@@ -10,6 +10,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.nio.file.Path;
@@ -999,21 +1000,115 @@ public final class StaticTaskVerifier {
             String userRequest,
             String modelAnswer
     ) {
+        return assessReadOnlyWebDiagnostics(workspace, readPaths, userRequest, modelAnswer).answer();
+    }
+
+    /** Caller-owned evidence binding is required before observations enter this pure assessment. */
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            List<ReadOnlyFinalizationEvidence.Source> sources,
+            String userRequest,
+            String modelAnswer
+    ) {
+        return assessReadOnlyWebDiagnostics(sources, userRequest, modelAnswer,
+                dev.talos.runtime.task.AnswerRequirements.fromRequest(userRequest));
+    }
+
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            List<ReadOnlyFinalizationEvidence.Source> sources,
+            String userRequest,
+            String modelAnswer,
+            dev.talos.runtime.task.AnswerRequirements requirements
+    ) {
+        ObservedStaticWebSources.Selection selected = ObservedStaticWebSources.select(sources);
+        if (!selected.available()) {
+            return limitedObservedWebDiagnostics(selected.reason(), selected.detail(), List.of());
+        }
+        ReadOnlyWebDiagnosticResult derived = RuntimeWebDiagnosticAnswer.assess(requirements, sources, selected);
+        if (derived != null) return derived;
+        StaticWebSelectorAnalyzer.Facts facts = selected.facts();
+        boolean cssInspected = !facts.cssFile().isBlank();
+        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
+        StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), facts.html()).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.contentProblems(cssInspected).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        diagnostics.addAll(facts.selectorDiagnostics());
+        facts.genericButtonResultDiagnosticProblems().forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.buttonResultBehaviorProblems(userRequest).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        ReadOnlyWebAnswerAssessment assessment = ReadOnlyWebDiagnosticAnswer.assess(
+                modelAnswer, selected.readPaths(), facts, diagnostics);
+        if (assessment.preserved()) {
+            return new ReadOnlyWebDiagnosticResult(modelAnswer, assessment, diagnostics);
+        }
+
+        StringBuilder out = new StringBuilder("The retained source observations were analyzed for literal selector relationships:\n\n");
+        out.append("- HTML: `").append(facts.htmlFile()).append("`\n");
+        out.append("- JavaScript: `").append(facts.jsFile()).append("`\n");
+        if (cssInspected) out.append("- CSS: `").append(facts.cssFile()).append("`\n");
+        if (diagnostics.isEmpty()) {
+            out.append("\nNo literal selector mismatch was identified in the supported source representation. ");
+            out.append("The requested explanation remains unverified.");
+        } else {
+            out.append("\nStatic source findings:\n");
+            for (StaticWebDiagnostic diagnostic : diagnostics)
+                out.append("- ").append(diagnostic.message()).append('\n');
+        }
+        out.append("\nThese findings describe the retained source representation, not browser execution or current disk contents.");
+        if (looksLikePlanRequest(userRequest)) {
+            appendReadOnlyWebPlan(out, facts, cssInspected, true,
+                    diagnostics.stream().map(StaticWebDiagnostic::message).toList());
+        }
+        return limitedObservedWebDiagnostics(assessment.reason(), out.toString(), diagnostics);
+    }
+
+    public static ReadOnlyWebDiagnosticResult limitedReadOnlyWebDiagnostics(
+            ReadOnlyWebAnswerAssessment.Reason reason) {
+        String detail = switch (reason) {
+            case SOURCE_RELATION_UNSUPPORTED -> "The supplied source relationship is outside the supported analysis scope.";
+            case SOURCE_RELATION_AMBIGUOUS -> "The available source observations do not identify one unambiguous relationship.";
+            case LINKED_SOURCE_UNOBSERVED -> "The linked source is not among the available source observations. Its existence on disk was not checked.";
+            default -> "The source observations could not be bound to this answer with complete eligible coverage.";
+        };
+        return limitedObservedWebDiagnostics(reason, detail, List.of());
+    }
+
+    private static ReadOnlyWebDiagnosticResult limitedObservedWebDiagnostics(
+            ReadOnlyWebAnswerAssessment.Reason reason, String detail, List<StaticWebDiagnostic> diagnostics) {
+        return new ReadOnlyWebDiagnosticResult(
+                ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + detail.stripTrailing()
+                        + "\n\nNo files were changed. No browser or tests were run by this static diagnosis.",
+                ReadOnlyWebAnswerAssessment.limited(reason), diagnostics);
+    }
+
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            Path workspace,
+            Collection<String> readPaths,
+            String userRequest,
+            String modelAnswer
+    ) {
         if (workspace == null
-                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
+                || !StaticWebFileAccess.isDirectory(workspace, workspace))
+            return ReadOnlyWebDiagnosticResult.unaffected(null);
         List<String> inspected = inspectedStaticWebReadFiles(workspace, readPaths);
-        if (inspected.isEmpty()) return null;
+        if (inspected.isEmpty()) return ReadOnlyWebDiagnosticResult.unaffected(null);
         Path root = workspace.toAbsolutePath().normalize();
         if (!hasReadFileWithExtension(inspected, ".js", ".jsx", ".ts", ".tsx")) {
             String diagnostic = renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
-            return modelAnswer == null || diagnostic == null ? diagnostic
-                    : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic;
+            if (modelAnswer == null || diagnostic == null)
+                return ReadOnlyWebDiagnosticResult.unaffected(diagnostic);
+            return new ReadOnlyWebDiagnosticResult(
+                    ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic,
+                    ReadOnlyWebAnswerAssessment.limited(
+                            ReadOnlyWebAnswerAssessment.Reason.UNSUPPORTED_DIAGNOSTIC),
+                    List.of());
         }
         StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyzeFunctional(
                 root,
                 inspected,
                 inspected);
-        if (facts == null) return null;
+        if (facts == null) return ReadOnlyWebDiagnosticResult.unaffected(null);
 
         boolean cssInspected = !facts.cssFile().isBlank() && containsTarget(inspected, facts.cssFile());
         boolean jsInspected = !facts.jsFile().isBlank() && containsTarget(inspected, facts.jsFile());
@@ -1028,13 +1123,17 @@ public final class StaticTaskVerifier {
         }
         out.append('\n');
 
-        List<String> problems = readOnlyWebDiagnosticProblems(facts, cssInspected, jsInspected, userRequest);
-        if (ReadOnlyWebDiagnosticAnswer.canPreserve(modelAnswer, readPaths, facts, problems)) {
-            return modelAnswer;
+        List<StaticWebDiagnostic> diagnostics = readOnlyWebDiagnostics(
+                facts, cssInspected, jsInspected, userRequest);
+        List<String> problems = diagnostics.stream().map(StaticWebDiagnostic::message).toList();
+        ReadOnlyWebAnswerAssessment assessment = ReadOnlyWebDiagnosticAnswer.assess(
+                modelAnswer, readPaths, facts, diagnostics);
+        if (assessment.preserved()) {
+            return new ReadOnlyWebDiagnosticResult(modelAnswer, assessment, diagnostics);
         }
         boolean planRequest = looksLikePlanRequest(userRequest);
         if (problems.isEmpty() && !planRequest) {
-            return null;
+            return ReadOnlyWebDiagnosticResult.unaffected(null);
         }
         if (problems.isEmpty()) {
             out.append("Static web diagnostics did not find obvious problems in the inspected evidence.");
@@ -1049,7 +1148,10 @@ public final class StaticTaskVerifier {
         }
         out.append("\nNo files were changed.");
         String diagnostic = out.toString().stripTrailing();
-        return modelAnswer == null ? diagnostic : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic;
+        return new ReadOnlyWebDiagnosticResult(
+                modelAnswer == null ? diagnostic : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic,
+                modelAnswer == null ? ReadOnlyWebAnswerAssessment.notApplicable() : assessment,
+                diagnostics);
     }
 
     private static String renderHtmlOnlyReadOnlyWebDiagnostics(
@@ -1212,7 +1314,7 @@ public final class StaticTaskVerifier {
         return List.copyOf(out);
     }
 
-    private static List<String> readOnlyWebDiagnosticProblems(
+    private static List<StaticWebDiagnostic> readOnlyWebDiagnostics(
             StaticWebSelectorAnalyzer.Facts facts,
             boolean cssInspected,
             boolean jsInspected,
@@ -1226,12 +1328,20 @@ public final class StaticTaskVerifier {
         }
         problems.addAll(filterReadOnlyLinkageProblems(facts.linkageProblems(), cssInspected, jsInspected));
         problems.addAll(filterReadOnlyContentProblems(facts.contentProblems(), facts, cssInspected, jsInspected));
-        problems.addAll(filterReadOnlySelectorProblems(facts.selectorProblems(), cssInspected, jsInspected));
-        if (jsInspected) {
-            problems.addAll(facts.genericButtonResultDiagnosticProblems());
-            problems.addAll(facts.buttonResultBehaviorProblems(userRequest));
+        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
+        problems.forEach(problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        for (StaticWebDiagnostic diagnostic : facts.selectorDiagnostics()) {
+            if (!cssInspected && diagnostic.kind().isCss()) continue;
+            if (!jsInspected && diagnostic.kind().isJavaScript()) continue;
+            diagnostics.add(diagnostic);
         }
-        return List.copyOf(problems);
+        if (jsInspected) {
+            facts.genericButtonResultDiagnosticProblems().forEach(
+                    problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+            facts.buttonResultBehaviorProblems(userRequest).forEach(
+                    problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        }
+        return List.copyOf(diagnostics);
     }
 
     private static List<String> filterReadOnlyLinkageProblems(
@@ -1265,22 +1375,6 @@ public final class StaticTaskVerifier {
             if (!jsInspected && lower.contains("javascript")) continue;
             if (!cssInspected && !facts.cssFile().isBlank() && problem.startsWith(facts.cssFile() + ":")) continue;
             if (!jsInspected && !facts.jsFile().isBlank() && problem.startsWith(facts.jsFile() + ":")) continue;
-            out.add(problem);
-        }
-        return List.copyOf(out);
-    }
-
-    private static List<String> filterReadOnlySelectorProblems(
-            List<String> problems,
-            boolean cssInspected,
-            boolean jsInspected
-    ) {
-        if (problems == null || problems.isEmpty()) return List.of();
-        List<String> out = new ArrayList<>();
-        for (String problem : problems) {
-            if (problem == null || problem.isBlank()) continue;
-            if (!cssInspected && problem.startsWith("CSS ")) continue;
-            if (!jsInspected && problem.startsWith("JavaScript ")) continue;
             out.add(problem);
         }
         return List.copyOf(out);

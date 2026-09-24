@@ -26,6 +26,21 @@ public final class TerminalReadOnlyStopAnswer {
                 && SYNTHESIS_UNAVAILABLE_REASON.equals(result.failureDecision().reason());
     }
 
+    /** A rejected answer generation is distinguished from failed read evidence. */
+    public static boolean rejectedProposalSynthesis(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return synthesisUnavailable(result)
+                && result.readOnlySynthesisStatus() == dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus.REJECTED
+                && result.readOnlyFinalizationEvidence().proposalSelected()
+                && result.failedCalls() == 0 && result.mutatingToolSuccesses() == 0
+                && !result.toolOutcomes().isEmpty()
+                && result.toolOutcomes().stream().noneMatch(outcome -> outcome.denied() || !outcome.success()
+                    || outcome.mutating() || outcome.mutationEffects().hasEffects());
+    }
+
+    public static String synthesisUnavailableAnswer() {
+        return ReadOnlyEvidenceSynthesizer.UNAVAILABLE;
+    }
+
     public static String tryAnswer(
             LoopState state,
             ToolCallExecutionStage.IterationOutcome outcome

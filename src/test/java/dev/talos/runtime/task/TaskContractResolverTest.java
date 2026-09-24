@@ -688,7 +688,7 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void confirmationAfterConcreteAssistantMutationPlanInheritsMutationContract() {
+    void confirmationAfterAssistantMutationPlanDoesNotCreateAuthorityFromProse() {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("The site is too plain. Make it look like a synthwave band page."),
@@ -704,13 +704,9 @@ class TaskContractResolverTest {
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
-        assertEquals(TaskType.FILE_EDIT, contract.type());
-        assertTrue(contract.mutationRequested());
-        assertTrue(contract.mutationAllowed());
-        assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
-        assertEquals("confirmation-follow-up-inherits-assistant-mutation-plan",
-                contract.classificationReason());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.expectedTargets().isEmpty());
     }
 
     @Test
@@ -2010,7 +2006,7 @@ class TaskContractResolverTest {
         messages.add(ChatMessage.user("Great! now can you create that site?"));
         messages.add(ChatMessage.assistant("Created index.html."));
         messages.add(ChatMessage.user(
-                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files."));
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
@@ -2019,6 +2015,21 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void conditionalFixAfterSiteCreationDoesNotBecomeRequiredMutation() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Great! now can you create that site?"));
+        messages.add(ChatMessage.assistant("Created index.html."));
+        messages.add(ChatMessage.user(
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
     }
 
     @Test

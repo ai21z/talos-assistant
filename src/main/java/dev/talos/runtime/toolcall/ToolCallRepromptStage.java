@@ -118,9 +118,13 @@ public final class ToolCallRepromptStage {
                 .afterIteration(state, outcome);
         if (failureDecision.shouldStop()) {
             state.stopWithFailure(failureDecision, ToolFailurePolicyStopAnswer.render(state, failureDecision));
-            LOG.debug("Stopping tool-call loop by failure policy: {}", failureDecision.reason());
+            LOG.debug("Stopping tool-call loop by failure policy: {}",
+                    dev.talos.safety.SafeLogFormatter.text(failureDecision.reason()));
             return false;
         }
+
+        Optional<Boolean> pendingComparison = DocumentComparisonContinuation.tryHandle(state);
+        if (pendingComparison.isPresent()) return pendingComparison.get();
 
         Optional<Boolean> pendingDiagnosisReads = ReadOnlyEvidenceContinuation.tryHandle(state);
         if (pendingDiagnosisReads.isPresent()) return pendingDiagnosisReads.get();

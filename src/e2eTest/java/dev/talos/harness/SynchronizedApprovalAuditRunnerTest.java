@@ -2,6 +2,7 @@ package dev.talos.harness;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
+import dev.talos.core.llm.ForegroundProviderScriptedLlmClient;
 import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.TurnPolicyTrace;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SynchronizedApprovalAuditRunnerTest {
+    // Unlike the legacy name canary, this prose survives extraction sanitization.
+    private static final String PRIVATE_DOCUMENT_HANDOFF_PROBE = "Amber heron 6418.";
 
     @TempDir
     Path workspace;
@@ -178,7 +182,8 @@ class SynchronizedApprovalAuditRunnerTest {
     @Test
     void private_mode_extracted_docx_send_to_model_opt_in_allows_handoff_but_artifacts_redact(
             @TempDir Path artifacts) throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Eleni Nikolaou");
+        writeDocx(workspace.resolve("medical-notes.docx"),
+                "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE);
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "private extracted docx send to model opt in",
@@ -189,11 +194,12 @@ class SynchronizedApprovalAuditRunnerTest {
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                         "The extracted patient name is [redacted-private-document-canary]."),
                 List.of());
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertTrue(result.approvals().isEmpty(), result.approvals().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
         assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
@@ -213,6 +219,7 @@ class SynchronizedApprovalAuditRunnerTest {
                     .reduce("", (left, right) -> left + "\n" + right);
         }
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
     }
@@ -220,7 +227,8 @@ class SynchronizedApprovalAuditRunnerTest {
     @Test
     void private_mode_extracted_docx_per_turn_approval_allows_handoff_and_records_prompt(
             @TempDir Path artifacts) throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Eleni Nikolaou");
+        writeDocx(workspace.resolve("medical-notes.docx"),
+                "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE);
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "private extracted docx per turn handoff approved",
@@ -233,7 +241,7 @@ class SynchronizedApprovalAuditRunnerTest {
                 List.of(ScriptedApprovalGate.Step.approve(
                         "private document model handoff",
                         "medical-notes.docx")));
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertEquals(1, result.approvals().size(), result.approvals().toString());
         assertEquals(ApprovalResponse.APPROVED, result.approvals().getFirst().response());
@@ -245,10 +253,16 @@ class SynchronizedApprovalAuditRunnerTest {
                         .containsKey("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED"),
                 result.trace().contextLedgerSummary().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
+        String allArtifacts = readAllArtifacts(bundle.root());
+        assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
+        assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
     }
 
@@ -315,13 +329,15 @@ class SynchronizedApprovalAuditRunnerTest {
                 "private extracted pdf send to model opt in",
                 "medical-notes.pdf",
                 "Read medical-notes.pdf and tell me the patient name.",
-                () -> writePdf(workspace.resolve("medical-notes.pdf"), "Patient name: Eleni Nikolaou"));
+                () -> writePdf(workspace.resolve("medical-notes.pdf"),
+                        "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE));
         assertPrivateExtractedDocumentOptInArtifactsRedact(
                 artifacts,
                 "private extracted xlsx send to model opt in",
                 "medical-notes.xlsx",
                 "Read medical-notes.xlsx and tell me the patient name.",
-                () -> writeXlsx(workspace.resolve("medical-notes.xlsx"), "Patient name", "Eleni Nikolaou"));
+                () -> writeXlsx(workspace.resolve("medical-notes.xlsx"), "Patient name",
+                        "Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE));
     }
 
     @Test
@@ -1932,19 +1948,59 @@ class SynchronizedApprovalAuditRunnerTest {
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + fileName + "\"}}",
                         "The extracted patient name is [redacted-private-document-canary]."),
                 List.of());
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertTrue(result.approvals().isEmpty(), result.approvals().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
         assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
         String allArtifacts = readAllArtifacts(bundle.root());
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
+    }
+
+    private static SynchronizedApprovalAuditRunner.Result runWithPrivateExtractedDocumentObservation(
+            SynchronizedApprovalAuditRunner.Request request) {
+        AtomicInteger dispatchedRequests = new AtomicInteger();
+        AtomicInteger admittedReadRequests = new AtomicInteger();
+        try (var llm = ForegroundProviderScriptedLlmClient.create(
+                request.config(), request.scriptedModelResponses(), modelRequest -> {
+                    int ordinal = dispatchedRequests.incrementAndGet();
+                    var extractedMessages = modelRequest.messages.stream()
+                            .filter(message -> !"assistant".equals(message.role()))
+                            .filter(message -> message.content() != null
+                                    && message.content().contains("[tool_result: talos.read_file]")
+                                    && message.content().contains(PRIVATE_DOCUMENT_HANDOFF_PROBE))
+                            .toList();
+                    if (extractedMessages.isEmpty()) return;
+                    admittedReadRequests.incrementAndGet();
+                    assertEquals(2, ordinal, "extracted content must reach the post-read provider request");
+                    assertEquals(1, extractedMessages.size(), "one extracted tool result must be admitted");
+                    assertTrue(extractedMessages.getFirst().content().contains("[redacted-private-document-canary]"),
+                            "the legacy name canary must retain extraction's existing redaction");
+                    assertFalse(extractedMessages.getFirst().content().contains("Eleni Nikolaou"),
+                            "the original name canary must already be sanitized by extraction");
+                    assertTrue(modelRequest.contentRestrictions.modelAllowed(), "model handoff remains allowed");
+                    assertFalse(modelRequest.contentRestrictions.artifactAllowed(), "raw artifacts remain denied");
+                    assertFalse(modelRequest.contentRestrictions.historyAllowed(), "private history remains denied");
+                    var restrictions = extractedMessages.getFirst().contentRestrictions();
+                    assertTrue(restrictions.modelAllowed(), "extracted message remains model-readable");
+                    assertFalse(restrictions.artifactAllowed(), "extracted message cannot enter raw artifacts");
+                    assertFalse(restrictions.historyAllowed(), "extracted message cannot enter history");
+                })) {
+            var result = SynchronizedApprovalAuditRunner.run(request, llm);
+            assertEquals(2, dispatchedRequests.get(), "one initial and one post-read scripted provider request");
+            assertEquals(1, admittedReadRequests.get(), "the provider must receive the actual extracted canary once");
+            assertFalse(result.modelTranscript().contains(PRIVATE_DOCUMENT_HANDOFF_PROBE),
+                    "diagnostic transcript must withhold admitted document prose");
+            return result;
+        }
     }
 
     private SynchronizedApprovalAuditRunner.Request artifactRequest(

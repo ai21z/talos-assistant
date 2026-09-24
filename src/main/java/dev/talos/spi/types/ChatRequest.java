@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import dev.talos.safety.ContentRestrictions;
+import dev.talos.safety.ContentRestrictionScope;
 
 public final class ChatRequest {
     public final String backend;
@@ -30,6 +32,7 @@ public final class ChatRequest {
      * Provider-neutral request controls such as tool choice and response format.
      */
     public final ChatRequestControls controls;
+    public final ContentRestrictions contentRestrictions;
 
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout) {
@@ -62,6 +65,15 @@ public final class ChatRequest {
         this.messages = messages == null ? List.of() : List.copyOf(messages);
         this.tools = tools == null ? List.of() : List.copyOf(tools);
         this.controls = controls == null ? ChatRequestControls.defaults() : controls;
+        ContentRestrictions restrictions = ContentRestrictionScope.current();
+        for (ChatMessage message : this.messages) {
+            restrictions = restrictions.intersect(message.contentRestrictions());
+        }
+        if (!restrictions.modelAllowed()) {
+            throw new IllegalArgumentException("Document content is not admitted to model context.");
+        }
+        this.contentRestrictions = restrictions;
+        ContentRestrictionScope.restrictIfActive(restrictions);
     }
 
     public String flattenedContext() {

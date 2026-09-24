@@ -8,6 +8,14 @@ import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import dev.talos.core.Config;
+import dev.talos.core.diff.DocumentPairAdmission;
+import dev.talos.core.diff.DocumentPairReceipt;
+import dev.talos.core.security.Sandbox;
+import dev.talos.safety.ContentRestrictions;
+import dev.talos.safety.ContentRestrictionScope;
+import java.nio.file.Path;
+import java.util.UUID;
 
 /**
  * Thread-local collector for the current turn's tool/approval activity.
@@ -31,6 +39,10 @@ public final class TurnAuditCapture {
 
     /** Mutable per-turn bag; finalized into {@link TurnAudit}. */
     static final class Bag {
+        final UUID documentTurn = UUID.randomUUID();
+        final List<DocumentPairReceipt> issuedPairs = new ArrayList<>();
+        final List<DocumentPairReceipt> includedPairs = new ArrayList<>();
+        final List<DocumentComparison> comparisons = new ArrayList<>();
         final List<TurnRecord.ToolCallSummary> toolCalls = new ArrayList<>();
         final List<String> policyBlocks = new ArrayList<>();
         TurnPolicyTrace policyTrace = TurnPolicyTrace.empty();
@@ -44,11 +56,103 @@ public final class TurnAuditCapture {
     /** Start a new per-turn audit on the current thread. Replaces any prior bag. */
     public static void begin() {
         HOLDER.set(new Bag());
+        ContentRestrictionScope.begin();
+    }
+
+    public record DocumentCapture(DocumentPairAdmission.Result admission, DocumentPairReceipt receipt) {}
+
+    public record DocumentComparison(String request, Path workspace, DocumentPairReceipt receipt,
+            DocumentPairAdmission.CapturedPair pair, dev.talos.core.diff.DocumentTextDiff.Result result) {
+        @Override public String toString() { return "DocumentComparison[status=" + result.status() + "]"; }
+    }
+
+    /** Admission and computation are retained together, never reconstructed from tool text. */
+    public static DocumentComparison compareDocuments(dev.talos.tools.ToolContext context,
+            DocumentPairAdmission.RequestedPair proposed) {
+        Bag bag = HOLDER.get();
+        var contract = TurnTaskContractCapture.get();
+        var request = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (bag == null || context == null || !request.request().equals(TurnUserRequestCapture.get())
+                || request.matching(proposed).isEmpty() || bag.comparisons.size() >= 8) return null;
+        var capture = captureDocumentPair(context.workspace(), context.sandbox(), context.config(), request.matching(proposed).getFirst().pair(), proposed);
+        if (capture.receipt() == null) return null;
+        var pair = capture.admission().pair();
+        var view = pair.view(dev.talos.core.privacy.DocumentContentDecision.Use.LOCAL_DISPLAY).orElseThrow();
+        var result = dev.talos.core.diff.DocumentTextDiff.compare(view.left(), view.right());
+        var observation = new DocumentComparison(request.request(), context.workspace().toAbsolutePath().normalize(),
+                capture.receipt(), pair, result);
+        bag.comparisons.add(observation);
+        return observation;
+    }
+
+    public static List<DocumentComparison> currentComparisons(String request, Path workspace) {
+        Bag bag = HOLDER.get();
+        if (bag == null || !java.util.Objects.equals(request, TurnUserRequestCapture.get())) return List.of();
+        Path root = workspace == null ? null : workspace.toAbsolutePath().normalize();
+        return bag.comparisons.stream().filter(value -> value.request().equals(request)
+                && (root == null || value.workspace().equals(root)) && includesCurrentDocumentPair(value.receipt())).toList();
+    }
+
+    public static boolean comparisonEvidenceComplete(dev.talos.runtime.task.TaskContract contract, Path workspace) {
+        var request = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (!request.active()) return true;
+        var observations = currentComparisons(request.request(), workspace);
+        return request.requirements().stream().allMatch(requirement -> observations.stream().filter(value ->
+                value.receipt().left().relativePath().equals(requirement.pair().left())
+                && value.receipt().right().relativePath().equals(requirement.pair().right())
+                && value.result().status() == dev.talos.core.diff.DocumentTextDiff.Status.COMPLETE).count() == 1);
+    }
+
+    /** Local presentation receives the same persistence restrictions without granting model permission. */
+    public static void includeLocalComparison(DocumentComparison observation) {
+        Bag bag = HOLDER.get();
+        if (bag == null || bag.comparisons.stream().noneMatch(value -> value == observation)
+                || !includesCurrentDocumentPair(observation.receipt()))
+            throw new IllegalArgumentException("A current computed comparison is required.");
+        if (!bag.includedPairs.contains(observation.receipt())) bag.includedPairs.add(observation.receipt());
+        ContentRestrictionScope.restrict(observation.receipt().restrictions());
+    }
+
+    /** Fresh admission and receipt issuance are owned by the same active turn. */
+    public static DocumentCapture captureDocumentPair(Path workspace, Sandbox sandbox, Config config,
+            DocumentPairAdmission.RequestedPair requested, DocumentPairAdmission.RequestedPair proposed) {
+        Bag bag = HOLDER.get();
+        if (bag == null) throw new IllegalStateException("An active turn is required for document admission.");
+        var result = new DocumentPairAdmission().capture(workspace, sandbox, config, requested, proposed);
+        if (result.pair() == null) return new DocumentCapture(result, null);
+        var receipt = DocumentPairReceipt.bind(bag.documentTurn, result.pair());
+        bag.issuedPairs.add(receipt);
+        return new DocumentCapture(result, receipt);
+    }
+
+    public static boolean includesCurrentDocumentPair(DocumentPairReceipt receipt) {
+        Bag bag = HOLDER.get();
+        return bag != null && receipt != null && bag.documentTurn.equals(receipt.turn())
+                && bag.issuedPairs.stream().anyMatch(issued -> issued == receipt);
+    }
+
+    public static void includeDocumentPair(DocumentPairReceipt receipt, ContentRestrictions additionalRestrictions) {
+        if (!includesCurrentDocumentPair(receipt) || !receipt.restrictions().modelAllowed()) {
+            throw new IllegalArgumentException("The document pair is not admitted to this turn.");
+        }
+        Bag bag = HOLDER.get();
+        if (!bag.includedPairs.contains(receipt)) bag.includedPairs.add(receipt);
+        ContentRestrictionScope.restrict(receipt.restrictions().intersect(additionalRestrictions));
+    }
+
+    public static ContentRestrictions currentContentRestrictions() {
+        return ContentRestrictionScope.current();
     }
 
     /** @return true if an audit is active on this thread. */
     public static boolean isActive() {
         return HOLDER.get() != null;
+    }
+
+    /** An identity is exposed for same-turn dispatch binding, never as execution permission. */
+    public static UUID currentDocumentTurn() {
+        Bag bag = HOLDER.get();
+        return bag == null ? null : bag.documentTurn;
     }
 
     /** Returns the immutable policy evidence currently bound to this thread. */
@@ -261,6 +365,8 @@ public final class TurnAuditCapture {
     public static TurnAudit end() {
         Bag b = HOLDER.get();
         HOLDER.remove();
+        ContentRestrictions restrictions = ContentRestrictionScope.current();
+        ContentRestrictionScope.end();
         if (b == null) return TurnAudit.empty();
         TurnPolicyTrace trace = b.policyTrace.withBlocks(List.copyOf(b.policyBlocks));
         return new TurnAudit(
@@ -268,7 +374,7 @@ public final class TurnAuditCapture {
                 b.approvalsRequired,
                 b.approvalsGranted,
                 b.approvalsDenied,
-                trace
+                trace, null, restrictions, List.copyOf(b.includedPairs)
         );
     }
 

@@ -111,6 +111,10 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         }
         builder.redirectErrorStream(true);
         builder.redirectOutput(ProcessBuilder.Redirect.PIPE);
+        boolean nativeFileLogging = nativeFileLogging(builder.command(), builder.environment());
+        if (logPath == null && nativeFileLogging) {
+            throw new dev.talos.spi.types.ProviderTransportHandoff.ArtifactRetentionRejected();
+        }
 
         LlamaCppProcessTerminationOwner.LaunchPermit permit =
                 terminationOwner.retryRetainedAndAcquire(
@@ -135,7 +139,8 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                     process,
                     observation,
                     terminationLease,
-                    outputCapture);
+                    outputCapture,
+                    nativeFileLogging);
         } catch (IOException startFailure) {
             settleFailedLaunch(
                     permit,
@@ -249,6 +254,9 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         private volatile boolean captureComplete;
         private volatile boolean sourceClosed = true;
         private volatile boolean sinkClosed = true;
+        private final java.util.concurrent.locks.ReentrantLock retentionBarrier =
+                new java.util.concurrent.locks.ReentrantLock();
+        private boolean retentionDenied;
         private InputStream source;
         private OutputStream sink;
         private CloseAttempt closeAttempt;
@@ -336,8 +344,22 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
 
         private void pump() {
             try {
-                source.transferTo(sink);
-                sink.flush();
+                source.transferTo(new OutputStream() {
+                    @Override public void write(int value) throws IOException {
+                        write(new byte[] {(byte) value}, 0, 1);
+                    }
+                    @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                        java.util.Objects.checkFromIndexSize(offset, length, bytes.length);
+                        retentionBarrier.lock();
+                        try {
+                            if (!retentionDenied) sink.write(bytes, offset, length);
+                        } finally { retentionBarrier.unlock(); }
+                    }
+                });
+                retentionBarrier.lock();
+                try {
+                    if (!retentionDenied) sink.flush();
+                } finally { retentionBarrier.unlock(); }
                 captureComplete = true;
             } catch (Throwable unavailable) {
                 record(captureFailure, unavailable);
@@ -417,6 +439,19 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
         boolean healthy() {
             return captureFailure.get() == null
                     && (pumpDone.getCount() != 0L || captureComplete);
+        }
+
+        boolean suppressOutputRetention() {
+            try {
+                if (!retentionBarrier.tryLock(1, TimeUnit.SECONDS)) return false;
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            try {
+                retentionDenied = true;
+                return started && healthy();
+            } finally { retentionBarrier.unlock(); }
         }
 
         boolean captureComplete() {
@@ -664,15 +699,32 @@ final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLaun
                 ProviderProcessLaunchReceipt.digestEffectiveEnvironment(builder.environment()));
     }
 
+    static boolean nativeFileLogging(List<String> command, Map<String, String> environment) {
+        for (String argument : command) {
+            String option = argument.toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+            for (String sink : List.of("--log-file", "--log-prompts-dir", "--logdir", "--log-dir")) {
+                if (option.equals(sink) || option.startsWith(sink + "=")) return true;
+            }
+        }
+        return environment.entrySet().stream().anyMatch(entry ->
+                (entry.getKey().equalsIgnoreCase("LLAMA_ARG_LOG_FILE")
+                        || entry.getKey().equalsIgnoreCase("LLAMA_LOG_FILE"))
+                && entry.getValue() != null && !entry.getValue().isEmpty());
+    }
+
     private record ProcessAdapter(
             Process process,
             LlamaCppProcessLaunchObservation launchObservation,
             LlamaCppProcessTerminationOwner.Lease terminationLease,
-            LaunchOutputCapture outputCapture)
+            LaunchOutputCapture outputCapture,
+            boolean nativeFileLogging)
             implements LlamaCppProcess {
         @Override public boolean isAlive() { return process.isAlive(); }
         @Override public boolean outputCaptureHealthy() {
             return outputCapture.healthy();
+        }
+        @Override public boolean suppressOutputRetention() {
+            return !nativeFileLogging && outputCapture.suppressOutputRetention();
         }
         @Override public void destroy() {
             requireTerminated(

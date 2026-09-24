@@ -17,14 +17,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PackagedBuildIdentityContractTest {
-    private static final Path JAR = Path.of("build/libs/talos.jar").toAbsolutePath().normalize();
+    private static final String JAR_PROPERTY = "talos.test.packagedJar";
     private static final String RESOURCE = "META-INF/talos-build.properties";
 
     @Test
     void packagedJarCarriesTheExactGitCommitAndBranch() throws Exception {
-        assertTrue(Files.isRegularFile(JAR), "packaged Talos JAR is missing: " + JAR);
+        String configuredJar = System.getProperty(JAR_PROPERTY);
+        assertNotNull(configuredJar, "current build JAR property is required: " + JAR_PROPERTY);
+        assertTrue(!configuredJar.isBlank(), "current build JAR property is blank: " + JAR_PROPERTY);
+        Path packagedJar = Path.of(configuredJar).normalize();
+        assertTrue(packagedJar.isAbsolute(), "current build JAR path must be absolute: " + configuredJar);
+        assertTrue(Files.isRegularFile(packagedJar), "packaged Talos JAR is missing: " + packagedJar);
         Properties identity = new Properties();
-        try (ZipFile jar = new ZipFile(JAR.toFile())) {
+        try (ZipFile jar = new ZipFile(packagedJar.toFile())) {
             ZipEntry entry = jar.getEntry(RESOURCE);
             assertNotNull(entry, RESOURCE + " is missing from the packaged Talos JAR");
             try (InputStream input = jar.getInputStream(entry)) {

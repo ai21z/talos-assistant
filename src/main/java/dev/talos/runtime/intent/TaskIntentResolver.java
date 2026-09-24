@@ -112,17 +112,18 @@ public final class TaskIntentResolver {
                         canonicalRequest)));
         CoordinatedMutationTailPlan mutationTailPlan =
                 CoordinatedMutationTailParser.parse(canonicalRequest, tailCandidates);
-        List<SequentialMutationClausePlan.SourceSpan> excludedSequentialSpans =
-                mutationTailPlan.present()
-                        ? List.of(new SequentialMutationClausePlan.SourceSpan(
-                                mutationTailPlan.constraintStart(),
-                                mutationTailPlan.tailEnd()))
-                        : List.of();
+        CoordinatedMutationTailPlan constraintScanPlan = mutationTailPlan;
+        if (mutationTailPlan.decisions().isEmpty()
+                && mutationTailPlan.workspaceOperationObservations().isEmpty()
+                && mutationTailPlan.workspaceOperationClauseObservations().isEmpty()
+                && mutationTailPlan.workspaceOperationObligations().isEmpty()) {
+            mutationTailPlan = CoordinatedMutationTailPlan.empty(canonicalRequest);
+        }
         SequentialMutationClausePlan sequentialMutationPlan =
                 SequentialMutationClauseParser.parse(
                         canonicalRequest,
                         tailCandidates,
-                        excludedSequentialSpans);
+                        mutationTailPlan);
         boolean parserLimit = sequentialMutationPlan.authorityLimitExceeded();
         boolean rowOverflow = MutationPlanSelection.evidenceRowCount(
                 mutationTailPlan,
@@ -165,7 +166,7 @@ public final class TaskIntentResolver {
                 sequentialMutationPlan);
         LegacyMutationScan legacyScan = legacyMutationScan(
                 canonicalRequest,
-                mutationTailPlan,
+                constraintScanPlan,
                 sequentialMutationPlan,
                 work);
         RequiredContentEvidence requiredContentEvidence =
@@ -209,6 +210,14 @@ public final class TaskIntentResolver {
         }
         LinkedHashSet<String> optionalSourceOverlaps =
                 new LinkedHashSet<>(optionalMutationTargets);
+        for (MutationPlanSelection.SelectedDecision decision
+                : MutationPlanSelection.selected(mutationTailPlan, sequentialMutationPlan).values()) {
+            if ("OPTIONAL".equals(decision.authority())
+                    && "CONTENT_MUTATION".equals(decision.actionFamily())
+                    && !requiredContentEvidence.paths().contains(decision.path())) {
+                optionalSourceOverlaps.add(decision.path());
+            }
+        }
         optionalSourceOverlaps.retainAll(sourceEvidenceTargets);
         boolean unsupportedOptionalPostReadMutation = !optionalSourceOverlaps.isEmpty();
         boolean effectiveMutationAllowed = authorityContract.mutationAllowed();

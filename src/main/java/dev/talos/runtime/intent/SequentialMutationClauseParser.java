@@ -43,6 +43,14 @@ public final class SequentialMutationClauseParser {
             "(?iu)^\\s*(?:(?:too|also)\\s*)?[.!?\\u2026]*\\s*$");
     private static final Pattern SEQUENTIAL_ACTION_LEAD = Pattern.compile(
             "(?iu)^\\s*(?:(?:and|also|but|next|please|then)\\s+)*$");
+    private static final Pattern OPTIONAL_CHILD_PREFIX = Pattern.compile(
+            "(?iu)\\s+so\\s+(?:(?:optionally|perhaps|maybe|possibly|potentially)\\s+)+");
+    private static final Pattern CHILD_CONNECTOR_SUFFIX = Pattern.compile(
+            "(?iu)(?:,\\s*|\\s+)(?:and|but|then|also)\\s+"
+                    + "(?:(?:and|but|then|also|please|do\\s+not|never|"
+                    + "don['\\u2019]?t|optionally|perhaps|maybe|possibly|potentially)\\s+)*$");
+    private static final Pattern PARENT_CONDITION = Pattern.compile(
+            "(?iu)\\b(?:if|when|unless|provided|until)\\b|\\bonly\\s+after\\b");
     private static final Pattern DIRECTORY_SUFFIX = Pattern.compile(
             "(?iu)^\\s*(?:(?:as\\s+)?(?:an?\\s+)?"
                     + "(?:directories|directory|dirs|dir|folders|folder))\\b");
@@ -116,6 +124,10 @@ public final class SequentialMutationClauseParser {
             Set<String> candidateTargets,
             CoordinatedMutationTailPlan excludedTailPlan
     ) {
+        if (excludedTailPlan != null && !excludedTailPlan.canonicalRequest()
+                .equals(canonicalRequest == null ? "" : canonicalRequest)) {
+            throw new IllegalArgumentException("excluded tail must match the canonical request");
+        }
         List<SequentialMutationClausePlan.SourceSpan> excluded =
                 excludedTailPlan != null
                         && excludedTailPlan.present()
@@ -125,7 +137,8 @@ public final class SequentialMutationClauseParser {
                         excludedTailPlan.constraintStart(),
                         excludedTailPlan.tailEnd()))
                 : List.of();
-        return parse(canonicalRequest, candidateTargets, excluded);
+        return parseInternal(canonicalRequest, candidateTargets, excluded,
+                excludedTailPlan, new MutableParseWork()).plan();
     }
 
     /**
@@ -142,6 +155,7 @@ public final class SequentialMutationClauseParser {
                 canonicalRequest,
                 candidateTargets,
                 excludedSpans,
+                null,
                 new MutableParseWork()).plan();
     }
 
@@ -164,6 +178,7 @@ public final class SequentialMutationClauseParser {
                 canonicalRequest,
                 candidateTargets,
                 excludedSpans,
+                null,
                 new MutableParseWork());
     }
 
@@ -171,6 +186,7 @@ public final class SequentialMutationClauseParser {
             String canonicalRequest,
             Set<String> candidateTargets,
             List<SequentialMutationClausePlan.SourceSpan> excludedSpans,
+            CoordinatedMutationTailPlan excludedTailPlan,
             MutableParseWork work
     ) {
         String request = canonicalRequest == null ? "" : canonicalRequest;
@@ -253,6 +269,7 @@ public final class SequentialMutationClauseParser {
 
         List<BoundAction> boundActions = bindActions(
                 view,
+                authorityView,
                 candidates,
                 occurrences,
                 actions,
@@ -287,11 +304,8 @@ public final class SequentialMutationClauseParser {
         boolean eligibleAnchorSeen = false;
         for (int index = boundActions.size() - 1; index >= 0; index--) {
             laterEligibleAnchors[index] = eligibleAnchorSeen;
-            if (eligibleContentAnchor(boundActions.get(index))) {
-                eligibleAnchorSeen = true;
-            }
+            if (eligibleContentAnchor(boundActions.get(index))) eligibleAnchorSeen = true;
         }
-
         for (int index = 0; index < boundActions.size(); index++) {
             BoundAction bound = boundActions.get(index);
             int authorityFrom = anchorEstablished
@@ -306,6 +320,10 @@ public final class SequentialMutationClauseParser {
                             boundaries,
                             authorityFrom,
                             bound.action().start());
+            MutationPostfixOwnership.Analysis parentPostfix = parentPostfix(
+                    view, authorityView, bound,
+                    index + 1 < boundActions.size() ? boundActions.get(index + 1) : null,
+                    excludedTailPlan);
             SequentialMutationClausePlan.Authority authority = authorityFor(
                     authorityView,
                     bound.action(),
@@ -314,7 +332,13 @@ public final class SequentialMutationClauseParser {
                     bound.pronominalProhibition(),
                     authorityStart,
                     bound.outputEnd(),
-                    bound.clauseEnd());
+                    bound.clauseEnd(),
+                    parentPostfix);
+            if (bound.family() == CanonicalMutationClauseMatcher.Family.CONTENT_MUTATION
+                    && authority != SequentialMutationClausePlan.Authority.FORBIDDEN
+                    && MutationPostfixOwnership.rawConstraintTainted(view, bound.action().start())) {
+                authority = SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE;
+            }
             if (!anchorEstablished) {
                 int rejectedPreAnchorOffset = boundaries.firstRejectedOffset(
                         boundaries.rejectionSearchStart(
@@ -351,7 +375,6 @@ public final class SequentialMutationClauseParser {
                                 bound.outputEnd(),
                                 view.request().length())
                                 || controlRetainablePrimaryAnchor(bound);
-                boolean laterEligibleAnchor = laterEligibleAnchors[index];
                 if (preAnchorAuthority
                                 == SequentialMutationClausePlan.Authority.REQUIRED
                         && eligibleAnchor
@@ -414,10 +437,18 @@ public final class SequentialMutationClauseParser {
                         continue;
                     }
                     if (!controlSafeAnchor
-                            || laterEligibleAnchor
-                                    && explicitlyRestrictivePreAnchor(
-                                            bound,
-                                            preAnchorAuthority)) {
+                            || MutationPostfixOwnership.rawConstraintTainted(view, bound.action().start())
+                            || laterEligibleAnchors[index]
+                                    && explicitlyRestrictivePreAnchor(bound, preAnchorAuthority)
+                            || (parentPostfix.kind() != MutationPostfixOwnership.Kind.NONE
+                                    || bound.action().scopeKind()
+                                            != CanonicalMutationClauseMatcher.ScopeKind.NONE)
+                                    && MutationPostfixOwnership.containsConstraint(view, bound.outputEnd(),
+                                            view.sentenceEndAfter(bound.action().end()))
+                            || MutationPostfixOwnership.containsConstraint(authorityView, bound.outputEnd(),
+                                    view.sentenceEndAfter(bound.action().end()))
+                                    && (explicitlyRestrictivePreAnchor(bound, preAnchorAuthority)
+                                            || bound.disjunctiveTargets())) {
                         addPreAnchorNonAuthorityEvidence(
                                 view,
                                 bound,
@@ -938,7 +969,10 @@ public final class SequentialMutationClauseParser {
                 == CanonicalMutationClauseMatcher.Family.WORKSPACE_OPERATION) {
             return true;
         }
-        return bound.action().scopeKind()
+        return authority == SequentialMutationClausePlan.Authority.OPTIONAL
+                || bound.action().scopeKind()
+                        == CanonicalMutationClauseMatcher.ScopeKind.OPTIONAL
+                || bound.action().scopeKind()
                         == CanonicalMutationClauseMatcher.ScopeKind
                                 .REPORTED_ADVISORY
                 || bound.action().scopeKind()
@@ -1078,6 +1112,7 @@ public final class SequentialMutationClauseParser {
 
     private static List<BoundAction> bindActions(
             RequestLexicalView view,
+            RequestLexicalView authorityView,
             List<String> candidates,
             List<CoordinatedMutationTailParser.TargetOccurrence> occurrences,
             List<CanonicalMutationClauseMatcher.Action> actions,
@@ -1153,7 +1188,7 @@ public final class SequentialMutationClauseParser {
             }
             boolean disjunctiveContinuation =
                     DISJUNCTIVE_CLAUSE_SIGNAL.matcher(
-                            view.maskedLower().substring(
+                            authorityView.maskedLower().substring(
                                     outputEnd,
                                     Math.max(outputEnd, nextActionStart)))
                             .find();
@@ -1347,6 +1382,65 @@ public final class SequentialMutationClauseParser {
                 : action.family();
     }
 
+    private static MutationPostfixOwnership.Analysis parentPostfix(
+            RequestLexicalView raw,
+            RequestLexicalView authority,
+            BoundAction parent,
+            BoundAction next,
+            CoordinatedMutationTailPlan excludedTail
+    ) {
+        MutationPostfixOwnership.Analysis ordinary = MutationPostfixOwnership.analyze(
+                authority, parent.outputEnd(), parent.clauseEnd());
+        if (next != null && next.action().start() < raw.sentenceEndAfter(parent.action().end())
+                && next.action().start() - parent.outputEnd() <= MutationPostfixOwnership.MAX_CHARACTERS
+                && next.action().end() <= next.targets().getFirst().envelopeStart()
+                && raw.isUnquotedRange(next.action().start(), next.action().end())
+                && OPTIONAL_CHILD_PREFIX.matcher(raw.request())
+                        .region(parent.outputEnd(), next.action().start()).matches()
+                && raw.isUnquotedRange(parent.outputEnd(), next.action().start())) {
+            ordinary = new MutationPostfixOwnership.Analysis(MutationPostfixOwnership.Kind.NONE, null, null);
+        }
+        if (excludedTail == null || !excludedTail.present()
+                || parent.outputEnd() > excludedTail.constraintStart()
+                || excludedTail.constraintStart() >= raw.sentenceEndAfter(parent.action().end())) {
+            return ordinary;
+        }
+        CoordinatedMutationTailPlan.TargetDecision child = excludedTail.decisions().stream()
+                .min(Comparator.comparingInt(CoordinatedMutationTailPlan.TargetDecision::actionStartOffset))
+                .orElse(null);
+        if (child == null || child.actionStartOffset() < parent.outputEnd()
+                || child.actionStartOffset() - parent.outputEnd() > MutationPostfixOwnership.MAX_CHARACTERS) {
+            return new MutationPostfixOwnership.Analysis(MutationPostfixOwnership.Kind.UNSUPPORTED, null, null);
+        }
+        int headerEnd = child.actionStartOffset();
+        for (int offset = parent.outputEnd(); offset < headerEnd; offset++) {
+            if (raw.isQuoted(offset) || !raw.isTopLevel(offset)) continue;
+            char token = raw.request().charAt(offset);
+            if (token == ';' || token == '\n' || token == '\u2028' || token == '\u2029'
+                    || raw.isSentenceBoundaryAt(offset)
+                    || token == '\r' && offset + 1 < headerEnd
+                            && raw.request().charAt(offset + 1) == '\n') {
+                headerEnd = offset;
+                break;
+            }
+        }
+        if (OPTIONAL_CHILD_PREFIX.matcher(raw.request()).region(parent.outputEnd(), headerEnd).matches()
+                && raw.isUnquotedRange(parent.outputEnd(), headerEnd)) {
+            return ordinary;
+        }
+        var connector = CHILD_CONNECTOR_SUFFIX.matcher(raw.request()).region(parent.outputEnd(), headerEnd);
+        if (connector.find() && raw.isUnquotedRange(connector.start(), connector.end())
+                && raw.isTopLevel(connector.start())) {
+            headerEnd = connector.start();
+        }
+        MutationPostfixOwnership.Analysis header = MutationPostfixOwnership.analyze(
+                raw, parent.outputEnd(), headerEnd);
+        if (header.kind() != MutationPostfixOwnership.Kind.NONE
+                && (header.closedBehavior() || PARENT_CONDITION.matcher(raw.masked())
+                        .region(parent.outputEnd(), headerEnd).find())) return header;
+        return ordinary;
+    }
+
     private static SequentialMutationClausePlan.Authority authorityFor(
             RequestLexicalView view,
             CanonicalMutationClauseMatcher.Action action,
@@ -1355,7 +1449,8 @@ public final class SequentialMutationClauseParser {
             boolean pronominalProhibition,
             int clauseStart,
             int outputEnd,
-            int clauseEnd
+            int clauseEnd,
+            MutationPostfixOwnership.Analysis postfix
     ) {
         String prefix = view.maskedLower().substring(
                 Math.max(0, clauseStart),
@@ -1398,23 +1493,18 @@ public final class SequentialMutationClauseParser {
                 CoordinatedMutationTailParser.firstUnquotedConstraintBoundary(
                         view,
                         outputEnd,
-                         clauseEnd) == outputEnd;
-        if (opensConstraintTail) {
-            return SequentialMutationClausePlan.Authority.REQUIRED;
-        }
-        CanonicalMutationClauseMatcher.ScopeKind postfixScope = opensConstraintTail
-                ? CanonicalMutationClauseMatcher.ScopeKind.NONE
-                : CanonicalMutationClauseMatcher.finitePostfixScopeKind(suffix);
-        if (postfixScope
-                == CanonicalMutationClauseMatcher.ScopeKind.OPTIONAL) {
+                        clauseEnd) == outputEnd;
+        if (postfix.kind() == MutationPostfixOwnership.Kind.OPTIONAL) {
             return SequentialMutationClausePlan.Authority.OPTIONAL;
         }
-        if (postfixScope
-                        == CanonicalMutationClauseMatcher.ScopeKind
-                                .REPORTED_ADVISORY
+        if (postfix.kind() == MutationPostfixOwnership.Kind.REPORTED
+                || postfix.kind() == MutationPostfixOwnership.Kind.UNSUPPORTED
                 || action.nonImperativeUse()
                         && !followsUnicodeLineBoundary(view, clauseStart)) {
             return SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE;
+        }
+        if (opensConstraintTail || postfix.closedBehavior()) {
+            return SequentialMutationClausePlan.Authority.REQUIRED;
         }
         if (!POSITIVE_TERMINAL_SUFFIX.matcher(suffix).matches()) {
             return SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE;

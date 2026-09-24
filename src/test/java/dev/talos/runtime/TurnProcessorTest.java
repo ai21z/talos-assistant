@@ -286,6 +286,43 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
+    void comparisonFailureIsWithheldBeforeModelHandoff(@TempDir Path workspace) throws Exception {
+        String privateCode = "The archive committee meets on Tuesday";
+        String privateMessage = "The ceramics workshop meets beside the old observatory on Thursday.";
+        var metadata = new ToolContentMetadata(
+                ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON, "", false, false, false, "");
+        var raw = new ToolResult(false, null, new ToolError(privateCode, privateMessage), null, metadata);
+        var registry = new ToolRegistry();
+        registry.register(new TalosTool() {
+            @Override public String name() { return "test.echo"; }
+            @Override public String description() { return "synthetic comparison failure"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor(name(), description(), null, ToolRiskLevel.READ_ONLY);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return raw; }
+        });
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        TurnAuditCapture.begin();
+        var result = processor.executeTool(new Session(workspace, new Config()),
+                new ToolCall("test.echo", Map.of()), contextForWorkspace(workspace));
+        var trace = LocalTurnTraceCapture.complete();
+        var audit = TurnAuditCapture.end().withLocalTrace(trace);
+
+        assertSame(raw, result);
+        assertFalse(result.success());
+        assertEquals(1, audit.toolCalls().size());
+        assertFalse(audit.toolCalls().getFirst().success());
+        assertEquals(raw.mutationEffects(), audit.toolCalls().getFirst().mutationEffects());
+        assertEquals(dev.talos.safety.ContentRestrictions.UNRESTRICTED, audit.contentRestrictions());
+        assertTrue(trace.events().stream().anyMatch(event -> event.type().equals("TOOL_EXECUTED")));
+        String retained = MAPPER.writeValueAsString(audit);
+        assertFalse(retained.contains(privateCode), "Private error code reached the audit before handoff");
+        assertFalse(retained.contains(privateMessage), "Private error message reached the audit before handoff");
+        assertEquals(dev.talos.safety.ContentRestrictions.WITHHELD, audit.toolCalls().getFirst().reason());
+    }
+
+    @Test
     void unknownNamespacedToolAliasIsRejectedAndRecordedInLocalTrace() {
         var tp = new TurnProcessor(ModeController.defaultController());
         var session = new Session(WS, new Config());

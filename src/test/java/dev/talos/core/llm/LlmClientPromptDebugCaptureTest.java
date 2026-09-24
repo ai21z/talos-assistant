@@ -28,6 +28,26 @@ class LlmClientPromptDebugCaptureTest {
     @AfterEach
     void clearCapture() {
         PromptDebugCapture.clear();
+        dev.talos.safety.ContentRestrictionScope.end();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void markedHistorySurvivesRealRequestPreparationAndWorkerDispatch(boolean stream) {
+        String prose = "The ceramics workshop was moved to Thursday.";
+        var policy = new dev.talos.safety.ContentRestrictions(true, false, false, false);
+        var resolver = new RecordingResolver();
+        var messages = List.of(new ChatMessage("assistant", prose, null, null, policy), ChatMessage.user("Summarize."));
+        dev.talos.safety.ContentRestrictionScope.begin();
+        try (var client = new LlmClient(engineConfig(), resolver)) {
+            var result = stream ? client.chatStreamFull(messages, chunk -> {}, 5000L) : client.chatFull(messages, 5000L);
+            assertEquals("reply", result.text());
+            assertEquals(1, resolver.chatCalls.get());
+            assertEquals(policy, resolver.lastRequest.contentRestrictions);
+            assertTrue(resolver.lastRequest.messages.stream().anyMatch(message -> prose.equals(message.content())));
+            assertEquals(policy, dev.talos.safety.ContentRestrictionScope.current());
+            assertFalse(PromptDebugCapture.latest().orElseThrow().toString().contains(prose));
+        }
     }
 
     @Test
@@ -264,6 +284,7 @@ class LlmClientPromptDebugCaptureTest {
 
     private static final class RecordingResolver implements LlmEngineResolver {
         private final AtomicInteger chatCalls = new AtomicInteger();
+        private volatile ChatRequest lastRequest;
         private final Capabilities capabilities;
 
         private RecordingResolver() {
@@ -281,6 +302,7 @@ class LlmClientPromptDebugCaptureTest {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
+            lastRequest = request;
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
         }

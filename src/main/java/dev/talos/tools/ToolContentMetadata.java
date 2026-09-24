@@ -2,6 +2,7 @@ package dev.talos.tools;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import dev.talos.core.diff.DocumentPairReceipt;
 
 /**
  * Provenance and handoff metadata for tool output.
@@ -19,7 +20,8 @@ public record ToolContentMetadata(
         boolean rawArtifactPersistenceAllowed,
         boolean ragIndexAllowed,
         String decisionReason,
-        List<String> sourcePaths) {
+        List<String> sourcePaths,
+        DocumentPairReceipt documentPairReceipt) {
 
     public enum ContentPrivacyClass {
         NORMAL,
@@ -39,7 +41,8 @@ public record ToolContentMetadata(
         RAG_RETRIEVE,
         GREP,
         COMMAND,
-        MODEL
+        MODEL,
+        DOCUMENT_COMPARISON
     }
 
     public ToolContentMetadata {
@@ -48,6 +51,34 @@ public record ToolContentMetadata(
         sourcePath = sourcePath == null ? "" : sourcePath;
         decisionReason = decisionReason == null ? "" : decisionReason;
         sourcePaths = normalizeSourcePaths(sourcePaths);
+        if (documentPairReceipt != null) {
+            var decision = documentPairReceipt.decision();
+            source = ContentSource.DOCUMENT_COMPARISON;
+            privacyClass = decision.privateDocumentContent()
+                    ? ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                    : ContentPrivacyClass.EXTRACTED_DOCUMENT_TEXT;
+            sourcePath = "";
+            sourcePaths = List.of();
+            modelHandoffAllowed = decision.modelHandoffAllowed() && modelHandoffAllowed;
+            rawArtifactPersistenceAllowed = decision.rawArtifactPersistenceAllowed() && rawArtifactPersistenceAllowed;
+            ragIndexAllowed = decision.ragIndexAllowed() && ragIndexAllowed;
+            decisionReason = "Both admitted document policies are required.";
+        }
+    }
+
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, null);
+    }
+
+    public static ToolContentMetadata documentPair(DocumentPairReceipt receipt) {
+        java.util.Objects.requireNonNull(receipt);
+        var decision = receipt.decision();
+        return new ToolContentMetadata(ContentPrivacyClass.NORMAL, ContentSource.DOCUMENT_COMPARISON, "",
+                decision.modelHandoffAllowed(), decision.rawArtifactPersistenceAllowed(), decision.ragIndexAllowed(),
+                "", List.of(), receipt);
     }
 
     public ToolContentMetadata(
@@ -145,6 +176,11 @@ public record ToolContentMetadata(
     }
 
     public ToolContentMetadata withModelHandoffAllowed(boolean allowed, String reason) {
+        if (source == ContentSource.DOCUMENT_COMPARISON) {
+            return new ToolContentMetadata(privacyClass, source, sourcePath,
+                    modelHandoffAllowed && allowed, rawArtifactPersistenceAllowed, ragIndexAllowed,
+                    decisionReason, sourcePaths, documentPairReceipt);
+        }
         return new ToolContentMetadata(
                 privacyClass,
                 source,

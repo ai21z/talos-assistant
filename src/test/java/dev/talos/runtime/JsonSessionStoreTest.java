@@ -61,7 +61,7 @@ class JsonSessionStoreTest {
         }
         @Test void roundTrip_preservesActiveTaskContextAndArtifactGoal() {
             var store = store();
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             SessionData original = new SessionData("ctx1", "/tmp/ws", "goal sketch", 1,
@@ -74,7 +74,71 @@ class JsonSessionStoreTest {
             assertEquals(ActiveTaskContext.State.ACTIVE, loaded.activeTaskContext().state());
             assertEquals(ActiveTaskContext.Kind.PROPOSED_CHANGES, loaded.activeTaskContext().kind());
             assertEquals(List.of("README.md"), loaded.activeTaskContext().targets());
+            assertTrue(loaded.activeTaskContext().hasBoundProposal());
+            assertEquals(context.proposalProvenance(), loaded.activeTaskContext().proposalProvenance());
             assertEquals(ArtifactGoal.ArtifactKind.README, loaded.artifactGoal().artifactKind());
+        }
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+                "missing", "fractional-version", "overflow-version", "string-version", "fractional-turn",
+                "null-target", "blank-target", "whitespace-target", "extra-field", "wrong-trace", "wrong-summary"
+        })
+        void malformedProvenanceDoesNotAuthorizeOrRewriteTheSavedContext(String defect) throws Exception {
+            var store = store();
+            var context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
+                    3, "trace-save", List.of("README.md"), "Replace title.");
+            var original = new SessionData("bad-provenance", "/tmp/ws", "goal", 3,
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "test",
+                    context, ArtifactGoal.fromActiveContext(context));
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
+            Path saved = tempDir.resolve("bad-provenance.json");
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var root = mapper.readTree(Files.readString(saved));
+            var container = (com.fasterxml.jackson.databind.node.ObjectNode) root.get("activeTaskContext");
+            var pin = (com.fasterxml.jackson.databind.node.ObjectNode) container.get("proposalProvenance");
+            switch (defect) {
+                case "missing" -> container.remove("proposalProvenance");
+                case "fractional-version" -> pin.put("policyVersion", 1.9);
+                case "overflow-version" -> pin.put("policyVersion", 4294967297L);
+                case "string-version" -> pin.put("policyVersion", "1");
+                case "fractional-turn" -> pin.put("sourceTurnNumber", 3.9);
+                case "null-target" -> ((com.fasterxml.jackson.databind.node.ArrayNode) pin.get("targets")).addNull();
+                case "blank-target" -> ((com.fasterxml.jackson.databind.node.ArrayNode) pin.get("targets")).add("");
+                case "whitespace-target" -> ((com.fasterxml.jackson.databind.node.ArrayNode) pin.get("targets")).add("   ");
+                case "extra-field" -> pin.put("trusted", true);
+                case "wrong-trace" -> pin.put("sourceTraceId", "other");
+                case "wrong-summary" -> container.put("proposalSummary", "Delete file.");
+                default -> fail(defect);
+            }
+            Files.writeString(saved, mapper.writeValueAsString(root));
+            byte[] before = Files.readAllBytes(saved);
+            var loaded = store.load("bad-provenance").orElseThrow();
+            assertEquals(ActiveTaskContext.Kind.PROPOSED_CHANGES, loaded.activeTaskContext().kind());
+            assertFalse(loaded.activeTaskContext().hasBoundProposal());
+            assertEquals(ArtifactGoal.none(), loaded.artifactGoal());
+            var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate("apply those changes",
+                    dev.talos.runtime.task.TaskContract.unknown("apply those changes"),
+                    loaded.activeTaskContext(), loaded.artifactGoal(), 4);
+            assertFalse(decision.consumed());
+            assertFalse(decision.taskContract().mutationAllowed());
+            assertArrayEquals(before, Files.readAllBytes(saved));
+        }
+
+        @Test void legacyProposalIsRetainedWithoutAnActiveArtifactGoal() throws Exception {
+            var store = store();
+            ActiveTaskContext legacy = ActiveTaskContext.proposedChanges(
+                    3, "trace-save", List.of("README.md"), "Old proposal.");
+            SessionData original = new SessionData("legacy-proposal", "/tmp/ws", "goal", 3,
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "test",
+                    legacy, ArtifactGoal.fromActiveContext(legacy));
+            withWriter(store, original.sessionId(), writer -> writer.save(original));
+            Path saved = tempDir.resolve("legacy-proposal.json");
+            byte[] before = Files.readAllBytes(saved);
+            SessionData loaded = store.load("legacy-proposal").orElseThrow();
+            assertEquals(ActiveTaskContext.Kind.PROPOSED_CHANGES, loaded.activeTaskContext().kind());
+            assertFalse(loaded.activeTaskContext().hasBoundProposal());
+            assertEquals(ArtifactGoal.none(), loaded.artifactGoal());
+            assertArrayEquals(before, Files.readAllBytes(saved));
         }
         @Test void roundTrip_preservesActiveTaskContextRequiredVerificationClaims() {
             var store = store();

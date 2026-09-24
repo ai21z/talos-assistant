@@ -9,6 +9,10 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Reason;
+import static dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.limited;
+import static dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.preservedAnswer;
+
 /**
  * A narrow preservation gate for answers consistent with observed selector mismatches.
  * This is not a semantic grader: arithmetic and other model explanation are not verified.
@@ -64,25 +68,33 @@ public final class ReadOnlyWebDiagnosticAnswer {
     private ReadOnlyWebDiagnosticAnswer() {}
 
     static boolean canPreserve(String answer, Collection<String> readPaths,
-                               StaticWebSelectorAnalyzer.Facts facts, List<String> problems) {
+                               StaticWebSelectorAnalyzer.Facts facts, List<StaticWebDiagnostic> diagnostics) {
+        return assess(answer, readPaths, facts, diagnostics).preserved();
+    }
+
+    public static ReadOnlyWebAnswerAssessment assess(String answer, Collection<String> readPaths,
+                                                     StaticWebSelectorAnalyzer.Facts facts,
+                                                     List<StaticWebDiagnostic> diagnostics) {
         if (answer == null || answer.isBlank() || answer.length() > 65_536 || facts == null
-                || problems == null || problems.isEmpty()) return false;
-        if (problems.stream().anyMatch(problem -> !problem.startsWith("JavaScript references missing IDs:")
-                && !problem.startsWith("JavaScript references missing class selectors:"))) return false;
+                || diagnostics == null || diagnostics.isEmpty()) return limited(Reason.INVALID_INPUT);
+        if (diagnostics.stream().anyMatch(diagnostic -> diagnostic == null
+                || !diagnostic.kind().supportsAnswerPreservation())) return limited(Reason.UNSUPPORTED_DIAGNOSTIC);
 
         String plain = answer.replace("**", "").replace("\r\n", "\n").replace('\r', '\n');
-        if (UNSUPPORTED_ASSERTION.matcher(plain).find()
-                || EXECUTION_CLAIM.matcher(withoutNegatedCodeExecution(
-                        NEGATED_EXECUTION.matcher(plain).replaceAll(""), facts)).find()) return false;
+        if (UNSUPPORTED_ASSERTION.matcher(plain).find()) return limited(Reason.UNSUPPORTED_ASSERTION);
+        if (EXECUTION_CLAIM.matcher(withoutNegatedCodeExecution(
+                NEGATED_EXECUTION.matcher(plain).replaceAll(""), facts)).find()) {
+            return limited(Reason.EXECUTION_CLAIM_WITHOUT_EVIDENCE);
+        }
         // Only the selector view hides observed member names. Execution and
         // assertion checks above still see all original code and prose.
         plain = selectorRoleText(plain, facts);
-        if (contradictsPresentSelector(plain, facts)) return false;
+        if (contradictsPresentSelector(plain, facts)) return limited(Reason.SELECTOR_CONTRADICTION);
 
         Set<String> read = new LinkedHashSet<>();
         if (readPaths != null) readPaths.forEach(path -> read.add(normalize(path)));
         for (String cited : TaskContractResolver.extractExpectedTargets(answer)) {
-            if (!read.contains(normalize(cited))) return false;
+            if (!read.contains(normalize(cited))) return limited(Reason.UNREAD_PATH);
         }
         boolean uniqueReadScript = read.stream().filter(path -> SCRIPT_LIKE_PATH.matcher(path).matches()).count() == 1
                 && read.contains(normalize(facts.jsFile()));
@@ -91,27 +103,35 @@ public final class ReadOnlyWebDiagnosticAnswer {
         missingIds.removeAll(facts.htmlIds());
         Set<String> missingClasses = new LinkedHashSet<>(facts.jsClasses());
         missingClasses.removeAll(facts.htmlClasses());
-        if (missingIds.isEmpty() && missingClasses.isEmpty()) return false;
-        if (missingIds.size() + missingClasses.size() > 32) return false;
+        if (missingIds.isEmpty() && missingClasses.isEmpty()) return limited(Reason.NO_MISSING_SELECTOR);
+        if (missingIds.size() + missingClasses.size() > 32) return limited(Reason.SELECTOR_LIMIT_EXCEEDED);
         for (String id : missingIds) {
-            if (!acknowledgesMissingSelector(plain, "#" + id, facts, uniqueReadScript)) return false;
+            if (!acknowledgesMissingSelector(plain, "#" + id, facts, uniqueReadScript)) {
+                return limited(Reason.SELECTOR_RELATION_NOT_ESTABLISHED);
+            }
         }
         for (String name : missingClasses) {
-            if (!acknowledgesMissingSelector(plain, "." + name, facts, uniqueReadScript)) return false;
+            if (!acknowledgesMissingSelector(plain, "." + name, facts, uniqueReadScript)) {
+                return limited(Reason.SELECTOR_RELATION_NOT_ESTABLISHED);
+            }
         }
 
         // Any proposed ID selector must be present in the inspected HTML or be
         // the observed broken selector being explained. Do not infer a replacement.
         var selector = ID_SELECTOR.matcher(answer);
         while (selector.find()) {
-            if (!facts.htmlIds().contains(selector.group(1)) && !missingIds.contains(selector.group(1))) return false;
+            if (!facts.htmlIds().contains(selector.group(1)) && !missingIds.contains(selector.group(1))) {
+                return limited(Reason.UNOBSERVED_ID_SELECTOR);
+            }
         }
         var classSelector = CLASS_SELECTOR.matcher(selectorRoleText(answer, facts));
         while (classSelector.find()) {
             if (!facts.htmlClasses().contains(classSelector.group(1))
-                    && !missingClasses.contains(classSelector.group(1))) return false;
+                    && !missingClasses.contains(classSelector.group(1))) {
+                return limited(Reason.UNOBSERVED_CLASS_SELECTOR);
+            }
         }
-        return true;
+        return preservedAnswer();
     }
 
     private static boolean acknowledgesMissingSelector(String answer, String selector,

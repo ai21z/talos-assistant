@@ -24,6 +24,7 @@ public final class LoopState {
     public final RuntimeTurnContext ctx;
     public final Session toolSession;
     public final int maxIterations;
+    final DocumentComparisonContinuation.Scope comparisonScope;
 
     public String currentText;
     public List<NativeToolCall> currentNativeCalls;
@@ -32,6 +33,7 @@ public final class LoopState {
     public dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus readOnlySynthesisStatus =
             dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED;
     public boolean readOnlySynthesisAtLimit;
+    public ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence = ReadOnlyFinalizationEvidence.empty();
     public LocalTurnTraceCapture.ToolCallSource currentToolCallSource;
     public LocalTurnTraceCapture.RuntimeToolAuthorityReason currentRuntimeToolAuthorityReason;
 
@@ -121,6 +123,7 @@ public final class LoopState {
         this.toolSession = toolSession;
         this.maxIterations = maxIterations;
         this.aliasRescueBaseline = aliasRescueBaseline;
+        this.comparisonScope = DocumentComparisonContinuation.captureScope(this);
     }
 
     /** Revalidates an opaque same-turn handoff before the first nested-loop operation. */
@@ -160,6 +163,7 @@ public final class LoopState {
     }
 
     public void finishWithAnswer(String answer) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -179,6 +183,7 @@ public final class LoopState {
     public void finishWithCapturedAnswer(
             String answer,
             ProviderResponseCapture.Receipt receipt) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = receipt == null
@@ -196,6 +201,7 @@ public final class LoopState {
     }
 
     public void finishWithToolAnswer(String answer) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -207,6 +213,7 @@ public final class LoopState {
     }
 
     public void finishWithOperatorAnswer(String answer) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -220,6 +227,8 @@ public final class LoopState {
     public void transformAnswer(
             String answer,
             LocalTurnTraceCapture.AnswerTransformationReason reason) {
+        if (!Objects.equals(currentText, Objects.toString(answer, "")))
+            readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         LocalTurnTraceCapture.ensureExactProviderAnswerCandidate(
                 currentText,
                 currentResponseReceipt);
@@ -228,6 +237,7 @@ public final class LoopState {
     }
 
     public void applyProviderResult(dev.talos.core.llm.LlmClient.StreamResult result) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = result != null && result.outputLimitReached();
         currentText = result == null ? "" : result.text();
         currentNativeCalls = result == null ? List.of() : result.toolCalls();
@@ -244,6 +254,7 @@ public final class LoopState {
             List<NativeToolCall> nativeCalls,
             LocalTurnTraceCapture.RuntimeToolAuthorityReason reason
     ) {
+        readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = false;
         currentText = text == null ? "" : text;
         currentNativeCalls = nativeCalls == null ? List.of() : List.copyOf(nativeCalls);

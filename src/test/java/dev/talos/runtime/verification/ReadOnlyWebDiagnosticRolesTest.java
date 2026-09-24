@@ -202,7 +202,7 @@ class ReadOnlyWebDiagnosticRolesTest {
         }
         assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(
                 "`script.js` uses `id=\"calc\"` (`document.querySelector('#calc')`). " + BASE,
-                List.of("index.html", "scripts.js"), facts(JS), facts(JS).selectorProblems()));
+                List.of("index.html", "scripts.js"), facts(JS), facts(JS).selectorDiagnostics()));
     }
 
     @Test
@@ -267,11 +267,11 @@ class ReadOnlyWebDiagnosticRolesTest {
                 "document.querySelector('.toFixed'); const display = (22.22).toFixed(1);", Set.of("index.html", "script.js"));
         assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(
                 "The expression in script.js uses `.toFixed(1)`. Use `.real-button`.",
-                READS, facts, facts.selectorProblems()), "A method mention is not acknowledgement of the missing selector");
+                READS, facts, facts.selectorDiagnostics()), "A method mention is not acknowledgement of the missing selector");
         assertTrue(ReadOnlyWebDiagnosticAnswer.canPreserve(
                 "`.toFixed` does not exist in index.html. Use `.real-button`. "
                         + "The expression in script.js uses `.toFixed(1)`.",
-                READS, facts, facts.selectorProblems()));
+                READS, facts, facts.selectorDiagnostics()));
     }
 
     @Test
@@ -309,8 +309,10 @@ class ReadOnlyWebDiagnosticRolesTest {
         var facts = facts(JS);
         assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts, List.of()));
         assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts,
-                List.of("JavaScript references missing IDs: `#calc`", "script.js: JavaScript syntax error.")));
-        assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, null, facts.selectorProblems()));
+                List.of(facts.selectorDiagnostics().getFirst(),
+                        new StaticWebDiagnostic(StaticWebDiagnostic.Kind.OTHER, "script.js", "", List.of(),
+                                "script.js: JavaScript syntax error."))));
+        assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, null, facts.selectorDiagnostics()));
         assertFalse(preserve(answer + " ".repeat(65_536)));
     }
 
@@ -327,7 +329,7 @@ class ReadOnlyWebDiagnosticRolesTest {
         for (String answer : List.of(
                 "`.mis**sing-button` does not exist. Use `.real**-button`.",
                 "`.missing-button` does not exist. Use `.real**-button`.")) {
-            assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts, facts.selectorProblems()), answer);
+            assertFalse(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts, facts.selectorDiagnostics()), answer);
         }
     }
 
@@ -388,7 +390,7 @@ class ReadOnlyWebDiagnosticRolesTest {
                     String answer = "The code in `" + file + "` is using the incorrect selector `" + source
                             + "` instead of `" + target + "`.";
                     assertTrue(ReadOnlyWebDiagnosticAnswer.canPreserve(answer, List.of("index.html", file),
-                            facts, facts.selectorProblems()), answer + " / " + query);
+                            facts, facts.selectorDiagnostics()), answer + " / " + query);
                 }
             }
         }
@@ -455,7 +457,7 @@ class ReadOnlyWebDiagnosticRolesTest {
 
     private static boolean preserve(String answer, String js) {
         var facts = facts(js);
-        return ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts, facts.selectorProblems());
+        return ReadOnlyWebDiagnosticAnswer.canPreserve(answer, READS, facts, facts.selectorDiagnostics());
     }
 
     private static StaticWebSelectorAnalyzer.Facts facts(String js) {

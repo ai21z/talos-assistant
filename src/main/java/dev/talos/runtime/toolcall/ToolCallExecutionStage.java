@@ -315,17 +315,19 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            String resultText = ToolCallSupport.formatToolResult(
+            ToolResultFormatter.FormattedResult formattedResult = ToolResultFormatter.formatWithBody(
                     effective,
                     result,
                     handoffDecision.preserveModelResultForToolFormatting());
+            String resultText = formattedResult.text();
             if (readBeforeWriteNudge != null) {
                 resultText = resultText + readBeforeWriteNudge;
             }
             appendResultMessage(state, parsed.useNativePath(), i, resultText);
             if (result.success() && parsed.useNativePath()) {
                 int resultIndex = state.messages.size() - 1;
-                state.readEvidence.bindToolResult(effective, resultIndex, state.messages.get(resultIndex));
+                state.readEvidence.bindToolResult(
+                        effective, resultIndex, state.messages.get(resultIndex), formattedResult);
             }
 
             LOG.debug("  Tool {} -> {}", effective.toolName(),

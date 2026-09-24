@@ -32,7 +32,9 @@ public record ReadEvidence(
         boolean truncated,
         String body,
         String contentHash,
-        boolean redacted
+        boolean redacted,
+        String originId,
+        long originOrdinal
 ) {
     public ReadEvidence {
         rawTool = rawTool == null ? "" : rawTool;
@@ -42,5 +44,15 @@ public record ReadEvidence(
         canonicalPathKey = canonicalPathKey == null ? "" : canonicalPathKey;
         body = body == null ? "" : body;
         contentHash = contentHash == null ? "" : contentHash;
+        originId = originId == null ? "" : originId;
+    }
+
+    /** Compatibility values carry no runtime observation origin. */
+    public ReadEvidence(long sequence, String rawTool, String canonicalTool,
+                        Map<String, String> rawParams, String effectivePath, String canonicalPathKey,
+                        boolean readFile, boolean ranged, boolean truncated, String body,
+                        String contentHash, boolean redacted) {
+        this(sequence, rawTool, canonicalTool, rawParams, effectivePath, canonicalPathKey,
+                readFile, ranged, truncated, body, contentHash, redacted, "", 0);
     }
 }

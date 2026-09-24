@@ -12,6 +12,7 @@ import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -135,12 +136,15 @@ final class InspectCompletenessRetry {
                 boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
                 boolean equalFallback = !emptyFallback && mergedAnswer.equals(answer);
                 if (emptyFallback || equalFallback) {
-                    restoreOriginalCandidate(
+                    boolean restored = restoreOriginalCandidate(
                             originalCandidate,
                             answer,
                             emptyFallback
                                     ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
                                     : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                    groundedRetryLoop = withRestoredAnswer(groundedRetryLoop, answer,
+                            restored ? loopResult.readOnlyFinalizationEvidence()
+                                    : ReadOnlyFinalizationEvidence.empty());
                 }
                 return new Result(
                         emptyFallback ? answer : mergedAnswer,
@@ -176,11 +180,11 @@ final class InspectCompletenessRetry {
         throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
-    private static void restoreOriginalCandidate(
+    private static boolean restoreOriginalCandidate(
             LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint,
             String answer,
             LocalTurnTraceCapture.AnswerCandidateRestorationReason reason) {
-        LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
+        return LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
     }
 
     static ToolCallLoop.LoopResult mergeReadOnlyRetryEvidence(
@@ -219,7 +223,20 @@ final class InspectCompletenessRetry {
                 retry.readFileBodies(),
                 retry.finalAnswerOutputLimitReached(),
                 selectedRetrySynthesisStatus(original, retry),
-                retry.readOnlyEvidenceHandoff());
+                retry.readOnlyEvidenceHandoff(), retry.readOnlyFinalizationEvidence());
+    }
+
+    static ToolCallLoop.LoopResult withRestoredAnswer(ToolCallLoop.LoopResult result, String answer,
+                                                     ReadOnlyFinalizationEvidence evidence) {
+        if (result == null) return null;
+        return new ToolCallLoop.LoopResult(answer, result.iterations(), result.toolsInvoked(),
+                result.toolNames(), result.messages(), result.failedCalls(), result.retriedCalls(),
+                result.hitIterLimit(), result.mutatingToolSuccesses(), result.readPaths(),
+                result.cushionFiresRedundantRead(), result.cushionFiresAliasRescue(),
+                result.cushionFiresB3EditShortCircuit(), result.cushionFiresE1Suggestion(),
+                result.failureDecision(), result.toolOutcomes(), result.readFileBodies(),
+                result.finalAnswerOutputLimitReached(), result.readOnlySynthesisStatus(),
+                result.readOnlyEvidenceHandoff(), evidence);
     }
 
     static ToolCallLoop.ReadOnlySynthesisStatus selectedRetrySynthesisStatus(

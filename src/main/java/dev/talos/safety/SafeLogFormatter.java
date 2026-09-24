@@ -7,18 +7,22 @@ public final class SafeLogFormatter {
     private SafeLogFormatter() {}
 
     public static String value(Object value) {
+        if (!ContentRestrictionScope.current().artifactAllowed()) return ContentRestrictions.WITHHELD;
         return redactPathTokens(ProtectedContentSanitizer.sanitizeForLog(value));
     }
 
     public static String text(String value) {
+        if (!ContentRestrictionScope.current().artifactAllowed()) return ContentRestrictions.WITHHELD;
         return redactPathTokens(ProtectedContentSanitizer.sanitizeText(value));
     }
 
     public static Map<String, String> parameters(Map<String, String> parameters) {
+        if (!ContentRestrictionScope.current().artifactAllowed()) return Map.of("content", ContentRestrictions.WITHHELD);
         return ProtectedContentSanitizer.sanitizeToolParameters(parameters);
     }
 
     public static String throwableMessage(Throwable throwable) {
+        if (!ContentRestrictionScope.current().artifactAllowed()) return ContentRestrictions.WITHHELD;
         if (throwable == null) return "";
         String message = throwable.getMessage();
         if (message == null || message.isBlank()) {

@@ -35,6 +35,7 @@ import java.util.Map;
 public final class ReadEvidenceLedger {
 
     private final Path workspaceRoot;
+    private final String originId = java.util.UUID.randomUUID().toString();
     private final List<ReadEvidence> entries = new ArrayList<>();
     private final Map<Long, BoundToolResult> toolResults = new LinkedHashMap<>();
     private long nextSequence = 1;
@@ -55,8 +56,9 @@ public final class ReadEvidenceLedger {
         entries.removeIf(e -> e.canonicalTool().equals(canonicalTool)
                 && identityParams(e.rawParams()).equals(identity));
         String safeBody = body == null ? "" : body;
+        long sequence = nextSequence++;
         ReadEvidence evidence = new ReadEvidence(
-                nextSequence++,
+                sequence,
                 call.toolName(),
                 canonicalTool,
                 rawParams,
@@ -67,7 +69,8 @@ public final class ReadEvidenceLedger {
                 looksTruncated(safeBody),
                 safeBody,
                 sha256(safeBody),
-                RedactedReadWritebackGuard.containsRedactionSentinel(safeBody));
+                RedactedReadWritebackGuard.containsRedactionSentinel(safeBody),
+                originId, sequence);
         entries.add(evidence);
         return evidence;
     }
@@ -84,17 +87,29 @@ public final class ReadEvidenceLedger {
     /** Bind at execution time, after privacy handling and final tool formatting. */
     void bindToolResult(ToolCall call, int messageIndex, dev.talos.spi.types.ChatMessage message) {
         ReadEvidence evidence = latestIdenticalCall(call, true);
+        if (evidence == null) return;
+        bindToolResult(call, messageIndex, message, ToolResultFormatter.formatWithBody(
+                call, dev.talos.tools.ToolResult.ok(evidence.body()), false));
+    }
+
+    void bindToolResult(ToolCall call, int messageIndex, dev.talos.spi.types.ChatMessage message,
+                        ToolResultFormatter.FormattedResult formatted) {
+        ReadEvidence evidence = latestIdenticalCall(call, true);
         if (evidence == null || !evidence.readFile() || message == null
                 || !"tool".equals(message.role()) || message.toolCallId() == null
-                || message.toolCallId().isBlank() || message.content() == null) return;
-        toolResults.put(evidence.sequence(), new BoundToolResult(messageIndex, message));
+                || message.toolCallId().isBlank() || message.content() == null
+                || formatted == null || !message.content().equals(formatted.text())) return;
+        ToolResultFormatter.ReadBody body = formatted.body();
+        if (body != null && !body.observedBody().equals(evidence.body())) return;
+        toolResults.put(evidence.sequence(), new BoundToolResult(messageIndex, message, body));
     }
 
     BoundToolResult toolResult(ReadEvidence evidence) {
         return evidence == null ? null : toolResults.get(evidence.sequence());
     }
 
-    record BoundToolResult(int index, dev.talos.spi.types.ChatMessage message) {}
+    record BoundToolResult(int index, dev.talos.spi.types.ChatMessage message,
+                           ToolResultFormatter.ReadBody body) {}
 
     /** Import only the opaque handoff's authenticated typed evidence into a fresh loop. */
     void importReusable(ReadEvidence evidence, BoundToolResult result) {
@@ -102,7 +117,7 @@ public final class ReadEvidenceLedger {
                 nextSequence++, evidence.rawTool(), evidence.canonicalTool(), evidence.rawParams(),
                 evidence.effectivePath(), evidence.canonicalPathKey(), evidence.readFile(),
                 evidence.ranged(), evidence.truncated(), evidence.body(), evidence.contentHash(),
-                evidence.redacted());
+                evidence.redacted(), evidence.originId(), evidence.originOrdinal());
         entries.add(imported);
         toolResults.put(imported.sequence(), result);
     }

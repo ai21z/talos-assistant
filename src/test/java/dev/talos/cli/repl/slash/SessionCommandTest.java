@@ -108,7 +108,7 @@ class SessionCommandTest {
             Path ws = Path.of("/active/project").toAbsolutePath().normalize();
             String sessionId = JsonSessionStore.sessionIdFor(ws);
             SessionMemory mem = new SessionMemory();
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             mem.setActiveTaskContext(context);
@@ -163,7 +163,7 @@ class SessionCommandTest {
             Path ws = Path.of("/context/project").toAbsolutePath().normalize();
             String wsId = JsonSessionStore.sessionIdFor(ws);
             var cmd = new SessionCommand(ws, st, wsId + "-20260612090000");
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             String savedId = wsId + "-20260612080000";
             try (var writer = st.acquireSessionWriter(savedId)) {

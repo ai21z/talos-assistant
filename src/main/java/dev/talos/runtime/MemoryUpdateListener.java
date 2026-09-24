@@ -85,7 +85,8 @@ public final class MemoryUpdateListener implements SessionListener {
             // a confidence-trick failure mode (4 fabricated turns observed
             // in a real qwen2.5-coder transcript). Render-side chrome must
             // never be part of the model's training surface.
-            String forHistory = assistantTextForPersistence(answer, userInput);
+            String forHistory = result.audit().contentRestrictions().forHistory(
+                    assistantTextForPersistence(answer, userInput));
             if (!isMemorizableAssistantReply(result.result(), forHistory)) return;
             if (forHistory.isBlank()) return;
             conversationManager.addTurn(userInput, forHistory);

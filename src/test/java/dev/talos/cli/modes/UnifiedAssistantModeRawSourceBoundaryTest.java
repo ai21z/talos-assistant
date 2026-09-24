@@ -132,6 +132,7 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
         assertEquals(expectedRawEnd, rawStyle.derivation().endOffset());
         assertEquals(TargetRole.MUST_MUTATE, providerStyle.role());
         assertTrue(rawResolution.blocksUnscopedMutation());
+        assertFalse(rawResolution.contract().mutationAllowed());
         assertFalse(providerResolution.blocksUnscopedMutation());
         assertTrue(providerResolution.contract().mutationAllowed());
         assertTrue(rawStyle.derivation().sourceText().indexOf('\u0000') >= 0);
@@ -156,8 +157,8 @@ class UnifiedAssistantModeRawSourceBoundaryTest {
         RunEvidence evidence = run(request, "style.css", workspace);
         assertRawTraceEvidence(evidence);
         assertCanonicalProviderParity(evidence, request);
-        assertTrue(evidence.preview().mutationAllowed());
-        assertTrue(evidence.captured().mutationAllowed());
+        assertFalse(evidence.preview().mutationAllowed());
+        assertFalse(evidence.captured().mutationAllowed());
         assertFalse(evidence.providerTools().contains("talos.write_file"));
         assertFalse(evidence.providerTools().contains("talos.edit_file"));
 

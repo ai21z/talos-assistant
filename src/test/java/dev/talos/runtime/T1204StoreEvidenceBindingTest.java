@@ -13,6 +13,8 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanEvidence;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,10 +43,10 @@ class T1204StoreEvidenceBindingTest {
                     + "Update style.css. Rewrite style.css.";
 
     @Test
-    void nonLexicalHistoryProjectionRemainsPersistable(
+    void assistantProseConfirmationPersistsWithoutAcquiringMutationAuthority(
             @TempDir Path directory
     ) throws Exception {
-        String sessionId = "nonlexical-history-projection";
+        String sessionId = "unbound-assistant-confirmation";
         String confirmation = "Yes, proceed.";
         TaskResolution projected = TaskContractResolver.resolveFromMessages(
                 List.of(
@@ -53,8 +56,10 @@ class T1204StoreEvidenceBindingTest {
                                 "I can update index.html. Should I proceed?"),
                         ChatMessage.user(confirmation)));
         TurnPolicyTrace policy = policyTrace(projected);
-        assertTrue(policy.rolefulTargets().stream().anyMatch(target ->
-                TargetSource.MESSAGE_HISTORY.name().equals(target.source())));
+        assertFalse(projected.hasAuthorizedContentMutation());
+        assertFalse(policy.mutationRequested());
+        assertFalse(policy.mutationAllowed());
+        assertTrue(policy.rolefulTargets().isEmpty());
         assertTrue(policy.lexicalDecisions().isEmpty());
         assertTrue(policy.lexicalRegions().isEmpty());
 
@@ -66,11 +71,64 @@ class T1204StoreEvidenceBindingTest {
                     turnRecord(1, confirmation, policy, ""));
         }
 
-        TurnRecord loaded = store.loadTurns(sessionId).getFirst();
+        Path turnLog = directory.resolve(sessionId + ".turns.jsonl");
+        byte[] before = Files.readAllBytes(turnLog);
+        List<TurnRecord> turns = store.loadTurns(sessionId);
+        assertEquals(1, turns.size());
+        TurnRecord loaded = turns.getFirst();
+        assertEquals(policy, loaded.policyTrace());
         assertEquals(policy.rolefulTargets(),
                 loaded.policyTrace().rolefulTargets());
+        assertFalse(loaded.policyTrace().mutationRequested());
+        assertFalse(loaded.policyTrace().mutationAllowed());
         assertTrue(loaded.policyTrace().lexicalDecisions().isEmpty());
         assertTrue(loaded.policyTrace().lexicalRegions().isEmpty());
+        assertArrayEquals(before, Files.readAllBytes(turnLog));
+    }
+
+    @Test
+    void nonLexicalRepairProjectionRemainsPersistable(@TempDir Path directory) throws Exception {
+        String sessionId = "nonlexical-repair-projection";
+        String followUp = "Fix it.";
+        TaskResolution projected = TaskContractResolver.resolveFromMessages(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Edit index.html to add a button."),
+                ChatMessage.assistant("[Task incomplete: Static verification failed - Expected targets were not all mutated.]"),
+                ChatMessage.user(followUp)));
+        TurnPolicyTrace policy = policyTrace(projected);
+        assertTrue(projected.hasAuthorizedContentMutation());
+        assertTrue(policy.mutationRequested());
+        assertTrue(policy.mutationAllowed());
+        assertEquals(List.of("index.html"), policy.expectedTargets());
+        assertTrue(policy.rolefulTargets().stream().anyMatch(target ->
+                target.path().equals("index.html") && TargetSource.REPAIR_CONTEXT.name().equals(target.source())
+                        && TargetRole.MUST_MUTATE.name().equals(target.role())));
+        assertTrue(policy.lexicalDecisions().isEmpty());
+        assertTrue(policy.lexicalRegions().isEmpty());
+        assertEquals("NONE", policy.workspaceOperationPlan().state());
+        assertTrue(policy.workspaceOperationPlan().operations().isEmpty());
+
+        JsonSessionStore store = new JsonSessionStore(directory);
+        try (SessionWriterLease writer = store.acquireSessionWriter(sessionId)) {
+            writer.appendTurn(sessionId, turnRecord(1, followUp, policy, ""));
+        }
+        Path turnLog = directory.resolve(sessionId + ".turns.jsonl");
+        byte[] before = Files.readAllBytes(turnLog);
+        List<TurnRecord> turns = store.loadTurns(sessionId);
+        assertEquals(1, turns.size());
+        TurnPolicyTrace loaded = turns.getFirst().policyTrace();
+        // The empty operation plan is rebound to the persisted row input, not the inherited request.
+        var rowPlan = WorkspaceOperationPlanEvidence.from(WorkspaceOperationAuthorityPlan.none(followUp));
+        assertEquals(policy.withWorkspaceOperationPlan(rowPlan), loaded);
+        assertEquals("NONE", loaded.workspaceOperationPlan().state());
+        assertTrue(loaded.workspaceOperationPlan().operations().isEmpty());
+        assertEquals("690cc521261686d9e468ac60d31aefbfa60ecc5774647f8ff7a65a9d4ed3162c",
+                loaded.workspaceOperationPlan().canonicalRequestSha256());
+        assertEquals(7, loaded.workspaceOperationPlan().canonicalRequestUtf8Bytes());
+        assertEquals(policy.rolefulTargets(), loaded.rolefulTargets());
+        assertTrue(loaded.lexicalDecisions().isEmpty());
+        assertTrue(loaded.lexicalRegions().isEmpty());
+        assertArrayEquals(before, Files.readAllBytes(turnLog));
     }
 
     @Test

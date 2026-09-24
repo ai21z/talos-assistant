@@ -95,6 +95,16 @@ public final class ScriptedNativeLlmClient {
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
 
+    /** Constructed responses can use the actual admitted request, including its frozen catalog. */
+    public static RecordedClient recordingResponder(java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder,
+                                                    int contextWindowTokens) {
+        Config config = new Config(null);
+        config.data.put("llm", new java.util.LinkedHashMap<>(Map.of("transport", "engine", "default_backend", "llama_cpp")));
+        RecordingResolver resolver = new RecordingResolver(List.of(), contextWindowTokens, false);
+        resolver.responder = java.util.Objects.requireNonNull(responder);
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
     public record BlockingClient(
             LlmClient client,
             CountDownLatch firstChunkEmitted,
@@ -133,6 +143,14 @@ public final class ScriptedNativeLlmClient {
                 config, responses, contextWindowTokens, false);
     }
 
+    public static RecordedClient recordingWithJsonSchemaCapability(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean jsonSchemaResponse) {
+        return recordingWithContextWindow(
+                new Config(), responses, contextWindowTokens, false, jsonSchemaResponse);
+    }
+
     /** Native/REQUIRED-capable foreground fixture that records every request, then fails once exhausted. */
     public static RecordedClient recordingThenFailureWithContextWindow(
             List<LlmClient.StreamResult> responses,
@@ -154,6 +172,16 @@ public final class ScriptedNativeLlmClient {
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens,
             boolean authoritativeNonNative) {
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, authoritativeNonNative, !authoritativeNonNative);
+    }
+
+    private static RecordedClient recordingWithContextWindow(
+            Config config,
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean authoritativeNonNative,
+            boolean jsonSchemaResponse) {
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
             @SuppressWarnings("unchecked")
@@ -162,7 +190,7 @@ public final class ScriptedNativeLlmClient {
             llm.put("default_backend", "llama_cpp");
         }
         RecordingResolver resolver = new RecordingResolver(
-                responses, contextWindowTokens, authoritativeNonNative);
+                responses, contextWindowTokens, authoritativeNonNative, null, jsonSchemaResponse);
         return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
     }
 
@@ -306,7 +334,8 @@ public final class ScriptedNativeLlmClient {
 
         @Override
         public Capabilities capabilities() {
-            return Capabilities.of(true, false, false, 0);
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, !authoritativeNonNative, false, false);
         }
 
         @Override
@@ -347,11 +376,13 @@ public final class ScriptedNativeLlmClient {
     }
 
     private static final class RecordingResolver implements LlmEngineResolver {
+        private java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder;
         private final List<LlmClient.StreamResult> responses;
         private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
         private final int contextWindowTokens;
         private final boolean authoritativeNonNative;
+        private final boolean jsonSchemaResponse;
         private final List<ChatRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
         private RecordingResolver(
@@ -366,11 +397,21 @@ public final class ScriptedNativeLlmClient {
                 int contextWindowTokens,
                 boolean authoritativeNonNative,
                 RuntimeException terminalFailure) {
+            this(responses, contextWindowTokens, authoritativeNonNative, terminalFailure, !authoritativeNonNative);
+        }
+
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure,
+                boolean jsonSchemaResponse) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
             this.contextWindowTokens = Math.max(256, contextWindowTokens);
             this.authoritativeNonNative = authoritativeNonNative;
+            this.jsonSchemaResponse = jsonSchemaResponse;
             this.terminalFailure = terminalFailure;
         }
 
@@ -389,7 +430,7 @@ public final class ScriptedNativeLlmClient {
                     !authoritativeNonNative,
                     !authoritativeNonNative,
                     !authoritativeNonNative,
-                    false, false, false, true);
+                    false, jsonSchemaResponse, false, true);
         }
 
         @Override
@@ -400,6 +441,7 @@ public final class ScriptedNativeLlmClient {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             requests.add(request);
+            if (responder != null) return chunks(responder.apply(request));
             int next = cursor.getAndIncrement();
             if (terminalFailure != null && next >= responses.size()) throw terminalFailure;
             int index = Math.min(next, responses.size() - 1);
@@ -458,7 +500,7 @@ public final class ScriptedNativeLlmClient {
             return Capabilities.of(
                     true, true, false, 16_384,
                     true, true, true,
-                    false, false, false, true);
+                    false, true, false, true);
         }
 
         @Override
@@ -515,7 +557,7 @@ public final class ScriptedNativeLlmClient {
             return Capabilities.of(
                     true, true, false, 16_384,
                     true, true, true,
-                    false, false, false, true);
+                    false, true, false, true);
         }
 
         @Override
@@ -585,7 +627,8 @@ public final class ScriptedNativeLlmClient {
 
         @Override
         public Capabilities capabilities() {
-            return Capabilities.of(true, false, false, 0);
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, true, false, false);
         }
 
         @Override
@@ -653,7 +696,8 @@ public final class ScriptedNativeLlmClient {
 
         @Override
         public Capabilities capabilities() {
-            return Capabilities.of(true, false, false, 0);
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, !authoritativeNonNative, false, false);
         }
 
         @Override

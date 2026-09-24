@@ -14,6 +14,7 @@ public final class ToolNamePolicy {
             "(?i)\\b([a-z][a-z0-9_-]*(?:[.:][a-z][a-z0-9_-]*)+)\\b");
 
     private static final Set<String> CANONICAL_TOOL_NAMES = Set.of(
+            "talos.compare_documents",
             "talos.read_file",
             "talos.write_file",
             "talos.edit_file",
@@ -30,6 +31,7 @@ public final class ToolNamePolicy {
     );
 
     private static final Set<String> READ_ONLY_CANONICAL = Set.of(
+            "talos.compare_documents",
             "talos.read_file",
             "talos.list_dir",
             "talos.grep",

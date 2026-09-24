@@ -27,7 +27,8 @@ public final class ObservedProviderTransportFixture {
             ProviderTransportAttempt.SendOperation<Stream<TokenChunk>> send,
             boolean bufferedProviderTerminal) {
         ChatRequest exactRequest = Objects.requireNonNull(request, "provider request");
-        String providerBody = String.join(
+        boolean observedReadInputs = exactRequest.controls.debugTags().contains(ProviderReadInputBinding.REQUEST_TAG);
+        String providerBody = observedReadInputs ? serializedReadRequest(exactRequest) : String.join(
                 "\n",
                 exactRequest.backend,
                 exactRequest.model,
@@ -37,10 +38,9 @@ public final class ObservedProviderTransportFixture {
                 exactRequest.messages.toString(),
                 exactRequest.tools.toString(),
                 exactRequest.controls.toString());
-        ProviderTransportAttempt transport = ProviderTransportHandoff.admit(
-                handoff,
-                providerBody,
-                exactRequest.tools);
+        ProviderTransportAttempt transport = observedReadInputs
+                ? ProviderTransportHandoff.admit(handoff, providerBody, exactRequest.tools, exactRequest)
+                : ProviderTransportHandoff.admit(handoff, providerBody, exactRequest.tools);
         Stream<TokenChunk> stream;
         try {
             stream = Objects.requireNonNull(
@@ -59,6 +59,37 @@ public final class ObservedProviderTransportFixture {
             return stream;
         }
         return ProviderTransportTokenStream.track(stream, transport);
+    }
+
+    private static String serializedReadRequest(ChatRequest request) {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var body = mapper.createObjectNode();
+        body.put("model", request.model);
+        body.put("stream", true);
+        body.put("tool_choice", "none");
+        var messages = body.putArray("messages");
+        try {
+            for (ChatMessage message : request.messages) {
+                var serialized = messages.addObject();
+                serialized.put("role", message.role());
+                serialized.put("content", message.content());
+                if (message.toolCallId() != null) serialized.put("tool_call_id", message.toolCallId());
+                if (message.hasNativeToolCalls()) {
+                    var calls = serialized.putArray("tool_calls");
+                    for (ChatMessage.NativeToolCall call : message.toolCalls()) {
+                        var serializedCall = calls.addObject();
+                        serializedCall.put("id", call.id());
+                        serializedCall.put("type", "function");
+                        var function = serializedCall.putObject("function");
+                        function.put("name", call.name());
+                        function.put("arguments", mapper.writeValueAsString(call.arguments()));
+                    }
+                }
+            }
+            return mapper.writeValueAsString(body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+            throw new IllegalStateException("The observed test request could not be serialized", invalid);
+        }
     }
 
     public static void completeTerminal(

@@ -171,6 +171,12 @@ public final class CurrentTurnCapabilityFrame {
         appendReadOnlyProposalGroundingGuidance(frame, contract, mutationAllowed);
         appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
+        var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (comparison.active()) {
+            frame.append("\nEach requested ordered pair must be inspected with talos.compare_documents before finalization. A raw diff does not establish behavioral equivalence. Separately requested reads and results remain required.");
+            for (var requirement : comparison.requirements()) frame.append("\nComparison left ")
+                    .append(requirement.pair().left()).append(", right ").append(requirement.pair().right()).append('.');
+        }
         return frame.toString();
     }
 
@@ -632,6 +638,7 @@ public final class CurrentTurnCapabilityFrame {
 
     private static String evidenceGuidance(EvidenceObligation evidence) {
         return switch (evidence) {
+            case DOCUMENT_COMPARISON_REQUIRED -> "Evidence: the two requested snapshots must be compared with talos.compare_documents. A model summary is not comparison evidence.";
             case READ_TARGET_REQUIRED -> "Evidence: read the named target before answering.";
             case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
                     "Evidence: verify path existence with talos.list_dir for the parent directory "

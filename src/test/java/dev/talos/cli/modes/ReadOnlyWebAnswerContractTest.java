@@ -10,6 +10,10 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidenceTestSupport;
+import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,6 +36,67 @@ class ReadOnlyWebAnswerContractTest {
     @AfterEach
     void clearCapture() {
         TurnTaskContractCapture.clear();
+        dev.talos.runtime.trace.LocalTurnTraceCapture.clear();
+    }
+
+    @Test
+    void typedAssessmentIsRecordedByFinalizationWithoutExecutionProof(@TempDir Path workspace) throws Exception {
+        fixture(workspace);
+        String request = "Read index.html and script.js. Explain why the Calculate button fails. Do not change files.";
+        String supported = "`#calc` does not exist in index.html. Use `#calculate`.";
+        record Case(String answer, String disposition, String reason, TaskCompletionStatus status) {}
+        for (Case witness : List.of(
+                new Case(supported, "PRESERVED", "PRESERVED", TaskCompletionStatus.READ_ONLY_ANSWERED),
+                new Case(supported + " The tests passed.", "LIMITED", "EXECUTION_CLAIM_WITHOUT_EVIDENCE",
+                        TaskCompletionStatus.ADVISORY_ONLY))) {
+            dev.talos.runtime.trace.LocalTurnTraceCapture.begin(
+                    "answer-assessment", "local-test", 1, java.time.Instant.EPOCH.toString(),
+                    "workspace-hash", "ASK", "test", "test", request);
+            ExecutionOutcome outcome = finish(workspace, request, witness.answer(),
+                    List.of("index.html", "script.js"), false);
+            var trace = dev.talos.runtime.trace.LocalTurnTraceCapture.complete();
+            var events = trace.events().stream()
+                    .filter(event -> event.type().equals("READ_ONLY_WEB_ANSWER_ASSESSED")).toList();
+            assertEquals(1, events.size());
+            assertEquals(witness.disposition(), events.getFirst().data().get("disposition"));
+            assertEquals(witness.reason(), events.getFirst().data().get("reasonCode"));
+            assertEquals(1, events.getFirst().data().get("typedDiagnosticCount"));
+            assertEquals(List.of("JAVASCRIPT_MISSING_ID"), events.getFirst().data().get("typedDiagnosticKinds"));
+            assertEquals(witness.status(), outcome.taskOutcome().completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+            assertEquals(witness.disposition().equals("PRESERVED")
+                    ? ExecutionOutcome.GroundingStatus.UNKNOWN
+                    : ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
+        }
+    }
+
+    @Test
+    void realResolverNondiagnosisContractHasNoNativeSourceAssociation(@TempDir Path workspace) throws Exception {
+        fixture(workspace);
+        String request = "Read index.html and script.js and explain why Calculate fails. Do not edit.";
+        assertEquals(dev.talos.runtime.task.TaskType.READ_ONLY_QA,
+                TaskContractResolver.fromUserRequest(request).type());
+        String answer = "`#calc` does not exist in index.html. The correct selector is `#calculate`.";
+
+        ExecutionOutcome outcome = finish(workspace, request, answer,
+                List.of("index.html", "script.js"), false, List.of(), false);
+
+        assertNotEquals(answer, outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().startsWith(
+                dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+    }
+
+    @Test
+    void realResolverDoesNotYetRepresentMjsOrCjsReadTargets() {
+        for (String extension : List.of("mjs", "cjs")) {
+            var contract = TaskContractResolver.fromUserRequest("Read index.html, script.js and helper."
+                    + extension + ". Explain the selector mismatch. Do not edit.");
+            assertTrue(contract.expectedTargets().containsAll(List.of("index.html", "script.js")));
+            assertFalse(contract.expectedTargets().contains("helper." + extension));
+            assertFalse(contract.sourceEvidenceTargets().contains("helper." + extension));
+        }
     }
 
     @Test
@@ -45,15 +112,8 @@ class ReadOnlyWebAnswerContractTest {
                 + "unlinked sentinel file. README.md describes the calculator. No files were changed "
                 + "and no browser or tests were run.";
 
-        ExecutionOutcome outcome = finish(workspace, request, answer,
-                List.of("README.md", "index.html", "script.js", "scripts.js"), false);
-
-        assertTrue(outcome.finalAnswer().contains("#calculate"), outcome.finalAnswer());
-        assertTrue(outcome.finalAnswer().contains("22.2"), outcome.finalAnswer());
-        assertTrue(outcome.finalAnswer().contains("scripts.js"), outcome.finalAnswer());
-        assertTrue(outcome.finalAnswer().contains("unlinked sentinel"), outcome.finalAnswer());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        ExecutionOutcome outcome = finishHistoricalAnswer(workspace, request, answer,
+                List.of("README.md", "index.html", "script.js", "scripts.js"));
         // Exercise the actual durable-row codec after the real finalizer. The
         // live REPL orchestration is covered separately by the manual campaign.
         Path storePath = Files.createDirectory(workspace.resolve("test-owned-session-store"));
@@ -66,7 +126,7 @@ class ReadOnlyWebAnswerContractTest {
     }
 
     @Test
-    void recordedStructuralGuardAnswerSurvivesOutcomeAndBothPersistenceForms(@TempDir Path workspace) throws Exception {
+    void recordedStructuralGuardAnswersCannotBypassTheSelectedProposalContract(@TempDir Path workspace) throws Exception {
         // These four inputs retain the actual captured selector/member context.
         // In particular, .toFixed(1) is JavaScript member syntax, not a CSS class.
         var sources = java.util.Map.of(
@@ -125,19 +185,23 @@ class ReadOnlyWebAnswerContractTest {
             ExecutionOutcome outcome = finish(workspace, request, answer,
                     List.of("README.md", "index.html", "script.js", "scripts.js"), false);
 
-            assertEquals(answer, outcome.finalAnswer(), witness.name());
-            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), witness.name());
-            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus(), witness.name());
-            assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus(), witness.name());
+            assertNotEquals(answer, outcome.finalAnswer(), witness.name());
+            assertTrue(outcome.finalAnswer().contains("A usable bounded answer interpretation was not established"), witness.name());
+            assertFalse(outcome.finalAnswer().contains("`#calc` should be replaced by `#calculate`"), witness.name());
+            assertFalse(outcome.finalAnswer().contains("`22.2`"), witness.name());
+            assertFalse(outcome.finalAnswer().contains("`scripts.js` was also read"), witness.name());
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus(), witness.name());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus(), witness.name());
+            assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus(), witness.name());
             assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus(), witness.name());
             assertEquals(dev.talos.runtime.verification.TaskVerificationStatus.NOT_RUN,
                     outcome.taskOutcome().verificationResult().status(), witness.name());
             assertTrue(outcome.verificationReport().authoritativeProofKinds().isEmpty(), witness.name());
-            assertFalse(outcome.webDiagnosticGroundedOverride(), witness.name());
+            assertTrue(outcome.webDiagnosticGroundedOverride(), witness.name());
             assertFalse(outcome.selectorGroundedOverride(), witness.name());
             assertFalse(outcome.mutationRequested(), witness.name());
             assertEquals(0, outcome.taskOutcome().mutationOutcome().successCount(), witness.name());
-            assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit(), witness.name());
+            assertEquals(AnswerOutputLimit.CLEAR, outcome.outputLimit(), witness.name());
             for (var source : sources.entrySet()) {
                 assertEquals(source.getValue(), Files.readString(workspace.resolve(source.getKey())), witness.name());
             }
@@ -155,8 +219,8 @@ class ReadOnlyWebAnswerContractTest {
                             List.of(new dev.talos.runtime.SessionData.Turn("assistant", outcome.finalAnswer(), "ok")),
                             "recorded-output-test"));
                 }
-                assertEquals(answer, store.loadTurns(sessionId).getFirst().assistantText(), witness.name());
-                assertEquals(answer, store.load(sessionId).orElseThrow().turns().getFirst().content(), witness.name());
+                assertEquals(outcome.finalAnswer(), store.loadTurns(sessionId).getFirst().assistantText(), witness.name());
+                assertEquals(outcome.finalAnswer(), store.load(sessionId).orElseThrow().turns().getFirst().content(), witness.name());
             }
         }
     }
@@ -294,9 +358,7 @@ class ReadOnlyWebAnswerContractTest {
             String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
                     .digest(witness.answer().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             assertEquals(witness.hash(), hash, "retained projected-answer fixture identity");
-            ExecutionOutcome outcome = finish(workspace, witness.request(), witness.answer(), witness.reads(), false);
-            assertEquals(witness.answer(), outcome.finalAnswer());
-            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            finishHistoricalAnswer(workspace, witness.request(), witness.answer(), witness.reads());
         }
     }
 
@@ -335,13 +397,7 @@ class ReadOnlyWebAnswerContractTest {
             assertEquals(witness.hash(), java.util.HexFormat.of().formatHex(
                     java.security.MessageDigest.getInstance("SHA-256")
                             .digest(witness.answer().getBytes(java.nio.charset.StandardCharsets.UTF_8))));
-            ExecutionOutcome outcome = finish(workspace, witness.request(), witness.answer(), witness.reads(), false);
-            assertEquals(witness.answer(), outcome.finalAnswer());
-            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-            assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
-            assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
-            assertFalse(outcome.webDiagnosticGroundedOverride());
-            assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit());
+            finishHistoricalAnswer(workspace, witness.request(), witness.answer(), witness.reads());
         }
     }
 
@@ -680,18 +736,11 @@ class ReadOnlyWebAnswerContractTest {
         for (String path : List.of("README.md", "index.html", "script.js", "scripts.js")) {
             before.put(path, Files.readString(workspace.resolve(path)));
         }
-        ExecutionOutcome outcome = finish(workspace,
+        finishHistoricalAnswer(workspace,
                 "Read README.md, index.html, script.js and scripts.js. Explain exactly why the Calculate button fails, "
                         + "name the correct selector, and calculate BMI for 72 kg and 1.8 m. Distinguish the two JavaScript files. "
                         + "Do not change files or claim tests were run.",
-                answer, List.copyOf(before.keySet()), false);
-        assertEquals(answer, outcome.finalAnswer());
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
-        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
-        assertFalse(outcome.webDiagnosticGroundedOverride());
-        assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit());
+                answer, List.copyOf(before.keySet()));
         for (var entry : before.entrySet()) {
             assertEquals(entry.getValue(), Files.readString(workspace.resolve(entry.getKey())));
         }
@@ -820,20 +869,13 @@ class ReadOnlyWebAnswerContractTest {
         assertEquals(747, bytes.length);
         assertEquals(AcceptanceReadOnlyWebRecordedAnswers.A1_LISTENER_SHA256,
                 java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)));
-        // The retained line citation is inaccurate. UNKNOWN/NOT_RUN is essential:
-        // accepting a bounded selector explanation does not certify arbitrary prose.
-        ExecutionOutcome outcome = finish(workspace,
+        // The inaccurate retained citation remains outside the historical selector assessment.
+        // The current comparison obligation cannot be closed by that assessment.
+        finishHistoricalAnswer(workspace,
                 "Read README.md, index.html, script.js and scripts.js. Explain exactly why the Calculate button fails, "
                         + "name the correct selector, and calculate BMI for 72 kg and 1.8 m. Distinguish the two JavaScript files. "
                         + "Do not change files or claim tests were run.",
-                answer, List.of("README.md", "index.html", "script.js", "scripts.js"), false);
-        assertEquals(answer, outcome.finalAnswer());
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
-        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
-        assertFalse(outcome.webDiagnosticGroundedOverride());
-        assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit());
+                answer, List.of("README.md", "index.html", "script.js", "scripts.js"));
     }
 
     @Test
@@ -933,7 +975,7 @@ class ReadOnlyWebAnswerContractTest {
     }
 
     @Test
-    void exactRequiredReadTransitionAnswerSurvivesExecutorFinalizationAndPersistence(@TempDir Path workspace)
+    void exactRequiredReadTransitionCannotSupplyAMissingSourceDefinitionFromModelProse(@TempDir Path workspace)
             throws Exception {
         // Byte-exact captured provider output, exercised against selector-equivalent
         // test-owned sources. This is not another live model or browser test.
@@ -984,19 +1026,23 @@ class ReadOnlyWebAnswerContractTest {
         // AssistantTurnExecutor diagnostic override that rejected the live answer.
         ExecutionOutcome outcome = finish(workspace, request, answer, List.copyOf(before.keySet()), false);
 
-        assertEquals(answer, outcome.finalAnswer());
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
+        assertNotEquals(answer, outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("A usable bounded answer interpretation was not established"));
+        assertFalse(outcome.finalAnswer().contains("`#calc` should be replaced by `#calculate`"));
+        assertFalse(outcome.finalAnswer().contains("`22.2`"));
+        assertFalse(outcome.finalAnswer().contains("`scripts.js` was also read"));
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
         assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
         assertEquals(dev.talos.runtime.verification.TaskVerificationStatus.NOT_RUN,
                 outcome.taskOutcome().verificationResult().status());
         assertTrue(outcome.verificationReport().authoritativeProofKinds().isEmpty());
-        assertFalse(outcome.webDiagnosticGroundedOverride());
+        assertTrue(outcome.webDiagnosticGroundedOverride());
         assertFalse(outcome.selectorGroundedOverride());
         assertFalse(outcome.mutationRequested());
         assertEquals(0, outcome.taskOutcome().mutationOutcome().successCount());
-        assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit());
+        assertEquals(AnswerOutputLimit.CLEAR, outcome.outputLimit());
         for (var source : before.entrySet()) {
             assertEquals(source.getValue(), Files.readString(workspace.resolve(source.getKey())));
         }
@@ -1011,8 +1057,8 @@ class ReadOnlyWebAnswerContractTest {
                         List.of(new dev.talos.runtime.SessionData.Turn("assistant", outcome.finalAnswer(), "ok")),
                         "recorded-output-test"));
             }
-            assertEquals(answer, store.loadTurns(sessionId).getFirst().assistantText());
-            assertEquals(answer, store.load(sessionId).orElseThrow().turns().getFirst().content());
+            assertEquals(outcome.finalAnswer(), store.loadTurns(sessionId).getFirst().assistantText());
+            assertEquals(outcome.finalAnswer(), store.load(sessionId).orElseThrow().turns().getFirst().content());
         }
     }
 
@@ -1092,6 +1138,34 @@ class ReadOnlyWebAnswerContractTest {
         }
     }
 
+    private static ExecutionOutcome finishHistoricalAnswer(Path workspace, String request, String answer,
+                                                            List<String> reads) throws Exception {
+        var outcome = finish(workspace, request, answer, reads, false, List.of(), true, selected -> {
+            assertEquals(answer, selected.answer());
+            assertTrue(selected.assessment().preserved());
+        });
+        boolean comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(
+                TaskContractResolver.fromUserRequest(request)).active();
+        if (comparison) {
+            assertNotEquals(answer, outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("without one complete current-turn computation"));
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertEquals(AnswerOutputLimit.CLEAR, outcome.outputLimit());
+        } else {
+            assertEquals(answer, outcome.finalAnswer());
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
+            assertFalse(outcome.webDiagnosticGroundedOverride());
+            assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit());
+        }
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        return outcome;
+    }
+
     private static ExecutionOutcome finish(Path workspace, String request, String answer,
                                             List<String> reads, boolean hitLimit) throws Exception {
         return finish(workspace, request, answer, reads, hitLimit, List.of());
@@ -1099,20 +1173,65 @@ class ReadOnlyWebAnswerContractTest {
 
     private static ExecutionOutcome finish(Path workspace, String request, String answer,
             List<String> reads, boolean hitLimit, List<ToolCallLoop.ToolOutcome> additionalOutcomes) throws Exception {
+        return finish(workspace, request, answer, reads, hitLimit, additionalOutcomes, true);
+    }
+
+    private static ExecutionOutcome finish(Path workspace, String request, String answer,
+            List<String> reads, boolean hitLimit, List<ToolCallLoop.ToolOutcome> additionalOutcomes,
+            boolean supportedDiagnosisLane) throws Exception {
+        return finish(workspace, request, answer, reads, hitLimit, additionalOutcomes, supportedDiagnosisLane, null);
+    }
+
+    private static ExecutionOutcome finish(Path workspace, String request, String answer,
+            List<String> reads, boolean hitLimit, List<ToolCallLoop.ToolOutcome> additionalOutcomes,
+            boolean supportedDiagnosisLane,
+            java.util.function.Consumer<dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult> historicalCheck) throws Exception {
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
-        var contract = WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromUserRequest(request), workspace);
+        var resolved = WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromUserRequest(request), workspace);
+        var fixtureTargets = new java.util.LinkedHashSet<>(resolved.expectedTargets());
+        if (supportedDiagnosisLane) fixtureTargets.addAll(reads);
+        var contract = supportedDiagnosisLane && !resolved.mutationRequested() && !resolved.mutationAllowed()
+                ? new dev.talos.runtime.task.TaskContract(dev.talos.runtime.task.TaskType.DIAGNOSE_ONLY,
+                        resolved.mutationRequested(), resolved.mutationAllowed(), resolved.verificationRequired(),
+                        fixtureTargets, resolved.sourceEvidenceTargets(), resolved.forbiddenTargets(),
+                        resolved.originalUserRequest(), resolved.classificationReason(), resolved.staticWebRequirements())
+                : resolved;
         var plan = CurrentTurnPlan.create(contract, ExecutionPhase.INSPECT,
                 List.of("talos.read_file"), List.of("talos.read_file"), List.of());
         var outcomes = new ArrayList<ToolCallLoop.ToolOutcome>();
+        Map<String, String> sources = new LinkedHashMap<>();
         for (String read : reads) {
+            String source = Files.readString(workspace.resolve(read));
+            sources.put(read, source);
             outcomes.add(new ToolCallLoop.ToolOutcome("talos.read_file", read, true, false, false,
-                    Files.readString(workspace.resolve(read)), ""));
+                    source, ""));
         }
         outcomes.addAll(additionalOutcomes);
-        var loop = new ToolCallLoop.LoopResult(answer, outcomes.size(), outcomes.size(),
-                outcomes.stream().map(ToolCallLoop.ToolOutcome::toolName).toList(), List.of(),
-                0, 0, hitLimit, 0, reads, 0, 0, 0, 0, outcomes);
-        return ExecutionOutcome.fromToolLoop(answer, plan, messages, loop, workspace, 0);
+        boolean ownsTrace = !LocalTurnTraceCapture.isActive();
+        if (ownsTrace) {
+            LocalTurnTraceCapture.begin(LocalTurnTraceCapture.newTraceId(), "answer-contract", 1,
+                    java.time.Instant.EPOCH.toString(), "workspace-hash", "ASK", "test", "test", request);
+        }
+        try {
+            boolean eligible = !answer.isBlank() && additionalOutcomes.stream().noneMatch(
+                    outcome -> !outcome.success() || outcome.denied() || outcome.mutating()
+                            || outcome.mutationEffects().hasEffects());
+            ReadOnlyFinalizationEvidence evidence = eligible
+                    ? ReadOnlyFinalizationEvidenceTestSupport.evidence(workspace, contract, answer, sources)
+                    : ReadOnlyFinalizationEvidence.empty();
+            var loop = new ToolCallLoop.LoopResult(answer, outcomes.size(), outcomes.size(),
+                    outcomes.stream().map(ToolCallLoop.ToolOutcome::toolName).toList(), messages,
+                    0, 0, hitLimit, 0, reads, 0, 0, 0, 0,
+                    dev.talos.runtime.failure.FailureDecision.continueLoop(), outcomes, Map.of(), false,
+                    evidence.available() ? ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED
+                            : ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED,
+                    ReadOnlyEvidenceHandoff.empty(), evidence);
+            if (historicalCheck != null) historicalCheck.accept(AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                    answer, plan, messages, loop, workspace));
+            return ExecutionOutcome.fromToolLoop(answer, plan, messages, loop, workspace, 0);
+        } finally {
+            if (ownsTrace) LocalTurnTraceCapture.clear();
+        }
     }
 
     private static void fixture(Path workspace) throws Exception {

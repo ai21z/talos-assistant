@@ -24,8 +24,9 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
-import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
+import dev.talos.runtime.policy.EvidenceObligation;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -38,6 +39,8 @@ import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult;
+import dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment;
 import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
@@ -1724,10 +1727,13 @@ public final class AssistantTurnExecutor {
         }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 answer, plan, messages, loopResult, workspace,
-                extraMutationSuccesses, failedActionObligation);
-        String finalAnswer = groundedReadOnlyProposalAnswerIfNeeded(
-                outcome.finalAnswer(), messages, plan, loopResult);
-        return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(finalAnswer, opts), outcome.outputLimit());
+                extraMutationSuccesses, failedActionObligation, (text, components) -> {
+                    String grounded = groundedReadOnlyProposalAnswerIfNeeded(text, messages, plan, loopResult);
+                    return components.active()
+                            ? components.present(grounded, opts.answerSanitizer, opts.responseMaxChars)
+                            : sanitizeAndTruncate(grounded, opts);
+                });
+        return new AnswerOutputLimit.Presentation(outcome.finalAnswer(), outcome.outputLimit());
     }
 
     static String groundedReadOnlyProposalAnswerIfNeeded(
@@ -2478,6 +2484,17 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
+        return overrideSelectorMismatchAnalysisIfNeeded(
+                answer, plan, messages, loopResult, workspace, null);
+    }
+
+    static String overrideSelectorMismatchAnalysisIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            ReadOnlyWebDiagnosticResult diagnosticSelection) {
         if (answer == null || answer.isBlank()) return answer;
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
@@ -2494,17 +2511,15 @@ public final class AssistantTurnExecutor {
                 : contract.originalUserRequest();
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
-        if (answer.startsWith(dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX)) {
-            return answer;
+        var evidence = loopResult.readOnlyFinalizationEvidence();
+        if (diagnosticSelection != null && answer.equals(diagnosticSelection.answer())
+                && evidence.matches(loopResult.finalAnswer(), workspace, contract)
+                && evidence.selectionId().equals(diagnosticSelection.association().selectionId())
+                && ReadOnlyWebDiagnosticResult.textHash(answer)
+                    .equals(diagnosticSelection.association().outputHash())) {
+            return diagnosticSelection.answer();
         }
-        if (readStaticWebDiagnosticSurface(loopResult, workspace)
-                && answer.equals(StaticTaskVerifier.renderReadOnlyWebDiagnostics(
-                        workspace, loopResult.readPaths(), userRequest, answer))) {
-            return answer;
-        }
-
-        String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
-        return grounded == null || grounded.isBlank() ? answer : grounded;
+        return selectReadOnlyWebDiagnosticsIfNeeded(answer, plan, messages, loopResult, workspace).answer();
     }
 
     static String overrideStaticSelectorSearchAnswerIfNeeded(
@@ -2549,70 +2564,82 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
-        if (loopResult == null || workspace == null) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        return selectReadOnlyWebDiagnosticsIfNeeded(answer, plan, messages, loopResult, workspace).answer();
+    }
+
+    static ReadOnlyWebDiagnosticResult selectReadOnlyWebDiagnosticsIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
+        ReadOnlyWebDiagnosticResult unchanged = ReadOnlyWebDiagnosticResult.unaffected(answer);
+        if (loopResult == null || workspace == null) return unchanged;
+        if (loopResult.mutatingToolSuccesses() > 0) return unchanged;
         TaskContract requestContract = plan == null
                 ? TurnTaskContractCapture.currentOrResolve(messages)
                 : plan.taskContract();
-        if (requestContract == null) return answer;
+        if (requestContract == null) return unchanged;
         if (requestContract.mutationRequested()
                 || requestContract.mutationAllowed()) {
-            return answer;
+            return unchanged;
         }
-        if (requestContract.type() == TaskType.WORKSPACE_EXPLAIN) return answer;
+        var retainedEvidence = loopResult.readOnlyFinalizationEvidence();
+        if (retainedEvidence.proposalSelected()) {
+            if (dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.rejectedProposalSynthesis(loopResult)
+                    && plan != null
+                    && dev.talos.runtime.policy.EvidenceObligationAssessment.assessObserved(plan, loopResult)
+                        .result().status() == dev.talos.runtime.policy.EvidenceObligationVerifier.Status.SATISFIED) {
+                return new ReadOnlyWebDiagnosticResult(
+                        dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailableAnswer(),
+                        ReadOnlyWebAnswerAssessment.limited(ReadOnlyWebAnswerAssessment.Reason.SYNTHESIS_UNAVAILABLE),
+                        List.of());
+            }
+            if (!retainedEvidence.matches(answer == null ? "" : answer, workspace, requestContract)
+                    || loopResult.failedCalls() > 0 || loopResult.failureDecision().shouldStop()
+                    || loopResult.toolOutcomes().stream().anyMatch(outcome -> outcome.denied()
+                        || !outcome.success() || outcome.mutating() || outcome.mutationEffects().hasEffects()))
+                return StaticTaskVerifier.limitedReadOnlyWebDiagnostics(
+                        ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
+            return dev.talos.runtime.verification.NativeReadOnlyAnswerProposal.assessEvaluation(
+                    answer, retainedEvidence.requestMeaning(), retainedEvidence.sources())
+                    .withAssociation(retainedEvidence.selectionId(), retainedEvidence.generationId(), answer,
+                            retainedEvidence.sources().stream().map(source -> source.observationId()).toList());
+        }
+        if (requestContract.type() == TaskType.WORKSPACE_EXPLAIN) return unchanged;
+        EvidenceObligation requestEvidence = plan == null
+                ? EvidenceObligation.NONE
+                : EvidenceObligationPolicy.parse(plan.evidenceObligation());
         String originalUserRequest = requestContract.originalUserRequest();
         if ("WORKSPACE_EXPLAIN".equals(
                 ToolCallSupport.embeddedRetryTaskType(originalUserRequest))) {
-            return answer;
+            return unchanged;
         }
         String userRequest =
                 ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(
                         originalUserRequest);
-        if (StaticWebImportIntent.matches(userRequest)) return answer;
-        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
-        if (!readStaticWebDiagnosticSurface(loopResult, workspace)) return answer;
-
-        String grounded = StaticTaskVerifier.renderReadOnlyWebDiagnostics(
-                workspace,
-                loopResult.readPaths(),
-                userRequest,
-                answer == null ? "" : answer);
-        return grounded == null || grounded.isBlank() ? answer : grounded;
-    }
-
-    private static boolean readStaticWebDiagnosticSurface(ToolCallLoop.LoopResult loopResult, Path workspace) {
-        if (loopResult == null || loopResult.readPaths() == null || loopResult.readPaths().isEmpty()) return false;
-        boolean readHtml = false;
-        boolean readScript = false;
-        for (String path : loopResult.readPaths()) {
-            String lower = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
-            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-                readHtml = true;
-            }
-            if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-                readScript = true;
-            }
+        if (requestEvidence == EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED
+                && !looksLikeSelectorMismatchRequest(userRequest)) return unchanged;
+        if (StaticWebImportIntent.matches(userRequest)) return unchanged;
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)
+                && !looksLikeSelectorMismatchRequest(userRequest)) return unchanged;
+        if (requestContract.type() == TaskType.VERIFY_ONLY) {
+            ReadOnlyWebDiagnosticResult verified = StaticTaskVerifier.assessReadOnlyWebDiagnostics(
+                    workspace, loopResult.readPaths(), userRequest, answer);
+            return verified.answer() == null ? unchanged : verified;
         }
-        if (readHtml && readScript) return true;
-        if (!readHtml && !readScript) return false;
-        return EvidenceObligationVerifier.missingLinkedScriptReadTargets(
-                workspace, linkedScriptEvidenceOutcomes(loopResult)).isEmpty();
-    }
-
-    private static List<ToolCallLoop.ToolOutcome> linkedScriptEvidenceOutcomes(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null) return List.of();
-        if (loopResult.toolOutcomes() != null && !loopResult.toolOutcomes().isEmpty()) {
-            return loopResult.toolOutcomes();
+        var evidence = loopResult.readOnlyFinalizationEvidence();
+        if (!evidence.matches(answer == null ? "" : answer, workspace, requestContract)
+                || loopResult.failedCalls() > 0 || loopResult.failureDecision().shouldStop()
+                || loopResult.toolOutcomes().stream().anyMatch(outcome -> outcome.denied()
+                    || !outcome.success() || outcome.mutating() || outcome.mutationEffects().hasEffects())) {
+            return StaticTaskVerifier.limitedReadOnlyWebDiagnostics(
+                    ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
         }
-        if (loopResult.readPaths() == null || loopResult.readPaths().isEmpty()) return List.of();
-        List<ToolCallLoop.ToolOutcome> outcomes = new ArrayList<>();
-        for (String path : loopResult.readPaths()) {
-            String normalized = ToolCallSupport.normalizePath(path);
-            if (normalized.isBlank()) continue;
-            outcomes.add(new ToolCallLoop.ToolOutcome(
-                    "talos.read_file", normalized, true, false, false, "", ""));
-        }
-        return List.copyOf(outcomes);
+        ReadOnlyWebDiagnosticResult grounded = StaticTaskVerifier.assessReadOnlyWebDiagnostics(
+                evidence.sources(), userRequest, answer == null ? "" : answer, requestContract.answerRequirements());
+        return grounded.withAssociation(evidence.selectionId(), evidence.generationId(), answer,
+                evidence.sources().stream().map(source -> source.observationId()).toList());
     }
 
     static String overrideStaticWebImportAnswerIfNeeded(
@@ -2630,6 +2657,7 @@ public final class AssistantTurnExecutor {
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
         if (loopResult == null || workspace == null) return answer;
+        if (loopResult.readOnlyFinalizationEvidence().proposalSelected()) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
         String userRequest = latestUserRequest(plan, messages);
         if (!StaticWebImportIntent.matches(userRequest)) return answer;

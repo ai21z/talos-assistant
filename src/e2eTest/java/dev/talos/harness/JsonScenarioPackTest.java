@@ -312,7 +312,7 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: selector mismatch analysis is grounded in actual files")
+    @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: unbound selector analysis is explicitly limited")
     void selectorMismatchAnalysisIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/10-selector-mismatch-grounded.json");
 
@@ -320,52 +320,31 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertLocalTraceRecorded()
-                    .assertAnswerContains("[Answer incomplete: static diagnostics only;")
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("`.cta-button`")
-                    .assertAnswerContains("No files were changed.")
-                    .assertAnswerNotContains("There are no mismatches")
-                    .assertAnswerNotContains("present in both HTML and JavaScript");
-
-            var trace = result.localTrace();
-            assertEquals("ADVISORY_ONLY", trace.outcome().status());
-            assertEquals("NOT_RUN", trace.outcome().verificationStatus());
-            assertEquals("NOT_REQUESTED", trace.outcome().mutationStatus());
-            assertFalse(trace.taskContract().mutationAllowed());
-            assertFalse(trace.taskContract().mutationRequested());
-
-            for (String path : List.of("index.html", "style.css", "script.js")) {
-                assertTrue(trace.events().stream().anyMatch(event ->
-                                "TOOL_EXECUTED".equals(event.type())
-                                        && "talos.read_file".equals(event.toolName())
-                                        && path.equals(event.data().get("pathHint"))
-                                        && Boolean.TRUE.equals(event.data().get("success"))),
-                        "Expected successful current-turn read of " + path);
-            }
-            for (var entry : loaded.definition().initialFiles().entrySet()) {
-                assertArrayEquals(entry.getValue().getBytes(StandardCharsets.UTF_8),
-                        Files.readAllBytes(result.workspace().resolve(entry.getKey())),
-                        "Read-only diagnosis changed " + entry.getKey());
-            }
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "style.css", "script.js"));
+            result.assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("present in both HTML and JavaScript")
+                    .assertAnswerNotContains("`.cta-button`");
         }
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/20-selector-mismatch-grep-only-grounded.json] 20: grep-only selector underinspection is grounded")
-    void selectorMismatchGrepOnlyUnderinspectionIsGrounded() {
+    @DisplayName("[json-scenario:scenarios/20-selector-mismatch-grep-only-grounded.json] 20: grep-only selector underinspection is explicitly limited")
+    void selectorMismatchGrepOnlyUnderinspectionIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/20-selector-mismatch-grep-only-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Mismatches found:")
-                    .assertAnswerContains("`.cta-button`")
-                    .assertAnswerNotContains("There are no mismatches")
-                    .assertAnswerNotContains("No further action is needed");
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.grep", "talos.grep", "talos.grep"), List.of());
+            result.assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("there are no mismatches")
+                    .assertAnswerNotContains("No further action is needed")
+                    .assertAnswerNotContains("Mismatches found:")
+                    .assertAnswerNotContains("`.cta-button`");
         }
     }
 
@@ -658,40 +637,39 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/31-read-only-web-diagnostics-grounded.json] 31: read-only web diagnostics are grounded")
-    void readOnlyWebDiagnosticsAreGrounded() {
+    @DisplayName("[json-scenario:scenarios/31-read-only-web-diagnostics-grounded.json] 31: unbound web diagnostics do not acquire disk facts")
+    void readOnlyWebDiagnosticsAreGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/31-read-only-web-diagnostics-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerContains("`calculator-container` should probably be `.calculator-container`")
-                    .assertAnswerContains("No files were changed.")
-                    .assertAnswerNotContains("script.js` file is missing a closing script tag")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerNotContains("script.js` file is missing a closing script tag")
+                    .assertAnswerNotContains("malformed closing tag")
+                    .assertAnswerNotContains("`calculator-container` should probably be `.calculator-container`")
                     .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
                     .assertFileContains("index.html", "<script src=\"script.js\"></script");
         }
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/36-natural-site-diagnostic-grounded.json] 36: natural site diagnostic prompt is grounded")
-    void naturalSiteDiagnosticPromptIsGrounded() {
+    @DisplayName("[json-scenario:scenarios/36-natural-site-diagnostic-grounded.json] 36: natural site diagnosis reports unavailable source binding")
+    void naturalSiteDiagnosticPromptIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/36-natural-site-diagnostic-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerNotContains("newer browser")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerNotContains("newer browser")
+                    .assertAnswerNotContains("malformed closing tag")
                     .assertAnswerNotContains("There are no static HTML, CSS, or JavaScript problems");
         }
     }
@@ -1803,23 +1781,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: read-only web diagnostics stop before iteration cap")
-    void readOnlyWebDiagnosticsShortCircuit() {
+    @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: unbound read-only diagnosis stops after one post-read draft")
+    void readOnlyWebDiagnosticsShortCircuit() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/33-read-only-web-diagnostics-short-circuit.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerContains("1 iteration(s)")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerContains("1 iteration(s)")
                     .assertAnswerNotContains("iteration limit reached")
                     .assertAnswerNotContains("10 iteration(s)")
                     .assertAnswerNotContains("failure policy stopped")
+                    .assertAnswerNotContains("malformed closing tag")
+                    .assertAnswerNotContains("A problem in the BMI calculation is suspected")
                     .assertAnswerNotContains("This response should not be reached");
+            assertTwoForegroundResponsesEndWith(result,
+                    "The page files were reviewed. A problem in the BMI calculation is suspected.");
         }
     }
 
@@ -1929,6 +1910,111 @@ class JsonScenarioPackTest {
             assertTrue(result.streamedText().isEmpty(),
                     "buffered workspace-evidence turn should not stream the ungrounded first answer");
         }
+    }
+
+    private static void assertSourceUnavailableReadOnlyScenario(
+            ExecutorScenarioResult result,
+            List<String> expectedTools,
+            List<String> expectedReadPaths
+    ) throws Exception {
+        result.assertApprovalCounts(0, 0, 0, 0)
+                .assertLocalTraceRecorded()
+                .assertAnswerContains("[Answer incomplete: static diagnostics only;")
+                .assertAnswerContains("The source observations could not be bound to this answer with complete eligible coverage.")
+                .assertAnswerContains("No files were changed.")
+                .assertAnswerNotContains("Static web diagnostics found:");
+
+        var trace = result.localTrace();
+        String traceDetail = trace.events().toString();
+        assertEquals("ADVISORY_ONLY", trace.outcome().status(), traceDetail);
+        assertEquals("NOT_RUN", trace.outcome().verificationStatus(), traceDetail);
+        assertEquals("NOT_REQUESTED", trace.outcome().mutationStatus(), traceDetail);
+        assertFalse(trace.taskContract().mutationAllowed(), trace.taskContract().toString());
+        assertFalse(trace.taskContract().mutationRequested(), trace.taskContract().toString());
+        assertTraceExpectedTargets(result);
+
+        var assessments = trace.events().stream()
+                .filter(event -> "READ_ONLY_WEB_ANSWER_ASSESSED".equals(event.type()))
+                .toList();
+        assertEquals(1, assessments.size(), traceDetail);
+        var assessment = assessments.getFirst().data();
+        assertEquals("LIMITED", assessment.get("disposition"), assessment.toString());
+        assertEquals("SOURCE_EVIDENCE_UNAVAILABLE", assessment.get("reasonCode"), assessment.toString());
+        assertEquals(0, assessment.get("typedDiagnosticCount"), assessment.toString());
+        assertEquals(List.of(), assessment.get("typedDiagnosticKinds"), assessment.toString());
+        for (String key : List.of("selectionId", "generationId", "inputHash", "outputHash",
+                "observationIds", "analysisVersion", "scope")) {
+            assertFalse(assessment.containsKey(key),
+                    "Unavailable observations must not acquire " + key + ": " + assessment);
+        }
+
+        var executed = trace.events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .toList();
+        assertEquals(expectedTools, executed.stream().map(event -> event.toolName()).toList(), traceDetail);
+        assertEquals(expectedTools, trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .map(event -> event.toolName()).toList(), traceDetail);
+        assertTrue(executed.stream().allMatch(event -> Boolean.TRUE.equals(event.data().get("success"))),
+                traceDetail);
+        assertTrue(executed.stream().noneMatch(event -> event.data().containsKey("mutationEffects")),
+                traceDetail);
+        assertEquals(expectedReadPaths, executed.stream()
+                .filter(event -> "talos.read_file".equals(event.toolName()))
+                .map(event -> String.valueOf(event.data().get("pathHint")))
+                .toList(), traceDetail);
+        assertFalse(trace.events().stream().anyMatch(event ->
+                        "TOOL_CALL_BLOCKED".equals(event.type())
+                                || "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())),
+                traceDetail);
+        var outcomes = trace.events().stream()
+                .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                .toList();
+        assertEquals(expectedTools.size(), outcomes.size(), traceDetail);
+        for (var outcome : outcomes) {
+            assertEquals(true, outcome.data().get("success"), outcome.toString());
+            assertEquals(false, outcome.data().get("denied"), outcome.toString());
+            assertEquals(false, outcome.data().get("mutating"), outcome.toString());
+            assertEquals("NONE", outcome.data().get("mutationEvidenceKind"), outcome.toString());
+        }
+
+        for (var entry : result.definition().initialFiles().entrySet()) {
+            assertArrayEquals(entry.getValue().getBytes(StandardCharsets.UTF_8),
+                    Files.readAllBytes(result.workspace().resolve(entry.getKey())),
+                    "Read-only diagnosis changed " + entry.getKey());
+        }
+    }
+
+    private static void assertTwoForegroundResponsesEndWith(
+            ExecutorScenarioResult result,
+            String expectedSecondDraft
+    ) throws Exception {
+        var foregroundEvents = result.localTrace().events().stream()
+                .filter(event -> "FOREGROUND_PROVIDER".equals(event.data().get("source"))
+                        && "TURN_RESPONSE".equals(event.data().get("purpose")))
+                .toList();
+        var startedIds = foregroundEvents.stream()
+                .filter(event -> "GENERATION_STARTED".equals(event.type()))
+                .map(event -> event.data().get("generationId"))
+                .toList();
+        assertEquals(2, startedIds.size(), foregroundEvents.toString());
+        assertEquals(2, startedIds.stream().distinct().count(), foregroundEvents.toString());
+        for (String type : List.of("GENERATION_REQUEST_DISPATCHED", "GENERATION_COMPLETED")) {
+            assertEquals(startedIds, foregroundEvents.stream()
+                    .filter(event -> type.equals(event.type()))
+                    .map(event -> event.data().get("generationId"))
+                    .toList(), type + ": " + foregroundEvents);
+        }
+        var completed = foregroundEvents.stream()
+                .filter(event -> "GENERATION_COMPLETED".equals(event.type()))
+                .toList();
+        String expectedHash = "sha256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(expectedSecondDraft.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(expectedHash, completed.getLast().data().get("assistantHash"), completed.toString());
+        assertTrue(completed.stream().allMatch(event ->
+                        "PROVIDER_EOS".equals(event.data().get("completion"))
+                                && Boolean.TRUE.equals(event.data().get("providerTerminalEligible"))),
+                completed.toString());
     }
 
     private static void assertTraceExpectedTargets(ExecutorScenarioResult result, String... expectedTargets) {

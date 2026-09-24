@@ -16,6 +16,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ProviderReadInputBinding;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
@@ -64,23 +65,17 @@ public final class LlmClient implements AutoCloseable {
     private final long responseMaxChars;
 
     /**
-     * P2 - no-progress wall-clock budget for a single LLM call (one full
-     * {@link #chatStreamFull} or {@link #chatFull} invocation, including all
-     * internal retries). Once token chunks are arriving, the idle watchdog below
-     * becomes the live-progress guard so slow local models are not killed solely
-     * because they crossed the first wall-clock threshold.
+     * First-output allowance for one {@link #chatStreamFull} or
+     * {@link #chatFull} invocation, including internal retries. Progress is
+     * established by nonempty decoded text or a complete native tool-call
+     * chunk. Heartbeats, separate reasoning fields and incomplete native
+     * arguments do not establish progress.
      *
-     * <p><b>Why this exists:</b> the JDK {@code HttpRequest.timeout(...)} only
-     * fires while waiting for the <em>next</em> chunk; once chunks trickle in
-     * slowly the request never times out, so a wedged or runaway local model
-     * can hang the UI for tens of minutes (observed: 23 minutes in a real
-     * transcript before the loop hit max-iterations). The non-streaming
-     * legacy path in {@code AssistantTurnExecutor} already wraps its call in
-     * a {@code CompletableFuture.get(timeout)}, but the streaming path and
-     * the tool-call-loop re-prompts had no equivalent. This field, plus
-     * {@link LlmCallBudget#run}, closes that gap. Calls that never produce a
-     * first chunk still fail at this budget; calls that keep producing chunks
-     * can continue past it until they finish or go idle.
+     * <p>When the idle watchdog is enabled, progressing calls may continue
+     * beyond this allowance. A shorter idle budget is applied only after
+     * first output. When the idle watchdog is disabled, this allowance is
+     * retained as a hard call deadline. No total generation cap is implied
+     * for continuously progressing calls with the idle watchdog enabled.
      *
      * <p>Default 300_000 ms (5 min), overridable via
      * {@code limits.llm_timeout_ms} in config or per-call via the
@@ -89,16 +84,10 @@ public final class LlmClient implements AutoCloseable {
     private final long defaultWallClockBudgetMs;
 
     /**
-     * P2 - idle-stream timeout (ms). If no chunk (text or tool-call) arrives
-     * from the engine within this window, the worker is interrupted and the
-     * call returns a synthesized abort marker (same shape as the wall-clock
-     * trip).
-     *
-     * <p><b>Why this exists in addition to the wall-clock budget:</b> a short
-     * prompt that wedges the model produces a long stretch of zero tokens
-     * well before a long wall-clock budget would fire. The user-visible UX is "Talos
-     * is frozen". An idle watchdog catches that case in tens of seconds, not
-     * minutes, while genuine chunk progress keeps big local-model generations alive.
+     * Post-output idle timeout in milliseconds. After decoded progress has
+     * been observed, later stalls are abandoned through the budget arbiter.
+     * Stream closure is attempted, but cooperative worker termination is
+     * not assumed. The first-output allowance is not shortened by this limit.
      *
      * <p>Configurable via {@code limits.llm_idle_ms}; default 60_000 ms.
      * Set ≤0 to disable.
@@ -384,6 +373,17 @@ public final class LlmClient implements AutoCloseable {
         } catch (RuntimeException failure) {
             rethrowControlFlow(failure);
             return ModelIdentitySnapshot.empty();
+        }
+    }
+
+    public boolean supportsJsonSchemaResponse() {
+        if (mode != TransportMode.ENGINE || engineResolver == null) return false;
+        try {
+            Capabilities current = effectiveCapabilities();
+            return current != null && current.jsonSchemaResponse();
+        } catch (Exception failure) {
+            rethrowControlFlow(failure);
+            return false;
         }
     }
 
@@ -753,7 +753,7 @@ public final class LlmClient implements AutoCloseable {
                         m.role(),
                         Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
                         m.toolCalls(),
-                        m.toolCallId()))
+                        m.toolCallId(), m.contentRestrictions()))
                 .toList();
 
         return LlmRetryExecutor.executeIndexed(MAX_RETRIES, tryNumber -> {
@@ -1129,7 +1129,7 @@ public final class LlmClient implements AutoCloseable {
             // OR-combines the engine-level cancel and the externally-set cancel
             // hook so a Ctrl-C future patch can plug in without touching this
             // method.
-            AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
+            AtomicLong lastChunkAt = new AtomicLong();
             RepetitionBreaker breaker = new RepetitionBreaker();
             Consumer<String> decodedProgressSink = chunk -> {
                 lastChunkAt.set(System.currentTimeMillis());
@@ -1214,7 +1214,7 @@ public final class LlmClient implements AutoCloseable {
                         syntheticStreamResult(placeholderFromMessages(messages)), source, generation);
             }
             // P2 - same idle-watchdog + cancel-hook plumbing as chatStreamFull.
-            AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
+            AtomicLong lastChunkAt = new AtomicLong();
             RepetitionBreaker breaker = new RepetitionBreaker();
             Consumer<String> decodedProgressSink = chunk -> {
                 lastChunkAt.set(System.currentTimeMillis());
@@ -1670,10 +1670,8 @@ public final class LlmClient implements AutoCloseable {
         // supplier and an interrupt of its budget-owned worker thread. Keep
         // those signals distinct so an internal shutdownNow cannot be
         // reported as an operator cancellation.
-        // The pre-engine heartbeat prime lives in LlmCallBudget.run, which
-        // sets and captures the same value so thread-start latency can never
-        // read as first-token progress (T988). Priming here on the worker
-        // thread would race that capture.
+        // Unseen progress is initialized by LlmCallBudget.run before work
+        // is submitted. No progress is inferred from worker startup.
         return engineAssembledWithMessagesFull(
                 messages, displaySink, decodedProgressSink, timeout, cancelled, activeStream,
                 requestToolSpecs, controls, streamRequest, generation);
@@ -1702,7 +1700,7 @@ public final class LlmClient implements AutoCloseable {
                         m.role(),
                         Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
                         m.toolCalls(),
-                        m.toolCallId()))
+                        m.toolCallId(), m.contentRestrictions()))
                 .toList();
         List<ToolSpec> tools = effectiveToolSpecs(
                 requestToolSpecs, generation.toolAuthorityMode());
@@ -1845,6 +1843,7 @@ public final class LlmClient implements AutoCloseable {
             }
         };
         try {
+            attempt.bindPreparedReadInputs(request, ProviderReadInputBinding.SANITIZER_VERSION);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(request, streamRequest));
         } catch (RuntimeException | Error preDispatch) {
             attempt.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
@@ -2299,7 +2298,7 @@ public final class LlmClient implements AutoCloseable {
                                                          List<ToolSpec> tools,
                                                          ChatRequestControls controls) {
         int contextWindowTokens = effectiveContextWindowTokens();
-        int inputBudgetTokens = inputBudgetTokens(contextWindowTokens);
+        int inputBudgetTokens = inputBudgetTokens(contextWindowTokens, controls);
         int estimatedTokens = estimateChatRequestTokens(messages, tools, controls);
         if (estimatedTokens <= inputBudgetTokens) {
             return messages;
@@ -2353,10 +2352,12 @@ public final class LlmClient implements AutoCloseable {
         return Math.max(256, configured);
     }
 
-    private static int inputBudgetTokens(int contextWindowTokens) {
+    private static int inputBudgetTokens(int contextWindowTokens, ChatRequestControls controls) {
         TokenBudget budget = new TokenBudget(contextWindowTokens);
         int responseReserve = (int) (budget.contextMaxTokens() * budget.responseReserveFraction());
-        return Math.max(64, budget.contextMaxTokens() - responseReserve - budget.overheadTokens());
+        int requestedOutput = controls == null ? 0 : controls.maxOutputTokens();
+        responseReserve = Math.max(responseReserve, requestedOutput);
+        return (int) Math.max(0L, (long) budget.contextMaxTokens() - responseReserve - budget.overheadTokens());
     }
 
     private static int estimateChatRequestTokens(List<ChatMessage> messages,

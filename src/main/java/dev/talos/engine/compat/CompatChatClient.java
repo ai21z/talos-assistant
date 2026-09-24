@@ -1,5 +1,8 @@
 package dev.talos.engine.compat;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -59,6 +62,11 @@ public final class CompatChatClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompatChatClient.class);
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
+    static final int MAX_RESPONSE_SCHEMA_CHARS = 64_000;
+    private static final ObjectMapper RESPONSE_SCHEMA_MAPPER = new ObjectMapper(JsonFactory.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(32)
+                    .maxStringLength(MAX_RESPONSE_SCHEMA_CHARS).maxNumberLength(128).build()).build());
     private static final Pattern CONTEXT_SIZE_PATTERN = Pattern.compile(
             "request\\s*\\((\\d+)\\s+tokens\\)\\s+exceeds\\s+the\\s+available\\s+context\\s+size\\s*\\((\\d+)\\s+tokens\\)",
             Pattern.CASE_INSENSITIVE);
@@ -110,7 +118,7 @@ public final class CompatChatClient {
         HttpResponse<String> resp;
         try {
             ProviderTransportAttempt transport = ProviderTransportHandoff.admit(
-                    handoff, json, req.tools);
+                    handoff, json, req.tools, req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(
@@ -169,7 +177,7 @@ public final class CompatChatClient {
         HttpResponse<java.io.InputStream> resp;
         ProviderTransportAttempt transport;
         try {
-            transport = ProviderTransportHandoff.admit(handoff, json, req.tools);
+            transport = ProviderTransportHandoff.admit(handoff, json, req.tools, req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(transport, HttpResponse.BodyHandlers.ofInputStream())));
@@ -239,7 +247,7 @@ public final class CompatChatClient {
         HttpResponse<String> resp;
         ProviderTransportAttempt transport;
         try {
-            transport = ProviderTransportHandoff.admit(handoff, json, req.tools);
+            transport = ProviderTransportHandoff.admit(handoff, json, req.tools, req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(
@@ -475,10 +483,25 @@ public final class CompatChatClient {
             case JSON_SCHEMA -> {
                 Map<String, Object> rf = new LinkedHashMap<>();
                 rf.put("type", "json_schema");
-                rf.put("schema", parseSchemaOrDefault(req.controls.jsonSchema()));
+                rf.put("json_schema", Map.of("schema", parseResponseSchema(req.controls.jsonSchema())));
                 yield rf;
             }
         };
+    }
+
+    private static JsonNode parseResponseSchema(String schemaJson) {
+        if (schemaJson == null || schemaJson.isBlank() || schemaJson.length() > MAX_RESPONSE_SCHEMA_CHARS) {
+            throw new IllegalArgumentException("Invalid JSON response schema");
+        }
+        try {
+            JsonNode schema = readExactJson(RESPONSE_SCHEMA_MAPPER, schemaJson);
+            if (schema == null || !schema.isObject() || schema.isEmpty()) {
+                throw new IllegalArgumentException("Invalid JSON response schema");
+            }
+            return schema;
+        } catch (IOException failure) {
+            throw new IllegalArgumentException("Invalid JSON response schema", failure);
+        }
     }
 
     private Object parseSchemaOrDefault(String schemaJson) {

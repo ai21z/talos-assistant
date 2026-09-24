@@ -62,15 +62,11 @@ final class LlmCallBudget implements AutoCloseable {
                                ProviderResponseCapture.Generation generation) {
         final AtomicReference<AutoCloseable> activeStream = new AtomicReference<>();
         java.util.concurrent.ScheduledFuture<?> watchdog = null;
-        // This budget owns the pre-engine heartbeat prime: setting and
-        // capturing the same value here means only a real token chunk can
-        // ever read as progress. A worker-side prime would race this capture
-        // and could turn thread-start latency into false first-token
-        // progress, silently disabling the no-progress wall clock.
-        long initialChunkAt = -1L;
+        // Progress is reset once per logical call, before work is submitted.
+        // Zero remains unseen until decoded text or a complete native call
+        // is reported. Startup and internal retries cannot prime progress.
         if (lastChunkAt != null) {
-            initialChunkAt = System.currentTimeMillis();
-            lastChunkAt.set(initialChunkAt);
+            lastChunkAt.set(0L);
         }
 
         if (wallClockMs <= 0) {
@@ -87,13 +83,13 @@ final class LlmCallBudget implements AutoCloseable {
         TerminalArbiter arbiter = new TerminalArbiter(activeStream, generation);
         CompletableFuture<LlmClient.StreamResult> future = arbiter.outcome();
         try {
-            llmCallExecutor.execute(() -> {
+            llmCallExecutor.execute(dev.talos.safety.ContentRestrictionScope.propagate(() -> {
                 try {
                     arbiter.workSucceeded(work.apply(activeStream));
                 } catch (Throwable failure) {
                     arbiter.workFailed(failure);
                 }
-            });
+            }));
         } catch (RuntimeException submissionFailure) {
             arbiter.workFailed(submissionFailure);
         }
@@ -124,8 +120,9 @@ final class LlmCallBudget implements AutoCloseable {
                     return;
                 }
                 if (wantIdleWatchdog) {
-                    long since = System.currentTimeMillis() - lastChunkAt.get();
-                    if (since > defaultIdleMs) {
+                    long currentChunkAt = lastChunkAt.get();
+                    long since = System.currentTimeMillis() - currentChunkAt;
+                    if (currentChunkAt != 0L && since > defaultIdleMs) {
                         arbiter.abort(
                                 ProviderResponseCapture.Abandonment.IDLE_TIMEOUT,
                                 idleAbort(label, defaultIdleMs));
@@ -144,7 +141,6 @@ final class LlmCallBudget implements AutoCloseable {
                     future,
                     wallClockMs,
                     lastChunkAt,
-                    initialChunkAt,
                     label,
                     arbiter);
         } catch (TimeoutException te) {
@@ -171,7 +167,6 @@ final class LlmCallBudget implements AutoCloseable {
             CompletableFuture<LlmClient.StreamResult> future,
             long wallClockMs,
             AtomicLong lastChunkAt,
-            long initialChunkAt,
             String label,
             TerminalArbiter arbiter
     ) throws InterruptedException, ExecutionException, TimeoutException {
@@ -188,7 +183,7 @@ final class LlmCallBudget implements AutoCloseable {
                     return future.get(1L, TimeUnit.MILLISECONDS);
                 }
                 long currentChunkAt = lastChunkAt.get();
-                observedProgress = observedProgress || currentChunkAt > initialChunkAt;
+                observedProgress = observedProgress || currentChunkAt != 0L;
                 long idleForMs = now - currentChunkAt;
                 if (observedProgress && idleForMs <= defaultIdleMs) {
                     waitMs = Math.max(1L, Math.min(idleRemainingMs(idleForMs), watchdogPollMs()));
@@ -366,11 +361,24 @@ final class LlmCallBudget implements AutoCloseable {
                         ProviderResponseCapture.TRANSPORT_SETTLEMENT_GRACE_MS);
             }
             decision = Decision.ABORT;
+            AutoCloseable abandonedStream = activeStream.getAndSet(null);
             outcome.complete(result.withAbandonment(abandonment));
-            // Closing can block or be ignored by provider code. Publication
-            // must not depend on close cooperation once the generation fact
-            // and caller outcome agree on the winning abort.
-            closeActiveStream(activeStream);
+            // A resistant close must not block the caller or the watchdog.
+            // The detached handle is attempted once, independently of budget
+            // executor shutdown. Transport settlement is not inferred from it.
+            if (abandonedStream != null) {
+                try {
+                    Thread.ofVirtual().name("talos-llm-abandoned-stream-close").start(() -> {
+                        try {
+                            abandonedStream.close();
+                        } catch (Exception ignored) {
+                            // The selected terminal outcome is retained.
+                        }
+                    });
+                } catch (RuntimeException ignored) {
+                    // No inline close fallback may block terminal return.
+                }
+            }
             return true;
         }
     }

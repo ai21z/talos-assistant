@@ -117,6 +117,13 @@ public final class ActiveTaskContextPolicy {
                     false);
         }
 
+        if (savedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES
+                && !savedContext.hasBoundProposal()) {
+            return new Decision(current,
+                    savedContext.suppressed("Proposal provenance is unavailable. Explicit edit scope is required."),
+                    ArtifactGoal.none(), savedContext, false);
+        }
+
         if (!mutationAuthorityComplete) {
             return new Decision(
                     current,

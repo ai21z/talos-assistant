@@ -54,7 +54,7 @@ final class ToolRepromptSuccessfulMutationDecision {
                     LOG.debug("Continuing static web creation after directory-only mutation.");
                 } else {
                     LOG.debug("Continuing static web creation after verification found missing target(s): {}",
-                            plan.missingTargets());
+                            dev.talos.safety.SafeLogFormatter.value(plan.missingTargets()));
                 }
                 return Optional.of(ToolRepromptChatExecutor.execute(
                         state, plan.messages(), plan.tools(), plan.controls(), plan.retryName()));
@@ -68,11 +68,11 @@ final class ToolRepromptSuccessfulMutationDecision {
         }
         if (!remainingRepairTargets.isEmpty()) {
             LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
-                    outcome.mutationsThisIteration(), remainingRepairTargets);
+                    outcome.mutationsThisIteration(), dev.talos.safety.SafeLogFormatter.value(remainingRepairTargets));
         }
         if (!remainingExpectedTargets.isEmpty()) {
             LOG.debug("Continuing mutation task after {} successful mutation(s); remaining expected targets: {}",
-                    outcome.mutationsThisIteration(), remainingExpectedTargets);
+                    outcome.mutationsThisIteration(), dev.talos.safety.SafeLogFormatter.value(remainingExpectedTargets));
         }
         return Optional.empty();
     }

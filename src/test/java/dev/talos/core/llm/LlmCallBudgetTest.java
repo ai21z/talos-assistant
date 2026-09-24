@@ -212,12 +212,13 @@ class LlmCallBudgetTest {
     }
 
     @Test
-    void idle_watchdog_aborts_when_no_chunks_arrive() throws Exception {
+    void idle_watchdog_aborts_when_chunks_stop_after_first_output() throws Exception {
         AtomicBoolean streamClosed = new AtomicBoolean();
         try (LlmCallBudget budget = new LlmCallBudget(200L)) {
             AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
             LlmClient.StreamResult result = budget.run(ref -> {
                 ref.set(() -> streamClosed.set(true));
+                lastChunkAt.set(System.currentTimeMillis());
                 try {
                     Thread.sleep(5_000L);
                 } catch (InterruptedException e) {
@@ -240,6 +241,129 @@ class LlmCallBudgetTest {
                 Thread.sleep(25L);
             }
             assertTrue(streamClosed.get(), "idle watchdog must close the active stream");
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void first_output_may_arrive_after_idle_but_before_the_initial_deadline() throws Exception {
+        AtomicLong lastChunkAt = new AtomicLong(123L);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        try (LlmCallBudget budget = new LlmCallBudget(200L);
+             ExecutorService caller = Executors.newSingleThreadExecutor()) {
+            Future<LlmClient.StreamResult> result = caller.submit(() -> budget.run(ref -> {
+                entered.countDown();
+                try {
+                    awaitIgnoringInterrupt(release);
+                    lastChunkAt.set(System.currentTimeMillis());
+                    return OK;
+                } finally {
+                    finished.countDown();
+                }
+            }, 5_000L, lastChunkAt, "test", null));
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                assertThrows(TimeoutException.class, () -> result.get(1_200L, TimeUnit.MILLISECONDS),
+                        "The shorter idle budget must not abort an unseen first output");
+                release.countDown();
+                assertSame(OK, result.get(2, TimeUnit.SECONDS));
+            } finally {
+                release.countDown();
+                assertTrue(finished.await(2, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @Test
+    void progress_is_unseen_until_the_worker_reports_a_decoded_chunk() {
+        AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
+        try (LlmCallBudget budget = new LlmCallBudget(1_000L)) {
+            assertSame(OK, budget.run(ref -> {
+                assertEquals(0L, lastChunkAt.get(),
+                        "Thread startup must not be counted as decoded progress");
+                lastChunkAt.set(System.currentTimeMillis());
+                assertNotEquals(0L, lastChunkAt.get(),
+                        "Immediate progress must be distinct from the unseen state");
+                return OK;
+            }, 3_000L, lastChunkAt, "test", null));
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void unseen_first_output_reaches_its_initial_deadline_and_rejects_late_completion() throws Exception {
+        assertPhaseAbandonsBeforeLateWorkerCompletion(false);
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void stall_after_first_decoded_output_keeps_idle_abandonment() throws Exception {
+        assertPhaseAbandonsBeforeLateWorkerCompletion(true);
+    }
+
+    private static void assertPhaseAbandonsBeforeLateWorkerCompletion(boolean firstOutput)
+            throws Exception {
+        LedgerListener ledger = new LedgerListener();
+        ProviderResponseCapture.Scope scope = ProviderResponseCapture.begin(
+                ledger, firstOutput ? "turn-idle-after-output" : "turn-first-output-deadline");
+        ProviderResponseCapture.Generation generation = scope.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        AtomicLong lastChunkAt = new AtomicLong(-1L);
+        AtomicInteger decodedChunks = new AtomicInteger();
+        CountDownLatch workerReady = new CountDownLatch(1);
+        CountDownLatch releaseLateOutput = new CountDownLatch(1);
+        CountDownLatch workerFinished = new CountDownLatch(1);
+
+        try (LlmCallBudget budget = new LlmCallBudget(200L)) {
+            LlmClient.StreamResult result = budget.run(ref -> {
+                try {
+                    ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+                    attempt.requestDispatched();
+                    java.util.function.Consumer<String> decodedProgress = chunk -> {
+                        decodedChunks.incrementAndGet();
+                        lastChunkAt.set(System.currentTimeMillis());
+                    };
+                    LlmClient.reportDecodedProviderProgress("", decodedProgress);
+                    LlmClient.reportDecodedProviderProgress(null, decodedProgress);
+                    if (firstOutput) {
+                        LlmClient.reportDecodedProviderProgress("{", decodedProgress);
+                    }
+                    workerReady.countDown();
+                    awaitIgnoringInterrupt(releaseLateOutput);
+                    LlmClient.reportDecodedProviderProgress("late output", decodedProgress);
+                    ProviderResponseCapture.Receipt late = attempt.respond(response("late reply"));
+                    generation.complete(late);
+                    return OK;
+                } finally {
+                    workerFinished.countDown();
+                }
+            }, 1_500L, lastChunkAt, "test", null, null, generation);
+
+            assertTrue(workerReady.await(1, TimeUnit.SECONDS));
+            assertEquals(firstOutput ? 1 : 0, decodedChunks.get());
+            assertTrue(result.aborted());
+            var expected = firstOutput ? ProviderResponseCapture.Abandonment.IDLE_TIMEOUT
+                    : ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT;
+            assertEquals(expected,
+                    result.abandonment().orElseThrow());
+            assertEquals(1, ledger.abandonments.size());
+            assertEquals(expected,
+                    ledger.abandonments.getFirst().abandonment());
+
+            releaseLateOutput.countDown();
+            assertTrue(workerFinished.await(2, TimeUnit.SECONDS));
+            assertEquals(firstOutput ? 2 : 1, decodedChunks.get());
+            assertTrue(ledger.responses.isEmpty());
+            assertTrue(ledger.completions.isEmpty());
+            assertEquals(1, ledger.abandonments.size());
+        } finally {
+            releaseLateOutput.countDown();
+            ProviderResponseCapture.clear();
         }
     }
 
@@ -524,6 +648,82 @@ class LlmCallBudgetTest {
             assertTrue(workerFinished.await(2, TimeUnit.SECONDS));
         } finally {
             releaseWorker.countDown();
+            ProviderResponseCapture.clear();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @org.junit.jupiter.api.Timeout(10)
+    void first_output_deadline_returns_while_active_stream_close_is_blocked(boolean captured) throws Exception {
+        LedgerListener ledger = new LedgerListener();
+        ProviderResponseCapture.Generation generation = captured
+                ? ProviderResponseCapture.begin(ledger, "first-output-resistant-close").openGeneration(
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE)
+                : null;
+        CountDownLatch closeEntered = new CountDownLatch(1);
+        CountDownLatch releaseClose = new CountDownLatch(1);
+        CountDownLatch closeFinished = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        CountDownLatch workerFinished = new CountDownLatch(1);
+        AtomicInteger closeCalls = new AtomicInteger();
+        AtomicBoolean daemonCloser = new AtomicBoolean();
+        AtomicBoolean virtualCloser = new AtomicBoolean();
+        AtomicReference<AtomicReference<AutoCloseable>> registeredHandle = new AtomicReference<>();
+        try (LlmCallBudget budget = new LlmCallBudget(100L);
+             ExecutorService caller = Executors.newSingleThreadExecutor()) {
+            Future<LlmClient.StreamResult> pending = caller.submit(() -> budget.run(ref -> {
+                registeredHandle.set(ref);
+                ProviderResponseCapture.Attempt attempt = generation == null ? null : generation.startAttempt(
+                        ProviderResponseCapture.AttemptKind.PRIMARY,
+                        ProviderResponseCapture.RetryReason.NONE);
+                if (attempt != null) attempt.requestDispatched();
+                ref.set(() -> {
+                    closeCalls.incrementAndGet();
+                    daemonCloser.set(Thread.currentThread().isDaemon());
+                    virtualCloser.set(Thread.currentThread().isVirtual());
+                    closeEntered.countDown();
+                    try {
+                        awaitIgnoringInterrupt(releaseClose);
+                    } finally {
+                        closeFinished.countDown();
+                    }
+                });
+                try {
+                    awaitIgnoringInterrupt(releaseWorker);
+                    if (attempt != null) generation.complete(attempt.respond(response("late reply")));
+                    return OK;
+                } finally {
+                    workerFinished.countDown();
+                }
+            }, 800L, new AtomicLong(), "test", null, null, generation));
+            try {
+                assertTrue(closeEntered.await(3L, TimeUnit.SECONDS));
+                LlmClient.StreamResult result = pending.get(1_000L, TimeUnit.MILLISECONDS);
+                assertEquals(ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT,
+                        result.abandonment().orElseThrow());
+                assertEquals(1L, closeFinished.getCount(), "the close must remain blocked at caller return");
+                assertTrue(daemonCloser.get(), "a resistant close must not retain JVM liveness");
+                assertTrue(virtualCloser.get());
+                assertNull(registeredHandle.get().get(), "the closer must own only the detached handle");
+                budget.close();
+                releaseWorker.countDown();
+                assertTrue(workerFinished.await(2L, TimeUnit.SECONDS));
+                assertSame(result, pending.get());
+                assertEquals(1, closeCalls.get());
+                if (captured) {
+                    assertEquals(1, ledger.abandonments.size());
+                    assertTrue(ledger.responses.isEmpty());
+                    assertTrue(ledger.completions.isEmpty());
+                }
+            } finally {
+                releaseClose.countDown();
+                releaseWorker.countDown();
+                assertTrue(closeFinished.await(2L, TimeUnit.SECONDS));
+                assertTrue(workerFinished.await(2L, TimeUnit.SECONDS));
+            }
+        } finally {
             ProviderResponseCapture.clear();
         }
     }

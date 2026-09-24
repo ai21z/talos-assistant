@@ -39,6 +39,9 @@ final class CanonicalMutationClauseMatcher {
                     + "(?:\\s+(?:please|kindly))?\\s*[.!?]?\\s*$");
     private static final Pattern DIRECT_ASSISTANT_ACTION_REQUEST =
             Pattern.compile("(?iu)^\\s*(?:can|could|would)\\s+you\\s*$");
+    private static final Pattern DIRECT_TOOL_ACTION_REQUEST = Pattern.compile(
+            "(?iu)^\\s*use\\s+[a-z][a-z0-9_]{0,63}"
+                    + "(?:\\.[a-z][a-z0-9_]{0,63})?\\s+to\\s*$");
     private static final Pattern WORKSPACE_OVERWRITE_MODIFIER_GAP =
             Pattern.compile("(?iu).*(?:\\band\\s+|,\\s*)$");
     private static final Pattern WORKSPACE_OVERWRITE_MODIFIER_SUFFIX =
@@ -71,8 +74,8 @@ final class CanonicalMutationClauseMatcher {
                     + "write|create|save|apply|add|put|implement|"
                     + "regenerate|generate|scaffold|build|make|"
                      + "improve|edit|update|rewrite|replace|append|refactor|"
-                     + "overwrite|modify|change|fix|adjust|tweak|restyle|"
-                    + "redesign|polish|repair|touch"
+                     + "overwrite|modify|change|fix|adjust|tweak|re-?style|"
+                    + "re-?design|polish|repair|touch"
                      + ")\\b");
     private static final Pattern DIRECTORY_CONTEXT = Pattern.compile(
             "(?iu)\\b(?:directories|directory|dirs|dir|folders|folder)\\b");
@@ -86,7 +89,7 @@ final class CanonicalMutationClauseMatcher {
     static final int MAX_FALLBACK_INPUT_MULTIPLIER = 2;
     private static final Pattern EXPLICIT_ACTION_PREFIX = Pattern.compile(
             "(?iu)^[\\s,:;\\-\\u2013\\u2014]*"
-                    + "(?:(?:so|and|but|then|also|please|kindly|now|maybe|"
+                    + "(?:(?:so|ok|okay|and|but|then|also|please|kindly|now|maybe|"
                     + "optionally|perhaps|possibly|potentially|optional|if|when|"
                     + "unless|as|only|needed|necessary|required|appropriate|"
                     + "applicable|possible|feasible|first|next|really|genuinely|"
@@ -101,7 +104,7 @@ final class CanonicalMutationClauseMatcher {
     private static final Pattern TRAILING_STRUCTURAL_CONNECTOR_PREFIX =
             Pattern.compile(
                     "(?iu)\\b(?:and|but|then|also)\\b"
-                            + "(?:\\s+(?:[\\p{L}][\\p{L}-]*ly|only|now|"
+                            + "(?:\\s+(?:[\\p{L}][\\p{L}-]*ly|only|now|just|"
                             + "first|next|maybe|perhaps|optionally|possibly|"
                             + "potentially)){0,4}"
                             + "[\\s,:;\\-\\u2013\\u2014]*$");
@@ -1446,6 +1449,12 @@ final class CanonicalMutationClauseMatcher {
         return new ActionAuthority(nonImperative, scope);
     }
 
+    /** Generic intent is recognized here, workspace operation authority is not granted. */
+    static boolean directToolRequestPrefix(RequestLexicalView view, int actionStart) {
+        return DIRECT_TOOL_ACTION_REQUEST.matcher(view.masked())
+                .region(view.sentenceStartBefore(0, actionStart), actionStart).matches();
+    }
+
     static boolean directCollaborativeAuthorityContext(String active) {
         String value = active == null ? "" : active;
         if (BARE_DIRECT_NECESSITY_END.matcher(value).find()
@@ -2036,11 +2045,15 @@ final class CanonicalMutationClauseMatcher {
     /** Finite, fail-closed authority carried by bytes after a target. */
     static ScopeKind finitePostfixScopeKind(String visibleSuffix) {
         String suffix = visibleSuffix == null ? "" : visibleSuffix;
-        if (POSTFIX_REPORTED_SCOPE.matcher(suffix).find()
-                || EXAMPLE_ONLY_SCOPE.matcher(suffix).find()) {
+        return finitePostfixScopeKind(suffix, 0, suffix.length());
+    }
+
+    static ScopeKind finitePostfixScopeKind(String visible, int start, int end) {
+        if (POSTFIX_REPORTED_SCOPE.matcher(visible).region(start, end).find()
+                || EXAMPLE_ONLY_SCOPE.matcher(visible).region(start, end).find()) {
             return ScopeKind.REPORTED_ADVISORY;
         }
-        if (POSTFIX_OPTIONAL_SCOPE.matcher(suffix).find()) {
+        if (POSTFIX_OPTIONAL_SCOPE.matcher(visible).region(start, end).find()) {
             return ScopeKind.OPTIONAL;
         }
         return ScopeKind.NONE;

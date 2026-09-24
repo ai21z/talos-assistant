@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolLoopResultSummaryFormatter;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
@@ -84,7 +85,8 @@ public final class ToolCallLoop {
             Map<String, String> readFileBodies,
             boolean finalAnswerOutputLimitReached,
             ReadOnlySynthesisStatus readOnlySynthesisStatus,
-            ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff
+            ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff,
+            ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence
     ) {
         public LoopResult {
             toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
@@ -99,6 +101,24 @@ public final class ToolCallLoop {
                     ? ReadOnlySynthesisStatus.NOT_ATTEMPTED : readOnlySynthesisStatus;
             readOnlyEvidenceHandoff = readOnlyEvidenceHandoff == null
                     ? ReadOnlyEvidenceHandoff.empty() : readOnlyEvidenceHandoff;
+            readOnlyFinalizationEvidence = readOnlyFinalizationEvidence == null
+                    ? ReadOnlyFinalizationEvidence.empty() : readOnlyFinalizationEvidence;
+        }
+
+        /** Compatibility callers do not mint observation and selected-request associations. */
+        public LoopResult(
+                String finalAnswer, int iterations, int toolsInvoked, List<String> toolNames,
+                List<ChatMessage> messages, int failedCalls, int retriedCalls, boolean hitIterLimit,
+                int mutatingToolSuccesses, List<String> readPaths, int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue, int cushionFiresB3EditShortCircuit, int cushionFiresE1Suggestion,
+                FailureDecision failureDecision, List<ToolOutcome> toolOutcomes, Map<String, String> readFileBodies,
+                boolean finalAnswerOutputLimitReached, ReadOnlySynthesisStatus readOnlySynthesisStatus,
+                ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls, retriedCalls,
+                    hitIterLimit, mutatingToolSuccesses, readPaths, cushionFiresRedundantRead,
+                    cushionFiresAliasRescue, cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, readFileBodies, finalAnswerOutputLimitReached,
+                    readOnlySynthesisStatus, readOnlyEvidenceHandoff, ReadOnlyFinalizationEvidence.empty());
         }
 
         /** Legacy callers carry no trusted cross-loop read evidence. */

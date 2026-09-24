@@ -172,6 +172,16 @@ record ExecutionOutcome(
             int extraMutationSuccesses,
             boolean failedActionObligation
     ) {
+        return fromToolLoop(answer, plan, messages, loopResult, workspace, extraMutationSuccesses,
+                failedActionObligation, (text, components) -> text);
+    }
+
+    static ExecutionOutcome fromToolLoop(
+            String answer, CurrentTurnPlan plan, List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult, Path workspace, int extraMutationSuccesses,
+            boolean failedActionObligation,
+            java.util.function.BiFunction<String, dev.talos.runtime.verification.ReadOnlyAnswerComponents, String> presentation
+    ) {
         String current = answer == null ? "" : answer;
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
         TaskContract contract = safePlan.taskContract();
@@ -214,23 +224,36 @@ record ExecutionOutcome(
         boolean staticWebImportGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+        var webDiagnostic = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
                 current, safePlan, messages, loopResult, workspace);
+        webDiagnostic = dev.talos.runtime.verification.DocumentComparisonAnswer.compose(
+                contract, workspace, loopResult, extraMutationSuccesses, webDiagnostic);
+        if (requestCoverageBoundExceeded(contract)) {
+            webDiagnostic = new dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult(
+                    requestCoverageBoundNotice(),
+                    dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.limited(
+                            dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Reason.ANSWER_REQUIREMENTS_UNMET),
+                    List.of());
+        }
+        shaped = webDiagnostic.answer();
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
-        boolean limitedWebDiagnosticAnswer = shaped != null && shaped.startsWith(
-                dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX);
+        boolean limitedWebDiagnosticAnswer = webDiagnostic.assessment().limited();
+        boolean observedWebDiagnosis = webDiagnostic.assessment().disposition()
+                != dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Disposition.NOT_APPLICABLE
+                && contract.type() != dev.talos.runtime.task.TaskType.VERIFY_ONLY;
+        LocalTurnTraceCapture.recordReadOnlyWebAnswerAssessment(webDiagnostic);
         current = shaped;
+        if (webDiagnostic.components().active()) LocalTurnTraceCapture.recordDeterministicAnswerSelected(current);
 
-        shaped = AssistantTurnExecutor.overrideStaticSelectorSearchAnswerIfNeeded(
-                current, safePlan, messages, loopResult, workspace);
+        shaped = webDiagnostic.assessment().disposition()
+                == dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Disposition.NOT_APPLICABLE
+                ? AssistantTurnExecutor.overrideStaticSelectorSearchAnswerIfNeeded(
+                    current, safePlan, messages, loopResult, workspace)
+                : current;
         boolean staticSelectorSearchGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
-                current, safePlan, messages, loopResult, workspace);
-        boolean selectorGroundedOverride = staticSelectorSearchGroundedOverride
-                || !Objects.equals(current, shaped);
-        current = shaped;
+        boolean selectorGroundedOverride = staticSelectorSearchGroundedOverride;
 
         shaped = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
@@ -310,7 +333,9 @@ record ExecutionOutcome(
         current = commandOutputTruthfulness.answer();
 
         EvidenceObligationAssessment evidenceAssessment =
-                EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
+                observedWebDiagnosis
+                ? EvidenceObligationAssessment.assessObserved(safePlan, loopResult)
+                : EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
         EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
         var evidenceResult = evidenceAssessment.result();
         boolean missingEvidence = evidenceAssessment.missingEvidence();
@@ -346,12 +371,14 @@ record ExecutionOutcome(
                     workspace);
             if (!Objects.equals(current, shaped)) outputLimitRelevant = false;
             current = shaped;
-            current = PathExistenceAnswerRenderer.prependVerifiedStatusIfNeeded(
-                    current,
-                    safePlan,
-                    evidenceObligation,
-                    evidenceResult,
-                    workspace);
+            if (!observedWebDiagnosis) {
+                current = PathExistenceAnswerRenderer.prependVerifiedStatusIfNeeded(
+                        current,
+                        safePlan,
+                        evidenceObligation,
+                        evidenceResult,
+                        workspace);
+            }
         }
         if (!missingEvidence) {
             shaped = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(current, safePlan, loopResult);
@@ -370,7 +397,9 @@ record ExecutionOutcome(
                 contract,
                 loopResult,
                 staticWebImportGroundedOverride
-                        || selectorGroundedOverride,
+                        || selectorGroundedOverride
+                        || webDiagnostic.components().active()
+                            && webDiagnostic.components().render().equals(current),
                 current);
         boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimit.withoutRuntimeAnswer();
         boolean readOnlySynthesisUnavailable = dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailable(loopResult);
@@ -491,6 +520,12 @@ record ExecutionOutcome(
                 verificationStatus);
         finalDecision = OutcomeDominancePolicy.withReadEvidencePolicyBlock(finalDecision, readEvidencePolicyBlocked);
         completionStatus = finalDecision.completionStatus();
+        if (requestCoverageBoundExceeded(contract) && completionStatus == CompletionStatus.COMPLETE) {
+            finalDecision = new OutcomeDominancePolicy.Decision(CompletionStatus.ADVISORY_ONLY,
+                    dev.talos.runtime.outcome.TaskCompletionStatus.ADVISORY_ONLY, finalDecision.blockedByPolicy());
+            completionStatus = finalDecision.completionStatus();
+            current = requestCoverageBoundNotice() + "\n\n" + current;
+        }
 
         MutationFailureAnswerRenderer.PartialMutationAnswer partialAnswer = MutationFailureAnswerRenderer.selectPartialMutationAnswerIfNeeded(
                 current,
@@ -538,6 +573,14 @@ record ExecutionOutcome(
             // to authoritative effect evidence. This is not a successful retry.
             current = MutationFailureAnswerRenderer.failedMutationEffectsSummary(loopResult);
         }
+        current = Objects.toString(presentation.apply(current, webDiagnostic.components()), "");
+        if (webDiagnostic.components().active() && !webDiagnostic.components().deliveredIntact(current)
+                && completionStatus == CompletionStatus.COMPLETE) {
+            finalDecision = new OutcomeDominancePolicy.Decision(CompletionStatus.ADVISORY_ONLY,
+                    dev.talos.runtime.outcome.TaskCompletionStatus.ADVISORY_ONLY, finalDecision.blockedByPolicy());
+            completionStatus = finalDecision.completionStatus();
+        }
+        LocalTurnTraceCapture.recordReadOnlyAnswerComponentsPresented(webDiagnostic.components(), current);
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 finalDecision.taskCompletionStatus(),
@@ -611,6 +654,15 @@ record ExecutionOutcome(
                 completionStatus == CompletionStatus.ADVISORY_ONLY,
                 outputLimitRelevant ? AnswerOutputLimit.KEEP_ORIGINAL : AnswerOutputLimit.CLEAR
         );
+    }
+
+    private static boolean requestCoverageBoundExceeded(TaskContract contract) {
+        return contract != null && !contract.mutationAllowed() && !contract.mutationRequested()
+                && contract.originalUserRequest().length() > dev.talos.runtime.task.AnswerRequirements.MAX_REQUEST_CHARS;
+    }
+
+    private static String requestCoverageBoundNotice() {
+        return "[Answer incomplete]\n\nThe request exceeds the bounded interpretation limit. Complete request coverage was not established. A smaller request is required.";
     }
 
     static ExecutionOutcome fromNoTool(
@@ -711,7 +763,10 @@ record ExecutionOutcome(
                 || mutationCapabilityCorrected
                 || negativeWorkspaceResultCorrected
                 || shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_NEGATIVE_WORKSPACE_RESULT_REPLACEMENT));
-        boolean advisoryOnly = ungrounded && !blocked;
+        boolean advisoryOnly = (ungrounded || requestCoverageBoundExceeded(contract)) && !blocked;
+        if (requestCoverageBoundExceeded(contract) && !blocked && !failedActionObligation) {
+            shaped = requestCoverageBoundNotice();
+        }
         EvidenceObligationAssessment evidenceAssessment =
                 EvidenceObligationAssessment.assess(safePlan, null, null);
         EvidenceObligation evidenceObligation = evidenceAssessment.obligation();

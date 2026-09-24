@@ -2,6 +2,8 @@ package dev.talos.spi.types;
 
 import java.util.List;
 import java.util.Map;
+import dev.talos.safety.ContentRestrictions;
+import dev.talos.safety.ContentRestrictionScope;
 
 /**
  * A single message in a multi-turn conversation.
@@ -19,8 +21,27 @@ public record ChatMessage(
         String role,
         String content,
         List<NativeToolCall> toolCalls,
-        String toolCallId
+        String toolCallId,
+        ContentRestrictions contentRestrictions
 ) {
+    public ChatMessage {
+        contentRestrictions = java.util.Objects.requireNonNull(contentRestrictions)
+                .intersect(ContentRestrictionScope.current());
+    }
+
+    public ChatMessage(String role, String content, List<NativeToolCall> toolCalls, String toolCallId) {
+        this(role, content, toolCalls, toolCallId, ContentRestrictions.UNRESTRICTED);
+    }
+
+    public ChatMessage withContentRestrictions(ContentRestrictions restrictions) {
+        return new ChatMessage(role, content, toolCalls, toolCallId, contentRestrictions.intersect(restrictions));
+    }
+
+    @Override public String toString() {
+        return contentRestrictions.artifactAllowed()
+                ? "ChatMessage[role=" + role + ", content=" + content + "]"
+                : "ChatMessage[content withheld]";
+    }
 
     /**
      * A native tool call as returned by Ollama's /api/chat endpoint.

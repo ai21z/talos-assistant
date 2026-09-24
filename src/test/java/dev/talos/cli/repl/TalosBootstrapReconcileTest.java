@@ -8,11 +8,17 @@ import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ProposalContextTestSupport;
+import dev.talos.runtime.task.TaskContract;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -138,7 +144,7 @@ class TalosBootstrapReconcileTest {
     void snapshotRestoresActiveTaskContextAndArtifactGoal(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         try (var writer = store.acquireSessionWriter(sid)) {
@@ -151,6 +157,8 @@ class TalosBootstrapReconcileTest {
 
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }
 
@@ -159,7 +167,7 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-only";
         Instant created = Instant.parse("2026-01-15T10:30:00Z");
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         try (var writer = store.acquireSessionWriter(sid)) {
@@ -179,7 +187,7 @@ class TalosBootstrapReconcileTest {
     void restoreSavedSessionRestoresContextOnlySnapshot(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-only-restore";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         try (var writer = store.acquireSessionWriter(sid)) {
@@ -194,6 +202,8 @@ class TalosBootstrapReconcileTest {
         assertEquals(0, summary.pairsReplayed());
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }
 
@@ -201,7 +211,7 @@ class TalosBootstrapReconcileTest {
     void restoreSavedSessionFallsBackToJsonlForContextOnlySnapshot(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-with-jsonl";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         try (var writer = store.acquireSessionWriter(sid)) {
@@ -218,8 +228,58 @@ class TalosBootstrapReconcileTest {
         assertEquals(1, summary.pairsReplayed());
         assertTrue(mem.get().contains("from-jsonl-u"));
         assertTrue(mem.get().contains("from-jsonl-a"));
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "restore", "jsonl-fallback"})
+    void legacyProposalRestorationRetainsContextWithoutAuthorityOrRewritingFiles(
+            String route, @TempDir Path dir) throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "legacy-proposal-" + route;
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        boolean fallback = route.equals("jsonl-fallback");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            if (fallback) {
+                writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                        "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+            }
+        }
+        Path snapshot = dir.resolve(sid + ".json");
+        Path turnLog = dir.resolve(sid + ".turns.jsonl");
+        byte[] snapshotBefore = Files.readAllBytes(snapshot);
+        byte[] turnLogBefore = fallback ? Files.readAllBytes(turnLog) : null;
+        SessionMemory mem = new SessionMemory();
+        var summary = route.equals("snapshot")
+                ? TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem))
+                : TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertTrue(summary.hasSavedSession());
+        assertEquals(fallback ? 1 : 0, summary.pairsReplayed());
+        if (fallback) {
+            assertTrue(mem.get().contains("from-jsonl-u"));
+            assertTrue(mem.get().contains("from-jsonl-a"));
+        }
+        assertEquals(context, mem.activeTaskContext());
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
+        assertFalse(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(ArtifactGoal.none(), mem.artifactGoal());
+        var decision = ActiveTaskContextPolicy.evaluate("apply those changes",
+                TaskContract.unknown("apply those changes"), mem.activeTaskContext(), mem.artifactGoal(), 4);
+        assertFalse(decision.consumed());
+        assertFalse(decision.taskContract().mutationRequested());
+        assertFalse(decision.taskContract().mutationAllowed());
+        assertEquals(context, decision.memoryContext());
+        assertEquals(ActiveTaskContext.State.SUPPRESSED, decision.planContext().state());
+        assertArrayEquals(snapshotBefore, Files.readAllBytes(snapshot));
+        if (fallback) assertArrayEquals(turnLogBefore, Files.readAllBytes(turnLog));
     }
 
     @Test
@@ -233,7 +293,7 @@ class TalosBootstrapReconcileTest {
                     configWithSessionPolicy(true, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()),
                     workspace);
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             router.context().memory().setActiveTaskContext(context);
             router.context().memory().setArtifactGoal(ArtifactGoal.fromActiveContext(context));
@@ -251,6 +311,8 @@ class TalosBootstrapReconcileTest {
             SessionData saved = store.load(sessions.get(0).sessionId()).orElseThrow();
             assertEquals(ActiveTaskContext.State.ACTIVE, saved.activeTaskContext().state());
             assertEquals(List.of("README.md"), saved.activeTaskContext().targets());
+            assertTrue(saved.activeTaskContext().hasBoundProposal());
+            assertEquals(context.proposalProvenance(), saved.activeTaskContext().proposalProvenance());
             assertEquals(ArtifactGoal.ArtifactKind.README, saved.artifactGoal().artifactKind());
         });
     }

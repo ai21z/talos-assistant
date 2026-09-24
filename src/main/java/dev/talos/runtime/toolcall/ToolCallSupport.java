@@ -256,7 +256,8 @@ public final class ToolCallSupport {
                 originalsOut.putIfAbsent(idx, content);
             }
             String summary = summarizeToolResult(content);
-            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary));
+            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary)
+                    .withContentRestrictions(m.contentRestrictions()));
         }
     }
 

@@ -1272,7 +1272,7 @@ class ExecutionOutcomeTest {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user(
-                    "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+                    "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files."));
 
             String answer = """
                     [Task incomplete: Static verification failed - HTML references missing JavaScript file: `script.js`]
@@ -2150,7 +2150,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void selectorDiagnosticFallbackIsGroundedButDoesNotClaimCompleteAnswerOwnership() throws Exception {
+    void unboundSelectorDiagnosticDoesNotClaimSourceFactsOrCompleteAnswerOwnership() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2202,8 +2202,10 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
             assertTrue(outcome.webDiagnosticGroundedOverride());
-            assertTrue(outcome.finalAnswer().contains("Static web diagnostics found:"));
-            assertTrue(outcome.finalAnswer().contains(".cta-button"));
+            assertTrue(outcome.finalAnswer().startsWith(
+                    dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertFalse(outcome.finalAnswer().contains(".cta-button"));
             assertFalse(outcome.finalAnswer().contains("#ff4500"));
             assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
             assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE));
@@ -2333,8 +2335,9 @@ class ExecutionOutcomeTest {
         assertTrue(diagnostic.webDiagnosticGroundedOverride());
         assertTrue(
                 diagnostic.finalAnswer().contains(
-                        "Static web diagnostics found:"),
+                        "source observations could not be bound"),
                 diagnostic.finalAnswer());
+        assertFalse(diagnostic.finalAnswer().contains(".missing-button"), diagnostic.finalAnswer());
 
         var explainMessages = new ArrayList<ChatMessage>();
         explainMessages.add(ChatMessage.system("sys"));
@@ -2411,12 +2414,13 @@ class ExecutionOutcomeTest {
 
         assertTrue(outcome.webDiagnosticGroundedOverride());
         assertTrue(
-                outcome.finalAnswer().contains("Static web diagnostics found:"),
+                outcome.finalAnswer().contains("source observations could not be bound"),
                 outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains(".missing-button"), outcome.finalAnswer());
     }
 
     @Test
-    void selectorGroundingStillOverridesAfterGrepOnlyUnderinspection() throws Exception {
+    void grepOnlyUnderinspectionCannotSupplySelectorDiagnosisFacts() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-grep-only-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2453,9 +2457,10 @@ class ExecutionOutcomeTest {
                     "Based on the tool results, there are no mismatches.", messages, loopResult, ws, 0);
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
-            assertTrue(outcome.selectorGroundedOverride());
-            assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
-            assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
+            assertFalse(outcome.selectorGroundedOverride());
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertFalse(outcome.finalAnswer().contains("`.cta-button`"));
             assertFalse(outcome.finalAnswer().contains("There are no mismatches"));
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -4642,7 +4647,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void staticWebDiagnosisWithLinkedScriptButOnlyIndexReadIsEvidenceIncomplete() throws Exception {
+    void unboundHtmlOnlyDiagnosisDoesNotInferLinkedScriptFromDisk() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-linked-script-missing-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -4682,10 +4687,12 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
             assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
             assertTrue(outcome.finalAnswer().startsWith(
-                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+                    dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
             assertFalse(outcome.finalAnswer().contains("button markup is present"), outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains("script.js"), outcome.finalAnswer());
-            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertFalse(outcome.finalAnswer().contains("script.js"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {

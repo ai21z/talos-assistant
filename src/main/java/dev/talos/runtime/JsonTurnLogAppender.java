@@ -66,7 +66,8 @@ public final class JsonTurnLogAppender implements SessionListener {
                 : null;
         String committed = rawText == null
                 ? ""
-                : MemoryUpdateListener.assistantTextForPersistence(rawText, userInput);
+                : result.audit().contentRestrictions().forHistory(
+                        MemoryUpdateListener.assistantTextForPersistence(rawText, userInput));
         String persistedUserInput = settlement.ordinaryCompletion()
                 ? (userInput == null ? "" : userInput)
                 : "";

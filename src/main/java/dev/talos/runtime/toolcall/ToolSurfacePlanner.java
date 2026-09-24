@@ -100,8 +100,14 @@ public final class ToolSurfacePlanner {
         if (contract != null
                 && !contract.mutationAllowed()
                 && !contract.expectedTargets().isEmpty()) {
-            return select(registry, ToolSurfacePlanner::isFileReadTool, safeAvailability, "expected target read");
+            boolean compare = dev.talos.runtime.task.DocumentComparisonRequest.from(contract).active();
+            return select(registry, descriptor -> isFileReadTool(descriptor)
+                    || compare && DocumentComparisonTool.NAME.equals(descriptor.name()), safeAvailability, "expected target read");
         }
+
+        if (dev.talos.runtime.task.DocumentComparisonRequest.from(contract).active())
+            return select(registry, descriptor -> isFileReadTool(descriptor)
+                    || DocumentComparisonTool.NAME.equals(descriptor.name()), safeAvailability, "requested document comparison");
 
         boolean mutationAllowed = contract != null
                 && contract.mutationAllowed()
@@ -353,6 +359,7 @@ public final class ToolSurfacePlanner {
     }
 
     private static boolean isReadOnlyOperation(ToolDescriptor descriptor) {
+        if (descriptor != null && DocumentComparisonTool.NAME.equals(descriptor.name())) return false;
         ToolOperationMetadata metadata = metadata(descriptor);
         return metadata != null
                 && metadata.riskLevel() != null

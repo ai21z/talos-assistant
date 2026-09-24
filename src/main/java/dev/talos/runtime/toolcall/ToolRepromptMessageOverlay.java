@@ -143,7 +143,8 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         String original = state.compactedToolResultOriginals.get(index);
         if (original == null) return;
         restoredToolResults.add(new RestoredToolResult(index, current.content()));
-        state.messages.set(index, ChatMessage.toolResult(current.toolCallId(), original));
+        state.messages.set(index, ChatMessage.toolResult(current.toolCallId(), original)
+                .withContentRestrictions(current.contentRestrictions()));
     }
 
     private void applyReadOnlyEvidence() {
@@ -238,7 +239,8 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
             ChatMessage message = state.messages.get(restored.index());
             if ("tool".equals(message.role())) {
                 state.messages.set(restored.index(),
-                        ChatMessage.toolResult(message.toolCallId(), restored.compactedContent()));
+                        ChatMessage.toolResult(message.toolCallId(), restored.compactedContent())
+                                .withContentRestrictions(message.contentRestrictions()));
             }
         }
     }

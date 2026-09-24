@@ -8,7 +8,11 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
+import dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
@@ -128,19 +132,41 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 16_384);
         Context ctx = context(workspace, registry, recorded, 5);
 
+        String request = "Review this static web page and explain whether the button script is wired.";
+        var contract = TaskContractResolver.fromUserRequest(request);
+        assertEquals(TaskType.DIAGNOSE_ONLY, contract.type());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+
         AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                messages("Review this static web page and explain whether the button script is wired."),
+                messages(request),
                 workspace,
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        assertTrue(out.text().contains("Ready"), out.text());
+        assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+        assertFalse(out.text().contains("Ready"), out.text());
         assertEquals(1, countOccurrences(out.text(), "[Used "),
                 "merged inspect-completeness retry evidence should surface one visible summary block");
         assertTrue(recorded.requests().stream()
                         .map(AssistantTurnExecutorToolLoopOutcomeCharacterizationTest::joinRequestMessages)
                         .anyMatch(prompt -> prompt.contains("Read these files now before answering: script.js")),
                 "inspect-completeness retry must ask for the linked script that was missed initially");
+
+        var trace = LocalTurnTraceCapture.complete();
+        var readEvents = trace.events().stream()
+                .filter(event -> event.type().equals("TOOL_EXECUTED")
+                        && event.toolName().equals("talos.read_file")
+                        && Boolean.TRUE.equals(event.data().get("success")))
+                .toList();
+        assertEquals(List.of("index.html", "script.js"),
+                readEvents.stream().map(event -> event.data().get("pathHint")).toList(),
+                "both initial and retry reads must remain recorded despite the unbound final answer");
+        var assessments = trace.events().stream()
+                .filter(event -> event.type().equals("READ_ONLY_WEB_ANSWER_ASSESSED")).toList();
+        assertEquals(1, assessments.size());
+        assertEquals("LIMITED", assessments.getFirst().data().get("disposition"));
+        assertEquals("SOURCE_EVIDENCE_UNAVAILABLE", assessments.getFirst().data().get("reasonCode"));
     }
 
     @Test

@@ -291,6 +291,7 @@ Talos has a focused tool set for local workspace work:
 | Tool | Purpose | Approval |
 |---|---|---|
 | `read_file` | read a file with line-oriented output | not required |
+| `compare_documents` | compare requested ordered text files, or extracted PDF and DOCX text | not required |
 | `list_dir` | inspect workspace structure | not required |
 | `grep` | search for patterns in the workspace | not required |
 | `retrieve` | pull relevant indexed context | not required |
@@ -576,18 +577,21 @@ Talos has a structured development and review cycle:
 - larger full E2E audits before important release decisions
 
 ```text
-    change code
+    scoped change
          |
          v
-    .----------------------.
-    | versioned candidate  |
-    '----------+-----------'
-               |
-               v
-    build -> test -> e2e -> audit -> review
-               ^                         |
-               |                         |
-               '---- change code if needed
+    focused checks -> affected integration and E2E -> diff review
+         ^                                               |
+         '------------ corrections if needed ------------'
+                                                         |
+                                                         v
+                                      required local gates and batch review
+                                                         |
+                                                         v
+                                      separate candidate authorization
+                                                         |
+                                                         v
+                                      exact-candidate release QA and review
 ```
 
 The work-cycle documentation lives here:

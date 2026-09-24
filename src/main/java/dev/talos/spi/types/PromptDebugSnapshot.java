@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import dev.talos.safety.ContentRestrictions;
+import dev.talos.safety.ContentRestrictionScope;
 
 /**
  * Process-local diagnostic capture of the prompt request Talos assembled.
@@ -21,7 +23,8 @@ public record PromptDebugSnapshot(
         List<ToolSpec> tools,
         ChatRequestControls controls,
         String providerBodyJson,
-        Map<String, String> diagnostics
+        Map<String, String> diagnostics,
+        ContentRestrictions contentRestrictions
 ) {
     public PromptDebugSnapshot {
         stage = Objects.requireNonNullElse(stage, "");
@@ -33,6 +36,29 @@ public record PromptDebugSnapshot(
         controls = controls == null ? ChatRequestControls.defaults() : controls;
         providerBodyJson = Objects.requireNonNullElse(providerBodyJson, "");
         diagnostics = diagnostics == null ? Map.of() : Map.copyOf(diagnostics);
+        contentRestrictions = Objects.requireNonNull(contentRestrictions).intersect(ContentRestrictionScope.current());
+        for (ChatMessage message : messages) {
+            contentRestrictions = contentRestrictions.intersect(message.contentRestrictions());
+        }
+        if (!contentRestrictions.artifactAllowed()) {
+            ContentRestrictions restriction = contentRestrictions;
+            messages = messages.stream().map(message -> new ChatMessage(
+                    List.of("system", "user", "assistant", "tool").contains(message.role()) ? message.role() : "user",
+                    ContentRestrictions.WITHHELD, null, null, restriction)).toList();
+            tools = List.of();
+            controls = new ChatRequestControls(ToolChoiceMode.AUTO, "", ResponseFormatMode.TEXT, "",
+                    controls.debugTags().contains(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG)
+                            ? List.of(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG) : List.of());
+            providerBodyJson = ContentRestrictions.WITHHELD;
+            diagnostics = Map.of("contentProjection", "DOCUMENT_DERIVED_CONTENT_WITHHELD");
+        }
+    }
+
+    public PromptDebugSnapshot(String stage, String backend, String model, boolean stream, Instant capturedAt,
+                               List<ChatMessage> messages, List<ToolSpec> tools, ChatRequestControls controls,
+                               String providerBodyJson, Map<String, String> diagnostics) {
+        this(stage, backend, model, stream, capturedAt, messages, tools, controls, providerBodyJson, diagnostics,
+                ContentRestrictions.UNRESTRICTED);
     }
 
     public PromptDebugSnapshot(
@@ -69,7 +95,7 @@ public record PromptDebugSnapshot(
                 tools,
                 controls,
                 providerBodyJson,
-                merged);
+                merged, contentRestrictions);
     }
 
     public static PromptDebugSnapshot fromChatRequest(ChatRequest request, boolean stream) {
@@ -112,6 +138,6 @@ public record PromptDebugSnapshot(
                 safe.tools,
                 safe.controls,
                 providerBodyJson,
-                Map.of());
+                Map.of(), safe.contentRestrictions);
     }
 }

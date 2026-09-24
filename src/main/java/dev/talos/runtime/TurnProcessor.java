@@ -1931,6 +1931,7 @@ public final class TurnProcessor {
         return List.of(
                 "path", "file_path", "filepath", "file", "filename",
                 "from", "to", "source", "source_path", "src",
+                "left", "right",
                 "destination", "destination_path", "dest", "target",
                 "dir", "directory");
     }
@@ -2003,6 +2004,9 @@ public final class TurnProcessor {
 
     private static String toolFailureReason(ToolResult result) {
         if (result == null || result.success()) return "";
+        if (result.contentMetadata().source() == ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON) {
+            return dev.talos.safety.ContentRestrictions.WITHHELD;
+        }
         String code = result.error() == null ? "tool failed" : result.error().code();
         String message = result.errorMessage();
         return code + (message == null || message.isBlank() ? "" : ": " + shortReason(message));

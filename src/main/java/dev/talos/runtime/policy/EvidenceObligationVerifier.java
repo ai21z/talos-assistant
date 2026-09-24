@@ -90,6 +90,7 @@ public final class EvidenceObligationVerifier {
             case NONE -> Result.satisfied("No workspace evidence was required.");
             case LIST_DIRECTORY_ONLY -> verifyListDirectoryOnly(safeOutcomes);
             case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, true);
+            case DOCUMENT_COMPARISON_REQUIRED -> verifyDocumentComparison(workspace);
             case PATH_EXISTENCE_EVIDENCE_REQUIRED -> verifyPathExistenceTargets(targets, safeOutcomes);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
             case FILE_CONTENT_LOOKUP_REQUIRED -> verifyFileContentLookup(safeOutcomes);
@@ -100,6 +101,15 @@ public final class EvidenceObligationVerifier {
                     verifyAnyReadOnlyEvidence(safeOutcomes);
             case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED -> verifyUnsupportedCapability(targets, safeOutcomes);
         };
+    }
+
+    private static Result verifyDocumentComparison(Path workspace) {
+        var contract = dev.talos.runtime.TurnTaskContractCapture.get();
+        var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (comparison.active() && comparison.unresolved().isEmpty()
+                && dev.talos.runtime.TurnAuditCapture.comparisonEvidenceComplete(contract, workspace))
+            return Result.satisfied("Both ordered snapshots were compared in the current turn.");
+        return Result.unsatisfied("A complete current-turn ordered comparison was not retained.");
     }
 
     private static Result verifyStaticWebDiagnosisWithExplicitReads(

@@ -73,6 +73,7 @@ public class PromptRenderCmd implements Runnable {
     private static ToolRegistry toolRegistry(RagService rag) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
+        registry.register(new dev.talos.runtime.toolcall.DocumentComparisonTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());

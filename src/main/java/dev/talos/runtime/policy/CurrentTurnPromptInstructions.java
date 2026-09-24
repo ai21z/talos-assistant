@@ -108,7 +108,7 @@ public final class CurrentTurnPromptInstructions {
                         prior.role(),
                         instruction,
                         prior.toolCalls(),
-                        prior.toolCallId()));
+                        prior.toolCallId(), prior.contentRestrictions()));
                 removeDuplicateTaskContractInstructions(
                         messages,
                         existingIndex);

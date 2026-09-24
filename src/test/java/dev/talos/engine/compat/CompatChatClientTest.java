@@ -4,11 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
+import dev.talos.runtime.verification.ReadOnlyAnswerProposal;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderReadInputBinding;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
@@ -70,6 +73,115 @@ class CompatChatClientTest {
     void clearPromptDebug() {
         PromptDebugCapture.clear();
         ProviderResponseCapture.clear();
+    }
+
+    @Test
+    void boundedReadInputsAreCapturedWithoutAdvertisingTools() throws Exception {
+        for (boolean stream : List.of(false, true)) {
+            var path = new AtomicReference<String>();
+            var sentBody = new AtomicReference<String>();
+            String response = stream
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}";
+            HttpServer server = startServer(path, sentBody, response,
+                    stream ? "text/event-stream" : "application/json");
+            try {
+                String source = "1 | <button id=\"é\">\\</button>\n";
+                var request = new ChatRequest("llama_cpp", "model", "", "", List.of(), Duration.ofSeconds(5),
+                        List.of(ChatMessage.system("system"), ChatMessage.user("diagnose"),
+                                ChatMessage.system("[CurrentTurnCapability]"),
+                                ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                                        "read-html", "talos.read_file", Map.of("path", "pages/index.html")))),
+                                ChatMessage.toolResult("read-html", source)), List.of(),
+                        new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.TEXT, "",
+                                List.of(ProviderReadInputBinding.REQUEST_TAG)).withSingleAttempt(true));
+                var handoff = new DispatchCapture();
+                if (stream) client(server).chatStream(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM, handoff).toList();
+                else client(server).chat(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM, handoff);
+                var dispatch = handoff.evidence.getFirst();
+                assertTrue(dispatch.readInputMembership().available());
+                assertEquals(List.of(new ProviderReadInputBinding.ToolResultMembership("read-html", sha256Utf8(source))),
+                        dispatch.readInputMembership().toolResults());
+                assertEquals(sha256Utf8(sentBody.get()), dispatch.readInputMembership().providerBodyHash());
+                assertTrue(dispatch.nativeTools().isEmpty());
+                assertFalse(MAPPER.readTree(sentBody.get()).has("tools"));
+                assertEquals("none", MAPPER.readTree(sentBody.get()).path("tool_choice").asText());
+            } finally {
+                server.stop(0);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "stream", "structured"})
+    void generatedAndMaximumDepthSchemasPreserveRealSerializedReadMembership(String transport) throws Exception {
+        String html = "<html><body><label>Voltage (V)<input id=\"voltage\"></label>"
+                + "<label>Current (A)<input id=\"current\"></label><button id=\"power\">Power</button>"
+                + "<p id=\"result\"></p><script src=\"power.js\"></script></body></html>\n";
+        String script = "const button = document.querySelector('#switch');\n"
+                + "button.addEventListener('click', () => {\n"
+                + "const voltage = Number(document.querySelector('#voltage').value);\n"
+                + "const current = Number(document.querySelector('#current').value);\n"
+                + "document.querySelector('#result').textContent = (voltage + current).toFixed(1);\n});\n";
+        var sources = List.of(schemaSource("guide.md", "Power is voltage multiplied by current.\n"),
+                schemaSource("page.html", html), schemaSource("power.js", script),
+                schemaSource("spare.js", "const spare = 'KEEP';\n"));
+        String generated = ReadOnlyAnswerProposal.responseSchema(sources);
+        String maximum = "{\"type\":\"object\",\"annotation\":" + "[".repeat(31) + "0" + "]".repeat(31) + "}";
+        for (String schema : List.of(generated, maximum)) {
+            boolean streaming = "stream".equals(transport);
+            String response = streaming
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}";
+            var sentBody = new AtomicReference<String>();
+            HttpServer server = startServer(new AtomicReference<>(), sentBody, response,
+                    streaming ? "text/event-stream" : "application/json");
+            try {
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.user("Diagnose the Power button without changing files."));
+                for (int index = 0; index < sources.size(); index++) {
+                    String id = "read-" + index;
+                    messages.add(ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                            id, "talos.read_file", Map.of("path", sources.get(index).path())))));
+                    messages.add(ChatMessage.toolResult(id, sources.get(index).text()));
+                }
+                var request = new ChatRequest("llama_cpp", "model", "", "", List.of(), Duration.ofSeconds(5),
+                        messages, List.of(), new ChatRequestControls(ToolChoiceMode.NONE, "",
+                        ResponseFormatMode.JSON_SCHEMA, schema, List.of(ProviderReadInputBinding.REQUEST_TAG))
+                        .withSingleAttempt(true));
+                var handoff = new DispatchCapture();
+                CompatChatClient client = client(server);
+                if ("chat".equals(transport)) client.chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN, handoff);
+                else {
+                    try (var chunks = streaming
+                            ? client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN, handoff)
+                            : client.chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                                    CompatChatClient.NativeToolPrefill.NONE, handoff)) {
+                        assertEquals("stop", chunks.toList().getLast().finishReason());
+                    }
+                }
+                assertEquals(1, handoff.evidence.size());
+                var membership = handoff.evidence.getFirst().readInputMembership();
+                assertTrue(membership.available(), membership.reasonCode());
+                assertEquals(sha256Utf8(sentBody.get()), membership.providerBodyHash());
+                assertEquals(4, membership.toolResults().size());
+                for (int index = 0; index < sources.size(); index++) {
+                    assertEquals(new ProviderReadInputBinding.ToolResultMembership("read-" + index,
+                            sha256Utf8(sources.get(index).text())), membership.toolResults().get(index));
+                }
+                JsonNode body = MAPPER.readTree(sentBody.get());
+                assertEquals(MAPPER.readTree(schema), body.at("/response_format/json_schema/schema"));
+                assertEquals("none", body.path("tool_choice").asText());
+                assertFalse(body.has("tools"));
+            } finally {
+                server.stop(0);
+            }
+        }
+    }
+
+    private static ReadOnlyFinalizationEvidence.Source schemaSource(String path, String text) {
+        return new ReadOnlyFinalizationEvidence.Source(path, text, "observed-" + path, 1,
+                sha256Utf8(text), ReadOnlyFinalizationEvidence.SOURCE_PROJECTION_VERSION);
     }
 
     @Test
@@ -668,6 +780,146 @@ class CompatChatClientTest {
         assertEquals(0, http.sendCalls.get());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "stream", "non-stream"})
+    void responseSchemaIsBoundInsideTheBackendEnvelopeWithoutToolAuthority(String transport) throws Exception {
+        String schema = """
+                {"type":"object","properties":{"result":{"oneOf":[
+                  {"type":"object","properties":{"kind":{"const":"VALUE"},"source":{"enum":["s0","s1"]}},
+                   "required":["kind","source"],"additionalProperties":false},
+                  {"type":"object","properties":{"kind":{"const":"UNKNOWN"}},
+                   "required":["kind"],"additionalProperties":false}]}},
+                 "required":["result"],"additionalProperties":false}
+                """;
+        boolean streaming = "stream".equals(transport);
+        String response = streaming
+                ? "data: {\"choices\":[{\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    + "data: [DONE]\n\n"
+                : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},"
+                    + "\"finish_reason\":\"stop\"}]}";
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, response,
+                streaming ? "text/event-stream" : "application/json");
+        try {
+            CompatChatClient client = client(server);
+            ChatRequest request = responseFormatRequest(ResponseFormatMode.JSON_SCHEMA, schema);
+            DispatchCapture handoff = new DispatchCapture();
+            if ("chat".equals(transport)) {
+                assertEquals("{}", client.chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff));
+            } else {
+                try (var chunks = streaming
+                        ? client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff)
+                        : client.chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                                CompatChatClient.NativeToolPrefill.QWEN25_REQUIRED, handoff)) {
+                    List<TokenChunk> received = chunks.toList();
+                    assertEquals("{}", received.getFirst().text());
+                    assertEquals("stop", received.getLast().finishReason());
+                    assertFalse(received.stream().anyMatch(TokenChunk::hasToolCalls));
+                }
+            }
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            JsonNode format = body.path("response_format");
+            assertEquals("json_schema", format.path("type").asText());
+            assertEquals(2, format.size());
+            assertFalse(format.has("schema"));
+            assertEquals(1, format.path("json_schema").size());
+            assertEquals(MAPPER.readTree(schema), format.path("json_schema").path("schema"));
+            assertEquals("none", body.path("tool_choice").asText());
+            assertFalse(body.has("tools"));
+            assertFalse(body.has("continue_final_message"));
+            assertFalse(body.has("add_generation_prompt"));
+            assertEquals(1, body.path("messages").size());
+            assertEquals(streaming, body.path("stream").asBoolean());
+            assertEquals(2_048, body.path("max_tokens").asInt());
+            assertEquals(1, handoff.evidence.size());
+            assertEquals(0, handoff.unboundDispatches);
+            assertTrue(handoff.evidence.getFirst().nativeTools().isEmpty());
+            assertEquals(sha256Utf8(bodyRef.get()), handoff.evidence.getFirst().providerBodyHash());
+            var captured = PromptDebugCapture.latest().orElseThrow();
+            assertEquals(bodyRef.get(), captured.providerBodyJson());
+            assertEquals(schema, captured.controls().jsonSchema());
+            assertTrue(captured.controls().singleAttempt());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "stream", "non-stream"})
+    void invalidResponseSchemasAreRejectedBeforeCaptureAdmissionOrSend(String transport) {
+        List<String> invalidSchemas = List.of("", " ", "null", "true", "false", "[]", "\"object\"", "42", "{}", "{",
+                "{\"type\":\"object\"} {}", "{\"type\":\"object\"} trailing",
+                "{\"type\":\"object\",\"type\":\"array\"}",
+                "{\"type\":\"object\",\"\\u0074ype\":\"array\"}",
+                "{\"properties\":{\"result\":{\"type\":\"string\",\"type\":\"number\"}}}",
+                "{\"properties\":{\"result\":{\"type\":\"string\",\"\\u0074ype\":\"number\"}}}",
+                "{/*comment*/\"type\":\"object\"}", "{\"type\":\"object\",}",
+                "{\"type\":\"object\",\"maximum\":" + "9".repeat(129) + "}",
+                "{\"type\":\"object\",\"properties\":{\"item\":" + "{\"items\":".repeat(33)
+                        + "{\"type\":\"string\"}" + "}".repeat(33) + "}}",
+                "{\"type\":\"object\"}" + " ".repeat(CompatChatClient.MAX_RESPONSE_SCHEMA_CHARS));
+        for (String schema : invalidSchemas) {
+            ThrowingSendHttpClient http = new ThrowingSendHttpClient();
+            CompatChatClient client = new CompatChatClient("http://127.0.0.1:1", "agent.gguf", http, MAPPER);
+            ChatRequest request = responseFormatRequest(ResponseFormatMode.JSON_SCHEMA, schema);
+            AtomicInteger dispatches = new AtomicInteger();
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, () -> {
+                switch (transport) {
+                    case "chat" -> client.chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                            dispatches::incrementAndGet);
+                    case "stream" -> client.chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                            dispatches::incrementAndGet);
+                    case "non-stream" -> client.chatStreamNonStreaming(request,
+                            RequestMessageLayout.PRESERVE_AS_WRITTEN, dispatches::incrementAndGet);
+                    default -> throw new AssertionError(transport);
+                }
+            });
+            assertEquals("Invalid JSON response schema", failure.getMessage());
+            assertEquals(0, dispatches.get());
+            assertEquals(0, http.sendCalls.get());
+            assertTrue(PromptDebugCapture.latest().isEmpty());
+        }
+    }
+
+    @Test
+    void responseSchemaCharacterBoundIsInclusive() {
+        String schema = "{\"type\":\"object\"}";
+        String atBound = schema + " ".repeat(CompatChatClient.MAX_RESPONSE_SCHEMA_CHARS - schema.length());
+        Map<String, Object> body = bodyOnlyClient().buildBody(
+                responseFormatRequest(ResponseFormatMode.JSON_SCHEMA, atBound), false);
+        assertEquals(MAPPER.valueToTree(Map.of("type", "object")),
+                MAPPER.valueToTree(body).path("response_format").path("json_schema").path("schema"));
+        assertThrows(IllegalArgumentException.class, () -> bodyOnlyClient().buildBody(
+                responseFormatRequest(ResponseFormatMode.JSON_SCHEMA, atBound + " "), false));
+    }
+
+    @Test
+    void ordinaryResponseFormatsAndToolParameterFallbackRemainUnchanged() {
+        for (boolean streaming : List.of(false, true)) {
+            JsonNode text = MAPPER.valueToTree(bodyOnlyClient().buildBody(
+                    responseFormatRequest(ResponseFormatMode.TEXT, "not a schema"), streaming));
+            assertFalse(text.has("response_format"));
+            JsonNode object = MAPPER.valueToTree(bodyOnlyClient().buildBody(
+                    responseFormatRequest(ResponseFormatMode.JSON_OBJECT, "not a schema"), streaming));
+            assertEquals(MAPPER.valueToTree(Map.of("type", "json_object")), object.path("response_format"));
+        }
+        for (String schema : List.of("", "not a schema")) {
+            JsonNode tools = MAPPER.valueToTree(bodyOnlyClient().convertToolSpecs(
+                    List.of(new ToolSpec("read", "Read", schema))));
+            assertEquals(MAPPER.valueToTree(Map.of("type", "object", "properties", Map.of())),
+                    tools.get(0).path("function").path("parameters"));
+        }
+    }
+
+    private static ChatRequest responseFormatRequest(ResponseFormatMode format, String schema) {
+        return new ChatRequest("llama_cpp", "agent.gguf", "", "", List.of(), Duration.ofSeconds(5),
+                List.of(ChatMessage.user("Return the bounded interpretation")), List.of(),
+                new ChatRequestControls(ToolChoiceMode.NONE, "", format, schema, List.of())
+                        .withMaxOutputTokens(2_048).withSingleAttempt(true));
+    }
+
     /**
      * T1008: llama-server (pinned b9918) parses tool_choice as a STRING only
      * (auto, none, required). The OpenAI named-function OBJECT form hits a
@@ -710,8 +962,8 @@ class CompatChatClientTest {
             assertEquals("required", body.path("tool_choice").asText(),
                     "NAMED must serialize to the enforceable string form");
             assertEquals("json_schema", body.path("response_format").path("type").asText());
-            assertEquals("object", body.path("response_format").path("schema").path("type").asText());
-            assertTrue(body.path("response_format").path("schema").path("properties").has("path"));
+            assertEquals("object", body.path("response_format").path("json_schema").path("schema").path("type").asText());
+            assertTrue(body.path("response_format").path("json_schema").path("schema").path("properties").has("path"));
         } finally {
             server.stop(0);
         }

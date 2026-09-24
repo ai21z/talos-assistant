@@ -7,6 +7,16 @@ import java.util.Map;
 final class RoutedAnswerTraceRecorder {
     private RoutedAnswerTraceRecorder() {}
 
+    static void recordComponentsCommitted(
+            LocalTurnTrace.Builder builder, String retainedAssistantText, boolean delivered, boolean retained) {
+        if (builder == null) return;
+        builder.event(TurnTraceEvent.simple(
+                "READ_ONLY_ANSWER_COMPONENTS_COMMITTED",
+                Instant.now().toString(),
+                Map.of("deliveredIntact", delivered, "retainedIntact", retained,
+                        "answerHash", TraceRedactor.hash(retainedAssistantText))));
+    }
+
     static void record(LocalTurnTrace.Builder builder, String assistantText) {
         if (builder == null) return;
         builder.assistantSummary(assistantText);

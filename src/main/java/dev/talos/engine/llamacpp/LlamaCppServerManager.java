@@ -60,6 +60,7 @@ final class LlamaCppServerManager implements AutoCloseable {
     private String lastTerminationFailure = "";
     private LlamaCppProcessTerminationOwner.Outcome lastTerminationOutcome;
     private boolean ready;
+    private boolean outputRetentionDenied;
     private long readinessObservedEpochMilli;
     private LlamaCppQualificationLaunchExpectation qualificationExpectation;
     private LlamaCppProcessLaunchObservation qualificationLaunch;
@@ -160,6 +161,22 @@ final class LlamaCppServerManager implements AutoCloseable {
         ensureStarted(null);
     }
 
+    synchronized void denyOutputRetention() {
+        if (!config.managed()) throw new dev.talos.spi.types.ProviderTransportHandoff.ArtifactRetentionRejected();
+        outputRetentionDenied = true;
+        if (process != null && process.isAlive()) requireOutputRetentionDenied();
+    }
+
+    synchronized void requireOutputRetentionDenied() {
+        try {
+            if (outputRetentionDenied && process != null && process.isAlive()
+                    && process.suppressOutputRetention()) return;
+        } catch (RuntimeException unavailable) {
+            throw new dev.talos.spi.types.ProviderTransportHandoff.ArtifactRetentionRejected();
+        }
+        throw new dev.talos.spi.types.ProviderTransportHandoff.ArtifactRetentionRejected();
+    }
+
     synchronized void ensureStarted(LlamaCppQualificationLaunchExpectation expectation) {
         if (!config.managed()) return;
         if (lastTerminationOutcome != null || !lastTerminationFailure.isBlank()) {
@@ -242,11 +259,12 @@ final class LlamaCppServerManager implements AutoCloseable {
                 // directly adjacent to the exact child launch.
                 verifyQualificationContent(expectation);
             }
+            Path capturePath = outputRetentionDenied ? null : logPath;
             process = expectation == null
-                    ? launcher.start(command, logPath, environment)
+                    ? launcher.start(command, capturePath, environment)
                     : launcher.startWithExactEnvironment(
                             command,
-                            logPath,
+                            capturePath,
                             environment,
                             qualificationWorkingDirectory);
             if (process == null) {
@@ -267,6 +285,7 @@ final class LlamaCppServerManager implements AutoCloseable {
                         null);
             }
             requireOutputCaptureHealthy();
+            if (outputRetentionDenied) requireOutputRetentionDenied();
             appendLifecycleLog(logPath, "Talos managed llama.cpp server process launched");
             if (expectation != null) {
                 LlamaCppProcessLaunchObservation observation = process.launchObservation();

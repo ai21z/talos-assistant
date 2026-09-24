@@ -16,7 +16,7 @@ import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.RetrieveTool;
 
 /**
- * The canonical descriptor catalog: the same 13 tools TalosBootstrap
+ * The canonical descriptor catalog: the same tools TalosBootstrap
  * registers, available to planners that need a registry-shaped view of the
  * full tool surface without a live session (T761).
  *
@@ -39,6 +39,7 @@ public final class CanonicalToolDescriptors {
     private static ToolRegistry build() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
+        registry.register(new DocumentComparisonTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());

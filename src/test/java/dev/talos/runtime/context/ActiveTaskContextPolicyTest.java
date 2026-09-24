@@ -361,7 +361,7 @@ class ActiveTaskContextPolicyTest {
     }
 
     private static ActiveTaskContext readmeProposal() {
-        return ActiveTaskContext.proposedChanges(
+        return dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 2,
                 "trace-propose",
                 List.of("README.md"),
@@ -385,7 +385,7 @@ class ActiveTaskContextPolicyTest {
     }
 
     private static ActiveTaskContext staticWebMutationContext() {
-        return ActiveTaskContext.proposedChanges(
+        return dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 2,
                 "trace-static-web",
                 List.of("index.html", "style.css", "script.js"),

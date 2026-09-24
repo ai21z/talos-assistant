@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- Ordered workspace text and code comparisons are supported, with PDF and DOCX
+  limited to extracted text. Source identities and incomplete outcomes are
+  reported. General behavioral equivalence is not established.
+- Structured read-only web diagnoses are bound to the current request and observed
+  sources. Supported calculations are derived by the runtime within a bounded
+  arithmetic grammar. Arbitrary prose is not certified as semantically correct.
+- The first-output deadline is separated from the post-output idle budget.
+  Startup and non-output provider frames are not counted as decoded progress.
+- Explicit HTML-linkage results are kept separate from ordered document diffs.
+  Unsupported comparisons and missing evidence remain incomplete.
+- Managed llama.cpp output retention is disabled before content with denied raw
+  artifact permission is sent. Output draining is preserved. Uncontrolled native
+  log sinks and unavailable capture control prevent restricted dispatch.
 - Read-only web diagnostics preserve supported explanations within a bounded
   selector-checking path instead of always replacing them with a static summary.
   Limited fallback answers and stops without final synthesis remain explicitly

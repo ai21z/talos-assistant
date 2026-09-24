@@ -364,32 +364,41 @@ final class LlmClientResolverSeamTest {
     @Test
     void user_cancel_closes_no_chunk_stream_before_wall_clock_budget() throws Exception {
         CancelableNoChunkResolver resolver = new CancelableNoChunkResolver();
-        LlmClient client = new LlmClient(engineConfig(), resolver);
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        client.setCancelSupplier(cancelled::get);
-        Thread cancelThread = Thread.ofPlatform().start(() -> {
+        try (LlmClient client = new LlmClient(engineConfig(), resolver)) {
+            AtomicBoolean cancelled = new AtomicBoolean(false);
+            client.setCancelSupplier(cancelled::get);
+            Thread cancelThread = Thread.ofPlatform().start(() -> {
+                try {
+                    assertTrue(resolver.started.await(2, TimeUnit.SECONDS), "stream did not start");
+                    cancelled.set(true);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+
             try {
-                assertTrue(resolver.started.await(2, TimeUnit.SECONDS), "stream did not start");
-                cancelled.set(true);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                long startedAt = System.nanoTime();
+                LlmClient.StreamResult result = client.chatFull(
+                        List.of(ChatMessage.user("wait for a slow model")),
+                        5_000L,
+                        List.of());
+                long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+                cancelThread.join(2_000L);
+
+                assertTrue(result.aborted(), result.text());
+                assertTrue(result.text().contains("interrupted"), result.text());
+                assertTrue(elapsedMillis < 2_000L,
+                        "cancel must not wait for the 5s wall-clock budget; elapsed=" + elapsedMillis);
+                long closeWaitNanos = TimeUnit.SECONDS.toNanos(5) - (System.nanoTime() - startedAt);
+                assertTrue(closeWaitNanos > 0 && resolver.closed.await(closeWaitNanos, TimeUnit.NANOSECONDS),
+                        "the cooperative stream must close before the original wall-clock deadline");
+                assertTrue(resolver.streamClosed.get(), "cancel watchdog must close the active stream");
+                assertEquals(1, resolver.chatCalls.get(), "cancelled request must not retry");
+            } finally {
+                cancelThread.interrupt();
+                cancelThread.join(2_000L);
             }
-        });
-
-        long startedAt = System.nanoTime();
-        LlmClient.StreamResult result = client.chatFull(
-                List.of(ChatMessage.user("wait for a slow model")),
-                5_000L,
-                List.of());
-        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
-        cancelThread.join(2_000L);
-
-        assertTrue(result.aborted(), result.text());
-        assertTrue(result.text().contains("interrupted"), result.text());
-        assertTrue(elapsedMillis < 2_000L,
-                "cancel must not wait for the 5s wall-clock budget; elapsed=" + elapsedMillis);
-        assertTrue(resolver.streamClosed.get(), "cancel watchdog must close the active stream");
-        assertEquals(1, resolver.chatCalls.get(), "cancelled request must not retry");
+        }
     }
 
     @Test
@@ -654,9 +663,8 @@ final class LlmClientResolverSeamTest {
 
     @Test
     void no_first_token_hang_fails_at_the_wall_clock_budget_when_idle_exceeds_it() {
-        // Contract from T988: the wall clock is the no-progress budget before
-        // the first token. The run()-owned heartbeat prime must not count as
-        // progress, even when llm_idle_ms is configured far above the budget.
+        // Startup is not counted as progress, even when llm_idle_ms is
+        // configured above the first-output allowance.
         BlockingNoChunkResolver resolver = new BlockingNoChunkResolver();
         Config config = engineConfig();
         Object limitsBlock = config.data.computeIfAbsent("limits", ignored -> new LinkedHashMap<String, Object>());
@@ -1100,6 +1108,7 @@ final class LlmClientResolverSeamTest {
 
     private static final class CancelableNoChunkResolver implements LlmEngineResolver {
         private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch closed = new CountDownLatch(1);
         private final AtomicBoolean streamClosed = new AtomicBoolean();
         private final AtomicInteger chatCalls = new AtomicInteger();
 
@@ -1132,7 +1141,10 @@ final class LlmClientResolverSeamTest {
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
-                    .onClose(() -> streamClosed.set(true));
+                    .onClose(() -> {
+                        streamClosed.set(true);
+                        closed.countDown();
+                    });
         }
 
         @Override

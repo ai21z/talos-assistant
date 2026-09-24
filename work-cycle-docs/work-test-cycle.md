@@ -1,6 +1,6 @@
 # Work-Test Cycle
 
-Talos work uses two loops: an inner development loop for small changes and a Release QA Gate for candidate evidence. Do not mix them. A focused unit test is enough for a small implementation step; it is not enough to publish artifacts. A full release packet is necessary before public artifacts; it is too heavy for every edit.
+Talos work is separated into an inner development loop and a Release QA Gate. Focused checks support individual edits. Required local gates are completed before a coherent batch is accepted. A full release packet is reserved for candidate acceptance, not repeated after every edit.
 
 ## Loop Map
 
@@ -9,10 +9,13 @@ flowchart TB
     Start["Scoped change or finding"] --> Inspect["Inspect source, tests, and current behavior"]
     Inspect --> Inner["Inner development loop"]
     Inner --> Focused["Focused tests and diff review"]
-    Focused --> More{"More changes in batch?"}
+    Focused --> Adjacent["Affected integration and deterministic E2E"]
+    Adjacent --> More{"More changes in batch?"}
     More -- yes --> Inspect
-    More -- no --> Candidate["Candidate readiness decision"]
-    Candidate --> Auto["Full automated gate"]
+    More -- no --> Batch["Required local gates and batch review"]
+    Batch --> Candidate{"Candidate authorized?"}
+    Candidate -- no --> Handoff["Local handoff with open questions"]
+    Candidate -- yes --> Auto["Exact-candidate full automated gate"]
     Auto --> Install["Clean installed-product smoke"]
     Install --> Manual["Manual PTY evidence"]
     Manual --> Live{"Model behavior in release claim?"}
@@ -28,17 +31,35 @@ flowchart TB
 
 ## Inner Development Loop
 
-Use this while actively implementing or debugging:
+During implementation or debugging:
 
-1. confirm branch, version, and worktree state
-2. inspect the affected source and tests
-3. add or update focused regression coverage when behavior changes
-4. implement the smallest coherent fix
-5. run the focused test
-6. run `git diff --check`
-7. review the diff before widening scope
+1. Branch, version and working-tree state are confirmed.
+2. The objective, preserved invariants, affected boundaries, acceptance checks and stop conditions are stated briefly.
+3. Source and callers are inspected. The failure is reproduced through the real affected boundary where possible.
+4. A coherent correction and focused regression coverage are implemented.
+5. Focused checks and `git diff --check` are run. The intended cause of each failed assertion is checked before its expectation is changed.
+6. Adjacent integration and relevant deterministic E2E checks are run before scope is widened, especially for authority, persistence and shared policy.
+7. Required local gates and independent review proportional to risk are completed before batch acceptance.
 
-Use the full Gradle `check` when the change touches runtime behavior, release wiring, public docs contracts, or shared policy. Do not bump the patch version for every inner-loop change.
+Full Gradle `check` is required before a batch touching runtime behavior, release wiring, public documentation contracts or shared policy is accepted. Affected architecture, privacy and release validators are run earlier when those boundaries change. Focused checks alone are not full local acceptance. Patch versions are not bumped for each inner-loop edit.
+
+The `test` and `e2eTest` tasks cover separate source sets. The `check` task additionally requires coverage, architecture, release-ledger and generated-artifact checks. A selected unit suite is not described as deterministic E2E or live-model validation.
+
+For documentation-only navigation or workflow housekeeping, links, consistency, whitespace and preservation are checked. Product suites are not rerun unless executable behavior or a public behavior contract is affected.
+
+## Bounded Batch Record
+
+One short record is maintained for each coherent outcome. Existing checklists or tickets are reused rather than duplicated.
+
+- Objective and observable acceptance criteria.
+- Invariants and affected producer, consumer and side-effect boundaries.
+- Evidence identity, commands and results, including failures, errors and skips.
+- Synthetic assumptions, untested behavior and remaining questions.
+- Next action and any new authority needed for external or destructive changes.
+
+Existing failed runs and closed reports are preserved. Current status is updated separately. Green summaries and process exit codes are checked against underlying results. In particular, reporting-oriented candidate test tasks can finish with exit code zero while test failures remain.
+
+A completed offline batch is distinguished from installed-product, live-model and exact-candidate acceptance. Broader claims are not inferred from a passing subset.
 
 ## Release QA Gate
 

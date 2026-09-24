@@ -333,14 +333,8 @@ public final class TaskContractResolver {
             return currentResolution;
         }
         if (!current.mutationRequested() && looksLikeConfirmationFollowUp(latest)) {
-            TaskContract inherited = inheritedAssistantPlanContract(messages, latest, current);
-            if (inherited != null) {
-                return projectResolution(
-                        currentResolution,
-                        withContextualStaticWebTargets(messages, latest, inherited),
-                        TargetSource.MESSAGE_HISTORY,
-                        "assistant-plan-confirmation-projection");
-            }
+            // Proposal continuation is resolved by request-bound active context, not assistant prose.
+            return currentResolution;
         }
         if (looksLikeRepairFollowUp(latest)) {
             TaskContract inherited =
@@ -1717,48 +1711,6 @@ public final class TaskContractResolver {
             return i;
         }
         return -1;
-    }
-
-    private static TaskContract inheritedAssistantPlanContract(
-            List<ChatMessage> messages,
-            String latestUserRequest,
-            TaskContract current
-    ) {
-        String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
-        if (!looksLikeConcreteMutationProposal(previousAssistant)) return null;
-        Set<String> expectedTargets = extractExpectedTargets(previousAssistant);
-        if (expectedTargets.isEmpty()) return null;
-        Set<String> forbiddenTargets = current == null ? Set.of() : current.forbiddenTargets();
-        expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
-        if (expectedTargets.isEmpty()) return null;
-        return new TaskContract(
-                TaskType.FILE_EDIT,
-                true,
-                true,
-                true,
-                expectedTargets,
-                Set.of(),
-                forbiddenTargets,
-                "Confirmed assistant-proposed mutation plan.\n\nConfirmation follow-up: "
-                        + (latestUserRequest == null ? "" : latestUserRequest.strip()),
-                "confirmation-follow-up-inherits-assistant-mutation-plan");
-    }
-
-    private static boolean looksLikeConcreteMutationProposal(String assistantResponse) {
-        if (assistantResponse == null || assistantResponse.isBlank()) return false;
-        String lower = assistantResponse.toLowerCase(Locale.ROOT);
-        boolean asksConfirmation = lower.contains("would you like")
-                || lower.contains("should i proceed")
-                || lower.contains("shall i proceed")
-                || lower.contains("proceed?");
-        if (!asksConfirmation) return false;
-        boolean mutationLanguage = lower.contains("update")
-                || lower.contains("edit")
-                || lower.contains("create")
-                || lower.contains("write")
-                || lower.contains("change")
-                || lower.contains("modify");
-        return mutationLanguage && !extractExpectedTargets(assistantResponse).isEmpty();
     }
 
     private static TaskContract inheritedRepairContract(

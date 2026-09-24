@@ -166,6 +166,7 @@ public final class TalosBootstrap {
         // ── Tools ────────────────────────────────────────────────────────
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new ReadFileTool());
+        toolRegistry.register(new dev.talos.runtime.toolcall.DocumentComparisonTool());
         toolRegistry.register(new FileWriteTool());
         toolRegistry.register(new FileEditTool());
         toolRegistry.register(new BatchWorkspaceApplyTool());

@@ -54,11 +54,13 @@ class ReadOnlyEvidenceContinuationTest {
     private final List<LlmClient> clients = new ArrayList<>();
 
     @BeforeEach void trace() {
+        dev.talos.runtime.TurnAuditCapture.begin();
         LocalTurnTraceCapture.begin("pending-diagnosis", "tests", 1, "2026-09-12T00:00:00Z",
                 "workspace", "auto", "llama_cpp", "fixture", REQUEST);
     }
 
     @AfterEach void clear() {
+        dev.talos.runtime.TurnAuditCapture.end();
         clients.forEach(LlmClient::close);
         LocalTurnTraceCapture.clear();
         TurnTaskContractCapture.clear();
@@ -253,8 +255,32 @@ class ReadOnlyEvidenceContinuationTest {
     }
 
     private LoopState state(LlmClient client, int completed) throws Exception {
+        return state(client, completed, REQUEST, false);
+    }
+    @Test void completeReadsTransitionToRequiredOrderedComparisonWithoutConflictingInstructions() throws Exception {
+        String request = "Read README.md, index.html, script.js and scripts.js. Explain why the Calculate button fails and give the correct selector. "
+                + "For span 12 m and rise 2.5 m, give the panel area according to README.md and the mathematical value of the expression in script.js separately. "
+                + "Explain any disagreement and distinguish the two JavaScript files. Do not edit files or claim tests were run.";
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(read("initial", "README.md"),
+                new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall("compare", DocumentComparisonTool.NAME,
+                        Map.of("left", "script.js", "right", "scripts.js"))))), 16_384);
+        var state = state(recorded.client(), 4, request, true);
+        assertTrue(dev.talos.runtime.task.DocumentComparisonRequest.from(TurnTaskContractCapture.get()).active());
+        assertTrue(ReadOnlyEvidenceContext.select(state).complete());
+        assertTrue(DocumentComparisonContinuation.tryHandle(state).orElseThrow());
+        var selected = recorded.requests().getLast();
+        assertEquals(ToolChoiceMode.REQUIRED, selected.controls.toolChoice());
+        assertEquals(List.of(DocumentComparisonTool.NAME), selected.tools.stream().map(ToolSpec::name).toList());
+        assertEquals(DocumentComparisonTool.NAME, state.currentNativeCalls.getFirst().name());
+        assertTrue(selected.messages.getLast().content().startsWith("[Required ordered comparisons]"));
+        assertTrue(selected.messages.getLast().content().contains("script.js"));
+        assertTrue(selected.messages.stream().noneMatch(message -> message.content().contains("Read only these remaining required paths")));
+        assertEquals(0, selected.messages.stream().filter(message -> message.role().equals("tool")).count());
+        assertEquals(2, recorded.requests().size());
+    }
+    private LoopState state(LlmClient client, int completed, String request, boolean compare) throws Exception {
         clients.add(client);
-        var messages = new ArrayList<>(List.of(ChatMessage.system("Read the required sources."), ChatMessage.user(REQUEST)));
+        var messages = new ArrayList<>(List.of(ChatMessage.system("Read the required sources."), ChatMessage.user(request)));
         var resolution = TaskContractResolver.resolveFromMessages(messages);
         assertEquals(TaskType.DIAGNOSE_ONLY, resolution.contract().type());
         assertFalse(resolution.contract().mutationAllowed());
@@ -267,9 +293,13 @@ class ReadOnlyEvidenceContinuationTest {
         assertEquals(Set.copyOf(TARGETS), resolution.intent().targets().pathsByRole(TargetRole.MUST_MUTATE));
         assertTrue(resolution.intent().targets().pathsByRole(TargetRole.MUST_READ).isEmpty());
         TurnTaskContractCapture.set(resolution, messages);
-        TurnUserRequestCapture.set(REQUEST);
+        TurnUserRequestCapture.set(request);
         var descriptor = new ReadFileTool().descriptor();
-        var specs = List.of(new ToolSpec(descriptor.name(), descriptor.description(), descriptor.parametersSchema()));
+        var specs = new ArrayList<>(List.of(new ToolSpec(descriptor.name(), descriptor.description(), descriptor.parametersSchema())));
+        if (compare) {
+            var additional = new DocumentComparisonTool().descriptor();
+            specs.add(new ToolSpec(additional.name(), additional.description(), additional.parametersSchema()));
+        }
         client.setToolSpecs(specs);
         var initial = client.chatFull(messages, specs, ChatRequestControls.defaults()
                 .withToolAuthorityMode(client.toolAuthorityModeForToolSurface(specs)));

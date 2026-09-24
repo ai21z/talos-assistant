@@ -18,6 +18,10 @@ Windows trailing-dot and trailing-space path aliases are canonicalized before pr
 
 ## Practical handling
 
+The following comparison behavior is Unreleased. Model-context permission and raw artifact permission remain separate. When model access is permitted but raw artifacts are denied, managed llama.cpp output is drained without being saved by Talos. Earlier log bytes are not changed by this suppression, but subsequent raw server diagnostics remain unavailable for that manager lifetime, including replacement processes. A later launch still resets its per-port log under the existing lifecycle. Configured native file or prompt-directory logging, unavailable capture control and connect-only llama.cpp prevent that restricted request from being sent. No logging option is silently changed.
+
+This controls Talos-owned capture and projections. External provider retention and arbitrary endpoint ownership are not certified. The restriction must not be treated as permission to send content to a different provider.
+
 - Do not run release audits inside folders containing real secrets.
 - Use fixture secrets and canaries when testing redaction.
 - Keep prompt-debug captures, provider bodies, server logs, and manual transcripts out of public commits unless a release runbook asks for a sanitized packet.

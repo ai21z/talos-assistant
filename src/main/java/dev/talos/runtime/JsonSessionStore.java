@@ -301,6 +301,10 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             String model     = str(root, "model");
             ActiveTaskContext activeTaskContext = activeTaskContextFrom(root.get("activeTaskContext"));
             ArtifactGoal artifactGoal = artifactGoalFrom(root.get("artifactGoal"));
+            if (activeTaskContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES
+                    && !activeTaskContext.hasBoundProposal()) {
+                artifactGoal = ArtifactGoal.none();
+            }
 
             @SuppressWarnings("unchecked")
             List<Map<String, String>> rawTurns =
@@ -1480,6 +1484,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         out.put("targets", safe.targets());
         out.put("operation", safe.operation().name());
         out.put("proposalSummary", safe.proposalSummary());
+        out.put("proposalProvenance", safe.proposalProvenance());
         out.put("previousOutcomeStatus", safe.previousOutcomeStatus());
         out.put("verifierFindings", safe.verifierFindings());
         out.put("requiredVerificationClaims", safe.requiredVerificationClaims().stream()
@@ -1535,7 +1540,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     requiredVerificationClaimsFrom(map.get("requiredVerificationClaims")),
                     staticWebRequirementsFrom(map.get("staticWebRequirements")),
                     stringVal(map, "blockedReason", ""),
-                    stringVal(map, "suppressionReason", ""));
+                    stringVal(map, "suppressionReason", ""),
+                    proposalProvenanceFrom(map.get("proposalProvenance")));
         } catch (Exception e) {
             return ActiveTaskContext.none();
         }
@@ -1546,6 +1552,26 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         return StaticWebRequirements.of(
                 stringList(map.get("requiredVisibleFacts")),
                 new java.util.LinkedHashSet<>(stringList(map.get("forbiddenArtifacts"))));
+    }
+
+    private static dev.talos.runtime.context.ProposalProvenance proposalProvenanceFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) return dev.talos.runtime.context.ProposalProvenance.none();
+        if (!map.keySet().equals(java.util.Set.of("policyVersion", "sourceTurnNumber", "sourceTraceId",
+                "requestHash", "answerHash", "summaryHash", "targets"))
+                || !(map.get("policyVersion") instanceof Integer)
+                || !(map.get("sourceTurnNumber") instanceof Integer)
+                || !(map.get("targets") instanceof List<?> paths)
+                || paths.stream().anyMatch(path -> !(path instanceof String))) {
+            return dev.talos.runtime.context.ProposalProvenance.none();
+        }
+        for (String key : List.of("sourceTraceId", "requestHash", "answerHash", "summaryHash")) {
+            if (!(map.get(key) instanceof String)) return dev.talos.runtime.context.ProposalProvenance.none();
+        }
+        return new dev.talos.runtime.context.ProposalProvenance(
+                intValLoose(map, "policyVersion"), intValLoose(map, "sourceTurnNumber"),
+                stringVal(map, "sourceTraceId", ""), stringVal(map, "requestHash", ""),
+                stringVal(map, "answerHash", ""), stringVal(map, "summaryHash", ""),
+                paths.stream().map(String.class::cast).toList());
     }
 
     private static List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaimsFrom(Object raw) {

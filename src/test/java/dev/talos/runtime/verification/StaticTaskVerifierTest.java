@@ -2631,7 +2631,7 @@ class StaticTaskVerifierTest {
 
         TaskVerificationResult result = StaticTaskVerifier.verify(
                 workspace,
-                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed.",
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files.",
                 loopResult(List.of(successfulWrite("style.css", VerificationStatus.PASS))),
                 0);
 

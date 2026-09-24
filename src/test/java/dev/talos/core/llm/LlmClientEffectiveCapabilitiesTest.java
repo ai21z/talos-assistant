@@ -29,6 +29,20 @@ class LlmClientEffectiveCapabilitiesTest {
         Config config = new Config();
         config.data.put("llm", new LinkedHashMap<>(java.util.Map.of("transport", "placeholder")));
         assertTrue(new LlmClient(config).nativeToolsCurrentlyEnabled());
+        assertFalse(new LlmClient(config).supportsJsonSchemaResponse());
+    }
+
+    @Test
+    void schemaSupportRequiresAnEffectiveQualifiedCapabilityWithoutDispatch() throws Exception {
+        AuthoritativeResolver resolver = new AuthoritativeResolver(capabilities(true));
+        LlmClient client = new LlmClient(engineConfig(true), resolver);
+        assertFalse(client.supportsJsonSchemaResponse());
+        assertEquals(0, resolver.prepareCalls.get());
+        assertEquals(null, resolver.lastRequest);
+        assertTrue(client.prepareNativeTools());
+        assertTrue(client.supportsJsonSchemaResponse());
+        assertEquals(1, resolver.prepareCalls.get());
+        assertEquals(null, resolver.lastRequest);
     }
 
     @Test
@@ -109,6 +123,7 @@ class LlmClientEffectiveCapabilitiesTest {
         assertEquals(ModelIdentitySnapshot.empty(), client.modelIdentity());
         assertFalse(client.supportsRequiredToolChoice());
         assertFalse(client.supportsNamedToolChoice());
+        assertFalse(client.supportsJsonSchemaResponse());
         assertEquals(0, client.contextWindowDiagnostics().engineWindowTokens());
     }
 
@@ -129,6 +144,9 @@ class LlmClientEffectiveCapabilitiesTest {
         assertSame(failure, assertThrows(
                 RuntimeException.class,
                 client::supportsNamedToolChoice));
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::supportsJsonSchemaResponse));
         assertSame(failure, assertThrows(
                 RuntimeException.class,
                 client::contextWindowDiagnostics));

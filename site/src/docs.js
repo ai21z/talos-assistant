@@ -32,6 +32,8 @@ const STATUS_NOTE_HTML = `
   <p><strong>Beta status.</strong> Talos 0.10.8 installs from GitHub Release assets.
   Windows x64 is unsigned and requires <code>-AllowUnsigned</code>. Ubuntu/WSL x64
   uses the runtime-bundled installer and starts <code>talos setup wizard</code>.
+  Unreleased capabilities are identified separately and are not established in
+  those published artifacts.
   To upgrade, rerun the installer with <code>--force</code> and the pinned version.</p>
 </aside>`;
 

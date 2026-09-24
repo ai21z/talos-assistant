@@ -102,7 +102,7 @@ final class OllamaChatClient {
         HttpResponse<String> resp;
         try {
             ProviderTransportAttempt transport = ProviderTransportHandoff.admit(
-                    handoff, json, List.of());
+                    handoff, json, List.of(), req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(
@@ -165,7 +165,7 @@ final class OllamaChatClient {
         HttpResponse<java.io.InputStream> resp;
         ProviderTransportAttempt transport;
         try {
-            transport = ProviderTransportHandoff.admit(handoff, json, List.of());
+            transport = ProviderTransportHandoff.admit(handoff, json, List.of(), req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(transport, HttpResponse.BodyHandlers.ofInputStream())));
@@ -356,7 +356,7 @@ final class OllamaChatClient {
         HttpResponse<String> resp;
         try {
             ProviderTransportAttempt transport = ProviderTransportHandoff.admit(
-                    handoff, json, nativeToolCalling ? req.tools : List.of());
+                    handoff, json, nativeToolCalling ? req.tools : List.of(), req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(
@@ -430,7 +430,7 @@ final class OllamaChatClient {
         ProviderTransportAttempt transport;
         try {
             transport = ProviderTransportHandoff.admit(
-                    handoff, json, nativeToolCalling ? req.tools : List.of());
+                    handoff, json, nativeToolCalling ? req.tools : List.of(), req);
             resp = transport.invokeSend(() -> http.send(
                     httpReq,
                     observeHeaders(transport, HttpResponse.BodyHandlers.ofInputStream())));

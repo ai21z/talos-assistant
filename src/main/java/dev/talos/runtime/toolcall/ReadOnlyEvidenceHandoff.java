@@ -83,7 +83,8 @@ public final class ReadOnlyEvidenceHandoff {
                         || state.readEvidence.latestIdenticalCall(converted.getFirst(), true)
                             != carrier.evidence()) return EMPTY;
                 captured.add(new Entry(carrier.target(), carrier.evidence(), carrier.index(),
-                        carrier.message(), originalCall.index(), originalCall.call()));
+                        carrier.message(), originalCall.index(), originalCall.call(),
+                        state.readEvidence.toolResult(carrier.evidence()).body()));
             }
             var result = new ReadOnlyEvidenceHandoff(normalize(state.workspace),
                     TurnTaskContractCapture.get(), LocalTurnTraceCapture.currentTraceId(),
@@ -122,7 +123,7 @@ public final class ReadOnlyEvidenceHandoff {
                 || !matches(state.messages, state.workspace)) return;
         for (Entry entry : entries) {
             state.readEvidence.importReusable(entry.evidence(),
-                    new ReadEvidenceLedger.BoundToolResult(entry.resultIndex(), entry.result()));
+                    new ReadEvidenceLedger.BoundToolResult(entry.resultIndex(), entry.result(), entry.body()));
             state.pathsReadThisTurn.add(ToolCallSupport.normalizePath(entry.evidence().effectivePath()));
         }
     }
@@ -252,7 +253,7 @@ public final class ReadOnlyEvidenceHandoff {
     }
 
     private record Entry(String target, ReadEvidence evidence, int resultIndex, ChatMessage result,
-                         int callIndex, ChatMessage.NativeToolCall call) {}
+                         int callIndex, ChatMessage.NativeToolCall call, ToolResultFormatter.ReadBody body) {}
     private record LocatedCall(int index, ChatMessage.NativeToolCall call) {}
     private record Replacement(int index, ChatMessage previous, ChatMessage restored) {}
 

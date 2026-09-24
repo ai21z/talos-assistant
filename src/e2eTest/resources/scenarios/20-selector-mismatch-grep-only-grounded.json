@@ -1,9 +1,9 @@
 {
-  "name": "selector mismatch grep-only underinspection is grounded",
+  "name": "grep-only selector diagnosis remains limited",
   "fixture": "horror-synth-site",
   "v1Pack": true,
   "claims": [
-    "grounded-analysis-reports-real-selector-mismatch",
+    "grep-only-results-do-not-supply-complete-source-observations",
     "grep-only-underinspection-does-not-escape"
   ],
   "runner": "executor",

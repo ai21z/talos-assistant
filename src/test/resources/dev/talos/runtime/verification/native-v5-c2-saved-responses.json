@@ -1,0 +1,20 @@
+{
+  "contextFixture": "native-v4-saved-responses.json",
+  "context": "C2",
+  "requestSha256": "3bc71acb85538d1e8263097f2fb8c030e262205040906b97a45eed0ddbed195d",
+  "provenance": "Two exact final response contents were selected by recorded SHA256 from the local role relations campaign. Source texts are reused from the authenticated portable C2 context. Any mapped fixture is separate from these historical responses.",
+  "captures": [
+    {
+      "id": "02-qwen-C2",
+      "bytes": 1413,
+      "sha256": "579908e93f63eeb6087b32a67cbffb5a6b1f70360871b05849a595df84696a33",
+      "response": "{\n  \"version\": 5,\n  \"catalogId\": \"fbfa12b330cfaba2ecf028e65f9cecca6db91f57a81b57771165d134654b4f44\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-0-69\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-71-121\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-123-164\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-166-203\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\n        \"b0\",\n        \"b1\"\n      ],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-5-209-254\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": [\n    {\n      \"regionId\": \"result-1-0-69\",\n      \"relationId\": \"d0\"\n    },\n    {\n      \"regionId\": \"result-1-0-69\",\n      \"relationId\": \"d1\"\n    },\n    {\n      \"regionId\": \"result-1-0-69\",\n      \"relationId\": \"d2\"\n    },\n    {\n      \"regionId\": \"result-2-71-121\",\n      \"relationId\": \"d3\"\n    },\n    {\n      \"regionId\": \"result-2-71-121\",\n      \"relationId\": \"d4\"\n    },\n    {\n      \"regionId\": \"result-2-71-121\",\n      \"relationId\": \"d5\"\n    },\n    {\n      \"regionId\": \"result-3-123-164\",\n      \"relationId\": \"d6\"\n    },\n    {\n      \"regionId\": \"result-3-123-164\",\n      \"relationId\": \"d7\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "05-gpt-C2",
+      "bytes": 815,
+      "sha256": "f33adbdec7dec265d107f82fda9dffd773695d41f0ee9beec962a1c6b3cb58e7",
+      "response": "{\n  \"version\": 5,\n  \"catalogId\": \"e62308492c9ca25efbaa82b056eae15a238ff49106f2aa9fcd0cb547f0a4cd3c\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-0-69\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-71-121\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-123-164\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-166-203\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\n        \"b0\",\n        \"b1\"\n      ],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-5-209-254\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": []\n}"
+    }
+  ]
+}

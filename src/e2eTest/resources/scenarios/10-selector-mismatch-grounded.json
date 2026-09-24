@@ -1,9 +1,9 @@
 {
-  "name": "selector mismatch analysis is grounded",
+  "name": "unbound selector mismatch analysis is limited",
   "fixture": "horror-synth-site",
   "v1Pack": true,
   "claims": [
-    "grounded-analysis-reports-real-selector-mismatch"
+    "unbound-selector-diagnosis-does-not-infer-source-facts"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",

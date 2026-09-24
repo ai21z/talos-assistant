@@ -31,6 +31,9 @@ public final class EvidenceObligationPolicy {
             Config cfg
     ) {
         if (contract == null) return EvidenceObligation.NONE;
+        var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (comparison.comparisonOnly() || !comparison.unresolved().isEmpty())
+            return EvidenceObligation.DOCUMENT_COMPARISON_REQUIRED;
         TaskType type = contract.type() == null ? TaskType.UNKNOWN : contract.type();
         if (type == TaskType.UNKNOWN || type == TaskType.SMALL_TALK) {
             return EvidenceObligation.NONE;

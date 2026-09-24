@@ -16,6 +16,11 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidenceTestSupport;
+import dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment;
+import dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer;
+import dev.talos.spi.types.ProviderReadInputBinding;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
@@ -139,6 +144,38 @@ class AssistantTurnExecutorTest {
             String response
     ) {
         return textProvider(registry, List.of(response));
+    }
+
+    private static ToolCallLoop.LoopResult observedDiagnosticLoop(
+            Path workspace, List<ChatMessage> messages, String answer, List<String> reads) throws Exception {
+        String request = messages.getLast().content();
+        var contract = new TaskContract(TaskType.DIAGNOSE_ONLY, false, false, false,
+                java.util.Set.copyOf(reads), TaskContractResolver.extractForbiddenTargets(request), request);
+        dev.talos.runtime.TurnTaskContractCapture.set(contract);
+        var sources = new java.util.LinkedHashMap<String, String>();
+        var outcomes = new ArrayList<ToolCallLoop.ToolOutcome>();
+        for (String read : reads) {
+            sources.put(read, Files.readString(workspace.resolve(read)));
+            outcomes.add(new ToolCallLoop.ToolOutcome("talos.read_file", read, true, false, false,
+                    "The source was read.", ""));
+        }
+        var evidence = ReadOnlyFinalizationEvidenceTestSupport.evidence(workspace, contract, answer, sources);
+        assertTrue(evidence.available(), evidence.reason().toString());
+        assertTrue(evidence.matches(answer, workspace, contract),
+                "The fixture answer must be the exact selected provider projection");
+        return new ToolCallLoop.LoopResult(answer, reads.size(), reads.size(),
+                outcomes.stream().map(ToolCallLoop.ToolOutcome::toolName).toList(), messages,
+                0, 0, false, 0, reads, 0, 0, 0, 0, null, outcomes, Map.of(), false,
+                ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED, null, evidence);
+    }
+
+    private static void assertDiagnosticReason(LocalTurnTrace trace, ReadOnlyWebAnswerAssessment.Reason reason) {
+        var assessments = trace.events().stream()
+                .filter(event -> "READ_ONLY_WEB_ANSWER_ASSESSED".equals(event.type())).toList();
+        assertEquals(1, assessments.size(), trace.events().toString());
+        assertEquals(reason.name(), assessments.getFirst().data().get("reasonCode"));
+        assertEquals(reason == ReadOnlyWebAnswerAssessment.Reason.PRESERVED ? "PRESERVED" : "LIMITED",
+                assessments.getFirst().data().get("disposition"));
     }
 
     private record RecordedRetry(
@@ -673,7 +710,7 @@ class AssistantTurnExecutorTest {
             throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Old title\n");
         String userRequest = "Apply that README.md proposal now.";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 1, "trace-propose", List.of("README.md"),
                 "Replace the README title and add usage.");
         SessionMemory memory = new SessionMemory();
@@ -752,7 +789,7 @@ class AssistantTurnExecutorTest {
 
     @Test
     void noWorkspaceChatSuppressesActiveContextInPromptAudit() {
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 1, "trace-propose", List.of("README.md"),
                 "Replace the README title and add usage.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
@@ -809,7 +846,7 @@ class AssistantTurnExecutorTest {
         for (String prompt : List.of(
                 "Hello friend, how are you?",
                 "Hello friend, how are you after the model command?")) {
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     1, "trace-propose", List.of("README.md"),
                     "Replace the README title and add usage.");
             SessionMemory memory = new SessionMemory();
@@ -1266,7 +1303,7 @@ class AssistantTurnExecutorTest {
     void deicticApplyReplacesStaleNativeSurfaceAndCapabilityFrame(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Old title\n");
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 1, "trace-propose", List.of("README.md"),
                 "Replace the README title and add usage.");
         SessionMemory memory = new SessionMemory();
@@ -3133,7 +3170,7 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Compare a.txt with b.txt."));
+            messages.add(ChatMessage.user("Read a.txt and b.txt."));
 
             LocalTurnTraceCapture.begin(
                     "trc-t77-partial-read-evidence-recovery",
@@ -3144,7 +3181,7 @@ class AssistantTurnExecutorTest {
                     "auto",
                     "scripted",
                     "test-model",
-                    "Compare a.txt with b.txt.");
+                    "Read a.txt and b.txt.");
             try {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -8547,17 +8584,19 @@ class AssistantTurnExecutorTest {
     class SelectorMismatchGroundingTests {
 
         @Test
-        @DisplayName("selector mismatch request is overridden by deterministic workspace analysis")
-        void selectorMismatchAnswerIsGroundedFromWorkspace() throws Exception {
+        @DisplayName("selector mismatch request is bounded by selected source observations")
+        void selectorMismatchAnswerIsGroundedFromObservations() throws Exception {
             Path ws = Files.createTempDirectory("talos-selector-grounding-");
             try {
                 Files.writeString(ws.resolve("index.html"), """
                         <!DOCTYPE html>
                         <html>
+                          <head><link rel="stylesheet" href="style.css"></head>
                           <body class="synthwave-theme">
                             <section id="hero">
                               <div class="hero-content"></div>
                             </section>
+                            <script src="script.js"></script>
                           </body>
                         </html>
                         """);
@@ -8575,18 +8614,14 @@ class AssistantTurnExecutorTest {
                 messages.add(ChatMessage.system("sys"));
                 messages.add(ChatMessage.user("Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                        "unused", 4, 4,
-                        List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
-                        List.of(), 0, 0, false, 0, List.of("index.html", "style.css", "script.js"),
-                        0, 0, 0, 0);
-
                 String bogus = "There are no mismatches. The class `cta-button` is present in HTML and JavaScript.";
+                var loopResult = observedDiagnosticLoop(ws, messages, bogus,
+                        List.of("index.html", "style.css", "script.js"));
                 String out = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
                         bogus, messages, loopResult, ws);
 
                 assertNotEquals(bogus, out);
-                assertTrue(out.contains("Mismatches found:"));
+                assertTrue(out.contains("Static source findings:"), out);
                 assertTrue(out.contains("`.cta-button`"));
                 assertFalse(out.contains("present in HTML and JavaScript"));
                 assertFalse(out.contains("#ff4500"));
@@ -8606,6 +8641,71 @@ class AssistantTurnExecutorTest {
     class ReadOnlyWebDiagnosticsGroundingTests {
 
         @Test
+        void namedDiagnosisReadsBindOneFinalSynthesisThroughTheFullPipeline(@TempDir Path workspace)
+                throws Exception {
+            String html = """
+                    <!doctype html>
+                    <html><body>
+                    <button id="calculate" type="button">Calculate</button>
+                    <script src="script.js"></script>
+                    </body></html>
+                    """;
+            String script = "document.querySelector('#calc');\n";
+            Files.writeString(workspace.resolve("index.html"), html);
+            Files.writeString(workspace.resolve("script.js"), script);
+            String answer = "`#calc` is missing from index.html. The correct selector is `#calculate`.";
+            var registry = new ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "read-html", "talos.read_file", Map.of("path", "index.html")))),
+                    new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "read-script", "talos.read_file", Map.of("path", "script.js")))),
+                    new LlmClient.StreamResult(answer, List.of())), 16_384);
+            var ctx = Context.builder(new Config()).llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, Map.of()))
+                    .toolRegistry(registry).nativeToolSpecs(toolSpecs(registry))
+                    .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 6))
+                    .build();
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(
+                    "Read index.html and script.js, then diagnose the selector mismatch. Do not edit files.")));
+            var resolved = TaskContractResolver.fromMessages(messages);
+            assertEquals(TaskType.DIAGNOSE_ONLY, resolved.type());
+            assertEquals(java.util.Set.of("index.html", "script.js"), resolved.expectedTargets());
+
+            var out = AssistantTurnExecutor.execute(messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains(answer), out.text());
+            assertFalse(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+            assertEquals(3, recorded.requests().size());
+            assertEquals(ToolChoiceMode.REQUIRED, recorded.requests().get(1).controls.toolChoice());
+            assertTrue(recorded.requests().get(1).controls.debugTags().contains("bounded-read-only-inspection"));
+            var syntheses = recorded.requests().stream()
+                    .filter(request -> request.controls.debugTags().contains(ProviderReadInputBinding.REQUEST_TAG))
+                    .toList();
+            assertEquals(1, syntheses.size());
+            var synthesis = syntheses.getFirst();
+            assertTrue(synthesis.tools.isEmpty());
+            assertEquals(ToolChoiceMode.NONE, synthesis.controls.toolChoice());
+            assertTrue(synthesis.controls.singleAttempt());
+            var carried = synthesis.messages.stream().filter(message -> "tool".equals(message.role())).toList();
+            assertEquals(List.of("read-html", "read-script"), carried.stream().map(ChatMessage::toolCallId).toList());
+            assertTrue(carried.getFirst().content().contains("3 | <button id=\"calculate\""));
+            assertTrue(carried.getLast().content().contains("1 | document.querySelector('#calc');"));
+            assertEquals(2, trace.events().stream().filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                    .filter(event -> "talos.read_file".equals(event.toolName())).count());
+            assertDiagnosticReason(trace, ReadOnlyWebAnswerAssessment.Reason.PRESERVED);
+            var assessment = trace.events().stream()
+                    .filter(event -> "READ_ONLY_WEB_ANSWER_ASSESSED".equals(event.type())).findFirst().orElseThrow();
+            assertFalse(assessment.data().get("selectionId").toString().isBlank());
+            assertFalse(assessment.data().get("generationId").toString().isBlank());
+            assertEquals(2, ((List<?>) assessment.data().get("observationIds")).size());
+            assertEquals(html, Files.readString(workspace.resolve("index.html")));
+            assertEquals(script, Files.readString(workspace.resolve("script.js")));
+        }
+
+        @Test
         @DisplayName("natural site diagnostic request is recognized")
         void naturalSiteDiagnosticRequestIsRecognized() {
             assertTrue(AssistantTurnExecutor.looksLikeReadOnlyWebDiagnosticRequest(
@@ -8621,8 +8721,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("web diagnostic request is overridden by deterministic static facts")
-        void readOnlyWebDiagnosticAnswerIsGroundedFromWorkspace() throws Exception {
+        @DisplayName("malformed observed markup does not produce invented tag repairs")
+        void readOnlyWebDiagnosticMalformedMarkupIsExplicitlyLimited() throws Exception {
             Path ws = Files.createTempDirectory("talos-web-diagnostics-grounding-");
             try {
                 Files.writeString(ws.resolve("index.html"), """
@@ -8651,22 +8751,21 @@ class AssistantTurnExecutorTest {
                 messages.add(ChatMessage.user(
                         "Inspect this BMI website and identify why it is not working. Do not edit files yet."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                        "unused", 4, 4,
-                        List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
-                        List.of(), 0, 0, false, 0,
-                        List.of("index.html", "styles.css", "script.js"),
-                        0, 0, 0, 0);
-
                 String bogus = "The issue is that the script.js file is missing a closing script tag.";
-                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                        bogus, messages, loopResult, ws);
+                var loopResult = observedDiagnosticLoop(ws, messages, bogus,
+                        List.of("index.html", "styles.css", "script.js"));
+                var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, null, messages, loopResult, ws);
+                String out = selected.answer();
 
                 assertNotEquals(bogus, out);
-                assertTrue(out.contains("Static web diagnostics found:"), out);
-                assertTrue(out.contains("index.html: malformed closing tag `</button>`"), out);
-                assertTrue(out.contains("index.html: malformed closing tag `</script>`"), out);
-                assertTrue(out.contains("`calculator-container` should probably be `.calculator-container`"), out);
+                assertEquals(ReadOnlyWebAnswerAssessment.Reason.SOURCE_RELATION_UNSUPPORTED,
+                        selected.assessment().reason());
+                assertTrue(selected.assessment().limited());
+                assertTrue(selected.diagnostics().isEmpty());
+                assertTrue(out.startsWith(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out);
+                assertFalse(out.contains("malformed closing tag"), out);
+                assertFalse(out.contains("should probably be"), out);
                 assertFalse(out.contains("script.js file is missing a closing script tag"));
             } finally {
                 try (var walk = Files.walk(ws)) {
@@ -8721,8 +8820,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("static button review false success is replaced by deterministic diagnostics")
-        void staticButtonReviewFalseSuccessIsGroundedFromWorkspace() throws Exception {
+        @DisplayName("static button review false success is replaced by observed source findings")
+        void staticButtonReviewFalseSuccessIsGroundedFromObservations() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-grounding-");
             try {
                 Files.writeString(ws.resolve("index.html"), """
@@ -8756,24 +8855,21 @@ class AssistantTurnExecutorTest {
                         "Review the current static web page and say whether the button can work in a browser. "
                                 + "Do not inspect protected files."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                        "unused", 3, 3,
-                        List.of("talos.list_dir", "talos.read_file", "talos.read_file"),
-                        List.of(), 0, 0, false, 0,
-                        List.of("index.html", "script.js"),
-                        0, 0, 0, 0);
-
                 String bogus = """
                         Yes - the page will work as expected in a browser.
 
                         Opening `index.html` in a browser will show the button and, when clicked,
                         will replace "Waiting." with "Audit action complete."
-                        """;
-                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                        bogus, messages, loopResult, ws);
+                        """.strip();
+                var loopResult = observedDiagnosticLoop(ws, messages, bogus, List.of("index.html", "script.js"));
+                var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, null, messages, loopResult, ws);
+                String out = selected.answer();
 
                 assertNotEquals(bogus, out);
-                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertTrue(selected.assessment().limited(), selected.toString());
+                assertFalse(selected.diagnostics().isEmpty(), selected.toString());
+                assertTrue(out.contains("Static source findings:"), out);
                 assertTrue(out.contains("script.js"), out);
                 assertTrue(out.contains("does not assign visible result text"), out);
                 assertFalse(out.contains("will work as expected"), out);
@@ -8788,8 +8884,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("static button review reports missing button and script linkage from read evidence")
-        void staticButtonReviewReportsMissingButtonAndScriptLinkage() throws Exception {
+        @DisplayName("unlinked observed script does not establish a supported button relationship")
+        void staticButtonReviewLimitsUnlinkedScriptRelationship() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-missing-linkage-");
             try {
                 Files.writeString(ws.resolve("index.html"), """
@@ -8822,22 +8918,20 @@ class AssistantTurnExecutorTest {
                         "Review the current static web page and say whether the button can work in a browser. "
                                 + "Do not inspect protected files."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                        "unused", 2, 2,
-                        List.of("talos.read_file", "talos.read_file"),
-                        List.of(), 0, 0, false, 0,
-                        List.of("index.html", "script.js"),
-                        0, 0, 0, 0);
-
                 String bogus = "The button can work in a browser. No issues found.";
-                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                        bogus, messages, loopResult, ws);
+                var loopResult = observedDiagnosticLoop(ws, messages, bogus, List.of("index.html", "script.js"));
+                var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, null, messages, loopResult, ws);
+                String out = selected.answer();
 
                 assertNotEquals(bogus, out);
-                assertTrue(out.contains("Static web diagnostics found:"), out);
-                assertTrue(out.contains("HTML does not link JavaScript file: `script.js`"), out);
-                assertTrue(out.contains("JavaScript references missing class selectors: `.cta-button`"), out);
-                assertTrue(out.contains("does not assign visible result text"), out);
+                assertEquals(ReadOnlyWebAnswerAssessment.Reason.SOURCE_RELATION_UNSUPPORTED,
+                        selected.assessment().reason());
+                assertTrue(selected.assessment().limited());
+                assertTrue(selected.diagnostics().isEmpty());
+                assertTrue(out.startsWith(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out);
+                assertFalse(out.contains("JavaScript references missing class selectors"), out);
+                assertFalse(out.contains("does not assign visible result text"), out);
                 assertFalse(out.contains("did not find obvious"), out);
                 assertFalse(out.contains("No issues found"), out);
             } finally {
@@ -8883,27 +8977,17 @@ class AssistantTurnExecutorTest {
                         "Plan a fix for the static page so the button can work. "
                                 + "Inspect only index.html and script.js; do not read .env and do not edit."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                var loopResult = observedDiagnosticLoop(ws, messages,
                         "I inspected index.html, styles.css, and script.js. The CSS is fine.",
-                        2,
-                        2,
-                        List.of("talos.read_file", "talos.read_file"),
-                        List.of(),
-                        0,
-                        0,
-                        false,
-                        0,
-                        List.of("index.html", "script.js"),
-                        0,
-                        0,
-                        0,
-                        0);
-
-                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                        loopResult.finalAnswer(), messages, loopResult, ws);
+                        List.of("index.html", "script.js"));
+                var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                        loopResult.finalAnswer(), null, messages, loopResult, ws);
+                String out = selected.answer();
 
                 assertNotEquals(loopResult.finalAnswer(), out);
-                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertEquals(ReadOnlyWebAnswerAssessment.Reason.UNREAD_PATH, selected.assessment().reason());
+                assertTrue(selected.assessment().limited());
+                assertTrue(out.contains("Static source findings:"), out);
                 assertTrue(out.contains("HTML: `index.html`"), out);
                 assertTrue(out.contains("JavaScript: `script.js`"), out);
                 assertFalse(out.contains("CSS: `styles.css`"), out);
@@ -8920,8 +9004,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("static button review grounds html-only underinspection when script is visible but unlinked")
-        void staticButtonReviewGroundsHtmlOnlyUnderinspectionWhenVisibleScriptIsUnlinked() throws Exception {
+        @DisplayName("broad html-only review remains limited without inventing script facts")
+        void staticButtonReviewLimitsHtmlOnlyUnderinspectionWhenVisibleScriptIsUnlinked() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-html-only-underinspection-");
             try {
                 Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
@@ -8993,9 +9077,11 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, ws, ctx, new AssistantTurnExecutor.Options());
 
-                assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
-                assertTrue(out.text().contains(
-                        "index.html: inspected HTML does not link a local JavaScript file."), out.text());
+                assertDiagnosticReason(LocalTurnTraceCapture.complete(),
+                        ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
+                assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+                assertFalse(out.text().contains("Static source findings:"), out.text());
+                assertFalse(out.text().contains("inspected HTML does not link a local JavaScript file"), out.text());
                 assertFalse(out.text().contains("JavaScript references missing class selectors"), out.text());
                 assertFalse(out.text().contains("does not assign visible result text"), out.text());
                 assertFalse(out.text().contains("With these changes, the button should work in a browser"),
@@ -9012,8 +9098,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("static button diagnostics survive primary-file completeness retry")
-        void staticButtonDiagnosticsSurviveInspectCompletenessRetry() throws Exception {
+        @DisplayName("broad diagnostic reads do not create unbound finalization evidence")
+        void broadStaticButtonReadsRemainLimitedAfterAdditionalInspection() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-retry-grounding-");
             try {
                 Files.writeString(ws.resolve("index.html"), """
@@ -9090,9 +9176,12 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, ws, ctx, new AssistantTurnExecutor.Options());
 
-                assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
-                assertTrue(out.text().contains("script.js"), out.text());
-                assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertDiagnosticReason(LocalTurnTraceCapture.complete(),
+                        ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
+                assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+                assertTrue(out.text().contains("read: index.html, script.js, styles.css"), out.text());
+                assertFalse(out.text().contains("Static source findings:"), out.text());
+                assertFalse(out.text().contains("does not assign visible result text"), out.text());
                 assertFalse(out.text().contains("After making this change, the button should work correctly"),
                         out.text());
                 assertFalse(out.text().contains("I apologize for the oversight"), out.text());
@@ -9106,8 +9195,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("static button review continues once to read linked script in full audit fixture")
-        void staticButtonReviewReadsLinkedScriptWhenFullFixtureSkipsPrimaryRetry() throws Exception {
+        @DisplayName("broad linked-script continuation keeps tool history without disk-derived diagnostics")
+        void broadStaticButtonReviewKeepsLinkedScriptReadHistoryWithoutGrounding() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-linked-script-continuation-");
             try {
                 Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
@@ -9187,9 +9276,10 @@ class AssistantTurnExecutorTest {
                     LocalTurnTraceCapture.clear();
                 }
 
-                assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
-                assertTrue(out.text().contains("script.js"), out.text());
-                assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertDiagnosticReason(trace, ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
+                assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+                assertFalse(out.text().contains("Static source findings:"), out.text());
+                assertFalse(out.text().contains("does not assign visible result text"), out.text());
                 assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
                 assertTrue(out.text().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)"),
                         out.text());
@@ -9256,8 +9346,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("linked script continuation failure keeps evidence-incomplete containment")
-        void linkedScriptContinuationNoToolRetryKeepsEvidenceIncompleteContainment() throws Exception {
+        @DisplayName("broad linked-script continuation failure cannot infer unread script facts")
+        void linkedScriptContinuationNoToolRetryKeepsSourceUnavailableContainment() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-linked-script-no-tool-");
             try {
                 Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
@@ -9305,8 +9395,12 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, ws, ctx, new AssistantTurnExecutor.Options());
 
-                assertTrue(out.text().contains("[Evidence incomplete"), out.text());
-                assertTrue(out.text().contains("linked script source target(s): script.js"), out.text());
+                assertDiagnosticReason(LocalTurnTraceCapture.complete(),
+                        ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE);
+                assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+                assertFalse(out.text().contains("linked script source target(s): script.js"), out.text());
+                assertFalse(out.text().contains("result.textC"), out.text());
+                assertFalse(out.text().contains("The page works"), out.text());
                 assertFalse(out.text().contains("Static web diagnostics found:"), out.text());
             } finally {
                 try (var walk = Files.walk(ws)) {
@@ -9342,18 +9436,20 @@ class AssistantTurnExecutorTest {
                         "Review the current static web page and say whether the button can work in a browser. "
                                 + "Do not inspect protected files."));
 
-                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                        "unused", 1, 1,
-                        List.of("talos.read_file"),
-                        List.of(), 0, 0, false, 0,
-                        List.of("index.html"),
-                        0, 0, 0, 0);
-
                 String answer = "I only read index.html.";
-                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
-                        answer, messages, loopResult, ws);
+                var loopResult = observedDiagnosticLoop(ws, messages, answer, List.of("index.html"));
+                var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                        answer, null, messages, loopResult, ws);
+                String out = selected.answer();
 
-                assertEquals(answer, out);
+                assertEquals(ReadOnlyWebAnswerAssessment.Reason.LINKED_SOURCE_UNOBSERVED,
+                        selected.assessment().reason());
+                assertTrue(selected.assessment().limited());
+                assertTrue(selected.diagnostics().isEmpty());
+                assertTrue(out.startsWith(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out);
+                assertTrue(out.contains("not among the available source observations"), out);
+                assertTrue(out.contains("Its existence on disk was not checked"), out);
+                assertFalse(out.contains("result.textC"), out);
             } finally {
                 try (var walk = Files.walk(ws)) {
                     walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {

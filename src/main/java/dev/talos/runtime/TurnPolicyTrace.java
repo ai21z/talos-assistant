@@ -638,8 +638,9 @@ public record TurnPolicyTrace(
         TaskContract contract = resolution.contract();
         TaskIntent intent = resolution.intent();
         TaskIntentEvidence.requireCanonicalAgreement(contract, intent);
+        List<RolefulTarget> projectedTargets = rolefulTargetsFrom(intent, contract);
         LexicalEvidenceBuild lexicalEvidence = lexicalEvidenceBuild(
-                resolution);
+                resolution, projectedTargets);
         return new TurnPolicyTrace(
                 contract.type().name(),
                 contract.mutationAllowed(),
@@ -652,7 +653,7 @@ public record TurnPolicyTrace(
                 promptTools,
                 List.of(),
                 contract.classificationReason(),
-                rolefulTargetsFrom(intent, contract),
+                projectedTargets,
                 lexicalEvidence.decisions(),
                 lexicalEvidence.regions(),
                 contract.mutationRequested(),
@@ -1004,6 +1005,14 @@ public record TurnPolicyTrace(
     static LexicalEvidenceBuild lexicalEvidenceBuild(
             TaskResolution resolution
     ) {
+        return lexicalEvidenceBuild(resolution,
+                rolefulTargetsFrom(resolution.intent(), resolution.contract()));
+    }
+
+    private static LexicalEvidenceBuild lexicalEvidenceBuild(
+            TaskResolution resolution,
+            List<RolefulTarget> projectedTargets
+    ) {
         List<MutationPlanSelection.SelectedDecision> decisions =
                 MutationPlanSelection.allDecisions(
                         resolution.mutationTailPlan(),
@@ -1033,6 +1042,10 @@ public record TurnPolicyTrace(
                         resolution.mutationTailPlan(),
                         resolution.sequentialMutationPlan());
         SpanDigestCache spanDigests = new SpanDigestCache();
+        Map<String, String> projectedRoles = new LinkedHashMap<>();
+        for (RolefulTarget target : projectedTargets) {
+            projectedRoles.put(target.path(), target.role());
+        }
         for (int ordinal = 0; ordinal < decisions.size(); ordinal++) {
             MutationPlanSelection.SelectedDecision decision =
                     decisions.get(ordinal);
@@ -1067,7 +1080,10 @@ public record TurnPolicyTrace(
                     selectedForPath,
                     selectedForPath
                             && resolution.activeLexicalPaths()
-                                    .contains(decision.path()),
+                                    .contains(decision.path())
+                            && (durableRoleMatches(decision.authority(), projectedRoles.get(decision.path()))
+                                    || durableIndependentSupersession(decision.authority(),
+                                            projectedRoles.get(decision.path()))),
                     sourceSpanSha256,
                     MutationPlanSelection.occurrenceSha256(
                             decision.owner().name(),

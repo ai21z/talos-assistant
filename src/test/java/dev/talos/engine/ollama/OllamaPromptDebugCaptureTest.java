@@ -5,10 +5,14 @@ import com.sun.net.httpserver.HttpServer;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderReadInputBinding;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +27,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,6 +43,36 @@ class OllamaPromptDebugCaptureTest {
     void clearCapture() {
         PromptDebugCapture.clear();
         ProviderResponseCapture.clear();
+    }
+
+    @Test
+    void boundedReadInputsAreCapturedWithoutAdvertisingTools() throws Exception {
+        for (boolean stream : List.of(false, true)) {
+            var sentBody = new AtomicReference<String>();
+            HttpServer server = startServer(sentBody);
+            try {
+                String source = "1 | <button id=\"é\">\\</button>\n";
+                var request = new ChatRequest("ollama", "model", "", "", List.of(), Duration.ofSeconds(5),
+                        List.of(ChatMessage.system("system"), ChatMessage.user("diagnose"),
+                                ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                                        "read-html", "talos.read_file", Map.of("path", "pages/index.html")))),
+                                ChatMessage.toolResult("read-html", source)), List.of(),
+                        new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.TEXT, "",
+                                List.of(ProviderReadInputBinding.REQUEST_TAG)).withSingleAttempt(true));
+                var handoff = new DispatchCapture();
+                if (stream) client(server).chatStream(request, handoff).toList();
+                else client(server).chat(request, handoff);
+                var dispatch = handoff.evidence.getFirst();
+                assertTrue(dispatch.readInputMembership().available());
+                assertEquals(List.of(new ProviderReadInputBinding.ToolResultMembership("read-html", sha256Utf8(source))),
+                        dispatch.readInputMembership().toolResults());
+                assertEquals(sha256Utf8(sentBody.get()), dispatch.readInputMembership().providerBodyHash());
+                assertTrue(dispatch.nativeTools().isEmpty());
+                assertFalse(new ObjectMapper().readTree(sentBody.get()).has("tools"));
+            } finally {
+                server.stop(0);
+            }
+        }
     }
 
     @Test

@@ -57,6 +57,31 @@ public record EvidenceObligationAssessment(
         return new EvidenceObligationAssessment(obligation, result);
     }
 
+    /** Read outcomes are assessed without substituting current filesystem content. */
+    public static EvidenceObligationAssessment assessObserved(
+            CurrentTurnPlan plan, ToolCallLoop.LoopResult loopResult) {
+        if (plan == null) return assess(null, loopResult, null);
+        EvidenceObligation obligation = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        Set<String> targets = evidenceTargets(plan.taskContract());
+        List<ToolCallLoop.ToolOutcome> outcomes = evidenceOutcomes(loopResult);
+        if (outcomes.stream().anyMatch(ToolCallLoop.ToolOutcome::denied)) {
+            return new EvidenceObligationAssessment(obligation, EvidenceObligationVerifier.Result.blocked(
+                    "An attempted diagnosis operation was blocked by approval."));
+        }
+        if (outcomes.stream().anyMatch(outcome -> !outcome.success())) {
+            return new EvidenceObligationAssessment(obligation, EvidenceObligationVerifier.Result.unsatisfied(
+                    "An attempted diagnosis operation did not produce successful evidence."));
+        }
+        if (loopResult != null && (loopResult.failedCalls() > 0 || loopResult.failureDecision().shouldStop()
+                && !dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.rejectedProposalSynthesis(loopResult))) {
+            return new EvidenceObligationAssessment(obligation, EvidenceObligationVerifier.Result.unsatisfied(
+                    "The diagnosis was stopped before successful completion."));
+        }
+        return new EvidenceObligationAssessment(obligation, EvidenceObligationVerifier.verify(
+                obligation, targets, outcomes, null,
+                explicitReadOnlyTargets(plan.taskContract(), targets)));
+    }
+
     private static Set<String> explicitReadOnlyTargets(TaskContract contract, Set<String> evidenceTargets) {
         if (contract == null || contract.mutationRequested() || contract.mutationAllowed()) return Set.of();
         Set<String> named = TaskContractResolver.extractExpectedTargets(contract.originalUserRequest());

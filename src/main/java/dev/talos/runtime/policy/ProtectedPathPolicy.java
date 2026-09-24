@@ -37,6 +37,12 @@ public final class ProtectedPathPolicy {
             return List.of(ResourceDecision.noPath());
         }
         var decisions = new java.util.ArrayList<ResourceDecision>();
+        if ("compare_documents".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            for (String key : List.of("left", "right")) {
+                String value = call.param(key);
+                if (value != null && !value.isBlank()) decisions.add(classify(workspace, value));
+            }
+        }
         if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
                 WorkspaceOperationPlanner.checkpointPlan(

@@ -12,7 +12,12 @@ import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.outcome.MutationRecoveryAssessment;
 import dev.talos.runtime.task.TaskResolution;
+import dev.talos.runtime.task.ReadOnlyRequestMeaning;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
 import dev.talos.runtime.verification.VerificationReport;
+import dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment;
+import dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult;
+import dev.talos.runtime.verification.StaticWebDiagnostic;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
@@ -54,6 +59,7 @@ public final class LocalTurnTraceCapture {
         String requestObligationSha256 = "";
         AnswerCandidate answerCandidate;
         OutcomeCandidate outcomeCandidate;
+        dev.talos.runtime.verification.ReadOnlyAnswerComponents answerComponents;
         ProviderResponseCapture.Receipt selectedResponseReceipt;
         ProviderResponseCapture.Response selectedProviderResponse;
         final Map<String, PendingProviderResponse> providerResponses = new LinkedHashMap<>();
@@ -635,13 +641,19 @@ public final class LocalTurnTraceCapture {
     }
 
     public static void recordRoutedAnswerCaptured(String assistantText) {
+        recordRoutedAnswerCaptured(assistantText, assistantText);
+    }
+
+    /** Delivery coverage is checked before history projection. Retained bytes own trace lineage. */
+    public static void recordRoutedAnswerCaptured(String deliveredAssistantText, String retainedAssistantText) {
         Bag bag = HOLDER.get();
         if (bag == null || bag.routedAnswerRecorded) return;
-        String routedHash = TraceRedactor.hash(assistantText);
+        String routedHash = TraceRedactor.hash(retainedAssistantText);
+        reconcileCommittedAnswerCoverage(bag, deliveredAssistantText, retainedAssistantText);
         AnswerCandidate candidate = bag.answerCandidate;
         boolean candidateMatches = candidate != null
                 && candidate.answerHash().equals(routedHash)
-                && Objects.equals(candidate.rawAnswer(), Objects.toString(assistantText, ""));
+                && Objects.equals(candidate.rawAnswer(), Objects.toString(retainedAssistantText, ""));
         ProviderResponseCapture.AnswerOrigin origin = candidateMatches
                 ? candidate.origin()
                 : ProviderResponseCapture.AnswerOrigin.NONE;
@@ -652,11 +664,153 @@ public final class LocalTurnTraceCapture {
                 ? candidate.sourceAttemptId()
                 : "";
         TerminalAnswerTraceRecorder.record(
-                bag.builder, assistantText, origin, sourceGenerationId, sourceAttemptId);
-        RoutedAnswerTraceRecorder.record(bag.builder, assistantText);
+                bag.builder, retainedAssistantText, origin, sourceGenerationId, sourceAttemptId);
+        RoutedAnswerTraceRecorder.record(bag.builder, retainedAssistantText);
         bag.routedAnswerRecorded = true;
         bag.answerCandidate = null;
         renderOutcomeIfReady(bag);
+    }
+
+    /** Assessment metadata is recorded without creating answer or execution evidence. */
+    public static void recordReadOnlyWebAnswerAssessment(
+            ReadOnlyWebAnswerAssessment assessment,
+            List<StaticWebDiagnostic> diagnostics) {
+        recordReadOnlyWebAnswerAssessment(assessment, diagnostics, ReadOnlyWebDiagnosticResult.Association.empty());
+    }
+
+    public static void recordReadOnlyWebAnswerAssessment(ReadOnlyWebDiagnosticResult result) {
+        if (result == null) return;
+        recordReadOnlyWebAnswerAssessment(result.assessment(), result.diagnostics(), result.association());
+        recordReadOnlyAnswerComponents(result.components(), null);
+    }
+
+    /** Final coverage is recorded after privacy and output shaping, without granting authority. */
+    public static void recordReadOnlyRequestMeaning(dev.talos.runtime.task.ReadOnlyRequestMeaning meaning) {
+        Bag bag = HOLDER.get();
+        if (bag == null || meaning == null) return;
+        synchronized (bag) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("origin", "BOUNDED_REQUEST_RULES");
+            data.put("requestHash", meaning.requestSha256());
+            data.put("meaningId", meaning.identity());
+            data.put("readReferenceCount", meaning.readReferences().size());
+            data.put("requirementsComplete", meaning.requirements().complete());
+            data.put("regions", meaning.regions().stream().map(region -> Map.of(
+                    "originalSlotId", region.originalSlotId(), "start", region.start(), "end", region.end(),
+                    "disposition", region.disposition().name(), "ruleId", region.ruleId(),
+                    "successorSlotIds", region.successorSlotIds(), "reasons", region.reasons())).toList());
+            bag.builder.event(TurnTraceEvent.simple("READ_ONLY_REQUEST_MEANING", now(), data));
+        }
+    }
+
+    /** Frozen read identities are retained for diagnosis, without granting answer or execution authority. */
+    public static void recordReadOnlySynthesisSources(
+            ReadOnlyRequestMeaning meaning, List<ReadOnlyFinalizationEvidence.Source> sources) {
+        Bag bag = HOLDER.get();
+        if (bag == null || meaning == null || sources == null || sources.isEmpty() || sources.size() > 8) return;
+        var metadata = new java.util.ArrayList<Map<String, Object>>(sources.size());
+        var observations = new java.util.HashSet<String>();
+        for (var source : sources) {
+            if (source == null || source.path().isBlank() || source.path().length() > 4096
+                    || source.text().length() > 16_000
+                    || !source.originId().matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
+                    || source.ordinal() < 1 || !source.bodyHash().matches("[a-f0-9]{64}")
+                    || !ReadOnlyFinalizationEvidence.SOURCE_PROJECTION_VERSION.equals(source.projectionVersion())
+                    || !observations.add(source.observationId())) return;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("observationId", source.observationId());
+            item.put("pathHint", TraceRedactor.pathHint(source.path()));
+            item.put("pathHash", TraceRedactor.hash(source.path()));
+            item.put("bodyHash", source.bodyHash());
+            item.put("textHash", ReadOnlyWebDiagnosticResult.textHash(source.text()));
+            item.put("projectionVersion", source.projectionVersion());
+            metadata.add(item);
+        }
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded) return;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("scope", "DIAGNOSTIC_ONLY");
+            data.put("requestHash", meaning.requestSha256());
+            data.put("meaningId", meaning.identity());
+            data.put("sourceCount", metadata.size());
+            data.put("sources", metadata);
+            bag.builder.event(TurnTraceEvent.simple("READ_ONLY_SYNTHESIS_SOURCES", now(), data));
+        }
+    }
+
+    public static void recordReadOnlyAnswerComponentsPresented(
+            dev.talos.runtime.verification.ReadOnlyAnswerComponents components, String answer) {
+        recordReadOnlyAnswerComponents(components, Objects.toString(answer, ""));
+    }
+
+    private static void recordReadOnlyAnswerComponents(
+            dev.talos.runtime.verification.ReadOnlyAnswerComponents components, String answer) {
+        Bag bag = HOLDER.get();
+        if (bag == null || components == null || !components.active()) return;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded) return;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("origin", "RUNTIME_DERIVED");
+            data.put("requestCovered", components.requestCovered());
+            data.put("coverageOrigin", components.coverageOrigin().name());
+            data.put("requirementsComplete", components.complete());
+            data.put("components", components.components().stream().map(component -> {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("requirementId", component.requirementId());
+                item.put("kind", component.kind());
+                item.put("status", component.support().name());
+                item.put("reasonCode", component.reason());
+                item.put("derivationHash", component.derivationHash());
+                if (component.interpretationDecision() != null)
+                    item.put("interpretationDecision", component.interpretationDecision().name());
+                if (component.observationPresentation() != null) {
+                    var presentation = component.observationPresentation();
+                    item.put("observationPresentation", Map.of("evidenceGroupId", presentation.evidenceGroupId(),
+                            "relationKind", presentation.relationKind(), "regionId", presentation.regionId()));
+                }
+                item.put("references", component.references().stream().map(reference -> Map.of(
+                        "observationId", reference.observationId(), "textHash", reference.textHash(),
+                        "start", reference.start(), "end", reference.end())).toList());
+                return item;
+            }).toList());
+            if (answer != null) {
+                bag.answerComponents = components;
+                data.put("deliveredIntact", components.deliveredIntact(answer));
+                data.put("answerHash", TraceRedactor.hash(answer));
+            }
+            bag.builder.event(TurnTraceEvent.simple(answer == null
+                    ? "READ_ONLY_ANSWER_COMPONENTS_DERIVED" : "READ_ONLY_ANSWER_COMPONENTS_PRESENTED", now(), data));
+        }
+    }
+
+    private static void recordReadOnlyWebAnswerAssessment(
+            ReadOnlyWebAnswerAssessment assessment, List<StaticWebDiagnostic> diagnostics,
+            ReadOnlyWebDiagnosticResult.Association association) {
+        Bag bag = HOLDER.get();
+        if (bag == null || assessment == null
+                || assessment.disposition() == ReadOnlyWebAnswerAssessment.Disposition.NOT_APPLICABLE) return;
+        List<StaticWebDiagnostic> safeDiagnostics = diagnostics == null ? List.of() : diagnostics;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded) return;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("disposition", assessment.disposition().name());
+            data.put("reasonCode", assessment.reason().name());
+            data.put("typedDiagnosticCount", safeDiagnostics.size());
+            data.put("typedDiagnosticKinds", safeDiagnostics.stream()
+                    .filter(Objects::nonNull)
+                    .map(diagnostic -> diagnostic.kind().name())
+                    .distinct().sorted().toList());
+            if (!association.selectionId().isBlank()) {
+                data.put("selectionId", association.selectionId());
+                data.put("generationId", association.generationId());
+                data.put("inputHash", association.inputHash());
+                data.put("outputHash", association.outputHash());
+                data.put("observationIds", association.observationIds());
+                data.put("analysisVersion", association.analysisVersion());
+                data.put("scope", "INTERMEDIATE_ASSESSMENT");
+            }
+            bag.builder.event(TurnTraceEvent.simple("READ_ONLY_WEB_ANSWER_ASSESSED", now(), data));
+        }
     }
 
     /**
@@ -788,7 +942,7 @@ public final class LocalTurnTraceCapture {
             String attemptId,
             ProviderResponseCapture.Response response) {}
 
-    private record OutcomeCandidate(String status, String classification) {}
+    private record OutcomeCandidate(String status, String classification, String verification, String approval, String mutation) {}
 
     private static void recordGenerationStarted(
             Bag bag,
@@ -2716,8 +2870,21 @@ public final class LocalTurnTraceCapture {
                     classification);
         }
         bag.outcomeRecorded = true;
-        bag.outcomeCandidate = new OutcomeCandidate(status, classification);
+        bag.outcomeCandidate = new OutcomeCandidate(status, classification, verificationStatus, approvalStatus, mutationStatus);
         renderOutcomeIfReady(bag);
+    }
+
+    private static void reconcileCommittedAnswerCoverage(
+            Bag bag, String deliveredAssistantText, String retainedAssistantText) {
+        if (bag.answerComponents == null) return;
+        boolean delivered = bag.answerComponents.deliveredIntact(deliveredAssistantText);
+        boolean retained = bag.answerComponents.deliveredIntact(retainedAssistantText);
+        RoutedAnswerTraceRecorder.recordComponentsCommitted(bag.builder, retainedAssistantText, delivered, retained);
+        if (!delivered && bag.outcomeCandidate != null && "COMPLETE".equals(bag.outcomeCandidate.status())) {
+            OutcomeCandidate prior = bag.outcomeCandidate;
+            recordOutcome("ADVISORY_ONLY", prior.verification(), prior.approval(), prior.mutation(), "ADVISORY_ONLY");
+        }
+        bag.answerComponents = null;
     }
 
     private static void renderOutcomeIfReady(Bag bag) {

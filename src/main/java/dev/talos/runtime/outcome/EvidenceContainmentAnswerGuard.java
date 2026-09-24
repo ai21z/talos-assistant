@@ -79,6 +79,7 @@ public final class EvidenceContainmentAnswerGuard {
             EvidenceObligationVerifier.Result evidenceResult
     ) {
         return switch (obligation) {
+            case DOCUMENT_COMPARISON_REQUIRED -> "The requested comparison remains incomplete without a current-turn ordered pair computation.";
             case PROTECTED_READ_APPROVAL_REQUIRED ->
                     "I did not read protected content this turn. A protected read approval "
                             + "path was required before answering from that file, so no protected "
