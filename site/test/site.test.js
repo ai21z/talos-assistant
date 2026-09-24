@@ -956,7 +956,10 @@ describe("Talos in-site documentation contract", () => {
     assert.doesNotMatch(html, /class="site-nav"/);
     assert.match(html, /data-docs-fallback/);
     assert.match(html, /Loading bundled documentation/);
-    assert.match(html, /source Markdown on GitHub/);
+    assert.match(html, /current-source Markdown on GitHub/);
+    assert.match(html, /tree\/main\/docs/);
+    assert.doesNotMatch(html, /tree\/v0\.9\.0-beta-dev/);
+    assert.match(html, /This may include unreleased changes/);
     assert.match(html, /type="module"\s+src="\/src\/docs\.js"/);
     for (const group of ["Get Started", "Using Talos", "Reference", "Architecture", "Development"]) {
       assert.match(html, new RegExp(`>${escapeRegExp(group)}<`));

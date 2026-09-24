@@ -8,6 +8,8 @@ Verification classifies supported action evidence; it does not establish the tru
 
 ```mermaid
 sequenceDiagram
+    accTitle: A turn across runtime participants
+    accDescr: The request is classified before model dispatch. Tool proposals return through policy and any required approval. Tool results are passed to verification, then evidence and the answer are recorded or presented. Solid and dashed message styles are preserved.
     participant U as User
     participant R as REPL
     participant C as Task contract
@@ -51,6 +53,8 @@ The prompt-visible tool list and runtime-accepted tool list must agree. If a tur
 
 ```mermaid
 flowchart TD
+    accTitle: One capability, two enforced surfaces
+    accDescr: Prompt-visible tools and runtime-accepted tools are derived from the same posture. Both paths meet at the tool loop before the policy gate.
     Contract["Task contract - intent, phase, targets"] --> Posture["Capability posture"]
     Posture --> PromptTools["Prompt-visible tools"]
     Posture --> NativeTools["Runtime native tools"]
@@ -65,7 +69,9 @@ flowchart TD
 Mutation is not one event. It is a controlled sequence:
 
 ```mermaid
-flowchart LR
+flowchart TB
+    accTitle: Mutation from intent to checked outcome
+    accDescr: Proposed changes pass through approval and any required checkpoint before application. Final state is read back and verified before an outcome is reported.
     Intent["Mutation intent"] --> Diff["Proposed write or edit"]
     Diff --> Approval["User approval"]
     Approval --> Checkpoint["Checkpoint when required"]

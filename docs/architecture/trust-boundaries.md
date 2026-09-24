@@ -8,6 +8,8 @@ At provider EOS, projection may retain a complete static HTML element byte-for-b
 
 ```mermaid
 flowchart TB
+    accTitle: Authority across four trust domains
+    accDescr: User decisions, runtime policy, workspace files and the model backend remain separate domains. Model output reaches policy, not files directly. The server and checkpoints remain visible even where no incoming edge is drawn.
     subgraph Terminal["User terminal"]
         User["User input"]
         Approval["Approval or denial"]

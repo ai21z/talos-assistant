@@ -1,6 +1,7 @@
 import "./styles.css";
 import { setupRitualMenu } from "./menu.js";
 import { escapeHtml, renderMarkdown } from "./docs-markdown.js";
+import { closeDiagram, renderDiagrams, setupDiagramExpansion } from "./docs-diagrams.js";
 
 document.documentElement.classList.add("js");
 setupRitualMenu();
@@ -49,13 +50,16 @@ function currentRoute() {
   };
 }
 
-function scrollToArticle(anchor = "") {
-  if (anchor) {
-    const target = document.getElementById(anchor);
-    if (target) {
-      target.scrollIntoView({ block: "start", behavior: "auto" });
-      return;
-    }
+function scrollToArticle(anchor = "", focus = false) {
+  const candidate = anchor ? document.getElementById(anchor) : null;
+  const target = candidate && article.contains(candidate) ? candidate : article.querySelector("h1");
+  if (focus && target) {
+    target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }
+  if ((anchor || focus) && target) {
+    target.scrollIntoView({ block: "start", behavior: "auto" });
+    return;
   }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -71,14 +75,34 @@ function setActiveLink(slug) {
   }
 }
 
-function renderRoute() {
+let routeGeneration = 0;
+let renderedSlug;
+let pendingAnchor = "";
+window.addEventListener("wheel", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("touchmove", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("pointerdown", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) pendingAnchor = "";
+});
+setupDiagramExpansion(article);
+
+function renderRoute({ focus = false } = {}) {
   const { slug, anchor } = currentRoute();
+  pendingAnchor = anchor;
   setActiveLink(slug);
+  if (renderedSlug === slug) {
+    closeDiagram(false);
+    scrollToArticle(anchor, focus);
+    return;
+  }
+  closeDiagram(false);
+  renderedSlug = slug;
+  const generation = ++routeGeneration;
 
   if (slug === "" || slug === "index") {
     article.innerHTML = renderLandingHtml();
     document.title = "Talos documentation | Local-first CLI workspace operator";
-    scrollToArticle(anchor);
+    scrollToArticle(anchor, focus);
     return;
   }
 
@@ -89,17 +113,24 @@ function renderRoute() {
 <p>The documentation page <code>${escapeHtml(slug)}</code> does not exist.</p>
 <p><a href="#/">Return to the documentation overview</a>.</p>`;
     document.title = "Not found | Talos documentation";
+    scrollToArticle("", focus);
     return;
   }
 
-  article.innerHTML = renderMarkdown(md, { currentSlug: () => currentRoute().slug });
+  article.innerHTML = renderMarkdown(md, { currentSlug: slug });
   const firstHeading = article.querySelector("h1");
   document.title = firstHeading
     ? `${firstHeading.textContent.trim()} | Talos documentation`
     : "Talos documentation";
   article.scrollTo?.({ top: 0 });
   article.parentElement?.scrollTo?.({ top: 0 });
-  scrollToArticle(anchor);
+  scrollToArticle(anchor, focus);
+  void renderDiagrams(article, () => generation === routeGeneration).then(() => {
+    if (generation === routeGeneration && pendingAnchor && currentRoute().anchor === pendingAnchor) {
+      scrollToArticle(pendingAnchor);
+      pendingAnchor = "";
+    }
+  });
 }
 
 function renderLandingHtml() {
@@ -204,7 +235,24 @@ ${STATUS_NOTE_HTML}
 ${cardHtml}`;
 }
 
-window.addEventListener("hashchange", renderRoute);
+document.querySelector(".skip-link").addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  pendingAnchor = "";
+  closeDiagram(false);
+  scrollToArticle("", true);
+});
+document.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest("a[href]");
+  if (!link || link.target || link.hasAttribute("download")) return;
+  const destination = new URL(link.href, location.href);
+  if (destination.origin === location.origin && destination.pathname === location.pathname && destination.search === location.search && destination.hash === location.hash && destination.hash.startsWith("#/")) {
+    event.preventDefault();
+    renderRoute({ focus: true });
+  }
+});
+window.addEventListener("hashchange", () => renderRoute({ focus: true }));
 renderRoute();
 
 // Copy-to-clipboard for rendered code blocks (delegated; survives re-render).
@@ -221,6 +269,8 @@ if (article && navigator.clipboard) {
         button.textContent = "Copy";
         delete button.dataset.copied;
       }, 1600);
+    }).catch(() => {
+      button.textContent = "Copy unavailable";
     });
   });
 }

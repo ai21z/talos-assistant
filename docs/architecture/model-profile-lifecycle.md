@@ -7,7 +7,9 @@ Passing admission is not a support claim. A model that starts, answers a smoke p
 ## Lifecycle map
 
 ```mermaid
-flowchart LR
+flowchart TB
+    accTitle: Evidence, disposition and hardware support
+    accDescr: Qualification evidence reaches a disposition review with four possible outcomes. Selectable profiles may collect hardware evidence and return to review when their identity or policy changes. Retirement remains a separate outcome.
     Research["Research candidate"] --> Frozen["Artifact frozen"]
     Frozen --> Compatible["Compatibility passed"]
     Compatible --> Admission["Admission passed"]

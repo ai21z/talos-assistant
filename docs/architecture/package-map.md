@@ -4,15 +4,17 @@ This map names all nine current top-level production packages under `src/main/ja
 
 ```mermaid
 flowchart TB
-    App["dev.talos.app - process entry and first-run adapter"]
-    API["dev.talos.api - embedded knowledge API"]
-    CLI["dev.talos.cli - commands, REPL, rendering, setup"]
-    Core["dev.talos.core - LLM contracts, prompts, retrieval, extraction"]
-    Runtime["dev.talos.runtime - turn execution, policy, verification, trace"]
-    Tools["dev.talos.tools - workspace tools and command adapters"]
-    Engine["dev.talos.engine - backend and model-profile integration"]
-    SPI["dev.talos.spi - engine contracts and transport types"]
-    Safety["dev.talos.safety - protected-content and safe-log primitives"]
+    accTitle: Package ownership and selected dependencies
+    accDescr: Nine production packages are shown once each. Arrows denote selected implementation dependencies, not execution order or a complete allowed-dependency matrix. Responsibilities are detailed in the table below.
+    App["app"]
+    API["api"]
+    CLI["cli"]
+    Core["core"]
+    Runtime["runtime"]
+    Tools["tools"]
+    Engine["engine"]
+    SPI["spi"]
+    Safety["safety"]
 
     App --> CLI
     API --> Core
@@ -74,7 +76,9 @@ Neither rule set supplies a complete allowed-dependency matrix. In particular, t
 Talos should continue moving policy out of large orchestrators and into named components. The target shape is:
 
 ```mermaid
-flowchart LR
+flowchart TB
+    accTitle: Shared capability ownership
+    accDescr: A resolved task supplies one current-turn capability for prompt and runtime surfaces. Runtime execution remains behind permission policy, followed by verification and outcome classification. This is the target refactoring shape.
     Resolver["Task contract resolver"] --> Capability["Current-turn capability"]
     Capability --> PromptSurface["Prompt surface"]
     Capability --> RuntimeSurface["Runtime surface"]
