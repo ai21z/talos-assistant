@@ -100,9 +100,11 @@ for (const width of widths) {
   });
 }
 
-test("live hero terminal streams a real turn and can replay", async ({ page }) => {
+test("hero terminal streams an illustrative turn and can replay", async ({ page }) => {
   await gotoTalos(page);
   const output = page.locator("[data-live-output]");
+  await expect(page.locator("#live-terminal-caption")).toContainText("Illustrative terminal example");
+  await expect(page.locator("#live-terminal-caption")).toContainText("not measured performance claims");
   // Streams the inspect turn to completion (route → inspect → answer).
   await expect(output).toContainText("route", { timeout: 9000 });
   await expect(output).toContainText("Local-first CLI workspace operator", { timeout: 9000 });
@@ -272,7 +274,7 @@ test("public beta install commands copy the active platform command", async ({ p
   await setup.getByLabel("Public beta details").focus();
   await expect(setup.getByRole("tooltip")).toContainText("Installs from GitHub Release assets");
   await expect(setup.getByRole("tooltip")).toContainText("Windows 0.10.8 is unsigned");
-  await expect(setup.getByRole("tooltip")).toContainText("To upgrade, rerun the installer with --force and the pinned version");
+  await expect(setup.getByRole("tooltip")).toContainText("To upgrade, rerun the installer with -Force on Windows or --force on Linux and the pinned version");
 });
 
 test("header CTAs are real links, not placeholder beta actions", async ({ page }) => {

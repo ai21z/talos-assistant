@@ -16,14 +16,14 @@ Open a new PowerShell window after install if `talos` is not found.
 
 ## 2. Download llama.cpp
 
-The setup wizard (`talos setup wizard`) can install a pinned, SHA-256-verified llama.cpp lane for you. On Windows it selects the lane from detected NVIDIA driver evidence and always falls back to CPU when no compatible driver is found:
+For the published 0.10.8 Windows artifact, a compatible engine must be downloaded and configured manually. The current source pins these llama.cpp Windows artifacts:
 
 - Release: https://github.com/ggml-org/llama.cpp/releases/tag/b9918
 - Windows x64 CPU artifact: `llama-b9918-bin-win-cpu-x64.zip`
 - Windows x64 CUDA 12.4 artifacts (NVIDIA driver 551.61 or newer): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus driver runtime `cudart-llama-bin-win-cuda-12.4-x64.zip`
 - Windows x64 CUDA 13.3 artifacts (NVIDIA driver 580 or newer): `llama-b9918-bin-win-cuda-13.3-x64.zip` plus driver runtime `cudart-llama-bin-win-cuda-13.3-x64.zip`
 
-The wizard states the tag, asset names, and SHA-256 digests, and asks before downloading anything. CUDA lanes need both archives, with the cudart DLLs extracted next to `llama-server.exe`.
+CUDA lanes need both archives, with the cudart DLLs extracted next to `llama-server.exe`.
 
 For a manual install, download and extract the matching archives somewhere you control, for example:
 
@@ -31,7 +31,7 @@ For a manual install, download and extract the matching archives somewhere you c
 C:\Users\<you>\Tools\llama-b9918\
 ```
 
-The server path should point to `llama-server.exe` inside the extracted folder. `talos doctor --start` verifies that the managed server starts, answers a smoke prompt, and reports measured rates. Whether GPU offload is actually active is verified by `talos tune` from the server log before it keeps a GPU-lane config, not assumed from the binary name.
+The server path should point to `llama-server.exe` inside the extracted folder. `talos doctor --start` checks managed server startup and an end-to-end smoke reply. Current-source rate reporting is conditional on measurable timing evidence, not guaranteed for every server response.
 
 ## 3. Download Qwen
 
@@ -51,10 +51,10 @@ C:\Users\<you>\.talos\models\qwen2.5-coder-14b-instruct-q4_k_m.gguf
 Replace the example paths with your real paths:
 
 ```powershell
-talos setup models --profile qwen2.5-coder-14b --server-path "C:\Users\<you>\Tools\llama-b9918\llama-server.exe" --model-path "C:\Users\<you>\.talos\models\qwen2.5-coder-14b-instruct-q4_k_m.gguf" --write --force
+talos setup models --profile qwen2.5-coder-14b --server-path "C:\Users\<you>\Tools\llama-b9918\llama-server.exe" --model-path "C:\Users\<you>\.talos\models\qwen2.5-coder-14b-instruct-q4_k_m.gguf" --write
 ```
 
-Restart Talos after the config write.
+Without `--write`, model setup prints help only. If configuration already exists, replacement requires an explicit `--force`, and a backup is created first. Talos must be restarted after a configuration write.
 
 ## 5. Verify
 
@@ -63,9 +63,13 @@ talos status --verbose
 talos doctor --start
 ```
 
-## 6. Tune (optional)
+## 6. Unreleased setup and tuning
 
-`talos tune` detects your hardware read-only, proposes an exact config diff (engine lane, context window, no GPU layer flags), applies it only after you approve with a timestamped backup, and then verifies GPU offload and generation rates from the server log. If verification cannot prove the GPU lane, it restores your previous config.
+Automatic Windows engine installation and `talos tune` are current-source capabilities, not capabilities of the published 0.10.8 Windows artifact.
+
+In current source, a pinned, SHA-256-verified Windows engine lane can be installed through `talos setup wizard`. The lane is selected from detected NVIDIA driver evidence, with CPU selected when no compatible driver is detected. The tag, asset names and hashes are shown, and approval is requested before download.
+
+GPU offload is verified by `talos tune` from the server log before a GPU-lane configuration is kept, not assumed from the binary name. A bounded configuration diff is proposed after read-only hardware detection. Changes are applied only after approval, with a timestamped backup. If verification cannot establish the proposed GPU lane, the previous configuration is restored.
 
 ```powershell
 talos tune

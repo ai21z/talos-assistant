@@ -133,12 +133,15 @@ privacy/file-capability policy changes.
 Approved direct protected reads are different. In developer/default mode, an
 approved `talos.read_file(".env")` or `talos.read_file("secrets/...")` may place
 protected file contents into model context for that turn. In private mode,
-approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
-file locally after approval, but withholds raw contents from model context and
-redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
-enabled. This is still not enough to position Talos as safe for sensitive
-paperwork folders; private-document positioning still needs stronger real-world
-fixture coverage and private-folder release evidence.
+approved protected reads default to `LOCAL_DISPLAY_ONLY`. Raw contents are
+withheld from model context. Sending them in private mode requires both
+`SEND_TO_MODEL_CONTEXT` scope and `privacy.protected_read.allow_send_to_model=true`.
+Raw persistence is separately controlled by
+`privacy.protected_read.persist_raw_artifacts`, which defaults to false.
+Permission to send content to a model does not grant raw persistence.
+This is still not enough to position Talos as safe for sensitive paperwork
+folders. Stronger real-world fixture coverage and private-folder release
+evidence are still needed.
 
 Private mode is user-visible in the REPL:
 
@@ -279,8 +282,13 @@ Talos has a local indexing and retrieval path:
 RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
 search or a vector database. BM25 retrieval works without embeddings and is
 best for exact names, paths, identifiers, config keys, and obvious text
-matches. Vector retrieval requires a local embedding endpoint. When embeddings
-are disabled or fail, Talos falls back to BM25-only retrieval. Use direct file
+matches. Vector retrieval requires an enabled embedding endpoint, which is
+localhost-gated by default. Embeddings are disabled by default. Remote embeddings
+require explicit opt-in through `embed.allow_remote` for the compat backend or
+`ollama.allow_remote` for legacy Ollama. Eligible indexed text and retrieval
+queries may then leave this machine, even when chat remains local. The index
+remains local. When embeddings are disabled or fail, Talos falls back to
+BM25-only retrieval. Use direct file
 reads for exact file contents, edits, line-sensitive reasoning, and
 verification.
 
@@ -288,7 +296,7 @@ verification.
 
 Talos has a focused tool set for local workspace work:
 
-| Tool | Purpose | Approval |
+| Tool | Purpose | Default approval |
 |---|---|---|
 | `read_file` | read a file with line-oriented output | not required |
 | `compare_documents` | compare requested ordered text files, or extracted PDF and DOCX text | not required |
@@ -305,8 +313,12 @@ Talos has a focused tool set for local workspace work:
 | `apply_workspace_batch` | internal compatibility surface; not exposed to models | required |
 | `run_command` | run approved bounded command profiles | required |
 
-Write tools are approval-gated. The workspace remains under user control, and
-Talos records the outcome of each governed operation.
+The table describes registered defaults, not unconditional permission. Protected
+direct reads require approval, and configured policy can require approval or
+deny ordinary reads. Protected comparison operands are rejected, not unlocked by
+read approval. Write tools remain permission-gated, but configured allow rules
+or remembered approval for supported safe writes can avoid a new prompt.
+The outcome of each governed operation is recorded.
 
 `apply_workspace_batch` remains registered internally for compatibility and
 negative-boundary testing, but the current assistant planner does not expose it
@@ -364,8 +376,15 @@ Windows x64:
 iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 talos --version
-talos setup models
+```
+
+Model setup must then be completed using [Windows setup](docs/getting-started/windows-setup.md).
+`talos setup models` alone prints help and does not configure a model. After a
+successful configuration write:
+
+```powershell
 talos status --verbose
+talos doctor --start
 talos
 ```
 
@@ -393,8 +412,9 @@ This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
 `talos setup wizard`.
 
-To upgrade an existing install, rerun the installer with `--force` and the pinned
-version. For beta releases, use the exact version instead of `latest`:
+To upgrade an existing install, rerun the installer with `-Force` on Windows or
+`--force` on Linux and the pinned version. For beta releases, use the exact
+version instead of `latest`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned

@@ -22,3 +22,7 @@ gradlew   text eol=lf
 *.mp4 binary
 *.jar binary
 *.zip binary
+
+# Test resources are fixture data. Their bytes are preserved on every platform.
+src/test/resources/** -text
+src/e2eTest/resources/** -text

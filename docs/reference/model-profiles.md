@@ -37,10 +37,12 @@ The accepted profiles are large local-model lanes. They are not weak-PC defaults
 
 ## Accepted beta profiles
 
+The example paths must be replaced with existing local paths. On Windows, the server path must name `llama-server.exe`. Without `--write`, setup only prints help. If a configuration already exists, replacement requires an explicit `--force`, and a backup is created before replacement. Talos must be restarted after a configuration write.
+
 ### qwen2.5-coder-14b
 
 ```bash
-talos setup models --profile qwen2.5-coder-14b
+talos setup models --profile qwen2.5-coder-14b --server-path /path/to/llama-server --write
 talos doctor --start
 ```
 
@@ -55,7 +57,7 @@ Use this profile for the established coding lane. It is not a low-resource profi
 ### gpt-oss-20b
 
 ```bash
-talos setup models --profile gpt-oss-20b --model-path /path/to/gpt-oss-20b-mxfp4.gguf
+talos setup models --profile gpt-oss-20b --server-path /path/to/llama-server --model-path /path/to/gpt-oss-20b-mxfp4.gguf --write
 talos doctor --start
 ```
 

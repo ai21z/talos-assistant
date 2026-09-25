@@ -284,6 +284,14 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(hero, /TalosProject\.TalosCLI/i);
   });
 
+  it("labels terminal timings as illustrative rather than measured", () => {
+    const hero = sectionSlice(read("index.html"), "overview", "execution");
+    assert.match(hero, /Illustrative terminal example/);
+    assert.match(hero, /Displayed timings are examples, not measured performance claims/);
+    assert.match(hero, /Illustrative Talos terminal turn, with example timings/);
+    assert.doesNotMatch(hero, /Modeled on a real Talos terminal turn|Values mirror a managed/);
+  });
+
   it("keeps primary GitHub and docs actions in the sticky header", () => {
     const html = read("index.html");
     const headerMatch = html.match(/<header\b[^>]*class="site-header"[\s\S]*?<\/header>/);
@@ -384,10 +392,12 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
   });
 
-  it("ships a linear execution flow with one compact tool evidence strip", () => {
+  it("presents a conceptual execution cycle without forbidding bounded repair", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const execution = sectionSlice(html, "execution", "turn-ui");
+    assert.match(execution.replace(/\s+/g, " "), /Bounded repair may repeat inspection, approval, mutation and verification without bypassing the required gates/);
+    assert.doesNotMatch(execution, /never runs them out of order|Stations run in order/);
     const stepOrder = ["Classify", "Inspect", "Approve", "Mutate", "Verify", "Trace"];
     let cursor = 0;
     for (const step of stepOrder) {

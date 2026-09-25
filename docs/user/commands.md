@@ -2,7 +2,7 @@
 
 Use this page for orientation. The installed `talos --help` and `/help all` output are the authority for the exact command list in the build you are running.
 
-Top-level CLI commands start Talos, inspect runtime state, configure local models, and run configured verification profiles:
+Top-level CLI commands start Talos, inspect runtime state and provide model setup:
 
 ```text
 talos
@@ -13,10 +13,6 @@ talos doctor
 talos doctor --start
 talos setup wizard
 talos setup models
-talos profiles list
-talos profiles configure
-talos profiles trust
-talos verify
 ```
 
 Common REPL slash commands:
@@ -35,11 +31,17 @@ Common REPL slash commands:
 /debug prompt on
 /last trace
 /session clear
+/profiles list
+/verify
 ```
+
+Verification profiles are configured and trusted inside the REPL, not through top-level `talos profiles` or `talos verify` commands. Configuration syntax is `/profiles configure <id> --exec <executable>`, with an actual profile ID and executable substituted. The declaration is reviewed and pinned through `/profiles trust`, and trust is revoked through `/profiles revoke`. Bare `/verify` lists runnable profiles. A named trusted profile is run through `/verify ws:<id>`, with approval required per run.
+
+`talos setup models` alone prints help. A configuration write requires `--profile`, `--server-path` and `--write`. See [Model setup](../getting-started/model-setup.md).
 
 `talos doctor` checks configuration and local runtime state. `talos doctor --start` may start the managed model server, require an end-to-end model smoke reply, then release the managed server again.
 
-Mutation and command execution are not implicit. Talos asks before writes and before approved command profiles run.
+Mutation and command execution are not implicit. Writes are permission-gated, with configured policy and remembered approval affecting whether a fresh prompt is needed. Workspace verification requires approval per run.
 
 ## Useful command order
 

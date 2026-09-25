@@ -144,7 +144,7 @@
                   <span class="setup-info" tabindex="0" aria-describedby="setup-info-text" aria-label="Public beta details">i</span>
                   <span class="setup-tooltip" id="setup-info-text" role="tooltip">
                     Installs from GitHub Release assets. Windows 0.10.8 is unsigned and uses -AllowUnsigned.
-                    Linux starts the setup wizard after install. To upgrade, rerun the installer with --force and the pinned version.
+                    Linux starts the setup wizard after install. To upgrade, rerun the installer with -Force on Windows or --force on Linux and the pinned version.
                   </span>
                 </div>
                 <div class="setup-tabs" role="tablist" aria-label="Talos install commands">
@@ -215,12 +215,12 @@ talos --version</code></pre>
                   </div>
                 </div>
                 <figcaption id="live-terminal-caption" class="banner-caption">
-                  Modeled on a real Talos terminal turn. Values mirror a managed
-                  <code>llama.cpp</code> run on <code>llama_cpp/gpt-oss-20b</code>.
+                  Illustrative terminal example using <code>llama_cpp/gpt-oss-20b</code>.
+                  Displayed timings are examples, not measured performance claims.
                 </figcaption>
               </figure>
               <p class="sr-only">
-                Talos terminal turn. Prompt: what does this workspace do? Route
+                Illustrative Talos terminal turn, with example timings. Prompt: what does this workspace do? Route
                 ask, read-only, workspace bounded. Inspect README.md, src/, docs/.
                 Read 4 files in 38 ms. Answer: Local-first CLI workspace operator.
                 Java 21 sources under src/, notes under docs/. Turn 1,
@@ -237,11 +237,12 @@ talos --version</code></pre>
             <div class="cycle-layout">
               <div class="cycle-copy reveal">
                 <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>The Execution Cycle</p>
-                <h2 id="execution-heading">One ordered flow. Stations run in order.</h2>
+                <h2 id="execution-heading">A governed cycle for local work.</h2>
                 <p class="section-lede">
                   Talos narrows the request, inspects evidence, gates mutation when needed,
-                  checks outcomes, and keeps the result inspectable. A turn uses only the
-                  stations it needs, and never runs them out of order.
+                  checks outcomes, and keeps the result inspectable. These stations summarize
+                  the cycle. Bounded repair may repeat inspection, approval, mutation and
+                  verification without bypassing the required gates.
                 </p>
                 <dl class="cycle-detail" data-cycle-detail aria-live="polite">
                   <dt class="cycle-detail-step"><span class="cycle-detail-num">01</span> Classify</dt>

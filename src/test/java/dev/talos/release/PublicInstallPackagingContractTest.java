@@ -682,7 +682,7 @@ class PublicInstallPackagingContractTest {
         assertTrue(site.contains("Installs from GitHub Release assets"),
                 "site install preview must describe the live GitHub Release artifact path");
         String normalizedSite = site.replaceAll("\\s+", " ");
-        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with --force and the pinned version"),
+        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with -Force on Windows or --force on Linux and the pinned version"),
                 "site install preview must explain beta upgrades without implying an automatic updater");
         assertFalse(site.toLowerCase(Locale.ROOT).contains("winget"),
                 "site homepage must stay off winget until that lane is real");
@@ -709,7 +709,7 @@ class PublicInstallPackagingContractTest {
                 "public installation doc must name the release artifact host");
         assertTrue(doc.contains("WiX"),
                 "public installation doc must record the Windows MSI builder prerequisite");
-        assertTrue(readme.contains("rerun the installer with `--force` and the pinned"),
+        assertTrue(normalizedReadme.contains("rerun the installer with `-Force` on Windows or `--force` on Linux and the pinned version"),
                 "README must document explicit-version upgrade behavior");
     }
 

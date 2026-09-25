@@ -10,6 +10,8 @@ run_command stdout and stderr pass through the model-context handoff boundary. N
 
 Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints are rejected unless the backend is explicitly configured to allow remote use. If remote chat is explicitly allowed, full prompts can leave this machine.
 
+Embeddings are disabled by default and their endpoints are localhost-gated by default. Remote embeddings require explicit opt-in through `embed.allow_remote` for the compat backend or `ollama.allow_remote` for legacy Ollama. Eligible indexed text and retrieval queries may then leave this machine, even when chat remains local. The index remains local.
+
 Local traces and logs are durable evidence artifacts, but they are not tamper-evident.
 
 On Windows, local secret-store custody uses the current Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect the key.

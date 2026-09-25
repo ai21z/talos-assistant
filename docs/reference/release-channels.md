@@ -22,7 +22,7 @@ Do not share QA staging artifacts as if they were public releases.
 
 ## Upgrades
 
-Talos does not currently have a `talos update` command. To upgrade, rerun the platform installer with `--force` and the pinned version.
+Talos does not currently have a `talos update` command. To upgrade, rerun the platform installer with `-Force` on Windows or `--force` on Linux and the pinned version.
 
 Examples:
 

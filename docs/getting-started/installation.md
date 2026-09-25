@@ -34,7 +34,7 @@ After install, use the platform setup guide:
 
 ## Upgrade an existing install
 
-To upgrade, rerun the installer with `--force` and the pinned version. "Pinned" means the exact release you want, for example `0.10.8` or `0.10.9`, not an open-ended latest channel.
+To upgrade, rerun the installer with `-Force` on Windows or `--force` on Linux and the pinned version. "Pinned" means an exact published release, for example `0.10.8`, not an open-ended latest channel.
 
 For the beta, use the installer script attached to the same GitHub Release as the app artifact.
 
@@ -85,13 +85,13 @@ Run setup for a local model:
 talos setup wizard
 ```
 
-On Windows, use:
+On Windows, existing local paths must be substituted before configuration:
 
 ```powershell
-talos setup models
+talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --model-path D:/models/qwen2.5-coder-14b-instruct-q4_k_m.gguf --write
 ```
 
-For concrete llama.cpp and model download links, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
+Without `--write`, model setup prints help only. Existing configuration replacement requires an explicit `--force`, with a backup created first. Talos must be restarted after a configuration write. For concrete llama.cpp and model download links, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
 
 Then verify the model path:
 

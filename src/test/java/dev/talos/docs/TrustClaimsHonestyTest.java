@@ -30,7 +30,7 @@ class TrustClaimsHonestyTest {
     private static final String RAG_LOCAL_BOUNDARY =
             "RAG in Talos means the local Lucene index and retrieval pipeline";
     private static final String VECTOR_OPTIONAL_BOUNDARY =
-            "Vector retrieval requires a local embedding endpoint";
+            "Vector retrieval requires an enabled embedding endpoint, which is localhost-gated by default";
     private static final String ACCEPTED_MODEL_BOUNDARY =
             "Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b";
     private static final String LARGE_MODEL_BOUNDARY =
@@ -208,6 +208,75 @@ class TrustClaimsHonestyTest {
         assertContains(modelProfiles, "talos setup models --profile gpt-oss-20b");
         assertContains(modelProfiles, "talos doctor --start");
         assertContains(modelProfiles, "Save the talos doctor --start output as evidence before calling a profile verified on a new machine.");
+    }
+
+    @Test
+    void modelSetupRecipesContainRequiredWriteArguments() throws Exception {
+        String docs = publicDocs();
+        List<String> recipes = docs.lines().map(String::strip)
+                .filter(line -> line.startsWith("talos setup models --profile ")).toList();
+        assertFalse(recipes.isEmpty(), "Model configuration recipes must remain available");
+        for (String recipe : recipes) {
+            assertTrue(recipe.matches(".* --server-path \\S+.*"), recipe);
+            assertTrue(recipe.matches(".* --write(?:\\s.*)?$"), recipe);
+        }
+        for (String path : List.of("docs/getting-started/model-setup.md",
+                "docs/getting-started/quickstart.md", "docs/getting-started/installation.md",
+                "docs/getting-started/windows-setup.md", "docs/reference/model-profiles.md")) {
+            String page = read(path);
+            assertContains(page, "prints help");
+            assertContains(page, "`--force`");
+            assertContains(page, "backup");
+        }
+    }
+
+    @Test
+    void profileAndVerificationCommandsRemainInTheRepl() throws Exception {
+        for (String path : List.of("docs/user/commands.md", "docs/reference/cli.md")) {
+            String page = read(path);
+            assertContains(page, "/profiles list");
+            assertContains(page, "/profiles configure <id> --exec <executable>");
+            assertContains(page, "/verify");
+            assertFalse(Pattern.compile("(?m)^talos (?:profiles|verify)\\b").matcher(page).find());
+            assertFalse(Pattern.compile("(?m)^\\| `talos (?:profiles|verify)\\b").matcher(page).find());
+        }
+        assertContainsNormalized(read("docs/user/commands.md"), "Bare `/verify` lists runnable profiles");
+        assertContains(read("docs/reference/cli.md"), "`/verify [ws:<id>]`");
+        assertContainsNormalized(read("docs/user/permissions-and-approvals.md"),
+                "Configured allow rules or remembered approval for supported safe writes can avoid a fresh prompt");
+    }
+
+    @Test
+    void modelHandoffAndPersistenceRemainSeparatePermissions() throws Exception {
+        String readme = read("README.md");
+        assertContains(readme, "`SEND_TO_MODEL_CONTEXT`");
+        assertContains(readme, "`privacy.protected_read.allow_send_to_model=true`");
+        assertContains(readme, "`privacy.protected_read.persist_raw_artifacts`");
+        assertContainsNormalized(readme, "Permission to send content to a model does not grant raw persistence");
+        for (String path : List.of("README.md", "docs/reference/config.md",
+                "docs/user/privacy-and-artifacts.md")) {
+            String page = read(path);
+            assertContainsNormalized(page, "Embeddings are disabled by default");
+            assertContains(page, "`embed.allow_remote`");
+            assertContains(page, "`ollama.allow_remote`");
+            assertContainsNormalized(page, "Eligible indexed text and retrieval queries may then leave this machine");
+            assertContainsNormalized(page, "even when chat remains local");
+            assertFalse(page.contains("Vector retrieval requires a local embedding endpoint"));
+        }
+    }
+
+    @Test
+    void windowsSetupSeparatesPublishedAndUnreleasedCapabilities() throws Exception {
+        for (String path : List.of("docs/getting-started/windows-setup.md",
+                "docs/getting-started/model-setup.md")) {
+            String page = read(path);
+            assertContains(page, "Automatic Windows engine installation and `talos tune`");
+            assertContains(page, "Unreleased");
+            assertContains(page, "not capabilities of the published 0.10.8 Windows artifact");
+            assertContains(page, "conditional on measurable timing evidence");
+        }
+        assertContains(read("docs/user/troubleshooting.md"),
+                "not a capability of the published 0.10.8 artifact");
     }
 
     @Test

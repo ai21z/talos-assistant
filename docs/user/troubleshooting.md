@@ -19,7 +19,7 @@ For the pinned Ubuntu/WSL x64 CPU lane, use:
 - https://github.com/ggml-org/llama.cpp/releases/tag/b9860
 - `llama-b9860-bin-ubuntu-x64.tar.gz`
 
-For Windows x64, the pinned lanes come from the llama.cpp `b9918` release (https://github.com/ggml-org/llama.cpp/releases/tag/b9918) and are wizard-installable with SHA-256 verification. Configure a manual download with `talos setup models`.
+For Windows x64, the current source pins lanes from the llama.cpp `b9918` release (https://github.com/ggml-org/llama.cpp/releases/tag/b9918). Automatic Windows engine installation with SHA-256 verification is Unreleased, not a capability of the published 0.10.8 artifact. For published Windows setup, a manual download must be configured using the complete command in [Windows setup](../getting-started/windows-setup.md).
 
 - Windows x64 (CPU): `llama-b9918-bin-win-cpu-x64.zip`
 - Windows x64 (CUDA 12.4, NVIDIA driver 551.61+): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus `cudart-llama-bin-win-cuda-12.4-x64.zip`

@@ -12,12 +12,14 @@ talos setup wizard
 talos doctor --start
 ```
 
-Windows users should use:
+On Windows, existing server and GGUF paths must be substituted in this configuration command:
 
 ```powershell
-talos setup models
+talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --model-path D:/models/qwen2.5-coder-14b-instruct-q4_k_m.gguf --write
 talos doctor --start
 ```
+
+`talos setup models` without `--write` prints help only. Existing configuration replacement requires an explicit `--force`, with a backup created first. Talos must be restarted after a configuration write. Download guidance is provided in [Windows setup](windows-setup.md).
 
 ## Where to get `llama-server`
 
@@ -30,7 +32,9 @@ The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release, a
 - Windows x64 (CUDA 12.4, NVIDIA driver 551.61+): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus `cudart-llama-bin-win-cuda-12.4-x64.zip`
 - Windows x64 (CUDA 13.3, NVIDIA driver 580+): `llama-b9918-bin-win-cuda-13.3-x64.zip` plus `cudart-llama-bin-win-cuda-13.3-x64.zip`
 
-The setup wizard selects the Windows lane from detected NVIDIA driver evidence and falls back to CPU when no compatible driver is detected. `talos doctor --start` verifies that the managed server starts, answers a smoke prompt, and reports measured rates. GPU offload is verified by `talos tune` from the server log before it keeps a GPU-lane config, not assumed from the binary name.
+Automatic Windows engine installation and `talos tune` are Unreleased current-source capabilities, not capabilities of the published 0.10.8 Windows artifact. In current source, the Windows lane is selected by the setup wizard from detected NVIDIA driver evidence, with CPU selected when no compatible driver is detected. GPU offload is verified by `talos tune` from the server log before a GPU-lane configuration is kept, not assumed from the binary name.
+
+`talos doctor --start` checks managed server startup and an end-to-end smoke reply. Current-source rate reporting is conditional on measurable timing evidence, not guaranteed for every server response.
 
 The first accepted model to try is Qwen. It is a large CPU model, not a low-resource default:
 

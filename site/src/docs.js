@@ -35,7 +35,8 @@ const STATUS_NOTE_HTML = `
   uses the runtime-bundled installer and starts <code>talos setup wizard</code>.
   Unreleased capabilities are identified separately and are not established in
   those published artifacts.
-  To upgrade, rerun the installer with <code>--force</code> and the pinned version.</p>
+  To upgrade, rerun the installer with <code>-Force</code> on Windows or
+  <code>--force</code> on Linux and the pinned version.</p>
 </aside>`;
 
 function currentRoute() {

@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReadmeToolTableDriftTest {
 
     private static final Path README = Path.of("README.md");
-    private static final String TABLE_HEADER = "| Tool | Purpose | Approval |";
+    private static final String TABLE_HEADER = "| Tool | Purpose | Default approval |";
     private static final Pattern ROW =
             Pattern.compile("^\\|\\s*`([a-z0-9_]+)`\\s*\\|[^|]*\\|\\s*([a-z ]+?)\\s*\\|$");
 
@@ -43,6 +43,21 @@ class ReadmeToolTableDriftTest {
             assertEquals(tool.getValue(), documented.get(tool.getKey()),
                     "README approval column for '" + tool.getKey()
                             + "' must match the tool's registered operation metadata");
+        }
+    }
+
+    @Test
+    void registeredDefaultsRemainQualifiedByEffectivePermissionPolicy() throws IOException {
+        String readme = Files.readString(README);
+        String toolUse = readme.substring(readme.indexOf("### Tool Use"),
+                readme.indexOf("### Workspace Boundary")).replaceAll("\\s+", " ");
+        for (String boundary : List.of(
+                "registered defaults, not unconditional permission",
+                "Protected direct reads require approval",
+                "configured policy can require approval or deny ordinary reads",
+                "Protected comparison operands are rejected",
+                "configured allow rules or remembered approval for supported safe writes")) {
+            assertTrue(toolUse.contains(boundary), "Missing adjacent permission boundary: " + boundary);
         }
     }
 

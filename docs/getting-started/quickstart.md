@@ -28,13 +28,13 @@ EOF
 talos setup wizard
 ```
 
-On Windows, configure model paths with:
+On Windows, existing local paths must be substituted before configuration:
 
 ```powershell
-talos setup models
+talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --model-path D:/models/qwen2.5-coder-14b-instruct-q4_k_m.gguf --write
 ```
 
-For the shortest platform-specific path, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
+Without `--write`, model setup prints help only. Existing configuration replacement requires an explicit `--force`, with a backup created first. Talos must be restarted after a configuration write. For downloads and platform-specific setup, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
 
 ## Run the doctor smoke
 
