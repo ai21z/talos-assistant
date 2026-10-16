@@ -37,14 +37,27 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
         }
     }
 
+    // Ordinary paraphrases are recognized only as whole results. A foreign subject, another directory or a
+    // restriction anywhere in the request still leaves unresolved text, so the request stays unbounded.
+    private static final String SCOPE = "(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder)\\b";
+    private static final String OBJECT = "(?:in\\s+(?:it\\b|" + SCOPE + ")|here\\b)";
     private static final Pattern LOCATION = Pattern.compile(
-            "\\bwhere\\s+(?:exactly\\s+)?(?:are\\s+we|is\\s+(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder))\\b"
+            "\\bwhere\\s+(?:exactly\\s+)?(?:are\\s+we|am\\s+i)(?:\\s+(?:working|located|right\\s+now))?\\b"
+                    + "|\\bwhere\\s+(?:exactly\\s+)?is\\s+(?:(?:this|the|our|current|active)\\s+)*"
+                    + "(?:workspace|directory|folder)(?:\\s+located)?\\b"
                     + "|\\b(?:(?:what|which)\\s+is\\s+(?:(?:this|the|our|current|active)\\s+)*)?"
-                    + "(?:workspace|directory|folder)\\s+(?:location|path)\\b");
+                    + "(?:workspace|directory|folder)\\s+(?:location|path)\\b"
+                    + "|\\bwhat(?:'s|’s|\\s+is)\\s+the\\s+(?:(?:full|absolute|current)\\s+)?(?:path|location)\\s+"
+                    + "(?:of|to|for)\\s+(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder)\\b"
+                    + "|\\b(?:which|what)\\s+(?:workspace|directory|folder)\\s+(?:are\\s+we|am\\s+i)\\s+(?:working\\s+)?in\\b");
     private static final Pattern CONTENTS = Pattern.compile(
             "\\b(?:is|whether)\\s+(?:(?:this|the|our|current|active)\\s+)*(?:it|workspace|directory|folder)\\s+empty\\b"
                     + "|\\b(?:list|show)\\s+(?:(?:me|the|all|top\\s+level)\\s+)*(?:files|entries|contents|directories)\\b"
-                    + "|\\bwhat\\s+(?:(?:files|entries)\\s+are\\s+(?:in|here)|(?:is|does\\s+it)\\s+(?:in|contain))\\b");
+                    + "|\\bwhat\\s+(?:(?:files|entries)\\s+are\\s+(?:in|here)|(?:is|does\\s+it)\\s+(?:in|contain))\\b"
+                    + "|\\bwhat(?:'s|’s)\\s+" + OBJECT
+                    + "|\\bwhat\\s+(?:can|do)\\s+you\\s+see\\s+" + OBJECT
+                    + "|\\bis\\s+(?:there\\s+)?(?:anything|any\\s+files?)\\s+" + OBJECT
+                    + "|\\bare\\s+there\\s+any\\s+(?:files|entries)\\s+" + OBJECT);
     private static final Pattern PURPOSE = Pattern.compile(
             "\\bwhat\\s+does\\s+(?:this|the|our)\\s+(?:project|workspace)\\s+do\\b"
                     + "|\\bwhat\\s+is\\s+(?:this|the|our)\\s+(?:project|workspace)\\b"
@@ -54,6 +67,18 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
     private static final Pattern FRAME = Pattern.compile(
             "\\b(?:can|could|would|will|you|please|tell|me|read|inspect|check|access|look|at|this|the|our|current|active|"
                     + "workspace|directory|folder|here|and|also|then|in|of|for|top|level|now|exactly)\\b|[\\s?,.!:;-]+");
+    // A greeting is framing only where the request opens with it.
+    private static final Pattern GREETING = Pattern.compile("^[\\s,.!]*(?:hey|hi|hello)\\b");
+    // Any other word directly before a scope noun names a different folder, such as "the hello folder".
+    // After a determiner only a scope adjective may follow, so "the check folder" and "the now folder" name one.
+    // A hyphenated compound such as "check-in folder" is a name too.
+    private static final Pattern SCOPE_QUALIFIER = Pattern.compile(
+            "(?U)(?:\\b(this|the|our|current|active)[\\s-]+)?([\\p{L}\\p{N}_]+)[\\s-]+(?=(?:workspace|directory|folder)\\b)");
+    private static final java.util.Set<String> SCOPE_WORDS = java.util.Set.of(
+            "this", "the", "our", "current", "active", "workspace", "which", "what",
+            "is", "in", "of", "for", "at", "to", "and", "also", "then", "can", "you", "me", "please", "tell", "now", "exactly");
+    private static final java.util.Set<String> FRAME_VERBS = java.util.Set.of("read", "inspect", "check", "access", "look");
+    private static final java.util.Set<String> SCOPE_ADJECTIVES = java.util.Set.of("current", "active", "workspace");
 
     public RequestedResultInventory {
         originalRequest = originalRequest == null ? "" : originalRequest;
@@ -99,6 +124,9 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
             return unestablished(request);
         List<RequestedResult> results = new ArrayList<>();
         char[] remaining = masked.toCharArray();
+        var greeting = GREETING.matcher(masked);
+        if (greeting.find()) java.util.Arrays.fill(remaining, greeting.start(), greeting.end(), ' ');
+        String scoped = new String(remaining);
         collect(results, remaining, masked, LOCATION, Kind.WORKSPACE_LOCATION, EvidenceBasis.TURN_WORKSPACE);
         collect(results, remaining, masked, CONTENTS, Kind.DIRECTORY_CONTENTS, EvidenceBasis.SCOPED_DIRECTORY_OBSERVATION);
         collect(results, remaining, masked, PURPOSE, Kind.PROJECT_PURPOSE, EvidenceBasis.ADMITTED_PROJECT_SOURCES);
@@ -109,7 +137,7 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
                 result.region(), result.kind(), result.subject(), result.scope(), result.evidenceBasis()));
         boolean unresolved = !FRAME.matcher(new String(remaining)).replaceAll("").isBlank()
                 || masked.length() != request.length() || view.containsMalformedDelimiter(0, request.length())
-                || view.containsProviderRemovedControl(0, request.length());
+                || view.containsProviderRemovedControl(0, request.length()) || namesAnotherFolder(scoped);
         // Quoted material has not been interpreted as a requested result by this migration.
         for (int i = 0; i < request.length(); i++) if (view.isQuoted(i)) unresolved = true;
         return new RequestedResultInventory(request, stable,
@@ -132,6 +160,19 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
                     "active workspace", kind == Kind.DIRECTORY_CONTENTS ? "top-level, observation time" : "current turn", basis));
             java.util.Arrays.fill(remaining, matcher.start(), matcher.end(), ' ');
         }
+    }
+
+    private static boolean namesAnotherFolder(String text) {
+        var qualifier = SCOPE_QUALIFIER.matcher(text);
+        while (qualifier.find()) {
+            String word = qualifier.group(2);
+            int start = qualifier.start(2);
+            boolean compound = start > 1 && text.charAt(start - 1) == '-'
+                    && Character.isLetterOrDigit(text.charAt(start - 2));
+            if (qualifier.group(1) != null || compound ? !SCOPE_ADJECTIVES.contains(word)
+                    : !FRAME_VERBS.contains(word) && !SCOPE_WORDS.contains(word)) return true;
+        }
+        return false;
     }
 
     private static RequestedResultInventory unestablished(String request) {

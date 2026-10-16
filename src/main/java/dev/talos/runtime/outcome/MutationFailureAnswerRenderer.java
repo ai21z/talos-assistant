@@ -365,6 +365,14 @@ public final class MutationFailureAnswerRenderer {
         return out.toString().stripTrailing();
     }
 
+    /** The read-only refusal notice that opens an answer, or empty when the answer does not open with one. */
+    public static String readOnlyRefusalNotice(String answer) {
+        if (answer == null) return "";
+        for (String notice : List.of(READ_ONLY_DENIED_MUTATION_REPLACEMENT, READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT))
+            if (answer.startsWith(notice)) return notice;
+        return "";
+    }
+
     public static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
             String answer,
             CurrentTurnPlan plan,

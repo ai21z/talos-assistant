@@ -212,6 +212,21 @@ class MicaRequestBoundaryIntegrationTest {
     }
 
     @Test
+    void ordinaryPathQuestionNamesTheFolderWhileTheFullPathStaysMasked() throws Exception {
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("What's the path of this directory?", "Unused provider location.");
+            String folder = workspace.getFileName().toString();
+            assertTrue(run.terminalAnswer().contains("The current workspace folder is " + folder + "."),
+                    run.terminalAnswer());
+            assertTrue(run.terminalAnswer().contains("[path]"), run.terminalAnswer());
+            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
+            assertFalse(run.terminal().contains("[Evidence incomplete"), run.terminal());
+            assertAbsent(run, "Unused provider location");
+            assertParity(run);
+        }
+    }
+
+    @Test
     void permittedListingUsesActualDirectoryEvidenceAndKeepsUsefulNames() throws Exception {
         Files.writeString(workspace.resolve("alpha.txt"), "alpha-content-not-requested\n");
         Files.writeString(workspace.resolve("beta.txt"), "beta-content-not-requested\n");

@@ -275,7 +275,8 @@ record ExecutionOutcome(
 
         shaped = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
-        boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
+        boolean otherDeniedMutation = !Objects.equals(current, shaped);
+        boolean deniedMutation = readOnlyDeniedMutation || otherDeniedMutation;
         current = shaped;
 
         shaped = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
@@ -649,6 +650,21 @@ record ExecutionOutcome(
             dev.talos.runtime.TurnAuditCapture.recordLocationPresentation(
                     dev.talos.runtime.RuntimeLocationPresentation.issue(workspaceResults, current));
             if (!Objects.equals(current, composed)) outputLimitRelevant = false;
+            current = composed;
+        } else if (workspaceResults.applicable() && readOnlyDeniedMutation && !otherDeniedMutation
+                && !safePlan.requestedResults().requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)
+                && !MutationFailureAnswerRenderer.readOnlyRefusalNotice(current).isEmpty()
+                && !invalidMutation && !failedAnyActionObligation && !commandFailed && !commandDenied
+                && !deniedProtectedRead && !partialMutation && !falseMutationClaim && !readOnlyLimited
+                && !unsupportedCommandOutputClaim && !unresolvedMutationClaim && !unsupportedDocumentCapabilityLimited
+                && verificationStatus != VerificationStatus.FAILED
+                && !MutationFailureAnswerRenderer.hasFailedMutationEffects(loopResult)) {
+            // A refused unsolicited mutation does not displace runtime folder facts. The refusal notice stays first.
+            String composed = MutationFailureAnswerRenderer.readOnlyRefusalNotice(current) + "\n\n"
+                    + workspaceResults.compose("");
+            dev.talos.runtime.TurnAuditCapture.recordLocationPresentation(
+                    dev.talos.runtime.RuntimeLocationPresentation.issue(workspaceResults, ""));
+            outputLimitRelevant = false;
             current = composed;
         }
         CompletionStatus operationalStatus = completionStatus;

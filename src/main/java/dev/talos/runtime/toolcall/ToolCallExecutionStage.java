@@ -190,10 +190,9 @@ public final class ToolCallExecutionStage {
                 var outcome = ToolOutcomeFactory.failedAuthority(call, diagnostic);
                 state.addToolOutcome(outcome);
                 var requestFrame = state.ctx.requestFrame();
-                if (requestFrame != null) {
-                    requestFrame.requireCurrent();
-                    if (requestFrame.controlled()) state.toolOutcomeResults.bindPreExecutionRejection(outcome);
-                }
+                if (requestFrame != null) requestFrame.requireCurrent();
+                // An authority rejection precedes dispatch in every turn, so it cannot make an earlier observation stale.
+                state.toolOutcomeResults.bindPreExecutionRejection(outcome);
                 ToolFailureStateAccounting.recordFailure(state, call, "");
                 failuresThisIter++;
                 appendResultMessage(

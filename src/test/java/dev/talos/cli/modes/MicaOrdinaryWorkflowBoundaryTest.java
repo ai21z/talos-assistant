@@ -266,7 +266,98 @@ class MicaOrdinaryWorkflowBoundaryTest {
                 () -> assertFalse(run.answer().contains("A complete answer to the project request is not established"),
                         run.answer()),
                 () -> assertFalse(run.answer().contains("operational music service"), run.answer()),
-                () -> assertNotEquals("COMPLETE", run.trace().outcome().status(), run.answer()));
+                // The ordinary wording is now recognized, so no project-summary header precedes the listing.
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
+    }
+
+    @Test void conversationalLocationAndFolderQuestionGivesLocationAndListingWithoutHeader() throws Exception {
+        Files.createDirectory(workspace.resolve(".git"));
+        Run run = run("Hey, where are we working, and what is in this folder? Is it empty?", new Gate(), list("."),
+                "We are working in a music service project.");
+        assertEquals(1, successes(run, "talos.list_dir"), run.answer());
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertTrue(run.answer().contains(workspace.toString()), run.answer()),
+                () -> assertTrue(run.answer().contains("The inspected directory is not empty."), run.answer()),
+                () -> assertTrue(run.answer().contains(".git/"), run.answer()),
+                () -> assertFalse(run.answer().contains("music service"), run.answer()),
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
+    }
+
+    @Test void pathQuestionNamesTheWorkspaceFolderWithoutHeaderOrListing() throws Exception {
+        Run run = run("What's the path of this directory?", new Gate(), "The path is /somewhere/else.");
+        assertEquals(0, successes(run, "talos.list_dir"), run.answer());
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertTrue(run.answer().contains(workspace.toString()), run.answer()),
+                () -> assertFalse(run.answer().contains("/somewhere/else"), run.answer()),
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
+    }
+
+    @Test void repeatedQuestionsAreAnsweredOnce() throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Gate gate = new Gate();
+        Run contents = run("Hey, what can you see in this folder? Is it empty?", gate, list("."),
+                "The folder has notes.");
+        assertEquals(1, contents.answer().split("The inspected directory is not empty\\.", -1).length - 1,
+                contents.answer());
+        Run location = run("Where are we working? Which folder are we in?", gate, "We are here.");
+        assertEquals(1, location.answer().split("The current workspace folder is ", -1).length - 1,
+                location.answer());
+        Run purpose = run("What does this project do? Explain this workspace.", gate, list("."),
+                "It is a loom catalog.");
+        assertEquals(1, purpose.answer().split("The project purpose", -1).length - 1, purpose.answer());
+    }
+
+    @Test void refusedUnsolicitedWriteDoesNotDiscardTheFolderListing() throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Run run = run("Hey, what can you see in this folder?", new Gate(), list("."), write(),
+                "The folder has notes and a story.");
+        assertAll(
+                () -> assertEquals(0, successes(run, "talos.write_file"), run.answer()),
+                () -> assertEquals(0, run.audit().approvalsRequired(), run.answer()),
+                () -> assertFalse(Files.exists(workspace.resolve("story.txt")), run.answer()),
+                () -> assertTrue(run.answer().startsWith("[Truth check: no file was changed in this turn.")
+                        || run.answer().contains("\n[Truth check: no file was changed in this turn."), run.answer()),
+                () -> assertTrue(run.answer().contains("The inspected directory is not empty."), run.answer()),
+                () -> assertTrue(run.answer().contains("notes.txt"), run.answer()),
+                () -> assertFalse(run.answer().contains("a story"), run.answer()));
+    }
+
+    @Test void folderNamedAfterTheOperatingSystemUserIsNotShown() throws Exception {
+        String previousUser = System.getProperty("user.name");
+        System.setProperty("user.name", workspace.getFileName().toString().toUpperCase(java.util.Locale.ROOT));
+        try {
+            Run run = run("Which folder are we in?", new Gate(), "We are in the user folder.");
+            assertFalse(run.answer().contains("The current workspace folder is"), run.answer());
+            assertTrue(run.answer().contains(workspace.toString()), run.answer());
+        } finally {
+            System.setProperty("user.name", previousUser);
+        }
+    }
+
+    @Test void relativeHomeSettingDoesNotMakeTheWorkspaceHome() throws Exception {
+        System.setProperty("user.home", Path.of("").toAbsolutePath().relativize(workspace).toString());
+        Run run = run("Which folder are we in?", new Gate(), "We are in the user folder.");
+        assertTrue(run.answer().contains("The current workspace folder is " + workspace.getFileName() + "."),
+                run.answer());
+    }
+
+    @Test void homeWorkspaceIsCalledTheHomeFolderInsteadOfTheUserName() throws Exception {
+        System.setProperty("user.home", workspace.toString());
+        Run run = run("Which folder are we in?", new Gate(), "We are in the user folder.");
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is your home folder (~)."),
+                        run.answer()),
+                () -> assertFalse(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
     }
 
     @ParameterizedTest

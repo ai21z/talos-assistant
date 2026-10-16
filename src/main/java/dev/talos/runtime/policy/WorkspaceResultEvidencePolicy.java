@@ -91,24 +91,25 @@ public final class WorkspaceResultEvidencePolicy {
                     length = parts.stream().mapToInt(String::length).sum() + parts.size() * 2;
                     continue;
                 }
-                switch (result.requested().kind()) {
-                    case WORKSPACE_LOCATION -> {
-                        if (supported && admittedRuntimeLocation() && locationOffset < 0)
-                            locationOffset = length + LOCATION_PREFIX.length();
-                        parts.add(supported ? locationText(location, publication)
-                                : "The current workspace location is unavailable.");
-                    }
-                    case DIRECTORY_CONTENTS, DIRECTORY_COUNT, DIRECTORY_EMPTINESS ->
-                            parts.add(directoryText(result, publication));
+                String text = switch (result.requested().kind()) {
+                    case WORKSPACE_LOCATION -> supported ? locationText(location, publication)
+                            : "The current workspace location is unavailable.";
+                    case DIRECTORY_CONTENTS, DIRECTORY_COUNT, DIRECTORY_EMPTINESS -> directoryText(result, publication);
                     case PROJECT_PURPOSE -> {
                         purposeSupported = supported;
-                        if (!supported) parts.add(result.evidence().status() == EvidenceObligationVerifier.Status.BLOCKED
+                        yield supported ? "" : result.evidence().status() == EvidenceObligationVerifier.Status.BLOCKED
                                 ? "The required project source evidence was blocked. The project purpose remains unresolved."
                                 : "The project purpose cannot be established from the available "
-                                    + "project source evidence. That requested result remains unresolved.");
+                                    + "project source evidence. That requested result remains unresolved.";
                     }
-                    default -> parts.add("A requested result remains unresolved.");
-                }
+                    default -> "A requested result remains unresolved.";
+                };
+                // A question asked twice in one request is answered once.
+                if (text.isEmpty() || parts.contains(text)) continue;
+                if (result.requested().kind() == Kind.WORKSPACE_LOCATION && supported && admittedRuntimeLocation()
+                        && locationOffset < 0)
+                    locationOffset = length + LOCATION_PREFIX.length();
+                parts.add(text);
                 length = parts.stream().mapToInt(String::length).sum() + parts.size() * 2;
             }
             String composed = String.join("\n\n", parts);
@@ -154,7 +155,26 @@ public final class WorkspaceResultEvidencePolicy {
     private static String locationText(String location, PublicationSnapshot publication) {
         if (publication.controlled() && !publication.locationPublic())
             return "The workspace location was withheld by the current request.";
-        return LOCATION_PREFIX + ProtectedContentPolicy.sanitizeText(location);
+        String exact = LOCATION_PREFIX + ProtectedContentPolicy.sanitizeText(location);
+        if (publication.controlled()) return exact;
+        // Default terminal masking hides absolute paths in ordinary answers, so the folder name is stated too.
+        String folder = folderName(location);
+        return folder.isEmpty() ? exact : "The current workspace folder is " + folder + ".\n" + exact;
+    }
+
+    private static String folderName(String location) {
+        try {
+            Path path = Path.of(location).toAbsolutePath().normalize();
+            // The home folder is named as the startup banner shows it, and the operating system user name is not shown.
+            String home = System.getProperty("user.home");
+            if (home != null && !home.isBlank() && Path.of(home).isAbsolute() && path.equals(Path.of(home).normalize()))
+                return "your home folder (~)";
+            Path name = path.getFileName();
+            if (name == null || name.toString().equalsIgnoreCase(System.getProperty("user.name", ""))) return "";
+            return ProtectedContentPolicy.sanitizeText(name.toString()).strip();
+        } catch (RuntimeException invalid) {
+            return "";
+        }
     }
 
     public static Assessment assess(CurrentTurnPlan plan, ToolCallLoop.LoopResult loop, Path workspace) {
