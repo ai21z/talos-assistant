@@ -97,8 +97,8 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not gather source-bearing file content for this lookup, so I cannot "
                             + "claim the requested fact was found or absent from the workspace.";
             case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
-                    "Current project evidence remains incomplete. "
-                            + "A complete answer to the project request is not established."
+                    "Required evidence was incomplete in this turn, "
+                            + "so nothing is said about what the project is or does."
                             + evidenceDetailSentence(evidenceResult);
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "

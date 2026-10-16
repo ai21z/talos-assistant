@@ -169,8 +169,10 @@ class ProjectHandoffGenerationTransportTest {
             assertEquals(0, fixture.sends.get(), "The existing request grammar does not admit this mixed request completely");
             assertTrue(answer.contains("Runtime identity"), answer);
             assertTrue(answer.contains("Who are you"), answer);
-            assertTrue(answer.contains("What remains unverified"), answer);
-            assertTrue(answer.contains("Runtime activity and verification"), answer);
+            // The partially parsed handoff frame is answered concisely. The recognized open-checks question is
+            // answered by the retained sections instead of being echoed, and the runtime ledger heading is gone.
+            assertTrue(answer.contains("Recorded verification") && answer.contains("not established"), answer);
+            assertFalse(answer.contains("Runtime activity and verification"), answer);
             assertFalse(settled.audit().workStatusReceipt().presentationComplete());
         }
     }

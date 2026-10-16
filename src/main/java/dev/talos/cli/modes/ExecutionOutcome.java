@@ -380,6 +380,19 @@ record ExecutionOutcome(
             if (loopResult != null) {
                 if (evidenceObligation == EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED
                         && !containment.inputRetained()) {
+                    // An admitted listing of the workspace root is a supported fact of its own.
+                    // It is shown before the project-source limitation instead of being discarded with the prose.
+                    // Recognized result inventories already present their directory results, so only the
+                    // legacy path is supplemented.
+                    String observedRoot = safePlan.workspaceResultsApplicable() ? ""
+                            : dev.talos.runtime.policy.WorkspaceResultEvidencePolicy.observedRoot(
+                                safePlan, loopResult, workspace);
+                    if (!observedRoot.isBlank()) {
+                        String prefix = EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX + "\n\n";
+                        current = current.startsWith(prefix)
+                                ? prefix + observedRoot + "\n\n" + current.substring(prefix.length())
+                                : observedRoot + "\n\n" + current;
+                    }
                     String observations = loopResult.readEvidenceCoverage().projectSummaryObservations(
                             loopResult.toolOutcomes(), workspace, contract);
                     if (!observations.isBlank()) current += "\n\n" + observations;

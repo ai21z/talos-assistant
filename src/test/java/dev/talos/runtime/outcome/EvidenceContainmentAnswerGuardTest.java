@@ -79,7 +79,7 @@ class EvidenceContainmentAnswerGuardTest {
                 MARKERS);
 
         assertTrue(answer.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), answer);
-        assertTrue(answer.contains("Current project evidence remains incomplete"), answer);
+        assertTrue(answer.contains("Required evidence was incomplete in this turn"), answer);
         assertTrue(answer.contains("README.md"), answer);
         assertFalse(answer.contains("one-file JavaScript utility"), answer);
     }

@@ -145,6 +145,19 @@ public record WorkStatusRequest(String originalRequest, boolean selected, Covera
         return components.stream().anyMatch(component -> component.roles().contains(Role.UNSUPPORTED));
     }
 
+    /** True when an explicit handoff or work-status frame, such as "give me a short handoff", owns the request. */
+    public boolean handoffFrame() {
+        return selected && components.stream().anyMatch(component -> HANDOFF.matcher(normalized(
+                originalRequest.substring(component.start(), component.end()).toLowerCase(java.util.Locale.ROOT)))
+                .matches());
+    }
+
+    /** Original text of the components outside the bounded grammar, for restriction checks only. */
+    public List<String> unsupportedText() {
+        return components.stream().filter(component -> component.roles().contains(Role.UNSUPPORTED))
+                .map(component -> originalRequest.substring(component.start(), component.end())).toList();
+    }
+
     /** Request ownership is separated from the sufficiency of retained evidence. */
     public boolean runtimeOnly() {
         return selected && coverage == Coverage.COVERED

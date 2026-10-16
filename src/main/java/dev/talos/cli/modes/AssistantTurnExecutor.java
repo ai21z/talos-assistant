@@ -612,8 +612,18 @@ public final class AssistantTurnExecutor {
                 localDetails = WorkStatusAnswerPolicy.renderLocalEditDetails(
                         request, ctx.memory(), workspace, current.contentRestrictions());
             }
-            String assessed = localDetails.orElseGet(() -> WorkStatusAnswerPolicy.render(request, ctx.memory(), workspace));
-            boolean projectHandoff = ProjectHandoffPolicy.required(request);
+            // A partially parsed handoff frame is answered concisely from retained records, not as a runtime ledger.
+            // No provider or tool is used, and coverage stays PARTIAL.
+            boolean partialHandoff = workspace != null && request.handoffFrame()
+                    && request.coverage() == WorkStatusRequest.Coverage.PARTIAL;
+            // The current input's restrictions still govern the turn and its retained memory.
+            if (partialHandoff && current != null) ContentRestrictionScope.restrictIfActive(current.contentRestrictions());
+            UnaryOperator<String> projection = handoffProjection(ctx, opts);
+            String assessed = partialHandoff
+                    ? WorkStatusAnswerPolicy.renderPartialHandoff(request, ctx.memory(), workspace,
+                        request.unsupportedText().stream().map(text -> handoffQuestionLiteral(text.strip(), projection)).toList())
+                    : localDetails.orElseGet(() -> WorkStatusAnswerPolicy.render(request, ctx.memory(), workspace));
+            boolean projectHandoff = !partialHandoff && ProjectHandoffPolicy.required(request);
             if (!projectHandoff) LocalTurnTraceCapture.recordDeterministicAnswerSelected(assessed);
             ProjectHandoffPresentation handoff = projectHandoff
                     ? projectHandoffPresentation(request, messages, ctx, opts, assessed, identity, composeIdentity) : null;
@@ -688,14 +698,19 @@ public final class AssistantTurnExecutor {
         }
     }
 
-    private static ProjectHandoffPresentation projectHandoffPresentation(WorkStatusRequest request,
-            List<ChatMessage> messages, Context ctx, Options opts, String runtime,
-            ModelIdentitySnapshot identity, boolean composeIdentity) {
-        UnaryOperator<String> projection = value -> {
+    /** The presentation projection shared by handoff paths, so request text is redacted the same way on both. */
+    private static UnaryOperator<String> handoffProjection(Context ctx, Options opts) {
+        return value -> {
             String sanitized = opts.answerSanitizer.apply(value);
             return ctx.redactor() == null ? new dev.talos.core.security.Redactor().redactBlock(sanitized)
                     : ctx.redactor().redactBlock(sanitized);
         };
+    }
+
+    private static ProjectHandoffPresentation projectHandoffPresentation(WorkStatusRequest request,
+            List<ChatMessage> messages, Context ctx, Options opts, String runtime,
+            ModelIdentitySnapshot identity, boolean composeIdentity) {
+        UnaryOperator<String> projection = handoffProjection(ctx, opts);
         String minimum = composeProjectHandoff(projectHandoffGaps(request, null, projection), runtime, identity, composeIdentity, opts);
         if (!handoffFits(minimum, opts)) {
             LocalTurnTraceCapture.recordAnswerPresentationLimitation(

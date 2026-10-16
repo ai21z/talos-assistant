@@ -50,6 +50,53 @@ public final class WorkStatusAnswerPolicy {
         if (!dev.talos.runtime.observation.TurnRequestFrame.admits(inventory) || !inventory.retainedWork()
                 || frame == null || workspace == null || !frame.workspace().equals(workspace.toAbsolutePath().normalize()))
             throw new SecurityException("The retained-work projection is not current");
+        String unresolved = inventory.unresolvedRegions().isEmpty() ? "" : "Additional requested meaning remains unresolved.\n";
+        return renderRetained(inventory.results(), unresolved, memory, workspace,
+                frame.meaning().publication(), frame.meaning().fields());
+    }
+
+    /**
+     * A partially parsed request with an explicit handoff frame is answered from retained runtime records only.
+     * The frame itself asks for saved effects, verification and open checks, so no unsupported wording is
+     * interpreted. Target names and counts are withheld when an unsupported clause carries a restriction cue.
+     */
+    public static String renderPartialHandoff(WorkStatusRequest request, SessionMemory memory,
+            java.nio.file.Path workspace, List<String> uninterpretedLiterals) {
+        if (request == null || workspace == null || !request.handoffFrame()
+                || request.coverage() != WorkStatusRequest.Coverage.PARTIAL)
+            throw new IllegalArgumentException("A partially parsed handoff frame is required");
+        boolean restricted = request.unsupportedText().stream()
+                .anyMatch(dev.talos.runtime.intent.OutputRestrictionCue::present);
+        var frame = request.components().stream().filter(component -> component.roles().contains(
+                WorkStatusRequest.Role.VERIFICATION)).findFirst().orElse(request.components().getFirst());
+        var region = new dev.talos.runtime.intent.RequestedResultInventory.SourceRegion(frame.start(), frame.end());
+        var results = java.util.stream.Stream.of(
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.RETAINED_SAVES,
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.RETAINED_VERIFICATION,
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.RETAINED_UNCHECKED)
+                .map(kind -> new dev.talos.runtime.intent.RequestedResultInventory.RequestedResult(
+                        "handoff-" + kind.name().toLowerCase(java.util.Locale.ROOT), region, kind, "active workspace",
+                        "retained conversation",
+                        dev.talos.runtime.intent.RequestedResultInventory.EvidenceBasis.RETAINED_RUNTIME_RECORDS))
+                .toList();
+        // Literals arrive already projected and redaction-checked by the caller, so an unanswered question stays visible.
+        var literals = uninterpretedLiterals == null ? List.<String>of() : uninterpretedLiterals;
+        String unresolved = (literals.isEmpty() ? "Request coverage remains incomplete.\n"
+                    : "Request coverage remains incomplete. Not interpreted, so project meaning remains unresolved: "
+                        + String.join(", ", literals) + "\n")
+                + (request.roles().contains(WorkStatusRequest.Role.PROJECT_HANDOFF)
+                    ? "Earlier project discussion was not summarized for this request.\n" : "");
+        return renderRetained(results, unresolved, memory, workspace,
+                restricted ? dev.talos.runtime.observation.TurnRequestFrame.Publication.NO_NAMES
+                        : dev.talos.runtime.observation.TurnRequestFrame.Publication.ALL_NAMES,
+                restricted ? new dev.talos.spi.WorkspaceObservationBoundary.Fields(false, true, true, true)
+                        : dev.talos.spi.WorkspaceObservationBoundary.Fields.all());
+    }
+
+    private static String renderRetained(List<dev.talos.runtime.intent.RequestedResultInventory.RequestedResult> requestedResults,
+            String unresolved, SessionMemory memory, java.nio.file.Path workspace,
+            dev.talos.runtime.observation.TurnRequestFrame.Publication publication,
+            dev.talos.spi.WorkspaceObservationBoundary.Fields fields) {
         var evidence = memory == null ? new WorkStatusEvidence(List.of(), 0, false) : memory.workStatusEvidence();
         String scope = dev.talos.runtime.JsonSessionStore.sessionIdFor(workspace);
         var turns = evidence.turns().stream().filter(turn -> scope.equals(turn.workspaceHash())).toList();
@@ -58,9 +105,8 @@ public final class WorkStatusAnswerPolicy {
                 || turns.size() > MAX_OPERATION_DETAIL_ROWS || turns.stream().anyMatch(turn -> turn.omittedCalls() > 0);
         String tail = "No fresh inspection, tools or verification were performed.";
         String omission = "Retained or presented records are incomplete, absence of earlier work is not established.\n";
-        String unresolved = inventory.unresolvedRegions().isEmpty() ? "" : "Additional requested meaning remains unresolved.\n";
         int contentLimit = MAX_OPERATION_DETAIL_CHARS - tail.length() - omission.length() - unresolved.length();
-        for (var requested : inventory.results()) {
+        for (var requested : requestedResults) {
             String part;
             if (requested.disposition() != dev.talos.runtime.intent.RequestedResultInventory.Disposition.ACTIVE) {
                 part = switch (requested.disposition()) {
@@ -69,11 +115,11 @@ public final class WorkStatusAnswerPolicy {
                     case WITHHELD -> "A handoff result was withheld.";
                     default -> "A requested result remains unresolved.";
                 };
-            } else if (!frame.meaning().fields().existencePublic() || !frame.meaning().fields().hiddenFactsPublic()) {
+            } else if (!fields.existencePublic() || !fields.hiddenFactsPublic()) {
                 part = "Retained-work details were withheld by the current request.";
             } else {
                 part = switch (requested.kind()) {
-                    case RETAINED_SAVES -> capturedEffects(turns, frame.meaning().publication(), frame.meaning().fields());
+                    case RETAINED_SAVES -> capturedEffects(turns, publication, fields);
                     case RETAINED_VERIFICATION -> "Recorded verification: " + (turns.isEmpty() ? "unavailable"
                             : turns.stream().sorted(java.util.Comparator.comparingInt(WorkStatusAnswerPolicy::verificationPriority)
                                     .thenComparingInt(WorkStatusEvidence.Turn::turnNumber)).limit(MAX_OPERATION_DETAIL_ROWS)

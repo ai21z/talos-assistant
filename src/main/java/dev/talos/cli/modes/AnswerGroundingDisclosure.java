@@ -63,6 +63,9 @@ final class AnswerGroundingDisclosure {
         if (!workspaceScoped(plan) || loopResult == null || hasMutation(loopResult)) {
             return ToolLoopResultSummaryFormatter.GroundingDisclosure.none();
         }
+        // The footer names files independently of the answer, so it follows the same restriction cue.
+        // The grounding caveat is kept, without names or counts.
+        boolean restricted = dev.talos.runtime.intent.OutputRestrictionCue.present(plan.originalUserRequest());
         Map<String, String> candidates = workspaceCandidateFiles(workspace, loopResult, messages, plan);
         if (candidates.isEmpty()) {
             return ToolLoopResultSummaryFormatter.GroundingDisclosure.none();
@@ -79,6 +82,9 @@ final class AnswerGroundingDisclosure {
         }
         if (unread.isEmpty()) {
             return ToolLoopResultSummaryFormatter.GroundingDisclosure.none();
+        }
+        if (restricted) {
+            return new ToolLoopResultSummaryFormatter.GroundingDisclosure("not all workspace candidate files were read");
         }
         String note = readCandidates + " of " + candidates.size()
                 + " workspace candidate files read, unread: " + boundedUnread(unread);

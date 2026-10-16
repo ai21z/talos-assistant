@@ -249,6 +249,82 @@ class MicaOrdinaryWorkflowBoundaryTest {
         assertNotEquals("COMPLETE", run.trace().outcome().status(), run.answer());
     }
 
+    private static final String RETAINED_FOLDER = "Hey, what can you see in this folder? Is it empty?";
+
+    @ParameterizedTest
+    @ValueSource(strings = {"git-only", "empty"})
+    void retainedFolderQuestionKeepsTheObservedRootListing(String state) throws Exception {
+        if (state.equals("git-only")) Files.createDirectory(workspace.resolve(".git"));
+        Run run = run(RETAINED_FOLDER, new Gate(), list("."), "The folder is an operational music service.");
+        assertEquals(1, successes(run, "talos.list_dir"), run.answer());
+        assertEquals(0, successes(run, "talos.read_file"));
+        assertAll(
+                () -> assertTrue(run.answer().contains(state.equals("empty")
+                        ? "The inspected top-level directory is empty." : "The inspected directory is not empty."),
+                        run.answer()),
+                () -> assertEquals(state.equals("git-only"), run.answer().contains(".git/"), run.answer()),
+                () -> assertFalse(run.answer().contains("A complete answer to the project request is not established"),
+                        run.answer()),
+                () -> assertFalse(run.answer().contains("operational music service"), run.answer()),
+                () -> assertNotEquals("COMPLETE", run.trace().outcome().status(), run.answer()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "is any file in this workspace?",
+            "What can you see in this folder?",
+            "Can you help me understand what this workspace is?"
+    })
+    void ordinaryFolderWordingKeepsTheObservedRootListing(String request) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Run run = run(request, new Gate(), list("."), "This workspace is a payment platform.");
+        assertEquals(1, successes(run, "talos.list_dir"), run.answer());
+        assertTrue(run.answer().contains("The inspected directory is not empty."), run.answer());
+        assertTrue(run.answer().contains("notes.txt"), run.answer());
+        assertFalse(run.answer().contains("payment platform"), run.answer());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Is this folder empty? Don't show its contents.",
+            "Keep the file names private. Is this folder empty?",
+            "Do not reveal the workspace path. Is this folder empty?",
+            "Don't edit, show or name anything. Is this folder empty?"
+    })
+    void restrictedFolderWordingShowsOnlyTheVerdict(String request) throws Exception {
+        Files.writeString(workspace.resolve("undisclosed-entry.txt"), "fixture\n");
+        Run run = run(request, new Gate(), list("."), "The folder holds undisclosed-entry.txt.");
+        assertEquals(1, successes(run, "talos.list_dir"), run.answer());
+        assertTrue(run.answer().contains("The inspected directory is not empty."), run.answer());
+        assertFalse(run.answer().contains("undisclosed-entry"), run.answer());
+        assertFalse(run.answer().contains(workspace.toString()), run.answer());
+        // The footer keeps its grounding caveat, without names or counts.
+        assertTrue(run.answer().contains("not all workspace candidate files were read"), run.answer());
+    }
+
+    @Test void boundedPurposeAndContentsShowTheRootListingOnce() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "The fixture is a local loom catalog.\n");
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Run run = run("What is in this folder and what does this project do?", new Gate(),
+                call("talos.list_dir", Map.of("path", ".", "max_depth", 1, "max_entries", 1)),
+                call("talos.read_file", Map.of("path", "README.md")),
+                "This project is a local loom catalog.");
+        assertEquals(1, successes(run, "talos.read_file"), run.answer());
+        String answer = run.answer();
+        assertEquals(1, answer.split("Observed entries within depth", -1).length - 1, answer);
+        assertFalse(answer.contains("Project source evidence was insufficient"), answer);
+        assertNotEquals("COMPLETE", run.trace().outcome().status(), answer);
+    }
+
+    @Test void mutationOnlyProhibitionDoesNotWithholdTheObservedListing() throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Run run = run("Hey, what can you see in this folder? Please don't edit anything.", new Gate(), list("."),
+                "This folder is a payment platform.");
+        assertEquals(0, run.audit().approvalsRequired(), run.answer());
+        assertTrue(run.answer().contains("The inspected directory is not empty."), run.answer());
+        assertTrue(run.answer().contains("notes.txt"), run.answer());
+    }
+
     @Test void knownLocationSurvivesUnresolvedProjectPurpose() throws Exception {
         String answer = "The current workspace is " + workspace
                 + ". Its purpose cannot be established from the empty directory listing.";

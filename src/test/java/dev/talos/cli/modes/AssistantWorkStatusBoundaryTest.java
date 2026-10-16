@@ -99,6 +99,56 @@ class AssistantWorkStatusBoundaryTest {
             "Give me a short handoff. What was saved and why was the lighthouse abandoned? Don't change files."
     })
     void partialHandoffPresentsRetainedOperationsWithoutCertifyingTheirMeaning(String request) throws Exception {
+        var handoff = settleRetainedHandoff(request);
+        var settled = handoff.settled();
+        var fixture = handoff.fixture();
+        String answer = text(settled.result());
+        assertTrue(answer.contains("harbor-story.txt"), answer);
+        assertTrue(answer.contains("Turn 5") && answer.contains("Turn 7"), answer);
+        assertTrue(answer.contains("READBACK_ONLY") && answer.contains("PASSED"), answer);
+        assertTrue(answer.contains("turn-level") && answer.contains("not per-file"), answer);
+        assertTrue(answer.contains("Request coverage remains incomplete"), answer);
+        assertTrue(answer.contains("No fresh"), answer);
+        assertFalse(answer.contains("Original project question"), answer);
+        assertFalse(answer.contains("story is perfect") || answer.contains("full test suite passed"), answer);
+        assertTrue(answer.length() < 2000, answer);
+        // A partially parsed handoff with an explicit frame is answered concisely, not as a runtime ledger.
+        assertTrue(answer.contains("Saved effects"), answer);
+        assertFalse(answer.contains("Inspection calls:") || answer.contains("Target limits:"), answer);
+        assertTrue(answer.length() < 1200, answer);
+        assertEquals(dev.talos.runtime.intent.WorkStatusRequest.Coverage.PARTIAL,
+                settled.audit().workStatusReceipt().coverage());
+        assertFalse(settled.audit().workStatusReceipt().presentationComplete());
+        assertTrue(settled.audit().workStatusReceipt().matches(request, answer));
+        assertEquals("ADVISORY_ONLY", settled.audit().localTrace().outcome().classification());
+        assertTrue(settled.audit().toolCalls().isEmpty());
+        assertEquals(0, fixture.generations().get());
+        assertEquals(0, fixture.preparations().get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Give me a short handoff. What is saved? Don't mention file names.",
+            "Give me a short handoff. What is saved and verified? Keep the file names private."
+    })
+    void restrictedPartialHandoffWithholdsTargetNames(String request) throws Exception {
+        var handoff = settleRetainedHandoff(request);
+        String answer = text(handoff.settled().result());
+        assertFalse(answer.contains("harbor-story"), answer);
+        assertTrue(answer.contains("Saved effects"), answer);
+        assertTrue(answer.contains("Request coverage remains incomplete"), answer);
+        assertEquals(dev.talos.runtime.intent.WorkStatusRequest.Coverage.PARTIAL,
+                handoff.settled().audit().workStatusReceipt().coverage());
+        assertEquals("ADVISORY_ONLY", handoff.settled().audit().localTrace().outcome().classification());
+        assertTrue(handoff.settled().audit().toolCalls().isEmpty());
+        assertEquals(0, handoff.fixture().generations().get());
+    }
+
+    private record SettledHandoff(dev.talos.runtime.TurnResult settled,
+                                  dev.talos.core.llm.WorkStatusColdProviderFixture fixture) {}
+
+    /** Two retained writes, with readback-only and passed turn verification, precede the request. */
+    private SettledHandoff settleRetainedHandoff(String request) throws Exception {
         var memory = new SessionMemory();
         var listener = new dev.talos.runtime.MemoryUpdateListener(new dev.talos.core.context.ConversationManager(
                 memory, new dev.talos.core.context.TokenBudget()), null, memory);
@@ -124,24 +174,7 @@ class AssistantWorkStatusBoundaryTest {
                 new UnifiedAssistantMode().handle(raw, ws, (Context) context));
         var settled = processor.process(new dev.talos.runtime.Session(workspace, cfg), request,
                 Context.builder(cfg).memory(memory).llm(fixture.client()).build());
-        String answer = text(settled.result());
-        assertTrue(answer.contains("harbor-story.txt"), answer);
-        assertTrue(answer.contains("Turn 5") && answer.contains("Turn 7"), answer);
-        assertTrue(answer.contains("READBACK_ONLY") && answer.contains("PASSED"), answer);
-        assertTrue(answer.contains("turn-level") && answer.contains("not per-file"), answer);
-        assertTrue(answer.contains("Request coverage remains incomplete"), answer);
-        assertTrue(answer.contains("No fresh"), answer);
-        assertFalse(answer.contains("Original project question"), answer);
-        assertFalse(answer.contains("story is perfect") || answer.contains("full test suite passed"), answer);
-        assertTrue(answer.length() < 2000, answer);
-        assertEquals(dev.talos.runtime.intent.WorkStatusRequest.Coverage.PARTIAL,
-                settled.audit().workStatusReceipt().coverage());
-        assertFalse(settled.audit().workStatusReceipt().presentationComplete());
-        assertTrue(settled.audit().workStatusReceipt().matches(request, answer));
-        assertEquals("ADVISORY_ONLY", settled.audit().localTrace().outcome().classification());
-        assertTrue(settled.audit().toolCalls().isEmpty());
-        assertEquals(0, fixture.generations().get());
-        assertEquals(0, fixture.preparations().get());
+        return new SettledHandoff(settled, fixture);
     }
 
     @Test
@@ -246,8 +279,16 @@ class AssistantWorkStatusBoundaryTest {
             String answer = text(settled.result());
             assertFalse(answer.contains("runtime-path-canary"), answer);
             assertFalse(answer.contains("private diagnostic"), answer);
-            assertTrue(answer.contains("1 applied, 0 uncertain"), answer);
-            assertTrue(answer.contains("Target limits:"), answer);
+            if (request.contains("has not been checked")) {
+                // The partially parsed handoff frame uses the concise renderer. Effects stay countable,
+                // restricted names stay withheld, and foreign or unbound records are reported as incomplete.
+                assertTrue(variant < 3 ? answer.contains("applied effect entries for withheld targets")
+                        : answer.contains("Retained or presented records are incomplete"), answer);
+                assertFalse(answer.contains("Target limits:"), answer);
+            } else {
+                assertTrue(answer.contains("1 applied, 0 uncertain"), answer);
+                assertTrue(answer.contains("Target limits:"), answer);
+            }
             assertFalse(settled.audit().workStatusReceipt().presentationComplete());
             assertEquals("ADVISORY_ONLY", settled.audit().localTrace().outcome().classification());
             assertTrue(settled.audit().toolCalls().isEmpty());

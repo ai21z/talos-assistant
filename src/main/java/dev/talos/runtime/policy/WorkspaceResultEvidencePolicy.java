@@ -225,18 +225,46 @@ public final class WorkspaceResultEvidencePolicy {
             return "Observed top-level entries" + (complete ? ":\n" : ", with incomplete coverage:\n")
                     + ProtectedContentPolicy.sanitizeText(outcome.summary()).strip();
         }
-        if (result.evidence().status() != EvidenceObligationVerifier.Status.SATISFIED) {
-            if (observation.returnedEntries() > 0) {
-                return "The inspected directory is not empty. The observation was limited, "
-                        + "so complete contents remain unresolved. Observed entries within depth "
-                        + observation.maxDepth() + ":\n" + ProtectedContentPolicy.sanitizeText(outcome.summary()).strip();
-            }
-            return "The directory observation was limited. Its complete contents and emptiness remain unresolved.";
+        return observedDirectoryText(result.evidence(), outcome, false, Integer.MAX_VALUE);
+    }
+
+    /**
+     * The admitted current observation of the workspace root, for an answer whose broader obligation was not met.
+     * Eligibility is decided by ReadEvidenceCoverage.assessDirectory, never by model prose. A listing of another
+     * directory, an unbound, failed or denied listing, or a listing followed by mutation yields no text.
+     * Names are withheld when the request carries an output-restriction cue.
+     */
+    public static String observedRoot(CurrentTurnPlan plan, ToolCallLoop.LoopResult loop, Path workspace) {
+        if (plan == null || loop == null || workspace == null || !loop.readEvidenceCoverage().captured()) return "";
+        var directory = loop.readEvidenceCoverage().assessDirectory(
+                loop.toolOutcomes(), workspace, plan.taskContract(), ".");
+        var outcome = directory.observation();
+        if (outcome == null || outcome.directoryObservation() == null) return "";
+        boolean restricted = dev.talos.runtime.intent.OutputRestrictionCue.present(plan.originalUserRequest());
+        return observedDirectoryText(directory.result(), outcome, restricted, MAX_OBSERVED_ROOT_LINES);
+    }
+
+    private static final int MAX_OBSERVED_ROOT_LINES = 50;
+
+    private static String observedDirectoryText(EvidenceObligationVerifier.Result evidence,
+                                                ToolCallLoop.ToolOutcome outcome, boolean namesWithheld, int maxLines) {
+        var observation = outcome.directoryObservation();
+        boolean complete = evidence.status() == EvidenceObligationVerifier.Status.SATISFIED;
+        if (observation.returnedEntries() == 0) {
+            return complete ? "The inspected top-level directory is empty. Hidden entries were included in this observation."
+                    : "The directory observation was limited. Its complete contents and emptiness remain unresolved.";
         }
-        if (observation.returnedEntries() == 0)
-            return "The inspected top-level directory is empty. Hidden entries were included in this observation.";
-        String body = ProtectedContentPolicy.sanitizeText(outcome.summary()).strip();
-        return "The inspected directory is not empty. Hidden entries were included. "
-                + "Observed entries within depth " + observation.maxDepth() + ":\n" + body;
+        String lead = complete ? "The inspected directory is not empty. Hidden entries were included. "
+                : "The inspected directory is not empty. The observation was limited, so complete contents remain unresolved. ";
+        if (namesWithheld) return lead + "Entry names and counts are withheld because the request may limit what is shown.";
+        return lead + "Observed entries within depth " + observation.maxDepth() + ":\n"
+                + boundedLines(ProtectedContentPolicy.sanitizeText(outcome.summary()).strip(), maxLines);
+    }
+
+    private static String boundedLines(String body, int maxLines) {
+        var lines = body.lines().toList();
+        if (lines.size() <= maxLines) return body;
+        return String.join("\n", lines.subList(0, maxLines)) + "\n"
+                + (lines.size() - maxLines) + " more observed lines are not shown.";
     }
 }
