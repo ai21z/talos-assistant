@@ -14,13 +14,13 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for streaming output in AskMode and RagMode.
+ * Tests for settled answer delivery when provider streaming is configured.
  *
  * <p>When a {@code streamSink} is present in the Context, modes should:
  * <ol>
  *   <li>Use {@code chatStream()} instead of blocking {@code chat()}</li>
- *   <li>Deliver chunks via the sink as they arrive</li>
- *   <li>Return a {@link Result.Streamed} instead of {@link Result.Ok}</li>
+ *   <li>Keep provider fragments out of the presentation sink</li>
+ *   <li>Return the complete selected answer as {@link Result.Ok}</li>
  * </ol>
  *
  * <p>Without a streamSink (null), modes fall back to the non-streaming path
@@ -34,6 +34,8 @@ class StreamingModeTest {
         return Context.builder(new Config())
                 .llm(LlmClient.scripted("hello streaming"))
                 .streamSink(chunks::add)
+                .onStreamComplete(() -> assertTrue(chunks.isEmpty(),
+                        "Transport completion must not commit answer fragments"))
                 .build();
     }
 
@@ -48,7 +50,7 @@ class StreamingModeTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    void askMode_with_streamSink_returns_streamed_result() throws Exception {
+    void askMode_with_streamSink_returns_complete_ok_result() throws Exception {
         List<String> chunks = new ArrayList<>();
         var ctx = scriptedStreamingContext(chunks);
         var mode = new AskMode();
@@ -56,24 +58,24 @@ class StreamingModeTest {
         Optional<Result> result = mode.handle("hello streaming", WS, ctx);
 
         assertTrue(result.isPresent());
-        assertInstanceOf(Result.Streamed.class, result.get(),
-                "When streamSink is present, should return Streamed");
+        assertInstanceOf(Result.Ok.class, result.get(),
+                "The selected answer must be returned for settled presentation");
 
-        Result.Streamed streamed = (Result.Streamed) result.get();
-        assertFalse(streamed.fullText.isBlank(),
-                "Streamed result should contain the full response text");
+        Result.Ok selected = (Result.Ok) result.get();
+        assertEquals("\nhello streaming\n\n", selected.text);
+        assertTrue(chunks.isEmpty(), "Neither provider fragments nor the selected answer may be emitted");
     }
 
     @Test
-    void askMode_with_streamSink_delivers_chunks() throws Exception {
+    void askMode_with_streamSink_keeps_sink_empty_through_completion() throws Exception {
         List<String> chunks = new ArrayList<>();
         var ctx = scriptedStreamingContext(chunks);
         var mode = new AskMode();
 
         mode.handle("hello streaming", WS, ctx);
 
-        assertFalse(chunks.isEmpty(),
-                "Stream sink should have received at least one chunk");
+        assertTrue(chunks.isEmpty(),
+                "Provider transport streaming must not expose answer fragments");
     }
 
     @Test

@@ -56,7 +56,7 @@ class LlamaCppServerManagerTest {
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.outputCaptureHealthy = false;
             launcher.process.throwOutputCaptureHealth = throwsOnObservation;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg),
                     launcher,
                     HttpClient.newHttpClient(),
@@ -86,6 +86,34 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void ordinaryManagedLaunchRejectsExistingListenerWithoutChangingLogsOrStartingChild() throws Exception {
+        HttpServer server = startHealthServer(200, "unrelated Gemma");
+        Path logs = tempDir.resolve("occupied-logs");
+        Files.createDirectories(logs);
+        Path log = logs.resolve("llama_cpp-" + server.getAddress().getPort() + ".log");
+        Files.writeString(log, "preserved previous launch evidence");
+        FakeLauncher launcher = new FakeLauncher();
+        Config cfg = config(Map.of("mode", "managed", "server_path", touch("occupied-server.exe").toString(),
+                "model_path", touch("occupied-model.gguf").toString(), "host", "http://127.0.0.1",
+                "port", server.getAddress().getPort()));
+        try (LlamaCppServerManager manager = new LlamaCppServerManager(LlamaCppConfig.from(cfg), launcher,
+                HttpClient.newHttpClient(), Duration.ofSeconds(2), Duration.ofMillis(10), logs)) {
+            EngineException.ConnectionFailed failure = assertThrows(EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+            assertTrue(failure.getMessage().contains("pre-existing listener"), failure.getMessage());
+            assertTrue(launcher.commands.isEmpty());
+            assertEquals("preserved previous launch evidence", Files.readString(log));
+            assertFalse(launcher.process.destroyed);
+            assertFalse(manager.health().ok(), "an unrelated listener cannot prove managed readiness");
+            assertEquals(200, HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(
+                    java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/health"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedModeLaunchesConfiguredExecutableWithExpectedArguments() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
@@ -103,7 +131,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("chat_template", "chatml"),
                     Map.entry("server_args", List.of("--no-webui", "--log-disable"))));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -140,7 +168,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "context", 4096));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -168,7 +196,7 @@ class LlamaCppServerManagerTest {
                     "context", 8192,
                     "server_args", List.of("--ctx-size", "2147483647")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -198,7 +226,7 @@ class LlamaCppServerManagerTest {
                     "context", 8192,
                     "server_args", List.of("--ctx-size", "9999999999")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -228,7 +256,7 @@ class LlamaCppServerManagerTest {
                     "context", 8192,
                     "server_args", List.of("--ctx-size", "-1")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -256,7 +284,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -294,7 +322,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "verification_logging", true));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -322,7 +350,7 @@ class LlamaCppServerManagerTest {
                     "verification_logging", true,
                     "server_args", List.of("-lv", "1")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -351,7 +379,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "server_args", List.of("-np", "2", "-n", "512")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -383,7 +411,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "server_args", serverArgs));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -415,7 +443,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "server_args", List.of("--parallel=3", "--n-predict=1024")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -447,7 +475,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("context", 8192),
                     Map.entry("jinja", true)));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -482,7 +510,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("host", "http://127.0.0.1"),
                     Map.entry("port", server.getAddress().getPort())));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -550,7 +578,7 @@ class LlamaCppServerManagerTest {
                 "host", "http://127.0.0.1",
                 "port", 18080));
         FakeLauncher launcher = new FakeLauncher();
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
 
         manager.ensureStarted();
@@ -572,7 +600,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -598,7 +626,7 @@ class LlamaCppServerManagerTest {
         FakeLauncher launcher = new FakeLauncher();
         InterruptingHttpClient http = new InterruptingHttpClient(
                 "interrupt llama.cpp health request");
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg),
                 launcher,
                 http,
@@ -633,7 +661,7 @@ class LlamaCppServerManagerTest {
                 "port", 18080));
         InterruptingHttpClient http = InterruptingHttpClient.wrapped(
                 "wrapped llama.cpp health interruption");
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg),
                 new FakeLauncher(),
                 http,
@@ -670,7 +698,7 @@ class LlamaCppServerManagerTest {
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.alive = false;
             launcher.logContentOnStart = "llama_model_load: failed to load model\nout of device memory\n";
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
 
@@ -693,7 +721,7 @@ class LlamaCppServerManagerTest {
                 "mode", "managed",
                 "server_path", tempDir.resolve("missing-server.exe").toString(),
                 "model_path", tempDir.resolve("agent.gguf").toString()));
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
         Health health = manager.health();
@@ -709,7 +737,7 @@ class LlamaCppServerManagerTest {
                 "mode", "managed",
                 "server_path", exe.toString(),
                 "model_path", tempDir.resolve("missing.gguf").toString()));
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
         Health health = manager.health();
@@ -732,7 +760,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -761,7 +789,7 @@ class LlamaCppServerManagerTest {
                 "model_path", model.toString()));
         FakeLauncher launcher = new FakeLauncher();
         launcher.failure = new IOException("cannot start");
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
 
         assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
@@ -780,7 +808,7 @@ class LlamaCppServerManagerTest {
                     "mode", "connect_only",
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
             Health health = manager.health();
@@ -805,7 +833,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -831,7 +859,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofMillis(40), Duration.ofMillis(5), tempDir.resolve("logs"));
 
@@ -860,7 +888,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.destroyLeavesAlive = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -893,7 +921,7 @@ class LlamaCppServerManagerTest {
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.destroyLeavesAlive = true;
             launcher.process.forceDestroyLeavesAlive = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -948,7 +976,7 @@ class LlamaCppServerManagerTest {
             launcher.process.destroyLeavesAlive = true;
             launcher.process.forceDestroyLeavesAlive = true;
             launcher.process.blockGracefulDestroy = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10),
                     tempDir.resolve("logs"));
@@ -1013,7 +1041,7 @@ class LlamaCppServerManagerTest {
             launcher.process.destroyLeavesAlive = true;
             launcher.process.forceDestroyLeavesAlive = true;
             launcher.process.interruptNextWait = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -1054,7 +1082,7 @@ class LlamaCppServerManagerTest {
                                 "injected launch observation failure"),
                         unsettled,
                         launcher.process.terminationLease);
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                 Duration.ofMillis(1), Duration.ofMillis(1),
                 tempDir.resolve("logs"));
@@ -1083,7 +1111,7 @@ class LlamaCppServerManagerTest {
                 "model_path", model.toString()));
         FakeLauncher launcher = new FakeLauncher();
         launcher.process.omitTerminationLease = true;
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                 Duration.ofMillis(1), Duration.ofMillis(1),
                 tempDir.resolve("logs"));
@@ -1118,7 +1146,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.throwTerminationLease = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10),
                     tempDir.resolve("logs"));
@@ -1157,7 +1185,7 @@ class LlamaCppServerManagerTest {
             FakeProcess failedEpoch = launcher.process;
             failedEpoch.terminationLeaseFailuresRemaining = 1;
             launcher.replaceDeadProcessOnLaunch = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10),
                     tempDir.resolve("logs"));
@@ -1194,7 +1222,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
 

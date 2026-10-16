@@ -399,8 +399,9 @@ class DocumentComparisonOutcomeTest {
             var initial = client.chatFull(messages, specs, dev.talos.spi.types.ChatRequestControls.defaults()
                     .withToolAuthorityMode(client.toolAuthorityModeForToolSurface(specs)));
             var loop = engine.run(initial.text(), initial.toolCalls(), initial.provenance(), messages, workspace, context);
-            assertEquals(specs, scripted.requests().get(1).tools);
-            assertEquals(dev.talos.spi.types.ToolChoiceMode.AUTO, scripted.requests().get(1).controls.toolChoice());
+            assertEquals(List.of("talos.read_file"), scripted.requests().get(1).tools.stream()
+                    .map(dev.talos.spi.types.ToolSpec::name).toList());
+            assertEquals(dev.talos.spi.types.ToolChoiceMode.REQUIRED, scripted.requests().get(1).controls.toolChoice());
             assertEquals(dev.talos.spi.types.ToolChoiceMode.REQUIRED, scripted.requests().get(2).controls.toolChoice());
             assertEquals(List.of(DocumentComparisonTool.NAME), scripted.requests().get(2).tools.stream().map(dev.talos.spi.types.ToolSpec::name).toList());
             assertEquals(3, loop.toolsInvoked());

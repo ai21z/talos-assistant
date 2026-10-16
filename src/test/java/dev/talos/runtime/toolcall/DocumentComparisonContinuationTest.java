@@ -63,6 +63,29 @@ class DocumentComparisonContinuationTest {
         assertEquals(0, state.totalToolsInvoked);
     }
 
+    @Test void comparisonSelectionProjectsIdentityWithoutChangingOrderedPairAuthority() throws Exception {
+        String request = "Compare a.txt and b.txt. Who are you?";
+        var fixture = fixture(true, request, "normal", true);
+        var scope = fixture.state().comparisonScope;
+        var resolution = TurnTaskContractCapture.getResolution();
+        var pair = new dev.talos.core.diff.DocumentPairAdmission.RequestedPair("a.txt", "b.txt");
+        assertTrue(TurnTaskContractCapture.runtimeIdentityPresentation());
+        assertEquals(List.of(pair), DocumentComparisonContinuation.pendingPairs(fixture.state()));
+        assertTrue(DocumentComparisonContinuation.tryHandle(fixture.state()).orElseThrow());
+        var dispatched = fixture.client().requests().getLast();
+        assertEquals(ToolChoiceMode.REQUIRED, dispatched.controls.toolChoice());
+        assertTrue(dispatched.messages.stream().anyMatch(message -> "user".equals(message.role())
+                && "Compare a.txt and b.txt.".equals(message.content().strip())));
+        assertFalse(dispatched.messages.stream().anyMatch(message -> request.equals(message.content())));
+        assertSame(scope, fixture.state().comparisonScope);
+        assertSame(resolution, TurnTaskContractCapture.getResolution());
+        assertEquals(request, scope.request().request());
+        assertEquals(request, TurnTaskContractCapture.get().originalUserRequest());
+        assertEquals(request, fixture.state().messages.getFirst().content());
+        assertEquals(Map.of("left", "a.txt", "right", "b.txt"), fixture.state().currentNativeCalls.getFirst().arguments());
+        assertEquals(0, fixture.state().totalToolsInvoked);
+    }
+
     @Test void laterRegistryAvailabilityCannotAddAnInitiallyAbsentCapability() throws Exception {
         var fixture = fixture(false, REQUEST);
         fixture.context().tools = List.of(readSpec(), compareSpec());
@@ -170,9 +193,19 @@ class DocumentComparisonContinuationTest {
     }
 
     private Fixture fixture(boolean initialComparison, String request, String response) throws Exception {
+        return fixture(initialComparison, request, response, false);
+    }
+
+    private Fixture fixture(boolean initialComparison, String request, String response, boolean identityPresentation) throws Exception {
         TurnAuditCapture.begin();
         TurnUserRequestCapture.set(request);
-        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        var messages = new ArrayList<>(List.of(ChatMessage.user(request)));
+        if (identityPresentation) {
+            TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages,
+                    ModelIdentitySnapshot.empty(), true);
+        } else {
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        }
         LocalTurnTraceCapture.begin("comparison-dispatch", "test", 1, "2026-09-24T00:00:00Z", "workspace", "ask", "fixture", "fixture", request);
         var count = new java.util.concurrent.atomic.AtomicInteger();
         var client = ScriptedNativeLlmClient.recordingResponder(ignored -> {
@@ -187,7 +220,6 @@ class DocumentComparisonContinuationTest {
         client.client().setToolSpecs(specs);
         Config config = new Config(null);
         var context = new MutableContext(Context.builder(config).llm(client.client()).sandbox(new Sandbox(workspace, config.data)).build(), specs);
-        var messages = new ArrayList<>(List.of(ChatMessage.user(request)));
         var initial = client.client().chatFull(messages, specs, ChatRequestControls.defaults()
                 .withToolAuthorityMode(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE));
         var state = new LoopState(initial.text(), initial.toolCalls(), initial.provenance(), messages, workspace, context, null, 10, 0);

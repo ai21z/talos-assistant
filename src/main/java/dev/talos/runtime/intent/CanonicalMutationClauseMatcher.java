@@ -264,6 +264,11 @@ final class CanonicalMutationClauseMatcher {
                     "(?iu)\\b(?:needs?|needed|wants?|wanted|expects?|expected|"
                             + "prefers?|preferred|would\\s+like)\\s+"
                             + "(?:you|talos)\\s+to\\s*$");
+    private static final Pattern DIRECT_FIRST_PERSON_DESIRE_END = Pattern.compile(
+            "(?iu)^\\s*(?:(?:please|now|also)\\s+)*(?:i|we)\\s+"
+                    + "(?:want|need|would\\s+like)\\s+to\\s*$");
+    private static final Pattern INDEPENDENT_POLITE_DIRECTIVE_END = Pattern.compile(
+            "(?iu)[,;:]\\s*(?:please|kindly)\\s*$");
     private static final Pattern DIRECT_FIRST_PERSON_PERFORMATIVE =
             Pattern.compile(
                     "(?iu)(?:^|[,:;\\r\\n\\u2013\\u2014]+\\s*"
@@ -1039,7 +1044,9 @@ final class CanonicalMutationClauseMatcher {
                         authority = classifyActionAuthority(
                                 view,
                                 classificationStart,
-                                token.start());
+                                token.start(),
+                                carried,
+                                previous == null ? -1 : previous.end());
                         work.fallbackClassifications++;
                         work.fallbackCharacters += classificationCharacters;
                     }
@@ -1050,7 +1057,8 @@ final class CanonicalMutationClauseMatcher {
                         token.start(),
                         token.end(),
                         authority.nonImperativeUse(),
-                        authority.scopeKind()));
+                        authority.scopeKind(),
+                        authority.firstPersonDesireFrame()));
                 if (targetAmbiguous) {
                     carried = null;
                     previous = null;
@@ -1364,8 +1372,13 @@ final class CanonicalMutationClauseMatcher {
 
     private record ActionAuthority(
             boolean nonImperativeUse,
-            ScopeKind scopeKind
-    ) {}
+            ScopeKind scopeKind,
+            boolean firstPersonDesireFrame
+    ) {
+        private ActionAuthority(boolean nonImperativeUse, ScopeKind scopeKind) {
+            this(nonImperativeUse, scopeKind, false);
+        }
+    }
 
     private record NeutralTransition(
             boolean neutral,
@@ -1408,6 +1421,16 @@ final class CanonicalMutationClauseMatcher {
             int regionStart,
             int actionStart
     ) {
+        return classifyActionAuthority(view, regionStart, actionStart, null, -1);
+    }
+
+    private static ActionAuthority classifyActionAuthority(
+            RequestLexicalView view,
+            int regionStart,
+            int actionStart,
+            ActionAuthority precedingAuthority,
+            int precedingActionEnd
+    ) {
         int activeRegionStart = Math.max(0, regionStart);
         for (int offset = activeRegionStart; offset < actionStart; offset++) {
             if (view.isSentenceBoundaryAt(offset)) {
@@ -1436,6 +1459,13 @@ final class CanonicalMutationClauseMatcher {
         if (nonAuthoritativeContext(active)) {
             return new ActionAuthority(true, scope);
         }
+        if (scope == ScopeKind.NONE
+                && INDEPENDENT_POLITE_DIRECTIVE_END.matcher(currentClause).find()) {
+            return new ActionAuthority(false, scope);
+        }
+        if (DIRECT_FIRST_PERSON_DESIRE_END.matcher(currentClause).matches()) {
+            return new ActionAuthority(false, scope, true);
+        }
         if (directCollaborativeAuthorityContext(currentClause)) {
             return new ActionAuthority(false, scope);
         }
@@ -1446,7 +1476,12 @@ final class CanonicalMutationClauseMatcher {
                         .matcher(currentClause).find()
                 && !EXPLICIT_MODIFIER_ONLY_PREFIX
                         .matcher(currentClause).matches();
-        return new ActionAuthority(nonImperative, scope);
+        boolean inheritedDesireFrame = precedingAuthority != null
+                && precedingAuthority.firstPersonDesireFrame()
+                && precedingActionEnd >= activeRegionStart
+                && active.equals(currentClause)
+                && !EXPLICIT_CLAUSE_BOUNDARY_PREFIX.matcher(currentClause).find();
+        return new ActionAuthority(nonImperative, scope, inheritedDesireFrame);
     }
 
     /** Generic intent is recognized here, workspace operation authority is not granted. */
@@ -1458,6 +1493,7 @@ final class CanonicalMutationClauseMatcher {
     static boolean directCollaborativeAuthorityContext(String active) {
         String value = active == null ? "" : active;
         if (BARE_DIRECT_NECESSITY_END.matcher(value).find()
+                || DIRECT_FIRST_PERSON_DESIRE_END.matcher(value).matches()
                 || positiveDirectiveFrame(value)) {
             return true;
         }
@@ -1828,6 +1864,7 @@ final class CanonicalMutationClauseMatcher {
         }
         Matcher predicate = REPORTED_PREDICATE.matcher(prefix);
         while (predicate.find()) {
+            if (insidePathToken(prefix, predicate.start(), predicate.end())) continue;
             if (!prefix.substring(predicate.end()).matches("[\\s:,-]*")) {
                 continue;
             }
@@ -1857,6 +1894,7 @@ final class CanonicalMutationClauseMatcher {
     private static boolean hasSubjectBoundReportedPredicate(String active) {
         Matcher predicate = REPORTED_PREDICATE.matcher(active);
         while (predicate.find()) {
+            if (insidePathToken(active, predicate.start(), predicate.end())) continue;
             String lead = active.substring(0, predicate.start());
             Matcher subject = TRAILING_WORD.matcher(lead);
             if (!subject.find()) continue;
@@ -2095,6 +2133,9 @@ final class CanonicalMutationClauseMatcher {
         }
         Matcher intent = THIRD_PARTY_INTENT_END.matcher(active);
         if (intent.find()) {
+            if (DIRECT_FIRST_PERSON_DESIRE_END.matcher(active).matches()) {
+                return false;
+            }
             return isThirdPartySubject(
                     active.substring(
                             thirdPartySubjectStart(active, intent.start()),
@@ -2375,7 +2416,8 @@ final class CanonicalMutationClauseMatcher {
             int start,
             int end,
             boolean nonImperativeUse,
-            ScopeKind scopeKind
+            ScopeKind scopeKind,
+            boolean firstPersonDesireFrame
     ) {
         Action {
             if (family == null

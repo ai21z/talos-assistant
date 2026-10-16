@@ -13,6 +13,7 @@ import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
 import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentProjector;
@@ -25,6 +26,7 @@ import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 
 import java.nio.file.Path;
@@ -139,6 +141,9 @@ public final class PromptInspector {
         }
 
         List<String> registryTools = registryToolNames(ctx);
+        RuntimeModelIdentityAnswerPolicy.project(messages,
+                ctx == null || ctx.llm() == null ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity());
+        RuntimeModelIdentityAnswerPolicy.projectProviderTask(messages, messages.size() - 1, input);
         messages = new ArrayList<>(
                 ProviderPromptSurfaceReconciler
                         .canonicalizeNormalizedLf(messages));
@@ -176,9 +181,35 @@ public final class PromptInspector {
             int historyMessages,
             List<ChatMessage> messages
     ) {
-        List<ChatMessage> canonicalMessages =
-                ProviderPromptSurfaceReconciler
-                        .canonicalizeNormalizedLf(messages);
+        return fromMessages(requestedMode, resolvedMode, workspace, ctx, nativeTools, historyMessages,
+                messages, ctx == null || ctx.llm() == null ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity());
+    }
+
+    public static PromptRender fromMessages(
+            String requestedMode,
+            String resolvedMode,
+            Path workspace,
+            Context ctx,
+            boolean nativeTools,
+            int historyMessages,
+            List<ChatMessage> messages,
+            ModelIdentitySnapshot runtimeIdentity
+    ) {
+        List<ChatMessage> canonicalMessages = new ArrayList<>(messages);
+        String currentRequest = "";
+        int currentTaskIndex = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message != null && "user".equals(message.role())
+                    && !dev.talos.runtime.toolcall.ToolCallSupport.isSyntheticToolResultContent(message.content())) {
+                currentRequest = message.content();
+                currentTaskIndex = i;
+                break;
+            }
+        }
+        RuntimeModelIdentityAnswerPolicy.projectProviderTask(canonicalMessages, currentTaskIndex, currentRequest);
+        RuntimeModelIdentityAnswerPolicy.project(canonicalMessages, runtimeIdentity, currentRequest);
+        canonicalMessages = new ArrayList<>(ProviderPromptSurfaceReconciler.canonicalizeNormalizedLf(canonicalMessages));
         String canonicalMode = resolvePromptMode(resolvedMode);
         // Resolve authority from the original runtime bytes. The canonical
         // copy below is presentation/provider transport only; reparsing it

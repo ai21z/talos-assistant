@@ -11,6 +11,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutationIntentTest {
 
+    @Test
+    void independentlyStatedCurrentImperativesAreNotSuppressedByHistoricalPreambles() {
+        for (String instruction : java.util.List.of(
+                "Please implement those same two changes now.",
+                "Could you apply the same edits now?",
+                "Now please update those changes.",
+                "Implement those improvements.")) {
+            String request = "Those edits were not approved before. " + instruction;
+            assertTrue(MutationIntent.looksExplicitMutationRequest(request), request);
+            assertTrue(MutationIntent.currentMutationReference(request).isPresent(), request);
+        }
+    }
+
+    @Test
+    void historicalQuotedHypotheticalAndConflictingInstructionsDoNotGrantCurrentMutation() {
+        for (String request : java.util.List.of(
+                "Those edits were not approved before.",
+                "Those edits were not approved before. Why was it denied?",
+                "Those edits were not approved before. Explain how to implement those changes.",
+                "Those edits were not approved before. If permission is granted, implement those changes.",
+                "Those edits were not approved before. \"Please implement those changes.\"",
+                "Those edits were not approved before. ```Please implement those changes.```",
+                "Those edits were not approved before. (Please implement those changes.)",
+                "The historical instruction was:\nPlease implement those same two changes.",
+                "For example:\nPlease implement those same two changes.",
+                "For example. Please implement those same two changes.",
+                "The guide says. Please implement those same two changes.",
+                "Those edits were not approved before. Please implement those changes. Do not change files.")) {
+            assertFalse(MutationIntent.looksExplicitMutationRequest(request), request);
+            assertTrue(MutationIntent.currentMutationReference(request).isEmpty(), request);
+        }
+    }
+
     private static final String F07_CONTRADICTION_PROMPT =
             "Do not change any files, but update notes.md now. "
                     + "Ask me to resolve the contradiction instead of acting.";

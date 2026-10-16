@@ -88,8 +88,8 @@ public final class ForegroundProviderScriptedLlmClient {
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
             return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request,
                     physicalProviderBody(request),
-                    request.tools,
                     handoff,
                     () -> responseChunks(request));
         }
@@ -99,8 +99,8 @@ public final class ForegroundProviderScriptedLlmClient {
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
             return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request,
                     physicalProviderBody(request),
-                    request.tools,
                     handoff,
                     () -> responseChunks(request));
         }

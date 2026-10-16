@@ -278,6 +278,26 @@ class ActiveTaskContextPolicyTest {
         assertEquals(rawContract, decision.taskContract());
     }
 
+    @Test void explicitCurrentReadOnlyAuthoritySurvivesVerifierContext() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        for (String request : List.of(
+                "Explain the remaining issue. Do not change files.",
+                "Describe the repair. Leave files unchanged.",
+                "Fix the remaining issue. Do not change files.",
+                "Make it better and more modern, without changing files.")) {
+            TaskContract raw = TaskContractResolver.fromUserRequest(request);
+            assertFalse(raw.mutationAllowed(), request);
+
+            ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                    request, raw, saved, ArtifactGoal.fromActiveContext(saved), 3);
+
+            assertFalse(decision.taskContract().mutationAllowed(), request);
+            assertFalse(decision.taskContract().mutationRequested(), request);
+            assertFalse(decision.consumed(), request);
+            assertEquals(saved, decision.memoryContext(), request);
+        }
+    }
+
     @Test void vagueStaticWebRedesignConsumesActiveStaticWebContext() {
         ActiveTaskContext saved = staticWebMutationContext();
         String userRequest = "make it better and more modern";

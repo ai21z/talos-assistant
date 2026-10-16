@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import dev.talos.tools.ToolMutationEffects;
+import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.impl.ExecutedEditDetail;
 
 /**
  * Minimal, turn-centric, durable record of one terminal turn settlement.
@@ -122,6 +124,17 @@ public record TurnRecord(
     }
 
     /**
+     * Whether a call was blocked or reached tool execution. This does not
+     * establish subprocess launch, observed effects, or verification.
+     * Legacy summaries without an explicit producer remain unknown.
+     */
+    public enum ToolCallDisposition {
+        UNKNOWN,
+        BLOCKED,
+        EXECUTED
+    }
+
+    /**
      * A compact summary of one tool invocation during a turn.
      *
      * @param name      the tool name (e.g. {@code talos.edit_file})
@@ -129,6 +142,8 @@ public record TurnRecord(
      * @param pathHints all resolved changed paths for multi-path tools; falls back to {@code pathHint}
      * @param success   whether the tool reported success
      * @param reason    compact failure/block reason, if the call did not succeed
+     * @param executionDisposition explicit runtime execution status, independent of success
+     * @param failureReason typed producer cause, NONE when unavailable in legacy evidence
      */
     public record ToolCallSummary(
             String name,
@@ -136,7 +151,10 @@ public record TurnRecord(
             List<String> pathHints,
             boolean success,
             String reason,
-            ToolMutationEffects mutationEffects
+            ToolMutationEffects mutationEffects,
+            ToolCallDisposition executionDisposition,
+            ToolFailureReason failureReason,
+            @com.fasterxml.jackson.annotation.JsonIgnore ExecutedEditDetail executedEditDetail
     ) {
         public ToolCallSummary {
             name = (name == null) ? "" : name;
@@ -144,6 +162,46 @@ public record TurnRecord(
             pathHint = primaryPathHint(pathHint, pathHints);
             reason = (reason == null) ? "" : reason;
             mutationEffects = mutationEffects == null ? ToolMutationEffects.none() : mutationEffects;
+            executionDisposition = executionDisposition == null ? ToolCallDisposition.UNKNOWN : executionDisposition;
+            failureReason = failureReason == null ? ToolFailureReason.NONE : failureReason;
+            executedEditDetail = executedEditDetail == null ? ExecutedEditDetail.none() : executedEditDetail;
+            var tool = dev.talos.tools.ToolAliasPolicy.resolve(name);
+            if (executionDisposition != ToolCallDisposition.EXECUTED || !tool.accepted()
+                    || !"talos.edit_file".equals(tool.canonicalToolName())
+                    || !executedEditDetail.associatedWith(mutationEffects)
+                    || !pathHint.equals(executedEditDetail.target())) {
+                executedEditDetail = ExecutedEditDetail.none();
+            }
+            if ((failureReason == ToolFailureReason.USER_APPROVAL_DENIED
+                    || failureReason == ToolFailureReason.PERMISSION_POLICY_DENIED
+                    || failureReason == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)
+                    && executionDisposition != ToolCallDisposition.BLOCKED) {
+                throw new IllegalArgumentException("A pre-execution denial requires a blocked tool call");
+            }
+            if (executionDisposition == ToolCallDisposition.BLOCKED
+                    && (success || mutationEffects.hasEffects())) {
+                throw new IllegalArgumentException("A blocked tool call cannot report success or mutation effects");
+            }
+        }
+
+        /** Compatibility constructors cannot establish whether execution was reached. */
+        public ToolCallSummary(String name, String pathHint, List<String> pathHints,
+                               boolean success, String reason, ToolMutationEffects mutationEffects,
+                               ToolCallDisposition executionDisposition, ToolFailureReason failureReason) {
+            this(name, pathHint, pathHints, success, reason, mutationEffects,
+                    executionDisposition, failureReason, ExecutedEditDetail.none());
+        }
+
+        public ToolCallSummary(String name, String pathHint, List<String> pathHints,
+                               boolean success, String reason, ToolMutationEffects mutationEffects,
+                               ToolCallDisposition executionDisposition) {
+            this(name, pathHint, pathHints, success, reason, mutationEffects,
+                    executionDisposition, ToolFailureReason.NONE);
+        }
+
+        public ToolCallSummary(String name, String pathHint, List<String> pathHints,
+                               boolean success, String reason, ToolMutationEffects mutationEffects) {
+            this(name, pathHint, pathHints, success, reason, mutationEffects, ToolCallDisposition.UNKNOWN);
         }
 
         public ToolCallSummary(String name, String pathHint, List<String> pathHints,

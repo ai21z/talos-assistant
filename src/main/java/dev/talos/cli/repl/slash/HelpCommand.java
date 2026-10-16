@@ -3,8 +3,10 @@ package dev.talos.cli.repl.slash;
 import dev.talos.runtime.Result;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CommandTextLayout;
 
 import java.util.*;
+import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 
 /**
@@ -16,6 +18,7 @@ import java.util.stream.Collectors;
 public final class HelpCommand implements Command {
     private final CommandRegistry reg;
     private final dev.talos.cli.repl.WorkspaceCommandTemplates templates;
+    private final IntSupplier terminalWidth;
 
     /** Visual width of group header rules. */
     private static final int RULE_WIDTH = 46;
@@ -38,14 +41,20 @@ public final class HelpCommand implements Command {
 
     /** T806: the workspace template catalog feeds the "/help all" section. */
     public HelpCommand(CommandRegistry reg, dev.talos.cli.repl.WorkspaceCommandTemplates templates) {
+        this(reg, templates, null);
+    }
+
+    public HelpCommand(CommandRegistry reg, dev.talos.cli.repl.WorkspaceCommandTemplates templates,
+                       IntSupplier terminalWidth) {
         this.reg = reg;
         this.templates = templates == null
                 ? dev.talos.cli.repl.WorkspaceCommandTemplates.none()
                 : templates;
+        this.terminalWidth = terminalWidth;
     }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("help", List.of("h", "?"), "/help [all|debug|security|rag|cmd]",
+        return new CommandSpec("help", List.of("h", "?"), "/help [all|models|debug|security|rag|cmd]",
                 "Show this help.",
                 CommandGroup.SESSION);
     }
@@ -85,15 +94,20 @@ public final class HelpCommand implements Command {
                             "/grep searches workspace text directly.")));
             case "models", "model" -> new Result.Ok(topicHelp(
                     "Model Help",
-                    "List configured/selectable models and switch the active chat model.",
+                    "Inspect local candidates and select the active chat model.",
                     CommandGroup.MODELS,
                     List.of(
-                            "/models lists configured/selectable models. /model is an alias.",
-                            "/set model <backend/model> switches the active model.",
-                            "Use `talos setup models` outside the REPL to configure tested managed llama.cpp profiles.",
-                            "Tested profiles: qwen2.5-coder-14b and gpt-oss-20b.",
-                            "Example: /set model <backend/model> using a name shown by /models "
-                                    + "(managed llama.cpp exposes only the configured/running GGUF).")));
+                            "/models lists managed aliases, local availability and catalog disposition. /model is an alias.",
+                            "/models --verbose shows additional local model details without starting a model.",
+                            "/models use <alias> selects a listed managed model. /set model <alias> is a compatibility form of the same operation.",
+                            "/models add <alias> \"<absolute GGUF path>\" registers another local model for this session without starting it.",
+                            "Selection checks the local artifact and restarts the owned backend. Talos stays open. No model is downloaded.",
+                            "If another server occupies the managed port, no replacement is launched. That server must be stopped explicitly or a different port configured.",
+                            "Imports and selections apply to this session. Saved defaults, conversation history, sampling and global tool/privacy policy are preserved.",
+                            "Local availability and catalog disposition do not establish artifact verification, current readiness or qualification.",
+                            "Connect-only servers are not restarted. Other configured backends use /set model <backend/model>.",
+                            "Use `talos setup models` outside the REPL to write persistent configuration.",
+                            "Accepted beta profiles: qwen2.5-coder-14b and gpt-oss-20b. Other listed profiles retain their own disposition.")));
             default -> findSpec(q)
                     .map(spec -> (Result) new Result.Ok(detail(spec)))
                     .orElseGet(() -> new Result.Error("No such help topic or command: " + q, 204));
@@ -101,16 +115,17 @@ public final class HelpCommand implements Command {
     }
 
     private String defaultHelp() {
+        int width = CommandTextLayout.width(terminalWidth);
         var sb = new StringBuilder();
         sb.append('\n');
         sb.append("  ").append(AnsiColor.bold("Talos Help")).append('\n').append('\n');
-        sb.append("  ").append(AnsiColor.grey("Ask normally: "))
-                .append("describe what to inspect, explain, or change.").append('\n');
+        sb.append(CommandTextLayout.wrap("  Ask normally: describe what to inspect, explain, or change.", width))
+                .append('\n');
         sb.append("  ").append(AnsiColor.grey("Common commands")).append('\n');
 
         appendIfRegistered(sb, "status", "workspace, model, index, policy");
         appendIfRegistered(sb, "mode", null);
-        appendIfRegistered(sb, "models", "list configured/selectable models; switch with /set model <backend/model>");
+        appendIfRegistered(sb, "models", "inspect local candidates. Select with /models use <alias>");
         appendIfRegistered(sb, "reindex", "refresh local index");
         appendIfRegistered(sb, "files", "list indexed files");
         appendIfRegistered(sb, "k", "set retrieval depth");
@@ -120,16 +135,17 @@ public final class HelpCommand implements Command {
 
         sb.append('\n');
         sb.append("  ").append(AnsiColor.grey("More help")).append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help all")).append("       all commands").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help models")).append("    configured/selectable models and switching").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help rag")).append("       retrieval and workspace context").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help security")).append("  approvals, audit, secrets").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help debug")).append("     diagnostics and traces").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help <cmd>")).append("     command details").append('\n');
+        appendEntry(sb, "/help all", "all commands", width);
+        appendEntry(sb, "/help models", "local candidates and switching", width);
+        appendEntry(sb, "/help rag", "retrieval and workspace context", width);
+        appendEntry(sb, "/help security", "approvals, audit, secrets", width);
+        appendEntry(sb, "/help debug", "diagnostics and traces", width);
+        appendEntry(sb, "/help <cmd>", "command details", width);
         return sb.toString();
     }
 
     private String fullInventory() {
+        int width = CommandTextLayout.width(terminalWidth);
         Map<CommandGroup, List<CommandSpec>> grouped = reg.allSpecs().stream()
                 .filter(spec -> !spec.hidden())
                 .collect(Collectors.groupingBy(CommandSpec::group));
@@ -145,18 +161,14 @@ public final class HelpCommand implements Command {
             sb.append("  ")
               .append(AnsiColor.violet(group.getDisplayName()))
               .append(' ')
-              .append(AnsiColor.dim(rule(group.getDisplayName().length())))
+              .append(AnsiColor.dim(rule(group.getDisplayName().length(), width)))
               .append('\n');
 
             // ── commands (sorted alphabetically) ───────────────────────
             specs.sort(Comparator.comparing(CommandSpec::name));
             for (CommandSpec spec : specs) {
                 String usage  = compactUsage(spec);
-                String desc   = listSummary(spec.summary());
-                sb.append("    ")
-                  .append(AnsiColor.blue(pad(usage, USAGE_COL)))
-                  .append(AnsiColor.grey(desc))
-                  .append('\n');
+                appendEntry(sb, usage, listSummary(spec.summary()), width);
             }
             sb.append('\n');
         }
@@ -166,16 +178,13 @@ public final class HelpCommand implements Command {
             sb.append("  ")
               .append(AnsiColor.violet("Workspace commands"))
               .append(' ')
-              .append(AnsiColor.dim(rule("Workspace commands".length())))
+              .append(AnsiColor.dim(rule("Workspace commands".length(), width)))
               .append('\n');
             for (String name : templates.names()) {
-                sb.append("    ")
-                  .append(AnsiColor.blue(pad("/" + name + " [args]", USAGE_COL)))
-                  .append(AnsiColor.grey(".talos/commands/" + name + ".md"))
-                  .append('\n');
+                appendEntry(sb, "/" + name + " [args]", ".talos/commands/" + name + ".md", width);
             }
-            sb.append("    ")
-              .append(AnsiColor.grey("Workspace templates run as typed prompts; restart to reload."))
+            sb.append(AnsiColor.grey(CommandTextLayout.wrap(
+                      "    Workspace templates run as typed prompts; restart to reload.", width)))
               .append('\n')
               .append('\n');
         }
@@ -183,22 +192,21 @@ public final class HelpCommand implements Command {
         // ── footer ─────────────────────────────────────────────────────
         String dot = AnsiColor.isUnicodeSafe() ? " · " : " - ";
         sb.append("  ")
-          .append(AnsiColor.dim(hRule()))
+          .append(AnsiColor.dim(hRule(width)))
           .append('\n')
-          .append("  ")
-          .append(AnsiColor.grey("/help <cmd> for full options"))
-          .append(AnsiColor.dim(dot))
-          .append(AnsiColor.grey("Tab to autocomplete"))
+          .append(AnsiColor.grey(CommandTextLayout.wrap(
+                  "  /help <cmd> for full options" + dot + "Tab to autocomplete", width)))
           .append('\n');
 
         return sb.toString();
     }
 
     private String topicHelp(String title, String intro, CommandGroup group, List<String> notes) {
+        int width = CommandTextLayout.width(terminalWidth);
         var sb = new StringBuilder();
         sb.append('\n');
         sb.append("  ").append(AnsiColor.bold(title)).append('\n').append('\n');
-        sb.append("  ").append(intro).append('\n').append('\n');
+        sb.append(CommandTextLayout.wrap("  " + intro, width)).append('\n').append('\n');
 
         List<CommandSpec> specs = reg.allSpecs().stream()
                 .filter(spec -> !spec.hidden())
@@ -208,7 +216,7 @@ public final class HelpCommand implements Command {
         if (!specs.isEmpty()) {
             sb.append("  ").append(AnsiColor.grey(group.getDisplayName() + " commands")).append('\n');
             for (CommandSpec spec : specs) {
-                appendCommandLine(sb, spec, null);
+                appendCommandLine(sb, spec, null, width);
             }
             sb.append('\n');
         }
@@ -216,7 +224,12 @@ public final class HelpCommand implements Command {
         if (notes != null && !notes.isEmpty()) {
             sb.append("  ").append(AnsiColor.grey("Notes")).append('\n');
             for (String note : notes) {
-                sb.append("    ").append(note).append('\n');
+                if (width < 76) {
+                    sb.append("    ").append(CommandTextLayout.wrap(note, Math.max(1, width - 4))
+                            .replace("\n", "\n    ")).append('\n');
+                } else {
+                    sb.append("    ").append(note).append('\n');
+                }
             }
         }
         return sb.toString();
@@ -239,21 +252,18 @@ public final class HelpCommand implements Command {
     }
 
     private void appendIfRegistered(StringBuilder sb, String name, String summary) {
-        findSpec(name).ifPresent(spec -> appendCommandLine(sb, spec, summary));
+        findSpec(name).ifPresent(spec -> appendCommandLine(sb, spec, summary,
+                CommandTextLayout.width(terminalWidth)));
     }
 
-    private void appendCommandLine(StringBuilder sb, CommandSpec spec, String summaryOverride) {
+    private void appendCommandLine(StringBuilder sb, CommandSpec spec, String summaryOverride, int width) {
         String usage = compactUsage(spec);
         String desc = summaryOverride == null ? listSummary(spec.summary()) : summaryOverride;
-        sb.append("    ")
-                .append(AnsiColor.blue(pad(usage, USAGE_COL)))
-                .append(AnsiColor.grey(desc))
-                .append('\n');
+        appendEntry(sb, usage, desc, width);
     }
 
-    /** Pad string to exactly {@code width} characters. */
-    private static String pad(String s, int width) {
-        return s.length() >= width ? s + " " : String.format("%-" + width + "s", s);
+    private static void appendEntry(StringBuilder sb, String label, String description, int width) {
+        sb.append(AnsiColor.grey(CommandTextLayout.entry(label, description, width))).append('\n');
     }
 
     /** Shorten long usage strings for the overview list. */
@@ -282,25 +292,23 @@ public final class HelpCommand implements Command {
         return (s != null && s.endsWith(".")) ? s.substring(0, s.length() - 1) : s;
     }
 
-    /** Keep command lists from wrapping in dumb/non-interactive transcripts. */
+    /** Normalize summaries for display without dropping any words. */
     private static String listSummary(String s) {
-        String value = trimDot(Objects.toString(s, "")).replaceAll("\\s+", " ");
-        int max = 80;
-        return value.length() <= max ? value : value.substring(0, max - 3) + "...";
+        return trimDot(Objects.toString(s, "")).replaceAll("\\s+", " ");
     }
 
     /** Horizontal rule filling remaining width after a group name. */
-    private static String rule(int headerLen) {
-        int dashes = RULE_WIDTH - headerLen - 3; // 2 indent + 1 space
+    private static String rule(int headerLen, int width) {
+        int dashes = Math.min(RULE_WIDTH, width - 2) - headerLen - 3; // 2 indent + 1 space
         if (dashes <= 0) return "";
         String ch = AnsiColor.isUnicodeSafe() ? "─" : "-";
         return ch.repeat(dashes);
     }
 
     /** Full-width horizontal rule for the footer. */
-    private static String hRule() {
+    private static String hRule(int width) {
         String ch = AnsiColor.isUnicodeSafe() ? "─" : "-";
-        return ch.repeat(RULE_WIDTH);
+        return ch.repeat(Math.max(0, Math.min(RULE_WIDTH, width - 2)));
     }
 
     /** Detailed view for /help <command>. */

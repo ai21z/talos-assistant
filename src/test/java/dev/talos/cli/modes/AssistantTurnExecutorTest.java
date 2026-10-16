@@ -574,8 +574,8 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
-    @DisplayName("records and prints redacted prompt audit in debug prompt mode")
-    void recordsAndPrintsPromptAuditInDebugPromptMode() {
+    @DisplayName("records prompt audit diagnostics without emitting answer fragments in debug prompt mode")
+    void recordsPromptAuditDiagnosticsWithoutEmissionInDebugPromptMode() {
         StringBuilder stream = new StringBuilder();
         var ctx = Context.builder(new Config())
                 .session(sessionWithDebugLevel(DebugLevel.PROMPT))
@@ -603,8 +603,11 @@ class AssistantTurnExecutorTest {
             assertNotNull(trace.promptAudit());
             assertFalse(trace.promptAudit().taskType().isBlank());
             assertFalse(trace.promptAudit().actionObligation().isBlank());
-            assertTrue(stream.toString().contains("Prompt Audit"), stream.toString());
-            assertTrue(stream.toString().contains("actionObligation:"), stream.toString());
+            assertTrue(stream.isEmpty(), "Prompt diagnostics must remain outside the answer sink");
+            String audit = PromptDebugCapture.latest().orElseThrow().diagnostics().get("promptAudit");
+            assertNotNull(audit);
+            assertTrue(audit.contains("Prompt Audit"), audit);
+            assertTrue(audit.contains("actionObligation:"), audit);
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -689,7 +692,7 @@ class AssistantTurnExecutorTest {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("system"));
         messages.add(ChatMessage.user(
-                "Did you read notes.md after edits earlier in this session? Answer yes or no."));
+                "Did you read notes.md earlier in this session? Answer yes or no."));
 
         TurnAuditCapture.begin();
         try {
@@ -1135,6 +1138,9 @@ class AssistantTurnExecutorTest {
                                 java.util.Map.of("path", "README.md")))),
                 12);
 
+        var delivery = dev.talos.runtime.trace.FinalAnswerStatus.decode(captured.trace());
+        assertTrue(delivery.available());
+        assertEquals(List.of(dev.talos.runtime.trace.FinalAnswerStatus.Cause.LOCAL_PRESENTATION_LIMIT), delivery.causes());
         assertTrue(captured.output().text().endsWith("[output truncated]"),
                 captured.output().text());
         var terminal = captured.trace().events().stream()
@@ -5355,7 +5361,13 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("read-only"), () -> out.text()
+                        + "\nBoundary messages: " + messages
+                        + "\nCaptured resolution: " + dev.talos.runtime.TurnTaskContractCapture.getResolution()
+                        + "\nBoundary trace: " + LocalTurnTraceCapture.complete().events().stream()
+                                .filter(event -> List.of("TOOL_CALL_AUTHORITY_REJECTED", "TOOL_CALL_BLOCKED",
+                                        "ACTION_OBLIGATION_EVALUATED", "OUTCOME_EVALUATED", "PROTOCOL_SANITIZED")
+                                        .contains(event.type())).limit(16).toList());
                 assertTrue(out.text().contains("No file changes were applied"), out.text());
                 assertFalse(out.text().contains("\"name\""), out.text());
                 assertFalse(out.text().contains("\"arguments\""), out.text());
@@ -5400,7 +5412,13 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("read-only"), () -> out.text()
+                        + "\nBoundary messages: " + messages
+                        + "\nCaptured resolution: " + dev.talos.runtime.TurnTaskContractCapture.getResolution()
+                        + "\nBoundary trace: " + LocalTurnTraceCapture.complete().events().stream()
+                                .filter(event -> List.of("TOOL_CALL_AUTHORITY_REJECTED", "TOOL_CALL_BLOCKED",
+                                        "ACTION_OBLIGATION_EVALUATED", "OUTCOME_EVALUATED", "PROTOCOL_SANITIZED")
+                                        .contains(event.type())).limit(16).toList());
                 assertTrue(out.text().contains("No file changes were applied"), out.text());
                 assertFalse(out.text().contains("\"name\""), out.text());
                 assertFalse(out.text().contains("\"arguments\""), out.text());
@@ -5629,7 +5647,7 @@ class AssistantTurnExecutorTest {
     class Streaming {
 
         @Test
-        void returns_answer_and_marks_streamed() {
+        void returns_complete_answer_without_marking_it_streamed() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
                     .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "streamed answer"))
@@ -5640,13 +5658,13 @@ class AssistantTurnExecutorTest {
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
 
-            assertFalse(out.text().isBlank(), "Should return non-empty text");
-            assertTrue(out.streamed(), "Streaming path should be marked streamed");
-            assertFalse(chunks.isEmpty(), "Stream sink should have received chunks");
+            assertEquals("streamed answer", out.text());
+            assertFalse(out.streamed(), "Transport streaming must not present answer fragments");
+            assertTrue(chunks.isEmpty(), "The selected answer must be returned for final rendering");
         }
 
         @Test
-        void streamed_text_matches_returned_text() {
+        void selected_text_is_returned_without_any_streamed_text() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
                     .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "streamed parity"))
@@ -5657,13 +5675,14 @@ class AssistantTurnExecutorTest {
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
 
-            String streamed = String.join("", chunks);
-            assertEquals(streamed, out.text(),
-                    "Returned text should match what was streamed");
+            assertTrue(chunks.isEmpty());
+            assertFalse(out.streamed());
+            assertEquals("streamed parity", out.text());
+            assertTrue(renderSelectedAnswer(out.text()).contains("streamed parity"));
         }
 
         @Test
-        void streamingIdentityQuestionEmitsTalosIdentity() {
+        void streamingIdentityQuestionReturnsTalosIdentityWithoutEmission() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
                     .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "I'm Qwen, made by Alibaba Cloud."))
@@ -5677,8 +5696,8 @@ class AssistantTurnExecutorTest {
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
             String visible = String.join("", chunks);
-            assertTrue(out.streamed(), "identity response should use the visible streaming path");
-            assertEquals(visible, out.text());
+            assertFalse(out.streamed());
+            assertEquals("", visible, "Identity selection must precede final rendering");
             assertTrue(out.text().contains("Talos"), out.text());
             assertFalse(out.text().toLowerCase().contains("qwen"), out.text());
             assertFalse(out.text().toLowerCase().contains("alibaba"), out.text());
@@ -5717,12 +5736,18 @@ class AssistantTurnExecutorTest {
                     "bare tool-call JSON must not be visible in streamed output");
             assertFalse(visible.contains("talos.read_file"),
                     "tool protocol must be suppressed from streamed output");
-            assertTrue(visible.contains("I will inspect."),
-                    "ordinary prose before the tool call should remain visible");
+            assertEquals("", visible,
+                    "replaceable provider prose must be deferred until the final answer is selected");
+            assertFalse(out.streamed(),
+                    "the selected answer must be delivered once through the final renderer");
             assertFalse(visible.contains("The file contains Hello."),
                     "tool-loop follow-up prose should not stream before final answer shaping");
             assertTrue(out.text().contains("The file contains Hello."),
                     "raw response must still enter the tool loop and complete normally");
+            String rendered = renderSelectedAnswer(out.text());
+            assertTrue(rendered.contains("The file contains Hello."));
+            assertFalse(rendered.contains("\"name\""), "Tool-call JSON must not reach final rendering");
+            assertFalse(rendered.contains("\"arguments\""), "Tool arguments must not reach final rendering");
         }
 
         @Test
@@ -5747,11 +5772,11 @@ class AssistantTurnExecutorTest {
                     .streamSink(streamFilter)
                     .build();
 
-            AssistantTurnExecutor.execute(new ArrayList<>(List.of(
+            var first = AssistantTurnExecutor.execute(new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
                     ChatMessage.user("How does dependency injection work in Java?"))), workspace, ctx,
                     new AssistantTurnExecutor.Options());
-            AssistantTurnExecutor.execute(new ArrayList<>(List.of(
+            var second = AssistantTurnExecutor.execute(new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
                     ChatMessage.user("Say hello."))), workspace, ctx,
                     new AssistantTurnExecutor.Options());
@@ -5759,8 +5784,13 @@ class AssistantTurnExecutorTest {
             String visible = String.join("", visibleChunks);
             assertFalse(visible.contains("```json"),
                     "empty protocol fence buffered during a tool-loop reprompt must not leak into the next turn");
-            assertTrue(visible.contains("plain second turn"),
-                    "the next normal streamed turn should still be visible");
+            assertEquals("", visible, "Both turns must retain private transport fragments");
+            assertFalse(first.streamed());
+            assertFalse(second.streamed());
+            assertEquals("plain second turn", second.text());
+            assertFalse(renderSelectedAnswer(first.text()).contains("```json"));
+            assertTrue(renderSelectedAnswer(second.text()).contains("plain second turn"),
+                    "The next selected answer must remain presentable");
         }
 
         @Test
@@ -5783,7 +5813,8 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
-            String visible = String.join("", visibleChunks);
+            assertTrue(visibleChunks.isEmpty());
+            String visible = renderSelectedAnswer(out.text());
             assertFalse(dev.talos.runtime.ToolCallParser.looksLikeMalformedProtocolArrayDebris(visible),
                     "malformed protocol array must not be visible in streamed output");
             assertFalse(visible.contains("\n    ,"),
@@ -5791,7 +5822,15 @@ class AssistantTurnExecutorTest {
             assertTrue(visible.contains("invalid tool-call payload"),
                     "streamed user-visible output should contain the truthful replacement");
             assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
-            assertTrue(out.streamed());
+            assertFalse(out.streamed());
+        }
+
+        private String renderSelectedAnswer(String selected) {
+            var bytes = new java.io.ByteArrayOutputStream();
+            var renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    bytes, true, false, 96, new dev.talos.core.security.Redactor());
+            renderer.render(new dev.talos.runtime.Result.Ok(selected));
+            return bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         }
 
         @Test
@@ -7494,13 +7533,17 @@ class AssistantTurnExecutorTest {
     @DisplayName("annotateIfFalseMutationClaim")
     class ClaimVsActionTests {
 
-        /** Build a LoopResult with the given number of successful mutating tool calls. */
+        /** A matching synthetic file record is supplied separately from its aggregate count. */
         private dev.talos.runtime.ToolCallLoop.LoopResult loopResult(int mutatingSuccesses) {
+            var outcomes = java.util.stream.IntStream.range(0, mutatingSuccesses)
+                    .mapToObj(index -> new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", true, true, false, "edited", ""))
+                    .toList();
             return new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 1, 1,
                     List.of("talos.read_file"),
                     List.of(), 0, 0, false, mutatingSuccesses, List.of(),
-                    0, 0, 0, 0);
+                    0, 0, 0, 0, outcomes);
         }
 
         @Test
@@ -7938,21 +7981,24 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("predicate fires: long answer + evidence-request prompt")
+        @DisplayName("predicate fires for a long answer with required file evidence")
         void fires_on_long_answer_plus_evidence_request() {
             var messages = new ArrayList<ChatMessage>();
-            messages.add(ChatMessage.user("Please read the source files and verify the wiring."));
+            messages.add(ChatMessage.user("Read README.md and explain the actual file contents."));
+            assertEquals("READ_TARGET_REQUIRED", CurrentTurnPlan.compatibility(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages), ExecutionPhase.INSPECT,
+                    List.of(), List.of(), List.of()).evidenceObligation());
 
             assertTrue(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
                     longAnswer(), messages),
-                    "long answer + evidence marker must fire");
+                    "A long no-tool answer with a required file-read obligation must be annotated");
         }
 
         @Test
         @DisplayName("predicate does NOT fire: answer below UNGROUNDED_MIN_CHARS")
         void does_not_fire_when_answer_too_short() {
             var messages = new ArrayList<ChatMessage>();
-            messages.add(ChatMessage.user("Please read the source files and verify the wiring."));
+            messages.add(ChatMessage.user("Read README.md and explain the actual file contents."));
 
             // Exactly one char below the threshold.
             String justBelow = "a".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS - 1);
@@ -8003,28 +8049,22 @@ class AssistantTurnExecutorTest {
         @Test
         @DisplayName("predicate mirrors non-streaming decision shape on same inputs")
         void predicate_mirrors_non_streaming_decision() {
-            // Same gating logic (length + latest user marker) should yield
-            // the same yes/no answer on both helpers. We assert this
-            // invariant directly so future edits to one without the other
-            // are caught.
-            var messages = new ArrayList<ChatMessage>();
-            messages.add(ChatMessage.user("Read the main file and identify the mismatch."));
-            String longAns = longAnswer();
-
-            boolean streamingFires = AssistantTurnExecutor
-                    .shouldAppendStreamingGroundingAnnotation(longAns, messages);
-
-            // The non-streaming helper has extra retry logic, but its own
-            // firing precondition is structurally the same: >= MIN_CHARS
-            // and looksLikeEvidenceRequest(latestUserRequest(messages)).
-            boolean nonStreamingGatingMatches =
-                    longAns.length() >= AssistantTurnExecutor.UNGROUNDED_MIN_CHARS
-                    && AssistantTurnExecutor.looksLikeEvidenceRequest(
-                            AssistantTurnExecutor.latestUserRequest(messages));
-
-            assertEquals(nonStreamingGatingMatches, streamingFires,
-                    "streaming predicate must agree with non-streaming gate on gating inputs");
-            assertTrue(streamingFires, "sanity: this shape must fire");
+            for (String request : List.of("Read README.md and explain the actual file contents.",
+                    "Use evidence from the actual files.", "Read the main files and verify the wiring.",
+                    "Explain evidence policies. No project inspection is needed.")) {
+                var messages = new ArrayList<>(List.of(ChatMessage.user(request)));
+                var plan = CurrentTurnPlan.compatibility(
+                        dev.talos.runtime.task.TaskContractResolver.fromMessages(messages), ExecutionPhase.INSPECT,
+                        List.of(), List.of(), List.of());
+                boolean streamingFires = AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(longAnswer(), messages);
+                var retried = new java.util.concurrent.atomic.AtomicBoolean();
+                var context = Context.builder(new Config(null)).llm(LlmClient.scripted("unused")).build();
+                NoToolGroundingRetry.retryIfNeeded(longAnswer(), plan, messages, context, ignored -> {
+                    retried.set(true);
+                    return new LlmClient.StreamResult("A selected retry response.", List.of());
+                });
+                assertEquals(streamingFires, retried.get(), request);
+            }
         }
 
         @Test
@@ -8044,7 +8084,8 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
-            assertTrue(out.streamed(), "streaming path must be marked streamed");
+            assertFalse(out.streamed(), "The selected answer must be returned for final rendering");
+            assertTrue(chunks.isEmpty());
             assertFalse(out.text().contains("Grounding check"),
                     "no annotation must appear on non-evidence prompts. Got: " + out.text());
             String joined = String.join("", chunks);
@@ -8053,11 +8094,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("streaming execute() does not rewrite the streamed prose (annotation is additive)")
-        void streaming_execute_does_not_rewrite_streamed_content() {
-            // Whatever the PLACEHOLDER returned, it must appear verbatim in
-            // out.text() - the annotation may or may not be appended, but
-            // the original streamed content is never replaced or shortened.
+        @DisplayName("streaming execute() returns the selected evidence answer without preselection output")
+        void streaming_execute_returns_selected_evidence_answer_without_emission() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
                     .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "Streamed content for evidence request."))
@@ -8069,21 +8107,9 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
-            String streamedText = String.join("", chunks);
-            // Remove any annotation the gate may have pushed into the sink.
-            String streamedWithoutAnnotation = streamedText
-                    .replace(AssistantTurnExecutor.UNGROUNDED_ANNOTATION.stripTrailing(), "")
-                    .replaceAll("\\s+$", "");
-            String textWithoutAnnotation = out.text()
-                    .replace(AssistantTurnExecutor.UNGROUNDED_ANNOTATION.stripTrailing(), "")
-                    .replaceAll("\\s+$", "");
-
-            // The pre-annotation text content must match in both surfaces
-            // (modulo the surrounding newline padding the annotation uses).
-            assertTrue(textWithoutAnnotation.startsWith(streamedWithoutAnnotation.stripTrailing()),
-                    "streamed content must appear at the start of out.text() - annotation must be additive, not a rewrite.\n"
-                    + "streamed=<" + streamedWithoutAnnotation + ">\n"
-                    + "text=<" + textWithoutAnnotation + ">");
+            assertTrue(chunks.isEmpty(), "Evidence selection must precede presentation");
+            assertFalse(out.streamed());
+            assertFalse(out.text().isBlank());
         }
     }
 

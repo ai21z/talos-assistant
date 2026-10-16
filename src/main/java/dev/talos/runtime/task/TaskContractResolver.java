@@ -1,6 +1,8 @@
 package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.CommandExecutionRequest;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentProjector;
@@ -53,7 +55,7 @@ public final class TaskContractResolver {
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
-                    + "(?:change|edit|modify|write|create|save|apply|touch|mutate|use)"
+                    + "(?:change|edit|modify|overwrite|write|create|save|apply|touch|mutate|use)"
                     + "|\\bwithout\\s+(?:changing|using))\\s+(.{0,240})");
 
     private static final Pattern IGNORED_INSTRUCTION_OUTPUT_TARGET_SPAN = Pattern.compile(
@@ -186,6 +188,10 @@ public final class TaskContractResolver {
 
     private static final Pattern EXPLICIT_NATURAL_COMMAND_EXECUTION = Pattern.compile(
             "(?i)\\b(?:run|execute|call|try)\\s+(?:the\\s+)?command\\b");
+    private static final Pattern TEST_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)\\b(?:run|execute|verify|check)\\s+(?:the\\s+)?tests\\b");
+    private static final Pattern GENERIC_TEST_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)\\b(?:run|execute)\\s+(?:the\\s+)?tests\\b");
 
     private static final Pattern SIMPLE_DIRECTORY_LISTING = Pattern.compile(
             "(?i)^\\s*(?:"
@@ -328,9 +334,62 @@ public final class TaskContractResolver {
             return currentResolution;
         }
         TaskContract current = currentResolution.contract();
+        // Prior-status authority remains read-only even when extra clauses reject a historical answer.
         if (current.type() == TaskType.VERIFY_ONLY
-                || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
+                || "historical-attribution-request".equals(current.classificationReason())
+                || hasHistoricalEvidenceIntent(latest)) {
             return currentResolution;
+        }
+        var mutationReference = MutationIntent.currentMutationReference(latest);
+        if (mutationReference.isPresent() && current.expectedTargets().isEmpty()) {
+            ChatMessage previousMessage = previousUserMessage(messages, latest);
+            String previousUser = previousMessage == null ? null : previousMessage.content();
+            TaskResolution prior = previousMessage == null
+                    || !previousMessage.contentRestrictions().equals(dev.talos.safety.ContentRestrictions.UNRESTRICTED)
+                    ? null : resolveFromUserRequest(previousUser);
+            boolean resolved = !mutationReference.get().ambiguous()
+                    && current.mutationRequested() && current.mutationAllowed()
+                    && prior != null && prior.contract().mutationAllowed()
+                    && prior.contract().mutationRequested()
+                    && !prior.contract().expectedTargets().isEmpty()
+                    && prior.contract().expectedTargets().size() <= 8
+                    && prior.contract().originalUserRequest().length() <= 8192
+                    && (mutationReference.get().statedCount() == 0
+                            || mutationReference.get().statedCount() == prior.contract().expectedTargets().size())
+                    && prior.hasIndependentAuthorizedContentMutation()
+                    && prior.workspaceOperationPlan().authorizedOperations().isEmpty()
+                    && prior.sequentialMutationPlan().occurrenceDecisions().stream().allMatch(decision ->
+                            decision.authority() == dev.talos.runtime.intent.SequentialMutationClausePlan.Authority.FORBIDDEN
+                                    || decision.authority() == dev.talos.runtime.intent.SequentialMutationClausePlan.Authority.REQUIRED
+                                    && decision.actionFamily() == dev.talos.runtime.intent.SequentialMutationClausePlan.ActionFamily.CONTENT_MUTATION)
+                    && prior.mutationTailPlan().workspaceOperationObservations().isEmpty()
+                    && prior.mutationTailPlan().workspaceOperationClauseObservations().isEmpty()
+                    && prior.mutationTailPlan().decisions().stream().allMatch(decision ->
+                            decision.authority() == CoordinatedMutationTailPlan.Authority.REQUIRED
+                                    || decision.authority() == CoordinatedMutationTailPlan.Authority.FORBIDDEN)
+                    && !currentTurnConstrainsInheritedAuthority(currentResolution,
+                            prior.contract().expectedTargets());
+            TaskContract referenced = resolved
+                    ? new TaskContract(prior.contract().type(), true, true, true,
+                            prior.contract().expectedTargets(), prior.contract().sourceEvidenceTargets(),
+                            prior.contract().forbiddenTargets(), current.originalUserRequest(),
+                            "explicit-user-mutation-reference")
+                    : new TaskContract(current.type(), true, false, true,
+                            Set.of(), Set.of(), current.forbiddenTargets(), current.originalUserRequest(),
+                            "unresolved-user-mutation-reference");
+            TaskResolution projected = projectResolution(currentResolution, referenced, TargetSource.MESSAGE_HISTORY,
+                    resolved ? "current-request-references-prior-user-scope" : "unresolved-user-mutation-reference");
+            if (!resolved) return projected;
+            var targets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : projected.intent().targets().targets()) {
+                targets = targets.with(new dev.talos.runtime.intent.TargetRef(target.path(), target.role(),
+                        new dev.talos.runtime.intent.IntentDerivation(TargetSource.MESSAGE_HISTORY,
+                                "current-request-references-prior-user-scope", -1, -1, -1,
+                                "", 1.0)));
+            }
+            var intent = new dev.talos.runtime.intent.TaskIntent(referenced.type(), true, true, true, targets,
+                    referenced.originalUserRequest(), referenced.classificationReason());
+            return projected.projectOnto(referenced, intent);
         }
         if (!current.mutationRequested() && looksLikeConfirmationFollowUp(latest)) {
             // Proposal continuation is resolved by request-bound active context, not assistant prose.
@@ -388,11 +447,48 @@ public final class TaskContractResolver {
         return resolveFromUserRequest(userRequest).contract();
     }
 
+    /** Current authority ceiling after target-local prohibitions are reconciled, without inherited context. */
+    public static boolean explicitlyForbidsMutation(String userRequest) {
+        TaskContract current = fromUserRequest(userRequest);
+        var saveRequest = dev.talos.runtime.intent.ContentSaveRequest.parse(
+                userRequest == null ? "" : userRequest.strip());
+        return !current.mutationAllowed()
+                && "global-read-only-negation".equals(MutationIntent.classificationReason(userRequest))
+                && (!saveRequest.mutationRequested() || saveRequest.hasUnquotedGlobalReadOnlyProhibition());
+    }
+
     public static TaskResolution resolveFromUserRequest(String userRequest) {
-        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
+        var saveRequest = dev.talos.runtime.intent.ContentSaveRequest.parse(
+                userRequest == null ? "" : userRequest.strip());
+        TaskContract legacy = resolveLegacyFromUserRequest(userRequest, saveRequest);
+        if (!saveRequest.present() && !saveRequest.originalRequest().equals(legacy.originalUserRequest())) {
+            saveRequest = dev.talos.runtime.intent.ContentSaveRequest.empty(legacy.originalUserRequest());
+        }
         TaskIntentResolver.IntentResolution intentResolution =
                 TaskIntentResolver.resolve(legacy.originalUserRequest(), legacy);
-        TaskIntent intent = intentResolution.intent();
+        TaskIntent intent = intentResolution.intent().withContentSaveRequest(saveRequest);
+        if (saveRequest.restrictsLegacyMutation()) {
+            var restrictedTargets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : intent.targets().targets()) {
+                restrictedTargets = restrictedTargets.with(new dev.talos.runtime.intent.TargetRef(
+                        target.path(), target.role() == dev.talos.runtime.intent.TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        ? dev.talos.runtime.intent.TargetRole.MUST_READ : target.role(), target.derivation()));
+            }
+            intent = new TaskIntent(intent.type(), false, false, intent.verificationRequired(),
+                    restrictedTargets, intent.originalUserRequest(), "scoped-content-save-restriction")
+                    .withContentSaveRequest(saveRequest);
+        }
+        if (saveRequest.clarificationRequired()) {
+            var unresolvedTargets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : intent.targets().targets()) {
+                unresolvedTargets = unresolvedTargets.with(new dev.talos.runtime.intent.TargetRef(
+                        target.path(), target.role() == dev.talos.runtime.intent.TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        ? dev.talos.runtime.intent.TargetRole.MUST_READ : target.role(), target.derivation()));
+            }
+            intent = new TaskIntent(intent.type(), true, false, true,
+                    unresolvedTargets, intent.originalUserRequest(),
+                    "content-save-needs-clarification").withContentSaveRequest(saveRequest);
+        }
         return new TaskResolution(
                 TaskContractCompiler.compile(intent),
                 intent,
@@ -435,6 +531,12 @@ public final class TaskContractResolver {
     }
 
     static TaskContract resolveLegacyFromUserRequest(String userRequest) {
+        return resolveLegacyFromUserRequest(userRequest,
+                dev.talos.runtime.intent.ContentSaveRequest.parse(userRequest == null ? "" : userRequest.strip()));
+    }
+
+    private static TaskContract resolveLegacyFromUserRequest(
+            String userRequest, dev.talos.runtime.intent.ContentSaveRequest saveRequest) {
         if (userRequest == null || userRequest.isBlank()
                 || ToolCallSupport.isSyntheticToolResultContent(userRequest)) {
             return TaskContract.unknown(userRequest);
@@ -442,6 +544,13 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
+        if (dev.talos.runtime.intent.HistoricalAttributionRequest.parse(original).isPresent()) {
+            String reason = ConversationEvidenceRequest.interpret(original).source()
+                    == ConversationEvidenceRequest.Source.SESSION_ACTIONS
+                    ? "session-action-summary" : "historical-attribution-request";
+            return new TaskContract(TaskType.READ_ONLY_QA, false, false, false,
+                    Set.of(), Set.of(), Set.of(), original, reason);
+        }
         if (looksLikeCheckpointRestoreRequest(lower)) {
             return new TaskContract(
                     TaskType.CHECKPOINT_RESTORE,
@@ -476,28 +585,57 @@ public final class TaskContractResolver {
                     original,
                     "tool-alias-capability-question");
         }
-        boolean sessionMetaEvidenceQuestion = looksLikeSessionMetaEvidenceQuestion(lower);
-        boolean sessionUncertaintyQuestion = looksLikeSessionUncertaintyQuestion(lower);
-        boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
+        var conversationEvidence = ConversationEvidenceRequest.interpret(original);
+        boolean sessionActionSummary = conversationEvidence.source()
+                == ConversationEvidenceRequest.Source.SESSION_ACTIONS;
+        boolean sessionMetaEvidenceQuestion = HistoricalFollowUpRequest.isSessionEvidenceRequest(
+                original, extractExpectedTargets(original));
+        boolean sessionUncertaintyQuestion = HistoricalFollowUpRequest.isSessionUncertaintyRequest(original);
+        boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original)
+                && HistoricalFollowUpRequest.isPriorStatusRequest(original);
+        boolean historicalAuthorityLimit = hasHistoricalEvidenceIntent(original);
         MutationIntent.RequestShape mutationShape = MutationIntent.classifyShape(original);
         boolean ambiguousMutationRequest = mutationShape.decision() == MutationIntent.Decision.AMBIGUOUS;
         String classificationReason = mutationShape.reason();
-        boolean mutationRequested = !sessionMetaEvidenceQuestion
+        if (saveRequest.mutationRequested() && "global-read-only-negation".equals(classificationReason)
+                && !saveRequest.hasUnquotedGlobalReadOnlyProhibition()) {
+            classificationReason = "compositional-content-save-request";
+            ambiguousMutationRequest = false;
+        }
+        boolean mutationRequested = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
+                && !historicalAuthorityLimit
                 && !priorChangeStatusQuestion
-                && mutationShape.decision() == MutationIntent.Decision.EXECUTE_MUTATION;
-        boolean commandVerificationRequest = !sessionMetaEvidenceQuestion
+                && (mutationShape.decision() == MutationIntent.Decision.EXECUTE_MUTATION
+                || saveRequest.mutationRequested());
+        if (saveRequest.mutationRequested()
+                && mutationShape.decision() != MutationIntent.Decision.EXECUTE_MUTATION
+                && !"global-read-only-negation".equals(classificationReason)) {
+            classificationReason = "compositional-content-save-request";
+            ambiguousMutationRequest = false;
+        }
+        if (saveRequest.restrictsLegacyMutation()) {
+            mutationRequested = false;
+            classificationReason = "scoped-content-save-restriction";
+        }
+        CommandExecutionRequest commandIntent = CommandExecutionRequest.parse(original);
+        boolean commandVerificationRequest = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
-                && looksExplicitCommandVerificationRequest(lower);
-        boolean unsupportedCommandVerificationRequest = !sessionMetaEvidenceQuestion
+                && commandIntent.commandClauses().stream()
+                        .anyMatch(TaskContractResolver::looksExplicitCommandVerificationRequest);
+        boolean unsupportedCommandVerificationRequest = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
                 && !commandVerificationRequest
-                && looksUnsupportedNaturalCommandVerificationRequest(lower);
-        TaskType type = sessionMetaEvidenceQuestion
+                && looksUnsupportedNaturalCommandVerificationRequest(commandIntent);
+        TaskType type = sessionActionSummary
+                ? TaskType.READ_ONLY_QA
+                : conversationEvidence.source() == ConversationEvidenceRequest.Source.RUNTIME_IDENTITY
+                ? TaskType.SMALL_TALK
+                : sessionMetaEvidenceQuestion
                 ? TaskType.VERIFY_ONLY
                 : sessionUncertaintyQuestion
                 ? TaskType.VERIFY_ONLY
@@ -509,14 +647,30 @@ public final class TaskContractResolver {
                 ? TaskType.VERIFY_ONLY
                 : ambiguousMutationRequest
                 ? TaskType.READ_ONLY_QA
-                : classify(lower, mutationRequested, classificationReason);
+                : classify(mutationRequested ? lower
+                        : conversationEvidence.positiveIntentText().toLowerCase(Locale.ROOT),
+                        mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
-                && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
+                && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE)
+                && !"global-read-only-negation".equals(classificationReason);
+        if (saveRequest.mutationRequested()
+                && !"global-read-only-negation".equals(classificationReason)) {
+            type = type == TaskType.FILE_EDIT ? type : TaskType.FILE_CREATE;
+            mutationAllowed = !saveRequest.clarificationRequired();
+        }
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
+        String targetAuthorityRequest = saveRequest.mutationRequested()
+                ? saveRequest.withoutQuotedLiteralPayloads() : original;
         MutationIntent.SourceToTargetArtifact sourceToTargetArtifact =
-                MutationIntent.sourceToTargetArtifact(original).orElse(null);
-        Set<String> forbiddenTargets = extractForbiddenTargets(original);
-        Set<String> expectedTargets = extractExpectedTargets(original);
+                MutationIntent.sourceToTargetArtifact(targetAuthorityRequest).orElse(null);
+        Set<String> forbiddenTargets = extractForbiddenTargets(targetAuthorityRequest);
+        Set<String> expectedTargets = extractExpectedTargets(saveRequest.mutationRequested()
+                ? saveRequest.targetDiscoveryRequest() : targetAuthorityRequest);
+        if (saveRequest.mutationRequested() && !saveRequest.resolvedTargets().isEmpty()) {
+            LinkedHashSet<String> saveTargets = new LinkedHashSet<>(expectedTargets);
+            saveTargets.addAll(saveRequest.resolvedTargets());
+            expectedTargets = Set.copyOf(saveTargets);
+        }
         Set<String> sourceEvidenceTargets = sourceToTargetArtifact == null
                 ? Set.of()
                 : sourceToTargetArtifact.sourceTargets();
@@ -540,13 +694,13 @@ public final class TaskContractResolver {
                 expectedTargets = Set.copyOf(merged);
             }
         }
-        if (mutationAllowed) {
+        if (mutationAllowed || saveRequest.mutationRequested()) {
             TaskIntentResolver.DirectSourceAuthority directSourceAuthority =
                     TaskIntentResolver.authoritativeDirectSourceAuthority(
-                            original);
+                            targetAuthorityRequest);
             Set<String> lexicalSourceTargets =
                     extractLexicalSourceEvidenceTargets(
-                            original,
+                            targetAuthorityRequest,
                             directSourceAuthority.sourceTargets());
             if (!lexicalSourceTargets.isEmpty()) {
                 LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
@@ -596,15 +750,15 @@ public final class TaskContractResolver {
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
             expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
         }
-        if (mutationAllowed && !forbiddenTargets.isEmpty()) {
+        if ((mutationAllowed || saveRequest.mutationRequested()) && !forbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
         }
-        Set<String> readForbiddenTargets = extractReadForbiddenTargets(original);
+        Set<String> readForbiddenTargets = extractReadForbiddenTargets(targetAuthorityRequest);
         if (!readForbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, readForbiddenTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, readForbiddenTargets);
         }
-        Set<String> ignoredInstructionOutputTargets = extractIgnoredInstructionOutputTargets(original);
+        Set<String> ignoredInstructionOutputTargets = extractIgnoredInstructionOutputTargets(targetAuthorityRequest);
         if (!ignoredInstructionOutputTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, ignoredInstructionOutputTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, ignoredInstructionOutputTargets);
@@ -624,7 +778,9 @@ public final class TaskContractResolver {
                 sourceEvidenceTargets,
                 forbiddenTargets,
                 original,
-                sessionMetaEvidenceQuestion
+                sessionActionSummary
+                        ? "session-action-summary"
+                        : sessionMetaEvidenceQuestion
                         ? "session-meta-evidence-question"
                         : sessionUncertaintyQuestion
                         ? "session-uncertainty-question"
@@ -1326,9 +1482,15 @@ public final class TaskContractResolver {
                 && looksGradleBuildOrTestVerification(lower);
     }
 
-    private static boolean looksUnsupportedNaturalCommandVerificationRequest(String lower) {
+    private static boolean looksUnsupportedNaturalCommandVerificationRequest(CommandExecutionRequest intent) {
+        if (looksUnsupportedPythonCommandExecutionRequest(intent)) return true;
+        return intent.commandClauses().stream()
+                .anyMatch(TaskContractResolver::looksUnsupportedNaturalCommandClause);
+    }
+
+    private static boolean looksUnsupportedNaturalCommandClause(String lower) {
         if (lower == null || lower.isBlank()) return false;
-        if (looksUnsupportedPythonCommandExecutionRequest(lower)) return true;
+        if (GENERIC_TEST_COMMAND_EXECUTION.matcher(lower).find()) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         if (!lower.contains("command")) return false;
         if (EXPLICIT_NATURAL_COMMAND_EXECUTION.matcher(lower).find()) return true;
@@ -1347,22 +1509,31 @@ public final class TaskContractResolver {
     }
 
     public static boolean looksUnsupportedPythonCommandExecutionRequest(String request) {
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
+        return looksUnsupportedPythonCommandExecutionRequest(CommandExecutionRequest.parse(request));
+    }
+
+    private static boolean looksUnsupportedPythonCommandExecutionRequest(CommandExecutionRequest intent) {
+        return intent.commandClauses().stream()
+                .anyMatch(TaskContractResolver::looksUnsupportedPythonCommandClause);
+    }
+
+    private static boolean looksUnsupportedPythonCommandClause(String lower) {
         if (PYTHON_COMMAND_EXECUTION.matcher(lower).find()) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         boolean pythonSurface = lower.contains("python")
                 || lower.contains("pytest")
                 || lower.contains(".py");
         if (!pythonSurface) return false;
-        return lower.contains("run tests")
-                || lower.contains("run the tests")
-                || lower.contains("execute tests")
-                || lower.contains("execute the tests")
-                || lower.contains("verify tests")
-                || lower.contains("verify the tests")
-                || lower.contains("check tests")
-                || lower.contains("check the tests");
+        return TEST_COMMAND_EXECUTION.matcher(lower).find();
+    }
+
+    /** Existing evidence and authority limits are retained, never whole-request answer eligibility. */
+    public static boolean hasHistoricalEvidenceIntent(String request) {
+        if (request == null) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return MutationIntent.looksPriorChangeStatusQuestion(request)
+                || looksLikeSessionMetaEvidenceQuestion(lower)
+                || looksLikeSessionUncertaintyQuestion(lower);
     }
 
     private static boolean looksLikeSessionMetaEvidenceQuestion(String lower) {
@@ -1958,6 +2129,11 @@ public final class TaskContractResolver {
     }
 
     private static String previousUserRequest(List<ChatMessage> messages, String latestUserRequest) {
+        ChatMessage previous = previousUserMessage(messages, latestUserRequest);
+        return previous == null ? null : previous.content();
+    }
+
+    private static ChatMessage previousUserMessage(List<ChatMessage> messages, String latestUserRequest) {
         if (messages == null || messages.isEmpty()) return null;
         boolean skippedLatest = false;
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -1974,7 +2150,7 @@ public final class TaskContractResolver {
                 skippedLatest = true;
                 continue;
             }
-            return content;
+            return message;
         }
         return null;
     }

@@ -97,19 +97,28 @@ public final class TaskIntentResolver {
                     work);
         }
         String canonicalRequest = legacyContract.originalUserRequest();
+        String targetDiscoveryRequest = ContentSaveRequest.parse(canonicalRequest).targetDiscoveryRequest();
         work.inputCharacters = canonicalRequest.length();
+        if ("historical-attribution-request".equals(legacyContract.classificationReason())
+                && !legacyContract.mutationRequested() && !legacyContract.mutationAllowed()
+                && legacyContract.expectedTargets().isEmpty() && legacyContract.sourceEvidenceTargets().isEmpty()
+                && HistoricalAttributionRequest.parse(canonicalRequest).isPresent()) {
+            return measured(new IntentResolution(fromLegacyContract(legacyContract, work),
+                    CoordinatedMutationTailPlan.empty(canonicalRequest),
+                    SequentialMutationClausePlan.empty(canonicalRequest)), work);
+        }
         LinkedHashSet<String> tailCandidates = new LinkedHashSet<>();
         tailCandidates.addAll(normalizedPaths(legacyContract.expectedTargets()));
         tailCandidates.addAll(normalizedPaths(legacyContract.sourceEvidenceTargets()));
         tailCandidates.addAll(normalizedPaths(legacyContract.forbiddenTargets()));
         tailCandidates.addAll(normalizedPaths(
-                TaskContractResolver.extractExpectedTargets(canonicalRequest)));
+                TaskContractResolver.extractExpectedTargets(targetDiscoveryRequest)));
         tailCandidates.addAll(normalizedPaths(
                 CoordinatedMutationTailParser.discoverDirectTargets(
-                        canonicalRequest)));
+                        targetDiscoveryRequest)));
         tailCandidates.addAll(normalizedPaths(
                 CoordinatedMutationTailParser.discoverAllDirectTargets(
-                        canonicalRequest)));
+                        targetDiscoveryRequest)));
         CoordinatedMutationTailPlan mutationTailPlan =
                 CoordinatedMutationTailParser.parse(canonicalRequest, tailCandidates);
         CoordinatedMutationTailPlan constraintScanPlan = mutationTailPlan;
@@ -165,7 +174,7 @@ public final class TaskIntentResolver {
                 mutationTailPlan,
                 sequentialMutationPlan);
         LegacyMutationScan legacyScan = legacyMutationScan(
-                canonicalRequest,
+                targetDiscoveryRequest,
                 constraintScanPlan,
                 sequentialMutationPlan,
                 work);
@@ -617,6 +626,19 @@ public final class TaskIntentResolver {
             String request,
             boolean requiredOnly
     ) {
+        return explicitSourceEvidenceTargets(request, requiredOnly, false);
+    }
+
+    /** Direct required reads only, not permission to mutate or proof of answer completion. */
+    public static Set<String> requiredReadTargetsForAcquisition(String request) {
+        return explicitSourceEvidenceTargets(request, true, true);
+    }
+
+    private static Set<String> explicitSourceEvidenceTargets(
+            String request,
+            boolean requiredOnly,
+            boolean rejectAlternatives
+    ) {
         if (request == null || request.isBlank()) return Set.of();
         RequestLexicalView view = RequestLexicalView.of(request);
         Set<String> candidateSet =
@@ -670,6 +692,7 @@ public final class TaskIntentResolver {
             List<CoordinatedMutationTailParser.TargetOccurrence>
                     bound = new ArrayList<>();
             int priorEnd = sourceAction.end();
+            boolean disjunctive = false;
             for (CoordinatedMutationTailParser.TargetOccurrence
                     occurrence : occurrences) {
                 String gap = view.masked().substring(
@@ -678,11 +701,16 @@ public final class TaskIntentResolver {
                 Pattern expectedGap = bound.isEmpty()
                         ? DIRECT_SOURCE_FIRST_OPERAND_PREFIX
                         : DIRECT_SOURCE_ADJACENT_OPERAND_GAP;
-                if (!expectedGap.matcher(gap).matches()) break;
+                if (!expectedGap.matcher(gap).matches()) {
+                    disjunctive = DIRECT_SOURCE_DISJUNCTIVE_GAP.matcher(gap).find();
+                    break;
+                }
                 bound.add(occurrence);
                 priorEnd = occurrence.envelopeEnd();
             }
             if (bound.isEmpty()) continue;
+            if (rejectAlternatives && (disjunctive || DIRECT_SOURCE_DISJUNCTIVE_GAP.matcher(
+                    view.masked().substring(priorEnd, sourceEnd)).find())) continue;
             if (requiredOnly
                     && !CoordinatedMutationTailParser
                             .requiredLocalActionAuthority(

@@ -143,11 +143,12 @@ class ReadOnlyEvidenceContinuationTest {
     }
 
     @Test void unrelatedOrMutatingTasksNeverAcquireRequiredDiagnosisReads() throws Exception {
-        for (var type : List.of(TaskType.READ_ONLY_QA, TaskType.UNKNOWN)) {
+        for (var type : List.of(TaskType.WORKSPACE_EXPLAIN, TaskType.UNKNOWN)) {
             var recorded = recorded();
             var state = state(recorded.client(), 1);
             TurnTaskContractCapture.set(new TaskContract(type, false, false, false,
-                    Set.copyOf(TARGETS), Set.of(), REQUEST));
+                    Set.copyOf(TARGETS), Set.of(), type == TaskType.UNKNOWN ? REQUEST
+                            : "README.md, index.html, script.js and scripts.js are mentioned."));
             assertTrue(ReadOnlyEvidenceContinuation.tryHandle(state).isEmpty());
             assertEquals(1, recorded.requests().size());
         }
@@ -175,6 +176,144 @@ class ReadOnlyEvidenceContinuationTest {
         }
     }
 
+    @Test void typedRequiredReadsDoNotDependOnDiagnosisSynthesisAdmission() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                .map(path -> TargetRef.of(path, TargetRole.MUST_READ)).toList());
+
+        assertFalse(ReadOnlyEvidenceContext.select(state).available());
+        assertEquals(java.util.Optional.of(true), ReadOnlyEvidenceContinuation.tryHandle(state));
+        assertEquals(ToolChoiceMode.REQUIRED, recorded.requests().getLast().controls.toolChoice());
+        assertFalse(ReadOnlyEvidenceContext.select(state).available(), "Acquisition does not admit synthesis");
+        assertEquals(1, state.totalToolsInvoked, "A generated read proposal is not an executed read");
+    }
+
+    @Test void requiredReadAcquisitionPreservesRolesAndDoesNotPromoteOutputOrMentionedTargets() throws Exception {
+        for (var excluded : List.of(TargetRole.OUTPUT_DESTINATION, TargetRole.VERIFY_ONLY,
+                TargetRole.MENTIONED_ONLY, TargetRole.MAY_MUTATE, TargetRole.FORBIDDEN)) {
+            var recorded = recorded();
+            var state = state(recorded.client(), 1);
+            captureReadRoles(TaskType.WORKSPACE_EXPLAIN, List.of(
+                    TargetRef.of("README.md", TargetRole.MUST_READ),
+                    TargetRef.of("index.html", TargetRole.SOURCE_EVIDENCE),
+                    TargetRef.of("script.js", excluded)));
+
+            assertEquals(java.util.Optional.of(true), ReadOnlyEvidenceContinuation.tryHandle(state), excluded.toString());
+            var pending = recorded.requests().getLast().messages.getLast().content().split("\n", 3)[1];
+            assertEquals(List.of("index.html"), new ObjectMapper().readValue(pending, List.class));
+        }
+    }
+
+    @Test void acquisitionRetentionFailureStopsWithoutGenericAutoFallback() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                .map(path -> TargetRef.of(path, TargetRole.MUST_READ)).toList());
+        ReadOnlyEvidenceContextTest.read(state, "README.md", "x".repeat(ReadOnlyEvidenceContext.MAX_EVIDENCE_CHARS),
+                Map.of("path", "README.md"));
+
+        assertEquals(java.util.Optional.of(false), ReadOnlyEvidenceContinuation.tryHandle(state));
+        assertEquals(TerminalReadOnlyStopAnswer.RETENTION_LIMIT_REASON, state.failureDecision.reason());
+        assertTrue(state.failureDecision.shouldStop());
+        assertEquals(1, recorded.requests().size());
+    }
+
+    @Test void requiredAcquisitionHonorsRestrictionsAddedAfterCarrierBinding() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                .map(path -> TargetRef.of(path, TargetRole.MUST_READ)).toList());
+        int index = state.messages.size() - 1;
+        var restrictions = new dev.talos.safety.ContentRestrictions(true, false, false, false);
+        state.messages.set(index, state.messages.get(index).withContentRestrictions(restrictions));
+
+        assertEquals(java.util.Optional.of(true), ReadOnlyEvidenceContinuation.tryHandle(state));
+        var restored = recorded.requests().getLast().messages.stream()
+                .filter(message -> "tool".equals(message.role())).findFirst().orElseThrow();
+        assertEquals(restrictions, restored.contentRestrictions());
+        assertEquals(restrictions, state.messages.get(index).contentRestrictions());
+    }
+
+    @Test void workspaceExplanationCannotUseLegacyMutationRolesAsReadAuthority() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                .map(path -> TargetRef.of(path, TargetRole.MUST_MUTATE)).toList(),
+                "README.md, index.html, script.js and scripts.js are mentioned.");
+        assertTrue(ReadOnlyEvidenceContinuation.tryHandle(state).isEmpty());
+        assertEquals(1, recorded.requests().size());
+    }
+
+    @Test void requiredPostReadMutationRoleCannotCompileIntoReadOnlyAuthority() {
+        var intent = new TaskIntent(TaskType.WORKSPACE_EXPLAIN, false, false, false,
+                ArtifactTargetSet.of(TargetRef.of("script.js", TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE)),
+                REQUEST, "post-read mutation exclusion fixture");
+        assertThrows(IllegalArgumentException.class, () -> TaskContractCompiler.compile(intent));
+    }
+
+    @Test void acquisitionDoesNotRestoreDisallowedUnboundOrProtectedSources() throws Exception {
+        List<Consumer<LoopState>> changes = List.of(
+                state -> {
+                    int index = state.messages.size() - 1;
+                    state.messages.set(index, state.messages.get(index).withContentRestrictions(
+                            new dev.talos.safety.ContentRestrictions(false, false, false, false)));
+                },
+                state -> state.messages.set(state.messages.size() - 1,
+                        ChatMessage.toolResult("unbound-call", "unbound content")),
+                state -> captureReadRoles(TaskType.WORKSPACE_EXPLAIN, List.of(
+                        TargetRef.of("README.md", TargetRole.MUST_READ),
+                        TargetRef.of(".env", TargetRole.MUST_READ))),
+                state -> captureReadRoles(TaskType.WORKSPACE_EXPLAIN, List.of(
+                        TargetRef.of("README.md", TargetRole.MUST_READ),
+                        TargetRef.of("../outside.txt", TargetRole.MUST_READ))));
+        for (var change : changes) {
+            var recorded = recorded();
+            var state = state(recorded.client(), 1);
+            captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                    .map(path -> TargetRef.of(path, TargetRole.MUST_READ)).toList());
+            change.accept(state);
+            assertFalse(ReadOnlyEvidenceContext.selectRequiredAcquisition(state).available());
+            assertTrue(ReadOnlyEvidenceContinuation.tryHandle(state).isEmpty());
+            assertEquals(1, recorded.requests().size());
+        }
+    }
+
+    @Test void tooManyRequiredSourcesStopBeforeDispatch() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, java.util.stream.IntStream.range(0, 9)
+                .mapToObj(index -> TargetRef.of("file" + index + ".txt", TargetRole.MUST_READ)).toList());
+        assertEquals(java.util.Optional.of(false), ReadOnlyEvidenceContinuation.tryHandle(state));
+        assertEquals(TerminalReadOnlyStopAnswer.RETENTION_LIMIT_REASON, state.failureDecision.reason());
+        assertEquals(1, recorded.requests().size());
+    }
+
+    @Test void oversizedLegacyReadRequestStopsBeforeInterpretationWithRequestLimitReason() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 1);
+        captureReadRoles(TaskType.WORKSPACE_EXPLAIN, TARGETS.stream()
+                .map(path -> TargetRef.of(path, TargetRole.MUST_MUTATE)).toList(),
+                REQUEST + " Neutral background detail. ".repeat(1_400));
+        var evidence = ReadOnlyEvidenceContext.selectRequiredAcquisition(state);
+        assertTrue(evidence.requestLimited());
+        assertFalse(evidence.retentionLimited());
+        assertEquals(java.util.Optional.of(false), ReadOnlyEvidenceContinuation.tryHandle(state));
+        assertEquals(TerminalReadOnlyStopAnswer.INSPECTION_REQUEST_LIMIT_REASON, state.failureDecision.reason());
+        assertEquals(1, recorded.requests().size());
+    }
+
+    private void captureReadRoles(TaskType type, List<TargetRef> refs) {
+        captureReadRoles(type, refs, REQUEST);
+    }
+
+    private void captureReadRoles(TaskType type, List<TargetRef> refs, String request) {
+        var intent = new TaskIntent(type, false, false, false, new ArtifactTargetSet(refs), request,
+                "required acquisition role fixture");
+        TurnTaskContractCapture.set(new TaskResolution(TaskContractCompiler.compile(intent), intent,
+                CoordinatedMutationTailPlan.empty(request), SequentialMutationClausePlan.empty(request)));
+    }
+
     @Test void completedEvidenceOrToolCapDoesNotSpendAnotherInspectionGeneration() throws Exception {
         var complete = recorded();
         var completeState = state(complete.client(), 4);
@@ -185,6 +324,21 @@ class ReadOnlyEvidenceContinuationTest {
         cappedState.iterations = cappedState.maxIterations;
         assertFalse(ReadOnlyEvidenceContinuation.tryHandle(cappedState).orElseThrow());
         assertEquals(1, capped.requests().size());
+        assertTrue(new ToolCallRepromptStage().hitIterationLimit(cappedState));
+        assertTrue(cappedState.currentNativeCalls.isEmpty());
+    }
+
+    @Test void supportingAcquisitionRetainsTheReachedCapAfterPendingCallsAreCleared() throws Exception {
+        var recorded = recorded();
+        var state = state(recorded.client(), 4);
+        state.iterations = state.maxIterations;
+
+        assertFalse(ReadOnlyEvidenceContinuation.tryContinueAcquisition(state).orElseThrow());
+
+        assertEquals(1, recorded.requests().size());
+        assertTrue(state.currentNativeCalls.isEmpty());
+        assertTrue(new ToolCallRepromptStage().hitIterationLimit(state));
+        assertEquals(TerminalReadOnlyStopAnswer.ACQUISITION_LIMIT_REASON, state.failureDecision.reason());
     }
 
     @Test void authorityRejectionAndApprovalDenialWinBeforeAnyFollowUpGeneration() throws Exception {
@@ -220,6 +374,10 @@ class ReadOnlyEvidenceContinuationTest {
         var state = state(recorded.client(), 1);
         assertFalse(ReadOnlyEvidenceContinuation.tryHandle(state).orElseThrow());
         assertTrue(state.failureDecision.shouldStop());
+        assertEquals(TerminalReadOnlyStopAnswer.INSPECTION_REQUEST_LIMIT_REASON, state.failureDecision.reason());
+        assertTrue(state.currentText.contains("estimated 5946 input tokens, budget 5635, context window 8192"),
+                state.currentText);
+        assertFalse(state.currentText.contains("Action obligation failed"), state.currentText);
         assertTrue(ReadOnlyEvidenceContinuation.tryHandle(state).isEmpty());
         assertEquals(2, recorded.requests().size());
         var events = LocalTurnTraceCapture.complete().events();

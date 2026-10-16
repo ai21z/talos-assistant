@@ -8,6 +8,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.tools.ToolCall;
 
 import java.util.LinkedHashSet;
@@ -52,13 +53,53 @@ public final class TurnTaskContractCapture {
             TaskResolution resolution,
             List<ChatMessage> messages
     ) {
+        set(resolution, messages, ModelIdentitySnapshot.empty());
+    }
+
+    public static void set(TaskResolution resolution, List<ChatMessage> messages,
+                           ModelIdentitySnapshot modelIdentity) {
+        ChatMessage boundary = resolution == null ? null : currentUserBoundary(resolution.contract(), messages);
+        String request = boundary == null ? "" : boundary.content();
+        boolean presentation = resolution != null && Objects.equals(request, resolution.contract().originalUserRequest())
+                && dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.requestsIdentityComponent(request)
+                && !dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.isIdentityOnlyRequest(request);
+        set(resolution, messages, modelIdentity, presentation);
+    }
+
+    public static void set(TaskResolution resolution, List<ChatMessage> messages,
+                           ModelIdentitySnapshot modelIdentity, boolean runtimeIdentityPresentation) {
         if (resolution == null) {
             HOLDER.remove();
             return;
         }
         HOLDER.set(new CapturedResolution(
                 resolution,
-                currentUserBoundary(resolution.contract(), messages)));
+                currentUserBoundary(resolution.contract(), messages), modelIdentity, runtimeIdentityPresentation,
+                latestProviderTaskBoundary(messages)));
+    }
+
+    public static boolean runtimeIdentityPresentation() {
+        CapturedResolution captured = HOLDER.get();
+        return captured != null && captured.runtimeIdentityPresentation;
+    }
+
+    public static String providerTaskRequest() {
+        CapturedResolution captured = HOLDER.get();
+        return captured == null || captured.providerTaskBoundary == null ? "" : captured.providerTaskBoundary.content();
+    }
+
+    public static int providerTaskBoundaryIndex(List<ChatMessage> messages) {
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null || captured.providerTaskBoundary == null || messages == null) return -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i) == captured.providerTaskBoundary) return i;
+        }
+        return -1;
+    }
+
+    public static ModelIdentitySnapshot modelIdentity() {
+        CapturedResolution captured = HOLDER.get();
+        return captured == null ? ModelIdentitySnapshot.empty() : captured.modelIdentity;
     }
 
     public static TaskContract get() {
@@ -74,6 +115,22 @@ public final class TurnTaskContractCapture {
     public static TaskResolution getResolution() {
         CapturedResolution captured = HOLDER.get();
         return captured == null ? null : captured.resolution();
+    }
+
+    /** Carries the already compiled result interpretation into acquisition without re-parsing. */
+    public static void setRequestedResults(dev.talos.runtime.intent.RequestedResultInventory inventory) {
+        CapturedResolution captured = HOLDER.get();
+        if (captured == null || inventory == null || !Objects.equals(
+                captured.resolution().contract().originalUserRequest(), inventory.originalRequest()))
+            throw new IllegalArgumentException("Requested results do not bind the captured current request");
+        if (captured.requestedResults != null && !captured.requestedResults.equals(inventory))
+            throw new IllegalArgumentException("Current requested results cannot be replaced");
+        captured.requestedResults = inventory;
+    }
+
+    public static dev.talos.runtime.intent.RequestedResultInventory requestedResults() {
+        CapturedResolution captured = HOLDER.get();
+        return captured == null ? null : captured.requestedResults;
     }
 
     public static TaskContract currentOrResolve(
@@ -263,6 +320,18 @@ public final class TurnTaskContractCapture {
         return canonical.substring(markerStart + marker.length()).strip();
     }
 
+    private static ChatMessage latestProviderTaskBoundary(List<ChatMessage> messages) {
+        if (messages == null) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            if (ToolCallSupport.isSyntheticToolResultContent(message.content())) continue;
+            return !message.hasNativeToolCalls() && message.toolCallId() == null
+                    && message.content() != null ? message : null;
+        }
+        return null;
+    }
+
     private static String normalizePath(String path) {
         String normalized = Objects.toString(path, "").strip().replace('\\', '/');
         while (normalized.startsWith("./")) {
@@ -273,7 +342,11 @@ public final class TurnTaskContractCapture {
 
     private static final class CapturedResolution {
         private final TaskResolution resolution;
+        private dev.talos.runtime.intent.RequestedResultInventory requestedResults;
         private final ChatMessage currentUserBoundary;
+        private final ModelIdentitySnapshot modelIdentity;
+        private final boolean runtimeIdentityPresentation;
+        private final ChatMessage providerTaskBoundary;
         private final Set<String> successfulContentMutationPaths =
                 new LinkedHashSet<>();
         private final Set<String> consumedWorkspaceOperationIds =
@@ -285,12 +358,31 @@ public final class TurnTaskContractCapture {
                 TaskResolution resolution,
                 ChatMessage currentUserBoundary
         ) {
+            this(resolution, currentUserBoundary, ModelIdentitySnapshot.empty());
+        }
+
+        private CapturedResolution(TaskResolution resolution, ChatMessage currentUserBoundary,
+                                   ModelIdentitySnapshot modelIdentity) {
+            this(resolution, currentUserBoundary, modelIdentity, false);
+        }
+
+        private CapturedResolution(TaskResolution resolution, ChatMessage currentUserBoundary,
+                                   ModelIdentitySnapshot modelIdentity, boolean runtimeIdentityPresentation) {
+            this(resolution, currentUserBoundary, modelIdentity, runtimeIdentityPresentation, null);
+        }
+
+        private CapturedResolution(TaskResolution resolution, ChatMessage currentUserBoundary,
+                                   ModelIdentitySnapshot modelIdentity, boolean runtimeIdentityPresentation,
+                                   ChatMessage providerTaskBoundary) {
             if (resolution == null) {
                 throw new IllegalArgumentException(
                         "captured resolution is required");
             }
             this.resolution = resolution;
             this.currentUserBoundary = currentUserBoundary;
+            this.modelIdentity = modelIdentity == null ? ModelIdentitySnapshot.empty() : modelIdentity;
+            this.runtimeIdentityPresentation = runtimeIdentityPresentation;
+            this.providerTaskBoundary = providerTaskBoundary;
         }
 
         private TaskResolution resolution() {

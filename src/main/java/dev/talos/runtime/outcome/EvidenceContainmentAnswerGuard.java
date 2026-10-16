@@ -86,8 +86,8 @@ public final class EvidenceContainmentAnswerGuard {
                             + "file content is available from this turn."
                             + targetSentence(plan);
             case READ_TARGET_REQUIRED ->
-                    "I did not inspect the required workspace target this turn, so I cannot "
-                            + "answer from its contents or propose grounded changes yet."
+                    "Current evidence for the required workspace target was not established. "
+                            + "An answer from its contents or grounded changes cannot be supported yet."
                             + targetSentence(plan);
             case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
                     "I did not gather directory or target-read evidence for the requested path "
@@ -97,8 +97,8 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not gather source-bearing file content for this lookup, so I cannot "
                             + "claim the requested fact was found or absent from the workspace.";
             case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
-                    "I did not inspect the project summary anchor, so I cannot make a grounded "
-                            + "claim about what the whole project does."
+                    "Current project evidence remains incomplete. "
+                            + "A complete answer to the project request is not established."
                             + evidenceDetailSentence(evidenceResult);
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "
@@ -108,8 +108,8 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not inspect the workspace this turn, so I cannot list files, "
                             + "show file contents, or claim changed files from this turn.";
             case STATIC_WEB_DIAGNOSIS_REQUIRED ->
-                    "I did not inspect the required static web files this turn, so I cannot "
-                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence."
+                    "Current evidence for the required static web files was not established. "
+                            + "The page diagnosis cannot be supported by grounded HTML, CSS, or JavaScript evidence."
                             + evidenceDetailSentence(evidenceResult);
             case VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     "I did not gather trace or workspace evidence this turn, so I cannot "

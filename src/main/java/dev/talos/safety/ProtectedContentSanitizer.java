@@ -27,8 +27,12 @@ public final class ProtectedContentSanitizer {
     private static final Pattern PRIVATE_MARKER_ASSIGNMENT = Pattern.compile(
             "(?i)\\b(PRIVATE_MARKER)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\r\\n,;]+)");
 
+    private static final String SECRET_LIKE_KEY =
+            "[A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|apikey|password|passwd|pwd|credential|credentials|bearer|private[_-]?key|private-key|access[_-]?key|client[_-]?secret|auth)[A-Za-z0-9_.-]*";
     private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
-            "(?i)\\b([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|apikey|password|passwd|pwd|credential|credentials|bearer|private[_-]?key|private-key|access[_-]?key|client[_-]?secret|auth)[A-Za-z0-9_.-]*)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
+            "(?i)\\b(" + SECRET_LIKE_KEY + ")\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
+    private static final Pattern QUOTED_SECRET_START = Pattern.compile(
+            "(?i)\\b(" + SECRET_LIKE_KEY + ")\\b\\s*[:=]\\s*([\"'`])");
 
     public static String sanitizeText(String text) {
         if (text == null || text.isBlank()) return text;
@@ -42,6 +46,35 @@ public final class ProtectedContentSanitizer {
 
     public static String sanitizeSearchLine(String line) {
         return sanitizeText(line);
+    }
+
+    /** Sanitize a known bounded prefix before further rendering cuts are applied. */
+    public static String sanitizeTextPrefix(String text) {
+        String redacted = redactUnterminatedSecretAssignment(text);
+        return sanitizeText(SecretShapePatterns.redactSecretShapesInPrefix(redacted, REDACTED_VALUE));
+    }
+
+    private static String redactUnterminatedSecretAssignment(String text) {
+        if (text == null || text.isBlank()) return text;
+        Matcher matcher = QUOTED_SECRET_START.matcher(text);
+        int next = 0;
+        while (matcher.find(next)) {
+            char quote = matcher.group(2).charAt(0);
+            int end = matcher.end();
+            boolean escaped = false;
+            for (; end < text.length(); end++) {
+                char current = text.charAt(end);
+                if (current == quote && !escaped) break;
+                // Only prefix scanning recognizes escaped delimiters. An odd
+                // backslash run escapes the quote, an even run leaves it closing.
+                escaped = current == '\\' && !escaped;
+            }
+            if (end == text.length()) {
+                return text.substring(0, matcher.start()) + matcher.group(1) + "=" + REDACTED_VALUE;
+            }
+            next = end + 1;
+        }
+        return text;
     }
 
     public static Map<String, String> sanitizeToolParameters(Map<String, String> parameters) {

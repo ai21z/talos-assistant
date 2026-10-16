@@ -294,13 +294,17 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
                 ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON, "", false, false, false, "");
         var raw = new ToolResult(false, null, new ToolError(privateCode, privateMessage), null, metadata);
         var registry = new ToolRegistry();
+        AtomicInteger executions = new AtomicInteger();
         registry.register(new TalosTool() {
             @Override public String name() { return "test.echo"; }
             @Override public String description() { return "synthetic comparison failure"; }
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor(name(), description(), null, ToolRiskLevel.READ_ONLY);
             }
-            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return raw; }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                executions.incrementAndGet();
+                return raw;
+            }
         });
         var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
         TurnAuditCapture.begin();
@@ -311,8 +315,11 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
 
         assertSame(raw, result);
         assertFalse(result.success());
+        assertEquals(1, executions.get());
         assertEquals(1, audit.toolCalls().size());
         assertFalse(audit.toolCalls().getFirst().success());
+        assertEquals(TurnRecord.ToolCallDisposition.EXECUTED,
+                audit.toolCalls().getFirst().executionDisposition());
         assertEquals(raw.mutationEffects(), audit.toolCalls().getFirst().mutationEffects());
         assertEquals(dev.talos.safety.ContentRestrictions.UNRESTRICTED, audit.contentRestrictions());
         assertTrue(trace.events().stream().anyMatch(event -> event.type().equals("TOOL_EXECUTED")));
@@ -1364,7 +1371,17 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
     void directoryListingContractBlocksContentInspectionTools(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742");
         ToolRegistry registry = new ToolRegistry();
-        registry.register(new ReadFileTool());
+        AtomicInteger executions = new AtomicInteger();
+        ReadFileTool delegate = new ReadFileTool();
+        registry.register(new TalosTool() {
+            @Override public String name() { return delegate.name(); }
+            @Override public String description() { return delegate.description(); }
+            @Override public ToolDescriptor descriptor() { return delegate.descriptor(); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                executions.incrementAndGet();
+                return delegate.execute(call, ctx);
+            }
+        });
         var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
         var session = new Session(workspace, new Config());
         var ctx = contextForWorkspace(workspace);
@@ -1396,7 +1413,11 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
             assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
             assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
             assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle);
+            assertEquals(0, executions.get());
             assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertEquals(TurnRecord.ToolCallDisposition.BLOCKED,
+                    audit.toolCalls().getFirst().executionDisposition());
+            assertFalse(audit.toolCalls().getFirst().mutationEffects().hasEffects());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();

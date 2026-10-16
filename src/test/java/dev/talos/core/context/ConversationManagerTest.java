@@ -128,6 +128,80 @@ class ConversationManagerTest {
     }
 
     @Test
+    void sketchOnlyUsesRepresentedCostAtBudgetBoundary() {
+        var budget = new TokenBudget();
+        var cm = new ConversationManager(new SessionMemory(), budget);
+        String sketch = "s".repeat(40);
+        cm.setSketch(sketch);
+        var represented = ChatMessage.assistant("[Conversation context] " + sketch);
+        int cost = budget.estimateTokens(represented.content());
+
+        assertTrue(cost > budget.estimateTokens(sketch));
+        assertEquals(List.of(), cm.buildHistory(budget.estimateTokens(sketch)));
+        assertEquals(List.of(), cm.buildHistory(cost - 1));
+        assertEquals(List.of(represented), cm.buildHistory(cost));
+        assertEquals(List.of(represented), cm.buildHistory(cost + 1));
+        assertEquals(cost, ConversationManager.estimateTokens(cm.buildHistory(cost), budget));
+        assertEquals(List.of(), cm.buildHistory(0));
+        assertEquals(List.of(), cm.buildHistory(-1));
+    }
+
+    @Test
+    void omittedOversizedSketchDoesNotDisplaceRecentPairs() {
+        var memory = new SessionMemory();
+        var budget = new TokenBudget();
+        var cm = new ConversationManager(memory, budget);
+        cm.addTurn("old-question", "old-response");
+        cm.addTurn("new-question", "new-response");
+        List<ChatMessage> recentPair = memory.getTurns().subList(2, 4);
+        int pairCost = ConversationManager.estimateTokens(recentPair, budget);
+        cm.setSketch("s".repeat(1000));
+
+        assertEquals(List.of(), cm.buildHistory(pairCost - 1));
+        assertEquals(recentPair, cm.buildHistory(pairCost));
+        assertEquals(recentPair, cm.buildHistory(pairCost + 1));
+        assertEquals(memory.getTurns(), cm.buildHistory(pairCost * 2));
+        assertEquals(pairCost, ConversationManager.estimateTokens(cm.buildHistory(pairCost), budget));
+        assertEquals(List.of(), cm.buildHistory(0));
+        assertEquals(List.of(), cm.buildHistory(-1));
+        assertEquals(2, cm.turnCount(), "Budget selection must not prune stored turns");
+        assertEquals("s".repeat(1000), cm.sketch(), "Omitted summary must remain stored");
+    }
+
+    @Test
+    void admittedSketchReservesExactCostAndKeepsWholeRecentTail() {
+        var memory = new SessionMemory();
+        var budget = new TokenBudget();
+        var cm = new ConversationManager(memory, budget);
+        cm.addTurn("old-question", "old-response");
+        cm.addTurn("new-question", "new-response");
+        cm.setSketch("earlier context");
+        var summary = ChatMessage.assistant("[Conversation context] earlier context");
+        int summaryCost = budget.estimateTokens(summary.content());
+        List<ChatMessage> recentPair = memory.getTurns().subList(2, 4);
+        int pairCost = ConversationManager.estimateTokens(recentPair, budget);
+        int exactBudget = summaryCost + pairCost;
+
+        assertEquals(List.of(summary), cm.buildHistory(exactBudget - 1));
+        var expected = List.of(summary, recentPair.getFirst(), recentPair.getLast());
+        assertEquals(expected, cm.buildHistory(exactBudget));
+        assertEquals(expected, cm.buildHistory(exactBudget + 1));
+        assertEquals(exactBudget, ConversationManager.estimateTokens(cm.buildHistory(exactBudget), budget));
+        assertEquals(List.of(), cm.buildHistory(0));
+        assertEquals(List.of(), cm.buildHistory(-1));
+    }
+
+    @Test
+    void historySelectionDoesNotSkipOversizedLatestPairForOlderPair() {
+        var cm = new ConversationManager(new SessionMemory());
+        cm.addTurn("old-question", "old-response");
+        cm.addTurn("large latest question".repeat(20), "large latest answer".repeat(20));
+        cm.setSketch("s".repeat(1000));
+
+        assertEquals(List.of(), cm.buildHistory(10), "History must remain a contiguous recent tail");
+    }
+
+    @Test
     void buildHistoryDefaultUsesContextFraction() {
         var memory = new SessionMemory();
         var cm = new ConversationManager(memory, new TokenBudget(8192));

@@ -27,6 +27,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExactWriteContextFallbackTest {
     @Test
+    void compactWritePreservesItsLiteralWhileProjectingTheCapturedIdentityTask() {
+        String original = "Who are you? Overwrite index.html with exactly AFTER. Use talos.write_file.";
+        var contract = new TaskContract(TaskType.FILE_EDIT, true, true, true, Set.of("index.html"), Set.of(), original);
+        var baseline = exactWritePlan();
+        var plan = new CurrentTurnPlan(contract, original, ExecutionPhase.APPLY, ExecutionPhase.APPLY,
+                ActionObligation.MUTATING_TOOL_REQUIRED, baseline.taskExpectations(), List.of("talos.write_file"),
+                List.of("talos.write_file"), List.of(), CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NOT_DERIVED,
+                "", CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+        var messages = List.of(ChatMessage.system("system"), ChatMessage.user(original));
+        dev.talos.runtime.TurnTaskContractCapture.set(dev.talos.runtime.task.TaskResolution.contractOnly(contract), messages,
+                dev.talos.spi.types.ModelIdentitySnapshot.empty(), true);
+        try {
+            var request = ExactWriteContextFallback.prepare(Context.builder(new Config()).nativeToolSpecs(List.of(writeFile())).build(),
+                    plan, (ctx, selected, tools) -> ChatRequestControls.defaults()).orElseThrow();
+            assertEquals("Overwrite index.html with exactly AFTER. Use talos.write_file.", request.messages().getLast().content().strip());
+            assertTrue(request.messages().stream().anyMatch(message -> message.content().contains("AFTER")));
+            assertEquals(original, dev.talos.runtime.TurnTaskContractCapture.get().originalUserRequest());
+            assertEquals(baseline.taskExpectations(), plan.taskExpectations());
+        } finally { dev.talos.runtime.TurnTaskContractCapture.clear(); }
+    }
+
+    @Test
     void preparesCompactExactWriteFallbackWithWriteFileOnly() {
         Context ctx = Context.builder(new Config())
                 .nativeToolSpecs(List.of(writeFile(), editFile()))

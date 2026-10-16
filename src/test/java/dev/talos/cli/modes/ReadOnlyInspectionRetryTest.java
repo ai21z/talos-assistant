@@ -96,9 +96,10 @@ class ReadOnlyInspectionRetryTest {
         assertTrue(result.extraSummary().contains("talos.read_file"), result.extraSummary());
         assertEquals(4, retryMessages.get().size(), "retry appends assistant answer and corrective user prompt");
         String prompt = retryMessages.get().get(3).content();
-        assertTrue(prompt.contains("Use read-only tools now."), prompt);
+        assertTrue(prompt.contains("Read the project source anchor README.md for project-purpose claims."), prompt);
         assertTrue(prompt.contains("README.md"), prompt);
-        assertTrue(prompt.contains("Do not call write_file or edit_file."), prompt);
+        assertTrue(prompt.contains("Do not mutate files."), prompt);
+        assertTrue(prompt.contains("Answer only from the evidence for each requested result."), prompt);
         var trace = LocalTurnTraceCapture.complete();
         var parsed = trace.events().stream()
                 .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))

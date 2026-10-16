@@ -163,7 +163,7 @@ public class PinExtractionTest {
     private List<?> invokePinFiles(Path workspace, String query, int maxPins, int maxChars, int maxDepth) throws Exception {
         Method method = RagMode.class.getDeclaredMethod("pinFiles", Path.class, String.class, int.class, int.class, int.class);
         method.setAccessible(true);
-        return (List<?>) method.invoke(null, workspace, query, maxPins, maxChars, maxDepth);
+        return (List<?>) method.invoke(new RagMode(), workspace, query, maxPins, maxChars, maxDepth);
     }
 
     // Helper to extract path from Snippet object

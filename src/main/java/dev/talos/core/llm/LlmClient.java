@@ -4,9 +4,12 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.context.ContextDeliveryCapture;
+import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
+import dev.talos.engine.llamacpp.ManagedModelLibrary;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ControlFlowFailure;
@@ -42,6 +45,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Local-first LLM client with dual transport:
@@ -59,6 +63,8 @@ public final class LlmClient implements AutoCloseable {
     private final TransportMode mode;
     private final LlmEngineResolver engineResolver;
     private final LlmCallBudget callBudget;
+    private final ManagedModelLibrary managedModels;
+    private final ReentrantReadWriteLock modelLifecycle = new ReentrantReadWriteLock();
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
@@ -147,6 +153,7 @@ public final class LlmClient implements AutoCloseable {
 
     LlmClient(Config cfg, LlmEngineResolver engineResolver) {
         this.cfg = (cfg == null ? new Config() : cfg);
+        this.managedModels = new ManagedModelLibrary(this.cfg);
 
         // ---- transport mode (default: PLACEHOLDER for tests/local safety) ----
         // When a Config is provided, ignore env here to keep tests deterministic.
@@ -307,19 +314,50 @@ public final class LlmClient implements AutoCloseable {
 
     /** Accepts "backend/model" or just "model" (in PLACEHOLDER, backend is ignored). */
     public void setModel(String name) {
-        String sanitized = sanitizeModelName(Objects.toString(name, ""));
+        String sanitized = Objects.toString(name, "").trim();
         if (sanitized.isBlank()) return;
-
-        if (mode == TransportMode.ENGINE && sanitized.contains("/")) {
-            String[] parts = sanitized.split("/", 2);
-            this.backend = parts[0];
-            this.model = parts[1];
-            if (engineResolver != null) try { engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
-        } else {
-            this.model = sanitized;
-            if (mode == TransportMode.ENGINE && engineResolver != null) try { engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
+        if (!sanitized.equals(sanitizeModelName(sanitized))) {
+            throw new IllegalArgumentException("Invalid model name.");
         }
-        this.preparedCapabilities = null;
+        String[] parts = sanitized.split("/", 2);
+        String selectedBackend = parts.length == 2 ? parts[0] : backend;
+        String selectedModel = parts.length == 2 ? parts[1] : sanitized;
+        if (!modelLifecycle.writeLock().tryLock()) {
+            throw new IllegalStateException("A model request is still active. Model switching was not started.");
+        }
+        try {
+            if (mode == TransportMode.ENGINE && "llama_cpp".equals(selectedBackend)
+                    && engineResolver != null && engineResolver.ownsManagedModelLifecycle() && managedModels.managed()) {
+                var target = managedModels.configuration(selectedModel);
+                selectedModel = Objects.toString(dev.talos.core.CfgUtil.map(
+                        dev.talos.core.CfgUtil.map(target.data().get("engines")).get("llama_cpp")).get("model"));
+                preparedCapabilities = null;
+                preparedCapabilities = engineResolver.switchManagedModel(target, selectedModel);
+            } else if (mode == TransportMode.ENGINE && engineResolver != null) {
+                preparedCapabilities = null;
+                engineResolver.select(selectedBackend, selectedModel);
+            }
+            backend = selectedBackend;
+            model = selectedModel;
+        } catch (RuntimeException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            rethrowControlFlow(failure);
+            throw new IllegalStateException("Model switching failed. No successful selection was reported.", failure);
+        } finally {
+            modelLifecycle.writeLock().unlock();
+        }
+    }
+
+    public boolean supportsManagedModelSelection() {
+        return mode == TransportMode.ENGINE && engineResolver != null
+                && engineResolver.ownsManagedModelLifecycle() && managedModels.managed();
+    }
+
+    public ManagedModelLibrary managedModelLibrary() { return managedModels; }
+
+    public boolean modelSelectionUnavailable() {
+        return engineResolver != null && engineResolver.selectionUnavailable();
     }
 
     /**
@@ -337,16 +375,23 @@ public final class LlmClient implements AutoCloseable {
 
     /** Prepares the selected engine and returns whether native tools are permitted for this turn. */
     public boolean prepareNativeTools() throws Exception {
-        if (!configuredNativeTools) return false;
-        if (mode != TransportMode.ENGINE || engineResolver == null) return true;
-        if (!engineResolver.capabilitiesAuthoritative()) return true;
-        Capabilities prepared = engineResolver.prepareCapabilities();
-        preparedCapabilities = prepared;
-        return prepared != null && prepared.nativeTools();
+        if (!modelLifecycle.readLock().tryLock()) throw new IllegalStateException("Model switching is in progress.");
+        try {
+            if (modelSelectionUnavailable()) throw new IllegalStateException("No model is available. A successful model selection is required.");
+            if (!configuredNativeTools) return false;
+            if (mode != TransportMode.ENGINE || engineResolver == null) return true;
+            if (!engineResolver.capabilitiesAuthoritative()) return true;
+            Capabilities prepared = engineResolver.prepareCapabilities();
+            preparedCapabilities = prepared;
+            return prepared != null && prepared.nativeTools();
+        } finally {
+            modelLifecycle.readLock().unlock();
+        }
     }
 
     /** Current no-start view used by prompt inspection and turn-policy recording. */
     public boolean nativeToolsCurrentlyEnabled() {
+        if (modelSelectionUnavailable()) return false;
         if (!configuredNativeTools) return false;
         if (mode != TransportMode.ENGINE || engineResolver == null) return true;
         if (!engineResolver.capabilitiesAuthoritative()) return true;
@@ -825,7 +870,7 @@ public final class LlmClient implements AutoCloseable {
                     completionFor(this.finishReason, this.abortReason),
                     false,
                     false,
-                    ProviderResponseCapture.Receipt.none(), null));
+                    ProviderResponseCapture.Receipt.none(), null, null));
         }
 
         StreamResult(
@@ -844,7 +889,7 @@ public final class LlmClient implements AutoCloseable {
                             : completion,
                     normalized,
                     truncated,
-                    ProviderResponseCapture.Receipt.none(), null));
+                    ProviderResponseCapture.Receipt.none(), null, null));
         }
 
         public StreamResult(
@@ -867,13 +912,29 @@ public final class LlmClient implements AutoCloseable {
                     truncated,
                     provenance == null
                             ? ProviderResponseCapture.Receipt.none()
-                            : provenance, null));
+                            : provenance, null, null));
         }
 
         StreamResult withProvenance(ProviderResponseCapture.Receipt receipt) {
             return new StreamResult(text, toolCalls, finishReason, abortReason,
                     abortOrigin(), completion(), normalized(), truncated(), receipt)
+                    .withTextProposalSource(textProposalSource())
                     .withAbandonment(abandonment().orElse(null));
+        }
+
+        private StreamResult withTextProposalSource(ProviderResponseCapture.TextProposalSource source) {
+            Metadata metadata = METADATA.get(this);
+            if (source != null && metadata != null && !aborted()) {
+                METADATA.put(this, new Metadata(metadata.abortOrigin(), metadata.completion(),
+                        metadata.normalized(), metadata.truncated(), metadata.provenance(),
+                        metadata.abandonment(), source));
+            }
+            return this;
+        }
+
+        private ProviderResponseCapture.TextProposalSource textProposalSource() {
+            Metadata metadata = METADATA.get(this);
+            return metadata == null ? null : metadata.textProposalSource();
         }
 
         /** Only the budget's winning arbiter supplies this typed terminal cause. */
@@ -882,7 +943,7 @@ public final class LlmClient implements AutoCloseable {
             if (!aborted()) throw new IllegalStateException("completed result cannot carry abandonment");
             StreamResult copy = new StreamResult(text, toolCalls, finishReason, abortReason);
             METADATA.put(copy, new Metadata(abortOrigin(), completion(), normalized(), truncated(),
-                    provenance(), cause));
+                    provenance(), cause, null));
             return copy;
         }
 
@@ -973,7 +1034,8 @@ public final class LlmClient implements AutoCloseable {
                 boolean normalized,
                 boolean truncated,
                 ProviderResponseCapture.Receipt provenance,
-                ProviderResponseCapture.Abandonment abandonment) {}
+                ProviderResponseCapture.Abandonment abandonment,
+                ProviderResponseCapture.TextProposalSource textProposalSource) {}
 
         /**
          * Weak identity sidecar keeps the established four-component public
@@ -1098,56 +1160,62 @@ public final class LlmClient implements AutoCloseable {
                                        long wallClockMs,
                                        List<ToolSpec> requestToolSpecs,
                                        ChatRequestControls controls) {
-        // P2 - clear any Ctrl-C from the previous turn so stale cancels
-        // don't immediately short-circuit this call.
-        externalCancelReset.run();
-        ProviderResponseCapture.Source source = responseSource(controls);
-        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
-                toolAuthorityMode(source, controls);
-        List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
-        ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
-                toolAuthorityContract(
-                        source, toolAuthorityMode, selectedToolSpecs, controls);
-        return captureStreamGeneration(source, toolAuthorityContract, generation -> {
-            if (scriptedFailure != null) {
-                throw scriptedFailure;
-            }
-            if (scriptedResponses != null) {
-                String r = nextScriptedResponse();
-                if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
-                return recordSyntheticStreamResult(syntheticStreamResult(r), source, generation);
-            }
-            if (mode == TransportMode.PLACEHOLDER) {
-                String full = placeholderFromMessages(messages);
-                if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
-                return recordSyntheticStreamResult(syntheticStreamResult(full), source, generation);
-            }
-            // P2 - track the time of the last decoded-provider progress callback;
-            // the watchdog (set up inside withWallClockBudget) abort()s the worker
-            // if no decoded chunk arrives for {@link #defaultIdleMs} ms. This is
-            // not evidence about transport settlement. The cancel supplier
-            // OR-combines the engine-level cancel and the externally-set cancel
-            // hook so a Ctrl-C future patch can plug in without touching this
-            // method.
-            AtomicLong lastChunkAt = new AtomicLong();
-            RepetitionBreaker breaker = new RepetitionBreaker();
-            Consumer<String> decodedProgressSink = chunk -> {
-                lastChunkAt.set(System.currentTimeMillis());
-                breaker.onChunk(chunk);
-            };
-            Supplier<Boolean> cancel = this.externalCancel;
-            Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
-            return callBudget.run(
-                    activeStream -> engineAssembledWithMessagesFullTracked(
-                            messages, onChunk, decodedProgressSink, engineRequestTimeout, cancel,
-                             lastChunkAt, activeStream, selectedToolSpecs, controls, true, generation),
-                    wallClockMs,
-                    lastChunkAt,
-                    "streaming chat",
-                    breaker,
-                    cancel,
-                    generation);
-        });
+        if (!modelLifecycle.readLock().tryLock()) throw new IllegalStateException("Model switching is in progress.");
+        try {
+            // P2 - clear any Ctrl-C from the previous turn so stale cancels
+            // don't immediately short-circuit this call.
+            externalCancelReset.run();
+            ProviderResponseCapture.Source source = responseSource(controls);
+            ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                    toolAuthorityMode(source, controls);
+            List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
+            ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
+                    toolAuthorityContract(
+                            source, toolAuthorityMode, selectedToolSpecs, controls);
+            return captureStreamGeneration(source, toolAuthorityContract, generation -> {
+                if (scriptedFailure != null) {
+                    throw scriptedFailure;
+                }
+                if (scriptedResponses != null) {
+                    String r = nextScriptedResponse();
+                    if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
+                    return recordSyntheticStreamResult(syntheticStreamResult(r), source, generation);
+                }
+                if (mode == TransportMode.PLACEHOLDER) {
+                    String full = placeholderFromMessages(messages);
+                    if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
+                    return recordSyntheticStreamResult(syntheticStreamResult(full), source, generation);
+                }
+                // P2 - track the time of the last decoded-provider progress callback;
+                // the watchdog (set up inside withWallClockBudget) abort()s the worker
+                // if no decoded chunk arrives for {@link #defaultIdleMs} ms. This is
+                // not evidence about transport settlement. The cancel supplier
+                // OR-combines the engine-level cancel and the externally-set cancel
+                // hook so a Ctrl-C future patch can plug in without touching this
+                // method.
+                AtomicLong lastChunkAt = new AtomicLong();
+                RepetitionBreaker breaker = new RepetitionBreaker();
+                Consumer<String> decodedProgressSink = chunk -> {
+                    lastChunkAt.set(System.currentTimeMillis());
+                    breaker.onChunk(chunk);
+                };
+                Supplier<Boolean> cancel = this.externalCancel;
+                Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
+                ContextDeliveryCapture contextDelivery = ContextLedgerCapture.deliveryCapture();
+                return callBudget.run(
+                        activeStream -> engineAssembledWithMessagesFullTracked(
+                                messages, onChunk, decodedProgressSink, engineRequestTimeout, cancel,
+                                 lastChunkAt, activeStream, selectedToolSpecs, controls, true, generation, contextDelivery),
+                        wallClockMs,
+                        lastChunkAt,
+                        "streaming chat",
+                        breaker,
+                        cancel,
+                        generation);
+            });
+        } finally {
+            modelLifecycle.readLock().unlock();
+        }
     }
 
     /**
@@ -1192,75 +1260,86 @@ public final class LlmClient implements AutoCloseable {
                                  long wallClockMs,
                                  List<ToolSpec> requestToolSpecs,
                                  ChatRequestControls controls) {
-        // P2 - see chatStreamFull: clear stale cancel flag per call.
-        externalCancelReset.run();
-        ProviderResponseCapture.Source source = responseSource(controls);
-        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
-                toolAuthorityMode(source, controls);
-        List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
-        ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
-                toolAuthorityContract(
-                        source, toolAuthorityMode, selectedToolSpecs, controls);
-        return captureStreamGeneration(source, toolAuthorityContract, generation -> {
-            if (scriptedFailure != null) {
-                throw scriptedFailure;
-            }
-            if (scriptedResponses != null) {
-                return recordSyntheticStreamResult(
-                        syntheticStreamResult(nextScriptedResponse()), source, generation);
-            }
-            if (mode == TransportMode.PLACEHOLDER) {
-                return recordSyntheticStreamResult(
-                        syntheticStreamResult(placeholderFromMessages(messages)), source, generation);
-            }
-            // P2 - same idle-watchdog + cancel-hook plumbing as chatStreamFull.
-            AtomicLong lastChunkAt = new AtomicLong();
-            RepetitionBreaker breaker = new RepetitionBreaker();
-            Consumer<String> decodedProgressSink = chunk -> {
-                lastChunkAt.set(System.currentTimeMillis());
-                breaker.onChunk(chunk);
-            };
-            Supplier<Boolean> cancel = this.externalCancel;
-            Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
-            return callBudget.run(
-                    activeStream -> engineAssembledWithMessagesFullTracked(
-                            messages, null, decodedProgressSink, engineRequestTimeout, cancel,
-                             lastChunkAt, activeStream, selectedToolSpecs, controls, false, generation),
-                    wallClockMs,
-                    lastChunkAt,
-                    "non-streaming chat",
-                    breaker,
-                    cancel,
-                    generation);
-        });
+        if (!modelLifecycle.readLock().tryLock()) throw new IllegalStateException("Model switching is in progress.");
+        try {
+            // P2 - see chatStreamFull: clear stale cancel flag per call.
+            externalCancelReset.run();
+            ProviderResponseCapture.Source source = responseSource(controls);
+            ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                    toolAuthorityMode(source, controls);
+            List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
+            ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
+                    toolAuthorityContract(
+                            source, toolAuthorityMode, selectedToolSpecs, controls);
+            return captureStreamGeneration(source, toolAuthorityContract, generation -> {
+                if (scriptedFailure != null) {
+                    throw scriptedFailure;
+                }
+                if (scriptedResponses != null) {
+                    return recordSyntheticStreamResult(
+                            syntheticStreamResult(nextScriptedResponse()), source, generation);
+                }
+                if (mode == TransportMode.PLACEHOLDER) {
+                    return recordSyntheticStreamResult(
+                            syntheticStreamResult(placeholderFromMessages(messages)), source, generation);
+                }
+                // P2 - same idle-watchdog + cancel-hook plumbing as chatStreamFull.
+                AtomicLong lastChunkAt = new AtomicLong();
+                RepetitionBreaker breaker = new RepetitionBreaker();
+                Consumer<String> decodedProgressSink = chunk -> {
+                    lastChunkAt.set(System.currentTimeMillis());
+                    breaker.onChunk(chunk);
+                };
+                Supplier<Boolean> cancel = this.externalCancel;
+                Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
+                ContextDeliveryCapture contextDelivery = ContextLedgerCapture.deliveryCapture();
+                return callBudget.run(
+                        activeStream -> engineAssembledWithMessagesFullTracked(
+                                messages, null, decodedProgressSink, engineRequestTimeout, cancel,
+                                 lastChunkAt, activeStream, selectedToolSpecs, controls, false, generation, contextDelivery),
+                        wallClockMs,
+                        lastChunkAt,
+                        "non-streaming chat",
+                        breaker,
+                        cancel,
+                        generation);
+            });
+        } finally {
+            modelLifecycle.readLock().unlock();
+        }
     }
 
     private String captureTextGeneration(
             ProviderResponseCapture.Source source,
             Function<ProviderResponseCapture.Generation, TextGeneration> generationWork) {
-        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
-                source, ProviderResponseCapture.purposeFor(source));
+        if (!modelLifecycle.readLock().tryLock()) throw new IllegalStateException("Model switching is in progress.");
         try {
-            TextGeneration result = generationWork.apply(generation);
-            if (result == null) return null;
-            if (result.completion() == ProviderResponseCapture.Completion.RUNTIME_ABORT) {
-                abandonGenerationForAbort(generation, result.abortOrigin());
+            ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                    source, ProviderResponseCapture.purposeFor(source));
+            try {
+                TextGeneration result = generationWork.apply(generation);
+                if (result == null) return null;
+                if (result.completion() == ProviderResponseCapture.Completion.RUNTIME_ABORT) {
+                    abandonGenerationForAbort(generation, result.abortOrigin());
+                    return result.text();
+                }
+                ProviderResponseCapture.Receipt receipt = result.provenance();
+                if (receipt == null || !generation.generationId().equals(receipt.generationId())) {
+                    ProviderResponseCapture.Attempt synthetic = generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+                    receipt = synthetic.respond(new ProviderResponseCapture.Response(
+                            result.text(), 0, source, result.completion(),
+                            result.normalized(), result.truncated()));
+                }
+                generation.complete(receipt);
                 return result.text();
+            } catch (RuntimeException | Error failure) {
+                generation.fail(generationFailure(source, failure, generation));
+                throw failure;
             }
-            ProviderResponseCapture.Receipt receipt = result.provenance();
-            if (receipt == null || !generation.generationId().equals(receipt.generationId())) {
-                ProviderResponseCapture.Attempt synthetic = generation.startAttempt(
-                        ProviderResponseCapture.AttemptKind.PRIMARY,
-                        ProviderResponseCapture.RetryReason.NONE);
-                receipt = synthetic.respond(new ProviderResponseCapture.Response(
-                        result.text(), 0, source, result.completion(),
-                        result.normalized(), result.truncated()));
-            }
-            generation.complete(receipt);
-            return result.text();
-        } catch (RuntimeException | Error failure) {
-            generation.fail(generationFailure(source, failure, generation));
-            throw failure;
+        } finally {
+            modelLifecycle.readLock().unlock();
         }
     }
 
@@ -1617,7 +1696,8 @@ public final class LlmClient implements AutoCloseable {
                         result.completion(),
                         result.normalized(),
                         result.truncated(),
-                        ToolProtocolText.containsToolCalls(result.text())));
+                        ToolProtocolText.containsToolCalls(result.text()),
+                        result.textProposalSource()));
         return result.withProvenance(receipt);
     }
 
@@ -1665,16 +1745,22 @@ public final class LlmClient implements AutoCloseable {
                                                                 List<ToolSpec> requestToolSpecs,
                                                                 ChatRequestControls controls,
                                                                 boolean streamRequest,
-                                                                ProviderResponseCapture.Generation generation) {
-        // The structured stream consumer classifies both the explicit cancel
-        // supplier and an interrupt of its budget-owned worker thread. Keep
-        // those signals distinct so an internal shutdownNow cannot be
-        // reported as an operator cancellation.
-        // Unseen progress is initialized by LlmCallBudget.run before work
-        // is submitted. No progress is inferred from worker startup.
-        return engineAssembledWithMessagesFull(
-                messages, displaySink, decodedProgressSink, timeout, cancelled, activeStream,
-                requestToolSpecs, controls, streamRequest, generation);
+                                                                ProviderResponseCapture.Generation generation,
+                                                                ContextDeliveryCapture contextDelivery) {
+        if (!modelLifecycle.readLock().tryLock()) throw new IllegalStateException("Model switching is in progress.");
+        try {
+            // The structured stream consumer classifies both the explicit cancel
+            // supplier and an interrupt of its budget-owned worker thread. Keep
+            // those signals distinct so an internal shutdownNow cannot be
+            // reported as an operator cancellation.
+            // Unseen progress is initialized by LlmCallBudget.run before work
+            // is submitted. No progress is inferred from worker startup.
+            return engineAssembledWithMessagesFull(
+                    messages, displaySink, decodedProgressSink, timeout, cancelled, activeStream,
+                    requestToolSpecs, controls, streamRequest, generation, contextDelivery);
+        } finally {
+            modelLifecycle.readLock().unlock();
+        }
     }
 
     /**
@@ -1691,7 +1777,8 @@ public final class LlmClient implements AutoCloseable {
                                                          List<ToolSpec> requestToolSpecs,
                                                          ChatRequestControls controls,
                                                          boolean streamRequest,
-                                                         ProviderResponseCapture.Generation generation) {
+                                                         ProviderResponseCapture.Generation generation,
+                                                         ContextDeliveryCapture contextDelivery) {
         // Sanitize message content while preserving tool-call structure
         // (toolCalls, toolCallId) - these carry native tool-call context that
         // OllamaEngine.serializeChatMessage needs for proper /api/chat formatting.
@@ -1702,8 +1789,11 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCalls(),
                         m.toolCallId(), m.contentRestrictions()))
                 .toList();
+        ContextDeliveryCapture.Prepared contextPrepared = contextDelivery.prepare(messages, sanitized);
         List<ToolSpec> tools = effectiveToolSpecs(
                 requestToolSpecs, generation.toolAuthorityMode());
+        sanitized = TextToolCallInstructions.forRequest(
+                sanitized, generation.toolAuthorityMode(), requestToolSpecs);
         ChatRequestControls requestControls = withConfigSampling(controls);
         List<ChatMessage> requestMessages = fitMessagesToContextBudget(sanitized, tools, requestControls);
         if (requestMessages.size() < sanitized.size()) {
@@ -1738,7 +1828,7 @@ public final class LlmClient implements AutoCloseable {
                         firstAttemptSink,
                         progressOnlySink,
                         !deferVisibleChunks,
-                        false);
+                        false, contextPrepared);
                 if (!shouldRetryCapTruncatedToolResult(req, first)) {
                     if (deferVisibleChunks && onChunk != null && first != null && !first.text().isEmpty()) {
                         onChunk.accept(first.text());
@@ -1764,7 +1854,7 @@ public final class LlmClient implements AutoCloseable {
                         onChunk,
                         progressOnlySink,
                         true,
-                        false);
+                        false, contextPrepared);
             } catch (EngineException.MalformedResponse malformed) {
                 if ((generation.attached() && generation.terminal())
                         || !shouldRetryCompatToolArgumentsNonStreaming(malformed, req)) {
@@ -1795,7 +1885,7 @@ public final class LlmClient implements AutoCloseable {
                         onChunk,
                         progressOnlySink,
                         true,
-                        true);
+                        true, contextPrepared);
             }
         });
     }
@@ -1811,113 +1901,119 @@ public final class LlmClient implements AutoCloseable {
             Consumer<String> onChunk,
             Consumer<String> progressOnlySink,
             boolean partialOutputCommitsAttempt,
-            boolean nonStreamingCompat) {
+            boolean nonStreamingCompat,
+            ContextDeliveryCapture.Prepared contextPrepared) {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(attemptKind, retryReason);
-        AtomicBoolean transportDispatched = new AtomicBoolean();
-        AtomicBoolean transportUnobserved = new AtomicBoolean();
-        ProviderTransportHandoff handoff = new ProviderTransportHandoff() {
-            @Override
-            public void requestDispatched() {
-                attempt.requestDispatched();
-                transportDispatched.set(true);
-            }
+        try (ContextDeliveryCapture.Request contextRequest = contextPrepared.beginRequest(request.messages)) {
+            AtomicBoolean transportDispatched = new AtomicBoolean();
+            AtomicBoolean transportUnobserved = new AtomicBoolean();
+            ProviderTransportHandoff handoff = new ProviderTransportHandoff() {
+                @Override
+                public void requestDispatched() {
+                    attempt.requestDispatched();
+                    contextRequest.handoff(null);
+                    transportDispatched.set(true);
+                }
 
-            @Override
-            public void requestDispatched(ProviderTransportHandoff.DispatchEvidence evidence) {
-                attempt.requestDispatched(evidence);
-                transportDispatched.set(true);
-            }
+                @Override
+                public void requestDispatched(ProviderTransportHandoff.DispatchEvidence evidence) {
+                    attempt.requestDispatched(evidence);
+                    contextRequest.handoff(evidence);
+                    transportDispatched.set(true);
+                }
 
-            @Override
-            public ProviderTransportAttempt admitTransport(
-                    ProviderTransportHandoff.DispatchEvidence evidence) {
-                ProviderTransportAttempt transport = attempt.admitTransport(evidence);
-                transportDispatched.set(true);
-                return transport;
-            }
+                @Override
+                public ProviderTransportAttempt admitTransport(
+                        ProviderTransportHandoff.DispatchEvidence evidence) {
+                    ProviderTransportAttempt transport = attempt.admitTransport(evidence);
+                    contextRequest.handoff(evidence);
+                    transportDispatched.set(true);
+                    return transport;
+                }
 
-            @Override
-            public void transportUnobserved() {
-                attempt.transportUnobserved();
-                transportUnobserved.set(true);
+                @Override
+                public void transportUnobserved() {
+                    attempt.transportUnobserved();
+                    transportUnobserved.set(true);
+                }
+            };
+            try {
+                attempt.bindPreparedReadInputs(request, ProviderReadInputBinding.SANITIZER_VERSION);
+                PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(request, streamRequest));
+            } catch (RuntimeException | Error preDispatch) {
+                attempt.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
+                generation.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
+                throw preDispatch;
             }
-        };
-        try {
-            attempt.bindPreparedReadInputs(request, ProviderReadInputBinding.SANITIZER_VERSION);
-            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(request, streamRequest));
-        } catch (RuntimeException | Error preDispatch) {
-            attempt.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
-            generation.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
-            throw preDispatch;
-        }
-        try {
-            java.util.stream.Stream<TokenChunk> stream = nonStreamingCompat
-                    ? engineResolver.chatStreamNonStreaming(request, handoff)
-                    : engineResolver.chatStream(request, handoff);
-            StreamResult result = consumeEngineStream(
-                    stream,
-                    activeStream,
-                    cancelled,
-                    onChunk,
-                    progressOnlySink,
-                    partialOutputCommitsAttempt,
-                    origin -> {
-                        if (origin != ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
-                            abandonGenerationForAbort(generation, origin);
-                        }
-                    });
-            if (result != null && result.aborted()) {
-                if (result.abortOrigin() == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
-                    ProviderResponseCapture.Failure classified = transportUnobserved.get()
-                            ? ProviderResponseCapture.Failure.TRANSPORT_UNOBSERVED
-                            : transportDispatched.get()
-                                    ? ProviderResponseCapture.Failure.PROVIDER_TRANSIENT
-                                    : ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH;
-                    attempt.fail(classified);
+            try {
+                java.util.stream.Stream<TokenChunk> stream = nonStreamingCompat
+                        ? engineResolver.chatStreamNonStreaming(request, handoff)
+                        : engineResolver.chatStream(request, handoff);
+                StreamResult result = consumeEngineStream(
+                        stream,
+                        activeStream,
+                        cancelled,
+                        onChunk,
+                        progressOnlySink,
+                        partialOutputCommitsAttempt,
+                        origin -> {
+                            if (origin != ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
+                                abandonGenerationForAbort(generation, origin);
+                            }
+                        });
+                if (result != null && result.aborted()) {
+                    if (result.abortOrigin() == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
+                        ProviderResponseCapture.Failure classified = transportUnobserved.get()
+                                ? ProviderResponseCapture.Failure.TRANSPORT_UNOBSERVED
+                                : transportDispatched.get()
+                                        ? ProviderResponseCapture.Failure.PROVIDER_TRANSIENT
+                                        : ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH;
+                        attempt.fail(classified);
+                        generation.fail(classified);
+                    }
+                    return result;
+                }
+                return recordAttemptResponse(result, generation.source(), attempt);
+            } catch (EngineException.ContextBudgetExceeded contextFailure) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), contextFailure);
+                attempt.fail(classified);
+                generation.fail(classified);
+                throw contextFailure;
+            } catch (EngineException.Transient transientFailure) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), transientFailure);
+                attempt.fail(classified);
+                throw transientFailure;
+            } catch (EngineException.MalformedResponse malformed) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), malformed);
+                attempt.fail(classified);
+                if (!transportDispatched.get() && !transportUnobserved.get()) {
                     generation.fail(classified);
                 }
-                return result;
-            }
-            return recordAttemptResponse(result, generation.source(), attempt);
-        } catch (EngineException.ContextBudgetExceeded contextFailure) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), contextFailure);
-            attempt.fail(classified);
-            generation.fail(classified);
-            throw contextFailure;
-        } catch (EngineException.Transient transientFailure) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), transientFailure);
-            attempt.fail(classified);
-            throw transientFailure;
-        } catch (EngineException.MalformedResponse malformed) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), malformed);
-            attempt.fail(classified);
-            if (!transportDispatched.get() && !transportUnobserved.get()) {
+                throw malformed;
+            } catch (EngineException engineFailure) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), engineFailure);
+                attempt.fail(classified);
                 generation.fail(classified);
+                throw engineFailure;
+            } catch (RuntimeException | Error runtimeFailure) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), runtimeFailure);
+                attempt.fail(classified);
+                generation.fail(classified);
+                throw runtimeFailure;
+            } catch (Exception checkedProviderFailure) {
+                ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
+                        transportDispatched.get(), transportUnobserved.get(), checkedProviderFailure);
+                attempt.fail(classified);
+                generation.fail(classified);
+                rethrowControlFlow(checkedProviderFailure);
+                throw new EngineException.ResponseError(
+                        0, checkedProviderFailure.getMessage(), checkedProviderFailure);
             }
-            throw malformed;
-        } catch (EngineException engineFailure) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), engineFailure);
-            attempt.fail(classified);
-            generation.fail(classified);
-            throw engineFailure;
-        } catch (RuntimeException | Error runtimeFailure) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), runtimeFailure);
-            attempt.fail(classified);
-            generation.fail(classified);
-            throw runtimeFailure;
-        } catch (Exception checkedProviderFailure) {
-            ProviderResponseCapture.Failure classified = failureAtTransportBoundary(
-                    transportDispatched.get(), transportUnobserved.get(), checkedProviderFailure);
-            attempt.fail(classified);
-            generation.fail(classified);
-            rethrowControlFlow(checkedProviderFailure);
-            throw new EngineException.ResponseError(
-                    0, checkedProviderFailure.getMessage(), checkedProviderFailure);
         }
     }
 
@@ -2031,7 +2127,14 @@ public final class LlmClient implements AutoCloseable {
                         "",
                         completion,
                         assembly.normalized(terminalText),
-                        assembly.truncated());
+                        assembly.truncated())
+                        .withTextProposalSource(completion == ProviderResponseCapture.Completion.PROVIDER_EOS
+                                && toolCalls.isEmpty() && !assembly.truncated()
+                                && assembly.normalized(terminalText)
+                                && !ToolProtocolText.selectExecutableJsonProposals(terminalText)
+                                        .executionOrder().isEmpty()
+                                ? ProviderResponseCapture.TextProposalSource.captured(assembly.rawText(), terminalText)
+                                : null);
             } catch (EngineException.Transient transientFailure) {
                 if (streamWasLocallyClosed(activeStream, stream)) {
                     recordAbortBeforeStreamClose(

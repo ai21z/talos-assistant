@@ -522,6 +522,14 @@ class SimpleCommandsTest {
             assertTrue(text.contains("/models"), text);
             assertTrue(text.contains("/model"), text);
             assertTrue(text.contains("/set model <backend/model>"), text);
+            assertTrue(text.contains("/models use <alias>"), text);
+            assertTrue(text.contains("/set model <alias>"), text);
+            assertTrue(text.contains("/models add <alias> \"<absolute GGUF path>\""), text);
+            assertTrue(text.contains("for this session without starting it"), text);
+            assertTrue(text.contains("No model is downloaded"), text);
+            assertTrue(text.contains("Connect-only servers are not restarted"), text);
+            assertTrue(text.contains("conversation history, sampling and global tool/privacy policy are preserved"), text);
+            assertTrue(text.contains("do not establish artifact verification, current readiness or qualification"), text);
             assertTrue(text.contains("talos setup models"), text);
             assertTrue(text.contains("qwen2.5-coder-14b"), text);
         }
@@ -532,6 +540,7 @@ class SimpleCommandsTest {
             assertFalse(text.contains("/set model llama_cpp/qwen2.5-coder-14b"),
                     "must not present a specific GGUF as a runnable example (404s unless configured): " + text);
             assertTrue(text.contains("/models"), text);
+            assertFalse(text.contains("exposes only the configured/running GGUF"), text);
         }
 
         @Test void default_help_advertises_the_models_topic() {
@@ -610,6 +619,13 @@ class SimpleCommandsTest {
     class Set {
 
         private final SetCommand cmd = new SetCommand();
+        private final Context ctx = Context.builder(placeholderConfig()).build();
+
+        private Config placeholderConfig() {
+            Config cfg = new Config();
+            cfg.data.put("llm", Map.of("transport", "placeholder"));
+            return cfg;
+        }
 
         @Test void set_model_updates_llm() throws Exception {
             Result r = cmd.execute("model qwen3:8b", ctx);

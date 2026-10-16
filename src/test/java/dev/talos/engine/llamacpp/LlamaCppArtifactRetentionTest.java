@@ -294,7 +294,7 @@ class LlamaCppArtifactRetentionTest {
                     executable.toString(), model.toString(), "", "", "", "retention-fixture",
                     "http://127.0.0.1", server.getAddress().getPort(), 8192,
                     false, true, "", "", List.of(), false, false);
-            manager = new LlamaCppServerManager(config, (command, logPath) -> {
+            manager = SyntheticManagedServer.manager(config, (command, logPath) -> {
                 logPaths.add(logPath);
                 current = suppressionSupported ? new SuppressibleProcess() : new CaptureProcess();
                 current.suppressed = logPath == null;

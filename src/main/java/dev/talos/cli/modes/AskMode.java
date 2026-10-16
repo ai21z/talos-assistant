@@ -18,6 +18,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,11 +99,20 @@ public final class AskMode implements Mode {
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
         // System prompt - composed from sections, tool-aware, history-aware
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistoryForAssist();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+        var statusMessages = new ArrayList<>(history);
+        statusMessages.add(ChatMessage.user(rawLine));
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         LocalTurnTraceCapture.enterExecutionStage(
                 TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
-        boolean nativeTools = ctx.llm().prepareNativeTools();
+        boolean nativeTools = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestForMessages(statusMessages).isEmpty()
+                && ctx.llm().prepareNativeTools();
         LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forAsk()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
@@ -111,22 +121,17 @@ public final class AskMode implements Mode {
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory);
         if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(visibleTools)) {
-            promptBuilder.withWorkspace(workspace);
+            promptBuilder.withWorkspace(dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent() ? null : workspace);
         }
         String system = promptBuilder.build();
 
         // Build conversation history - AskMode uses a larger budget (55% vs 25%)
         // because there are no RAG snippets competing for context space.
         // This is critical for multi-turn creative tasks.
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistoryForAssist();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "ask",
                 "ask",
@@ -134,10 +139,11 @@ public final class AskMode implements Mode {
                 ctx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         // Execute LLM turn via shared executor
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(responseMaxChars)
                 .capabilityPosture(CapabilityPosture.ASK_READ_ONLY);

@@ -1003,6 +1003,32 @@ public final class StaticTaskVerifier {
         return assessReadOnlyWebDiagnostics(workspace, readPaths, userRequest, modelAnswer).answer();
     }
 
+    /** Eligibility selects an existing bounded verifier, not a completed diagnosis. */
+    public static boolean canSynthesizeObservedReadOnlyDiagnosis(
+            List<ReadOnlyFinalizationEvidence.Source> sources, String userRequest) {
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return false;
+        var selected = ObservedStaticWebSources.select(sources);
+        if (!selected.available()) return false;
+        var diagnostics = observedReadOnlyDiagnostics(selected.facts(), userRequest);
+        return !diagnostics.isEmpty() && diagnostics.stream().allMatch(diagnostic ->
+                diagnostic.kind().supportsAnswerPreservation());
+    }
+
+    private static List<StaticWebDiagnostic> observedReadOnlyDiagnostics(
+            StaticWebSelectorAnalyzer.Facts facts, String userRequest) {
+        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
+        StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), facts.html()).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.contentProblems(!facts.cssFile().isBlank()).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        diagnostics.addAll(facts.selectorDiagnostics());
+        facts.genericButtonResultDiagnosticProblems().forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.buttonResultBehaviorProblems(userRequest).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        return List.copyOf(diagnostics);
+    }
+
     /** Caller-owned evidence binding is required before observations enter this pure assessment. */
     public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
             List<ReadOnlyFinalizationEvidence.Source> sources,
@@ -1027,16 +1053,7 @@ public final class StaticTaskVerifier {
         if (derived != null) return derived;
         StaticWebSelectorAnalyzer.Facts facts = selected.facts();
         boolean cssInspected = !facts.cssFile().isBlank();
-        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
-        StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), facts.html()).forEach(
-                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
-        facts.contentProblems(cssInspected).forEach(
-                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
-        diagnostics.addAll(facts.selectorDiagnostics());
-        facts.genericButtonResultDiagnosticProblems().forEach(
-                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
-        facts.buttonResultBehaviorProblems(userRequest).forEach(
-                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        List<StaticWebDiagnostic> diagnostics = observedReadOnlyDiagnostics(facts, userRequest);
         ReadOnlyWebAnswerAssessment assessment = ReadOnlyWebDiagnosticAnswer.assess(
                 modelAnswer, selected.readPaths(), facts, diagnostics);
         if (assessment.preserved()) {

@@ -177,6 +177,10 @@ class SynchronizedApprovalAuditRunnerTest {
         assertFalse(result.finalAnswer().contains("Eleni Nikolaou"), result.finalAnswer());
         assertTrue(result.finalAnswer().contains("Private document content was read locally but withheld from model context"),
                 result.finalAnswer());
+        assertTrue(result.finalAnswer().contains("[Evidence incomplete:"), result.finalAnswer());
+        assertEquals("ADVISORY_ONLY", result.trace().outcome().classification());
+        assertTrue(result.trace().warnings().stream().anyMatch(warning -> "MISSING_EVIDENCE".equals(warning.code())),
+                result.trace().warnings().toString());
     }
 
     @Test

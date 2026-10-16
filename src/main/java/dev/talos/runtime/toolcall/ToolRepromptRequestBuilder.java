@@ -1,11 +1,14 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.llm.TextToolCallInstructions;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
@@ -128,14 +131,23 @@ final class ToolRepromptRequestBuilder {
                     out,
                     plan,
                     selected);
+            RuntimeModelIdentityAnswerPolicy.projectCapturedProviderTask(out,
+                    TurnTaskContractCapture.providerTaskBoundaryIndex(out), resolution.contract().originalUserRequest());
             return List.copyOf(out);
         }
         List<ChatMessage> out = new ArrayList<>();
-        out.add(ChatMessage.system("""
+        String systemPrompt = """
                 You are Talos, a local-first workspace assistant.
                 This is a bounded static-repair continuation. Use the available file-write tool to repair the exact remaining target paths.
                 Do not answer in prose instead of calling the required tool. Do not claim completion until tool-backed changes have executed.
-                """));
+                """;
+        if (repromptToolSpecs != null && !repromptToolSpecs.isEmpty()
+                && state.ctx != null && state.ctx.llm() != null
+                && state.ctx.llm().toolAuthorityModeForToolSurface(repromptToolSpecs)
+                        == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON) {
+            systemPrompt += "\n" + TextToolCallInstructions.formatContract();
+        }
+        out.add(ChatMessage.system(systemPrompt));
         lastStaticVerificationRepairContext(state.messages)
                 .map(message -> enrichStaticRepairContextForReprompt(message, state))
                 .ifPresent(out::add);
@@ -146,7 +158,7 @@ final class ToolRepromptRequestBuilder {
                         + "Do not claim completion until static verification passes."));
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Continue the bounded static repair."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         // T1011: workspace bytes are data, not policy. The readbacks travel
         // inside the user-role instruction as structured JSON, never in a
         // system-role message.
@@ -196,7 +208,7 @@ final class ToolRepromptRequestBuilder {
     }
 
     static ChatRequestControls controls(LoopState state) {
-        return controls(state, "pending-action-obligation");
+        return controls(state, null);
     }
 
     static ChatRequestControls controls(LoopState state, String debugTag) {
@@ -215,12 +227,23 @@ final class ToolRepromptRequestBuilder {
         if (state == null
                 || state.ctx == null
                 || state.ctx.llm() == null
-                || !state.hasPendingActionObligation()
                 || !supportsRequiredToolChoice
-                || !hasMutatingTool(state.ctx.nativeToolSpecs())) {
+                || state.failureDecision.shouldStop()
+                || state.toolOutcomes.stream().anyMatch(outcome -> outcome != null
+                        && (outcome.denied()
+                        || outcome.failureReason() == dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED
+                        || outcome.failureReason() == dev.talos.tools.ToolFailureReason.PERMISSION_POLICY_DENIED
+                        || outcome.failureReason() == dev.talos.tools.ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID
+                        || (!outcome.success() && outcome.mutationEffects().hasEffects())))) {
             return ChatRequestControls.defaults();
         }
-        List<String> tags = new ArrayList<>(List.of("pending-action-obligation"));
+        boolean pendingRetry = state.hasPendingActionObligation()
+                && hasMutatingTool(state.ctx.nativeToolSpecs());
+        if (!pendingRetry && !requiresCurrentMutationContinuation(state)) {
+            return ChatRequestControls.defaults();
+        }
+        List<String> tags = new ArrayList<>(List.of(pendingRetry
+                ? "pending-action-obligation" : "current-turn-mutation-obligation"));
         if (debugTag != null && !debugTag.isBlank() && !tags.contains(debugTag)) {
             tags.add(debugTag);
         }
@@ -230,6 +253,29 @@ final class ToolRepromptRequestBuilder {
                 ResponseFormatMode.TEXT,
                 "",
                 tags);
+    }
+
+    private static boolean requiresCurrentMutationContinuation(LoopState state) {
+        // The current action obligation survives prerequisite reads. It is not
+        // a mutation-only retry obligation and must not narrow the tool surface.
+        var resolution = TurnTaskContractCapture.getResolution();
+        if (resolution == null) return false;
+        ExecutionPhase phase = state.ctx.executionPhaseState() == null
+                ? CurrentTurnPlan.defaultPhaseFor(resolution.contract())
+                : state.ctx.executionPhaseState().phase();
+        if (ActionObligationPolicy.derive(resolution, phase)
+                != ActionObligation.MUTATING_TOOL_REQUIRED) return false;
+        List<ToolSpec> selected = currentNativeToolSpecs(state);
+        if (!hasMutatingTool(selected)
+                || state.currentResponseReceipt.toolAuthorityContract().mode()
+                        != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                || state.ctx.llm().toolAuthorityModeForToolSurface(selected)
+                        != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE) return false;
+        if (!resolution.contract().expectedTargets().isEmpty()) {
+            return !ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty();
+        }
+        return state.toolOutcomes.stream().noneMatch(outcome -> outcome != null
+                && outcome.success() && outcome.mutating());
     }
 
     private static Optional<ChatMessage> lastStaticVerificationRepairContext(List<ChatMessage> messages) {

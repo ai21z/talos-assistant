@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.expectation.AppendLineExpectation;
@@ -185,7 +186,7 @@ final class TargetReadbackCompactRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Apply the requested file change."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
@@ -216,7 +217,7 @@ final class TargetReadbackCompactRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Append the requested line to the target file."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.

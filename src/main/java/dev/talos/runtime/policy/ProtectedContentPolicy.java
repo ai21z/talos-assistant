@@ -36,6 +36,10 @@ public final class ProtectedContentPolicy {
         return ProtectedContentSanitizer.sanitizeText(text);
     }
 
+    public static String sanitizeTextPrefix(String text) {
+        return ProtectedContentSanitizer.sanitizeTextPrefix(text);
+    }
+
     public static String sanitizeSearchLine(String line) {
         return ProtectedContentSanitizer.sanitizeSearchLine(line);
     }

@@ -100,6 +100,10 @@ class TalosBootstrapTest {
     }
 
     private static void saveSession(Path home, Path workspace, String user, String assistant) {
+        saveSession(home, workspace, user, assistant, "ollama/qwen2.5-coder:14b");
+    }
+
+    private static void saveSession(Path home, Path workspace, String user, String assistant, String model) {
         JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
         try (var writer = store.acquireSessionWriter(sessionId)) {
@@ -107,7 +111,7 @@ class TalosBootstrapTest {
                     List.of(
                             new SessionData.Turn("user", user, ""),
                             new SessionData.Turn("assistant", assistant, "ok")),
-                    "ollama/qwen2.5-coder:14b"));
+                    model));
         }
     }
 
@@ -201,6 +205,69 @@ class TalosBootstrapTest {
             assertTrue(router.context().conversationManager().hasHistory());
             assertTrue(router.context().memory().get().contains("old BMI answer"));
         });
+    }
+
+    @Test
+    void autoLoadKeepsHistoryAndConfiguredModelWhenSessionOnlyAliasIsMissing() throws Exception {
+        Path workspace = isolatedUserHome.resolve("missing-model-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+        saveSession(isolatedUserHome, workspace, "saved request", "saved answer", "llama_cpp/session-only-import");
+        Config cfg = configWithSessionPolicy(true, true);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+
+        ReplRouter router = createRouter(sessionState(), cfg,
+                new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
+
+        assertTrue(router.getStartupNotice().contains("restored 1 prior exchange"));
+        assertTrue(router.getStartupNotice().contains("Saved model was not restored"));
+        assertTrue(router.getStartupNotice().contains("previous model selection was preserved"));
+        assertFalse(router.getStartupNotice().contains("model llama_cpp/session-only-import"));
+        assertEquals("llama_cpp/configured-model", router.context().llm().getModel());
+        assertEquals("configured-model", dev.talos.core.CfgUtil.map(cfg.data.get("llm")).get("model"));
+        assertFalse(router.context().llm().modelSelectionUnavailable());
+        assertTrue(router.context().memory().get().contains("saved answer"));
+        assertEquals(1, router.context().conversationManager().turnCount());
+    }
+
+    @Test
+    void restoringAlreadySelectedModelPreservesLazyStartup() {
+        Config cfg = configWithSessionPolicy(false, false);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+        // No artifact or server path exists. Calling setModel would fail local validation.
+        try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+            assertEquals("", TalosBootstrap.restoreSavedModel(llm, "llama_cpp/configured-model"));
+            assertEquals("llama_cpp/configured-model", llm.getModel());
+            assertFalse(llm.modelSelectionUnavailable());
+        }
+    }
+
+    @Test
+    void failedSavedModelRestoreDoesNotClearExistingUnavailableState() throws Exception {
+        Config cfg = configWithSessionPolicy(false, false);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+        try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+            // Synthetic unsettled-switch state. No provider or model process is started.
+            var resolverField = dev.talos.core.llm.LlmClient.class.getDeclaredField("engineResolver");
+            resolverField.setAccessible(true);
+            Object resolver = resolverField.get(llm);
+            var registryField = resolver.getClass().getDeclaredField("registry");
+            registryField.setAccessible(true);
+            var registry = (dev.talos.core.engine.EngineRegistry) registryField.get(resolver);
+            var unavailableField = dev.talos.core.engine.EngineRegistry.class.getDeclaredField("selectionUnavailable");
+            unavailableField.setAccessible(true);
+            unavailableField.setBoolean(registry, true);
+
+            String notice = TalosBootstrap.restoreSavedModel(llm, "llama_cpp/configured-model");
+
+            assertTrue(notice.contains("No model is available"));
+            assertFalse(notice.contains("selection was preserved"));
+            assertTrue(llm.modelSelectionUnavailable());
+            assertEquals("llama_cpp/configured-model", llm.getModel());
+            assertThrows(IllegalStateException.class, registry::engine);
+        }
     }
 
     @Test

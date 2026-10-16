@@ -69,6 +69,30 @@ class ModelLifecycleDocumentationTest {
     }
 
     @Test
+    void sessionSelectionDocumentsLocalOnlyScopeWithoutConflatingReadinessAndQualification() throws Exception {
+        String setup = read("docs/getting-started/model-setup.md");
+        for (String required : List.of(
+                "/models use <alias>", "/set model <alias>",
+                "/models add my-agent \"D:/models/agent.gguf\"",
+                "~/.talos/models/gguf/<alias>/<artifactFile>",
+                "Imports and selections apply to this session.",
+                "do not download models", "Connect-only servers are not restarted",
+                "Saved defaults and conversation history are preserved",
+                "`tools.native_calling`", "sampling and embedding configuration",
+                "A local candidate is not proof of readiness.",
+                "Registering a custom GGUF does not qualify it",
+                "Saved session history is restored even when its saved model cannot be selected",
+                "another explicit successful selection is required")) {
+            assertContains(setup, required);
+        }
+        String profiles = read("docs/reference/model-profiles.md");
+        assertContains(profiles, "model-setup.md#select-a-model-in-the-current-session");
+        assertContains(profiles, "not artifact verification, readiness or qualification");
+        assertContains(profiles, "Built-in aliases require the pinned artifact bytes.");
+        assertContains(read("README.md"), "docs/getting-started/model-setup.md#select-a-model-in-the-current-session");
+    }
+
+    @Test
     void onboardingGuideCoversTheCompleteBoundedWorkflow() throws Exception {
         String guide = read("docs/development/onboard-new-models.md");
 

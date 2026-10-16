@@ -305,7 +305,7 @@ final class StaticWebContinuationPlanner {
                 ChatMessage.system(systemInstruction),
                 ChatMessage.system(frame.toString()),
                 ChatMessage.user("Current user request:\n"
-                        + (userTask == null ? "" : userTask.strip())
+                        + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip())
                         + "\n\n" + toolInstruction));
     }
 
@@ -335,7 +335,7 @@ final class StaticWebContinuationPlanner {
                         Do not answer in prose instead of calling the write-file tool.
                         """),
                 ChatMessage.user("Current user request:\n"
-                        + (userTask == null ? "" : userTask.strip())
+                        + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip())
                         + "\n\nCall talos.write_file now for the actual static web files."));
     }
 
@@ -432,7 +432,7 @@ final class StaticWebContinuationPlanner {
                 + safeToolInstruction + "\n"
                 + "Do not write any other file in this continuation.\n\n"
                 + "Original user request:\n"
-                + (userTask == null ? "" : userTask.strip());
+                + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip());
     }
 
     private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {

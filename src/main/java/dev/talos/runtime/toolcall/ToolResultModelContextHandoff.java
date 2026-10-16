@@ -107,7 +107,10 @@ public final class ToolResultModelContextHandoff {
         if (!contentWithheldFromModelContext && handoffCandidate != null && handoffCandidate.success()
                 && modelResult != null && modelResult.success()) {
             var metadata = handoffCandidate.contentMetadata();
-            if (metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION) {
+            if (metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION
+                    || (metadata.source() == ToolContentMetadata.ContentSource.RAG_RETRIEVE
+                    && (metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                    || metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.EXTRACTED_DOCUMENT_TEXT))) {
                 ContentRestrictionScope.restrictIfActive(new ContentRestrictions(
                         metadata.modelHandoffAllowed(), metadata.rawArtifactPersistenceAllowed(),
                         metadata.privacyClass() != ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,

@@ -27,7 +27,8 @@ public final class ObservedProviderTransportFixture {
             ProviderTransportAttempt.SendOperation<Stream<TokenChunk>> send,
             boolean bufferedProviderTerminal) {
         ChatRequest exactRequest = Objects.requireNonNull(request, "provider request");
-        boolean observedReadInputs = exactRequest.controls.debugTags().contains(ProviderReadInputBinding.REQUEST_TAG);
+        boolean observedReadInputs = exactRequest.controls.debugTags().contains(ProviderReadInputBinding.REQUEST_TAG)
+                || exactRequest.controls.debugTags().contains(ProviderReadInputBinding.DELIVERY_TAG);
         String providerBody = observedReadInputs ? serializedReadRequest(exactRequest) : String.join(
                 "\n",
                 exactRequest.backend,
@@ -66,9 +67,28 @@ public final class ObservedProviderTransportFixture {
         var body = mapper.createObjectNode();
         body.put("model", request.model);
         body.put("stream", true);
-        body.put("tool_choice", "none");
         var messages = body.putArray("messages");
         try {
+            if (request.controls.toolChoice() == ToolChoiceMode.NAMED) {
+                var choice = body.putObject("tool_choice");
+                choice.put("type", "function");
+                choice.putObject("function").put("name", request.controls.namedTool());
+            } else {
+                body.put("tool_choice", request.controls.toolChoice().name().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (!request.tools.isEmpty()) {
+                var tools = body.putArray("tools");
+                for (ToolSpec tool : request.tools) {
+                    var serialized = tools.addObject();
+                    serialized.put("type", "function");
+                    var function = serialized.putObject("function");
+                    function.put("name", tool.name());
+                    function.put("description", tool.description());
+                    function.set("parameters", tool.parametersSchemaJson() == null
+                            ? mapper.createObjectNode().put("type", "object")
+                            : mapper.readTree(tool.parametersSchemaJson()));
+                }
+            }
             for (ChatMessage message : request.messages) {
                 var serialized = messages.addObject();
                 serialized.put("role", message.role());

@@ -8,6 +8,7 @@ import dev.talos.runtime.TraceArtifactObservation;
 import dev.talos.runtime.TerminalTurnPairObservation;
 import dev.talos.runtime.TurnLogTailObservation;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.policy.ProjectHandoffSourceAccess;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.trace.TurnTraceEvent;
@@ -136,6 +137,19 @@ public final class ExplainLastTurnCommand implements Command {
                 .orElse(null);
         if (latest == null) {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
+        }
+        if ("sources".equals(view)) {
+            LocalTurnTrace trace = loadLocalTrace(store, sessionId, latest).orElse(null);
+            if (!requiresTerminalOnlyRendering(latest, trace)) {
+                LocalTurnTrace pairedTrace = validTracePair(latest, trace, traceWorkspaceId) ? trace : null;
+                var historical = ProjectHandoffSourceAccess.render(latest, pairedTrace,
+                        ctx != null && ctx.redactor() != null
+                                ? ctx.redactor()::redactBlock : java.util.function.UnaryOperator.identity());
+                if (historical.isPresent()) {
+                    // Derived historical content must pass the normal output redactor.
+                    return new Result.Info(renderSources(latest) + historical.get());
+                }
+            }
         }
         return new Result.TrustedInfo(renderView(
                 latest,
@@ -284,7 +298,7 @@ public final class ExplainLastTurnCommand implements Command {
             case "tools" -> renderTools(latest);
             case "sources" -> renderSources(latest);
             case "trace" -> renderTrace(latest, pairedTrace);
-            default -> render(latest);
+            default -> render(latest, pairedTrace);
         };
     }
 
@@ -301,6 +315,9 @@ public final class ExplainLastTurnCommand implements Command {
         sb.append("  Turn:      ").append(turn.turnNumber()).append('\n');
         sb.append("  Status:    ").append(effectiveStatus(turn, localTrace)).append('\n');
         sb.append("  Outcome:   ").append(inferOutcome(turn, localTrace)).append('\n');
+        for (String line : dev.talos.cli.ui.FinalAnswerStatusRenderer.lines(localTrace)) {
+            sb.append("  ").append(line).append('\n');
+        }
         sb.append("  Duration:  ").append(turn.durationMs()).append("ms\n");
         sb.append("  Approvals: required=").append(turn.approvalsRequired())
                 .append(" granted=").append(turn.approvalsGranted())

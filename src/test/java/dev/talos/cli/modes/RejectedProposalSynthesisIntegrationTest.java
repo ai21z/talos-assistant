@@ -80,6 +80,71 @@ class RejectedProposalSynthesisIntegrationTest {
         assertEquals(1, recorded.requests().size());
     }
 
+    @Test void actualSynthesisContextBudgetDetailSurvivesFinalizationWithoutGrantingProof() throws Exception {
+        var sourceFiles = sources();
+        for (var source : sourceFiles.entrySet()) Files.writeString(workspace.resolve(source.getKey()), source.getValue());
+        var config = new dev.talos.core.Config();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(config,
+                List.of(new LlmClient.StreamResult("Must not be dispatched.", List.of())), 2_048);
+        clients.add(recorded.client());
+        LocalTurnTraceCapture.begin("synthesis-context-budget-integration", "local-test", 1,
+                "2026-09-27T00:00:00Z", "workspace-hash", "ask", "test", "test-model", REQUEST);
+        var contract = WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromUserRequest(REQUEST), workspace);
+        TurnTaskContractCapture.set(contract);
+        dev.talos.runtime.TurnAuditCapture.begin();
+        dev.talos.runtime.TurnUserRequestCapture.set(REQUEST);
+        var registry = new dev.talos.tools.ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        registry.register(new dev.talos.runtime.toolcall.DocumentComparisonTool());
+        var specs = registry.descriptors().stream().map(descriptor -> new dev.talos.spi.types.ToolSpec(
+                descriptor.name(), descriptor.description(), descriptor.parametersSchema())).toList();
+        var context = dev.talos.cli.repl.Context.builder(config).llm(recorded.client())
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, Map.of()))
+                .toolRegistry(registry).nativeToolSpecs(specs).build();
+        var calls = new ArrayList<ChatMessage.NativeToolCall>();
+        for (String path : sourceFiles.keySet()) calls.add(new ChatMessage.NativeToolCall(
+                "read-" + path, "talos.read_file", Map.of("path", path)));
+        for (var requirement : dev.talos.runtime.task.DocumentComparisonRequest.from(contract).requirements()) {
+            calls.add(new ChatMessage.NativeToolCall("compare-" + calls.size(),
+                    dev.talos.runtime.toolcall.DocumentComparisonTool.NAME,
+                    Map.of("left", requirement.pair().left(), "right", requirement.pair().right())));
+        }
+        assertEquals(6, calls.size(), "Five source reads and one actual comparison are required");
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(REQUEST)));
+        var loop = new ToolCallLoop(new dev.talos.runtime.TurnProcessor(null,
+                new dev.talos.runtime.NoOpApprovalGate(), registry), 4).runRuntimeDeterministic("", calls,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API, messages, workspace, context);
+        assertEquals(6, loop.toolsInvoked());
+        assertEquals(0, loop.failedCalls());
+        assertTrue(loop.toolOutcomes().stream().allMatch(outcome -> outcome.success() && !outcome.mutating()));
+        assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, loop.readOnlySynthesisStatus());
+        assertTrue(TerminalReadOnlyStopAnswer.rejectedProposalSynthesis(loop));
+        assertTrue(loop.finalAnswer().contains("budget 0, context window 2048"), loop.finalAnswer());
+        assertTrue(recorded.requests().isEmpty(), "The real request budget must reject before transport or any retry");
+        var plan = CurrentTurnPlan.create(contract, ExecutionPhase.INSPECT,
+                specs.stream().map(dev.talos.spi.types.ToolSpec::name).toList(),
+                specs.stream().map(dev.talos.spi.types.ToolSpec::name).toList(), List.of());
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop).result().status());
+        var replacement = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                "Unrelated candidate must not inherit runtime status.", plan, messages, loop, workspace);
+        assertEquals(TerminalReadOnlyStopAnswer.synthesisUnavailableAnswer(), replacement.answer());
+        var outcome = finish(new Turn(plan, messages, loop), loop);
+        assertEquals(loop.finalAnswer(), outcome.finalAnswer());
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        assertTrue(outcome.verificationReport().authoritativeProofKinds().isEmpty());
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(outcome.finalAnswer());
+        var trace = LocalTurnTraceCapture.complete();
+        assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+        assertEquals("NOT_RUN", trace.outcome().verificationStatus());
+        assertEquals(6, trace.events().stream().filter(event -> "TOOL_EXECUTED".equals(event.type())).count());
+        assertTrue(trace.warnings().stream().anyMatch(warning -> "CONTEXT_BUDGET_RETRY_SKIPPED".equals(warning.code())
+                && warning.message().contains("budget 0, context window 2048")));
+        for (var source : sourceFiles.entrySet()) assertEquals(source.getValue(), Files.readString(workspace.resolve(source.getKey())));
+    }
+
     @Test void missingActualReadCannotUseTheSynthesisFailureExceptionAsCoverage() throws Exception {
         Turn turn = lengthTurn();
         List<ToolCallLoop.ToolOutcome> missing = turn.loop().toolOutcomes().stream()

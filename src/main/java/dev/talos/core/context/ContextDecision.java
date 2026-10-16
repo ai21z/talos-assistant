@@ -5,6 +5,9 @@ import java.util.Objects;
 /** Audit-only decision about how a context item was handled. */
 public record ContextDecision(Action action, String reasonCode) {
     public enum Action {
+        ADMITTED_TO_CONTEXT,
+        SERIALIZED_AT_TRANSPORT_HANDOFF,
+        DELIVERY_UNOBSERVED,
         INCLUDED_IN_MODEL_PROMPT,
         WITHHELD_FROM_MODEL,
         SHOWN_LOCALLY_ONLY,

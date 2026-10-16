@@ -73,26 +73,32 @@ public record ReadOnlyAnswerComponents(List<Component> components, boolean reque
 
     /** Privacy shaping is applied once and removed content is never restored. */
     public String present(String answer, UnaryOperator<String> sanitizer, long maximum) {
+        return presentWithDelivery(answer, sanitizer, maximum).answer();
+    }
+
+    public record Presentation(String answer, boolean clipped) {}
+
+    public Presentation presentWithDelivery(String answer, UnaryOperator<String> sanitizer, long maximum) {
         String safe = Objects.toString(sanitizer.apply(answer), "");
         int cap = (int) Math.min(Integer.MAX_VALUE, Math.max(0, maximum));
         if (!render().equals(answer)) {
-            return safe.length() <= cap ? safe : incomplete(cap);
+            return new Presentation(safe.length() <= cap ? safe : incomplete(cap), safe.length() > cap);
         }
         if (!safe.equals(answer)) {
             String withheld = ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX
                     + "\n\nRequired answer content was changed by presentation policy.\n\n" + safe;
-            return withheld.length() <= cap ? withheld : incomplete(cap);
+            return new Presentation(withheld.length() <= cap ? withheld : incomplete(cap), withheld.length() > cap);
         }
-        if (safe.length() <= cap) return safe;
+        if (safe.length() <= cap) return new Presentation(safe, false);
         List<Component> retained = new ArrayList<>(components);
         List<String> omitted = new ArrayList<>();
         while (!retained.isEmpty()) {
             Component removed = retained.removeLast();
             omitted.add(removed.kind());
             String bounded = render(retained, omitted);
-            if (bounded.length() <= cap) return bounded;
+            if (bounded.length() <= cap) return new Presentation(bounded, true);
         }
-        return incomplete(cap);
+        return new Presentation(incomplete(cap), true);
     }
 
     private String render(List<Component> retained, List<String> omitted) {

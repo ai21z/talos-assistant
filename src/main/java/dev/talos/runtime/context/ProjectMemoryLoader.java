@@ -12,8 +12,10 @@ import dev.talos.runtime.task.TaskContract;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -39,6 +41,8 @@ public final class ProjectMemoryLoader {
     }
 
     public ProjectMemoryContext load(ProjectMemoryRequest request) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent())
+            return ProjectMemoryContext.suppressed("CONTROLLED_REQUEST_ACQUISITION");
         ProjectMemoryPolicy.Decision policy = ProjectMemoryPolicy.decide(request);
         if (!policy.load()) {
             recordSuppressed(policy.reason(), request);
@@ -63,7 +67,7 @@ public final class ProjectMemoryLoader {
 
         Budgeted budgeted = applyBudget(viable);
         for (ProjectMemorySource source : budgeted.included()) {
-            ProjectMemoryDecision decision = source.decision("INCLUDED_IN_MODEL_PROMPT", "LOADED");
+            ProjectMemoryDecision decision = source.decision("ADMITTED_TO_CONTEXT", "LOADED");
             decisions.add(decision);
             recordDecision(source, decision);
         }
@@ -201,9 +205,12 @@ public final class ProjectMemoryLoader {
             if (truncated) {
                 bytes = java.util.Arrays.copyOf(bytes, limits.maxBytesPerFile());
             }
-            String decoded = decodeUtf8(bytes);
-            TextSlice slice = slice(decoded);
-            String sanitized = ProtectedContentPolicy.sanitizeText(slice.text());
+            String decoded = decodeUtf8(bytes, truncated);
+            String admitted = truncated
+                    ? ProtectedContentPolicy.sanitizeTextPrefix(decoded)
+                    : ProtectedContentPolicy.sanitizeText(decoded);
+            TextSlice slice = slice(admitted);
+            String sanitized = slice.text();
             if (sanitized.isBlank()) {
                 return ReadDecision.skip(candidate.decision("WITHHELD_FROM_MODEL", "BLANK_AFTER_SANITIZATION"));
             }
@@ -307,7 +314,12 @@ public final class ProjectMemoryLoader {
         }
         if (safe.length() > limits.maxCharsPerFile()) {
             truncated = true;
-            safe = safe.substring(0, limits.maxCharsPerFile());
+            int end = limits.maxCharsPerFile();
+            if (Character.isHighSurrogate(safe.charAt(end - 1))
+                    && Character.isLowSurrogate(safe.charAt(end))) {
+                end--;
+            }
+            safe = safe.substring(0, end);
         }
         return new TextSlice(safe.strip(), truncated);
     }
@@ -318,12 +330,41 @@ public final class ProjectMemoryLoader {
         }
     }
 
-    private static String decodeUtf8(byte[] bytes) throws CharacterCodingException {
-        return StandardCharsets.UTF_8.newDecoder()
+    private static String decodeUtf8(byte[] bytes, boolean truncated) throws CharacterCodingException {
+        var decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes == null ? new byte[0] : bytes))
-                .toString();
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer input = ByteBuffer.wrap(bytes);
+        if (!truncated) return decoder.decode(input).toString();
+
+        // A byte cap is not EOF. Strict decoding still rejects malformed retained
+        // bytes, but underflow leaves an unfinished trailing code point unconsumed.
+        CharBuffer output = CharBuffer.allocate(bytes.length);
+        var result = decoder.decode(input, output, false);
+        if (result.isError()) result.throwException();
+        if (input.hasRemaining()) validateIncompleteUtf8(input);
+        return output.flip().toString();
+    }
+
+    private static void validateIncompleteUtf8(ByteBuffer suffix) throws MalformedInputException {
+        int size = suffix.remaining();
+        int first = Byte.toUnsignedInt(suffix.get());
+        int width = first >= 0xc2 && first <= 0xdf ? 2
+                : first >= 0xe0 && first <= 0xef ? 3
+                : first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+        if (width == 0 || size >= width) throw new MalformedInputException(size);
+        for (int i = 1; suffix.hasRemaining(); i++) {
+            int next = Byte.toUnsignedInt(suffix.get());
+            // Even an incomplete sequence must still be capable of representing
+            // a scalar value, not an overlong form, surrogate or value above U+10FFFF.
+            if (next < 0x80 || next > 0xbf
+                    || i == 1 && (first == 0xe0 && next < 0xa0
+                    || first == 0xed && next > 0x9f
+                    || first == 0xf0 && next < 0x90
+                    || first == 0xf4 && next > 0x8f)) {
+                throw new MalformedInputException(size);
+            }
+        }
     }
 
     private static void recordSuppressed(String reason, ProjectMemoryRequest request) {
@@ -363,7 +404,7 @@ public final class ProjectMemoryLoader {
         String reason = decision == null ? "UNSPECIFIED" : decision.decisionReason();
         String action = decision == null ? "" : decision.action();
         return switch (action) {
-            case "INCLUDED_IN_MODEL_PROMPT" -> ContextDecision.includedInModel(reason);
+            case "ADMITTED_TO_CONTEXT" -> new ContextDecision(ContextDecision.Action.ADMITTED_TO_CONTEXT, reason);
             case "REFUSED_UNSUPPORTED_BOUNDARY" -> ContextDecision.refusedUnsupportedBoundary(reason);
             case "EXCLUDED_BY_PRIVACY_OR_TRUST_POLICY" -> ContextDecision.excludedByPrivacyOrTrustPolicy(reason);
             default -> ContextDecision.withheldFromModel(reason);

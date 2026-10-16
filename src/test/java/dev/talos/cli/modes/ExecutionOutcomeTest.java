@@ -6,6 +6,8 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
+import dev.talos.runtime.observation.TurnRequestFrame;
+import dev.talos.runtime.intent.RequestedResultInventory;
 import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
@@ -15,12 +17,15 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.ToolMutationEffects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -125,6 +131,94 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.DENIED, outcome.taskOutcome().mutationOutcome().status());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_MUTATION));
+    }
+
+    @Test
+    void readOnlyAuthorityRejectionSurvivesMissingEvidenceWithoutUnsupportedProviderClaims() {
+        String request = "Can you diagnose this page without changing files?";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        String candidate = "The inspected page contains UNSUPPORTED_PAGE_FACT and its scripts passed verification.";
+        var loopResult = new ToolCallLoop.LoopResult(
+                candidate, 1, 1, List.of("talos.edit_file"), messages,
+                1, 0, false, 0, List.of(), 0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "", false, true, false, "", "Authority rejected",
+                        null, ToolError.INVALID_AUTHORITY)
+                        .withFailureReason(ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PAGE_FACT"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("scripts passed verification"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("Read-only answer from inspected evidence"), outcome.finalAnswer());
+    }
+
+    @Test
+    void controlledWorkspaceCompositionCannotEraseRuntimeFailedMutationEffects(@TempDir Path workspace) {
+        String request = "Where is this workspace?";
+        var task = TaskContractResolver.resolveFromUserRequest(request);
+        var region = new RequestedResultInventory.SourceRegion(0, request.length());
+        var inventory = new RequestedResultInventory(request, List.of(
+                new RequestedResultInventory.RequestedResult("location", region,
+                        RequestedResultInventory.Kind.WORKSPACE_LOCATION, "active workspace", "current turn",
+                        RequestedResultInventory.EvidenceBasis.TURN_WORKSPACE)), List.of());
+        String providerAnswer = "No files changed. UNSUPPORTED_PROVIDER_FACT.";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        for (var effects : List.of(ToolMutationEffects.applied("changed.txt"),
+                ToolMutationEffects.uncertain("changed.txt"))) {
+            try (var frame = TurnRequestFrame.open(request, workspace, 1,
+                    (current, composed) -> new TurnRequestFrame.Meaning(inventory, Set.of(),
+                            TurnRequestFrame.Publication.NO_NAMES, true, false))) {
+                frame.adopt(task);
+                assertEquals(TurnRequestFrame.State.ADOPTED, frame.state());
+                TurnTaskContractCapture.set(task.contract());
+                var plan = CurrentTurnPlan.create(task.contract(), ExecutionPhase.INSPECT,
+                        List.of(), List.of(), List.of());
+                // Injected outcome evidence challenges composition, not physical execution permission.
+                var failed = new ToolCallLoop.ToolOutcome("talos.write_file", "changed.txt", false, true,
+                        false, "", "The write did not finish.", null, ToolError.TOOL_ERROR)
+                        .withMutationEffects(effects);
+                var loop = new ToolCallLoop.LoopResult(providerAnswer, 1, 1, List.of("talos.write_file"),
+                        messages, 1, 0, false, 0, List.of(), 0, 0, 0, 0, List.of(failed));
+
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        providerAnswer, plan, messages, loop, workspace, 0);
+
+                assertEquals(MutationFailureAnswerRenderer.failedMutationEffectsSummary(loop), outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().contains(effects.appliedPaths().isEmpty()
+                        ? "UNKNOWN; final mutation state is not established" : "APPLIED_UNVERIFIED"));
+                assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PROVIDER_FACT"));
+                assertFalse(outcome.finalAnswer().contains("No files changed"));
+                assertFalse(outcome.finalAnswer().contains("The current workspace is"));
+            }
+        }
+    }
+
+    @Test
+    void providerWrittenAuthorityRejectionPrefixCannotSupplyBlockedExecutionFact() {
+        String request = "Can you diagnose this page without changing files?";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        String candidate = MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT
+                + "\n\nThe inspected page contains UNSUPPORTED_PAGE_FACT.";
+        var loopResult = new ToolCallLoop.LoopResult(
+                candidate, 1, 0, List.of(), messages,
+                0, 0, false, 0, List.of(), 0, 0, 0, 0, List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loopResult, null, 0);
+
+        assertFalse(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().contains(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains(
+                MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PAGE_FACT"), outcome.finalAnswer());
     }
 
     @Test
@@ -608,6 +702,11 @@ class ExecutionOutcomeTest {
         assertFalse(lower.contains("approval was denied"), outcome.finalAnswer());
         assertFalse(lower.contains("approval denied"), outcome.finalAnswer());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+        assertEquals(List.of("A required tool action was not performed."),
+                outcome.taskOutcome().warnings().stream()
+                        .filter(warning -> warning.type() == TruthWarningType.FAILED_ACTION_OBLIGATION)
+                        .map(dev.talos.runtime.outcome.TruthWarning::message)
+                        .toList());
     }
 
     @Test
@@ -3908,7 +4007,8 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertTrue(outcome.finalAnswer().contains("did not inspect"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains(
+                "Current evidence for the required workspace target was not established."), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("Talos is done"), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("Proposed improvements"), outcome.finalAnswer());
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());

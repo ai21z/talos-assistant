@@ -110,7 +110,9 @@ public final class ReadFileTool implements TalosTool {
             var allLines = Files.readAllLines(resolved);
             int startIdx = offset - 1; // 0-based
             if (startIdx >= allLines.size()) {
-                return ToolResult.ok("(file has " + allLines.size() + " lines; offset " + offset + " is past end)");
+                return ToolResult.ok("(file has " + allLines.size() + " lines; offset " + offset + " is past end)",
+                        ToolContentMetadata.normal().withReadCoverage(allLines.isEmpty() && offset == 1
+                                ? ToolContentMetadata.ReadCoverage.COMPLETE : ToolContentMetadata.ReadCoverage.LIMITED));
             }
 
             int endIdx = Math.min(startIdx + maxLines, allLines.size());
@@ -124,13 +126,18 @@ public final class ReadFileTool implements TalosTool {
             }
 
             String output = sb.toString();
+            ToolContentMetadata.ReadCoverage coverage = startIdx == 0 && endIdx == allLines.size()
+                    ? ToolContentMetadata.ReadCoverage.COMPLETE
+                    : call.param("offset") != null || call.param("max_lines") != null
+                        ? ToolContentMetadata.ReadCoverage.REQUESTED_RANGE : ToolContentMetadata.ReadCoverage.LIMITED;
             if (output.length() > MAX_OUTPUT_CHARS) {
+                coverage = ToolContentMetadata.ReadCoverage.LIMITED;
                 output = output.substring(0, MAX_OUTPUT_CHARS)
                         + "\n... [output truncated at 16K chars - use talos.grep to search for specific content, "
                         + "or request a specific range with offset + max_lines]";
             }
 
-            return ToolResult.ok(output);
+            return ToolResult.ok(output, ToolContentMetadata.normal().withReadCoverage(coverage));
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to read file: " + e.getMessage()));
         }
@@ -144,18 +151,21 @@ public final class ReadFileTool implements TalosTool {
         if (extraction.status() == DocumentExtractionStatus.SUCCESS
                 || extraction.status() == DocumentExtractionStatus.PARTIAL) {
             DocumentContentDecision decision = PrivateDocumentContentPolicy.decide(ctx.config(), request, info);
-            return ToolResult.ok(formatExtraction(extraction), ToolContentMetadata.extractedDocument(
+            ExtractedOutput formatted = formatExtraction(extraction);
+            return ToolResult.ok(formatted.text(), ToolContentMetadata.extractedDocument(
                     extraction.sourcePath(),
                     decision.privateDocumentContent(),
                     decision.modelHandoffAllowed(),
                     decision.rawArtifactPersistenceAllowed(),
                     decision.ragIndexAllowed(),
-                    decision.reason()));
+                    decision.reason()).withReadCoverage(extraction.status() == DocumentExtractionStatus.PARTIAL
+                            || formatted.clipped()
+                            ? ToolContentMetadata.ReadCoverage.LIMITED : ToolContentMetadata.ReadCoverage.COMPLETE));
         }
         return ToolResult.fail(ToolError.unsupportedFormat(formatExtractionLimit(extraction)));
     }
 
-    private static String formatExtraction(DocumentExtractionResult result) {
+    private static ExtractedOutput formatExtraction(DocumentExtractionResult result) {
         StringBuilder out = new StringBuilder();
         out.append("Extracted document text from ")
                 .append(result.sourcePath())
@@ -173,12 +183,15 @@ public final class ReadFileTool implements TalosTool {
         }
         out.append('\n').append(result.safeText());
         String output = out.toString();
-        if (output.length() > MAX_OUTPUT_CHARS) {
+        boolean clipped = output.length() > MAX_OUTPUT_CHARS;
+        if (clipped) {
             output = output.substring(0, MAX_OUTPUT_CHARS)
                     + "\n... [output truncated at 16K chars - request a narrower range or search term]";
         }
-        return output;
+        return new ExtractedOutput(output, clipped);
     }
+
+    private record ExtractedOutput(String text, boolean clipped) {}
 
     private static String formatExtractionLimit(DocumentExtractionResult result) {
         StringBuilder out = new StringBuilder();

@@ -128,11 +128,21 @@ final class ToolOutcomeFactory {
         return failedAuthority(call, diagnosticError, null);
     }
 
+    static ToolCallLoop.ToolOutcome requestDenied(ToolCall call, ToolResult blocked,
+                                                 LocalTurnTraceCapture.ParsedToolCallPermit permit,
+                                                 boolean mutating) {
+        return new ToolCallLoop.ToolOutcome(toolName(call), "", false,
+                mutating, true, "",
+                blocked.error().message(), null, blocked.error().code(), null, null,
+                blocked.error().reason(), List.of(), toolCallId(permit));
+    }
+
     static ToolCallLoop.ToolOutcome failedAuthority(
             ToolCall call,
             String diagnosticError,
             LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
+        dev.talos.runtime.TurnAuditCapture.recordAuthorityRejectedToolCall(call, diagnosticError);
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
                 "",
@@ -195,7 +205,8 @@ final class ToolOutcomeFactory {
                         : result.error().reason(),
                 evidenceSourcePaths(call, pathHint, result),
                 toolCallId(permit),
-                result == null ? null : result.mutationEffects());
+                result == null ? null : result.mutationEffects(),
+                result == null ? null : result.contentMetadata().directoryObservation());
     }
 
     private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {

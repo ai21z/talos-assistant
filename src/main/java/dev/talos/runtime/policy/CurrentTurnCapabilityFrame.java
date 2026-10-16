@@ -24,7 +24,7 @@ public final class CurrentTurnCapabilityFrame {
         if (plan == null) {
             return render(null, ExecutionPhase.INSPECT, List.of());
         }
-        return render(
+        String frame = render(
                 plan.taskContract(),
                 plan.phaseInitial(),
                 plan.visibleTools(),
@@ -35,6 +35,16 @@ public final class CurrentTurnCapabilityFrame {
                 plan.actionObligation(),
                 plan.workspaceOperationPlan(),
                 plan.contentMutationPredecessorPaths());
+        var binding = plan.contentSaveRequest().clarificationBinding();
+        if (binding != null) {
+            frame += "\n[OperandClarification]\nOriginal task turn: " + binding.originTurn()
+                    + "\nFilename reply turn: " + binding.replyTurn()
+                    + "\nThe original task remains authoritative. Only its missing destination was clarified. "
+                    + "All requested results and dependencies must be retained. "
+                    + "Whole request coverage remains unassessed. A verified file operation does not prove complete fulfillment. "
+                    + "Normal proposal validation and approval remain required.\n[/OperandClarification]";
+        }
+        return frame;
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {

@@ -52,6 +52,79 @@ class ReadOnlyEvidenceSynthesizerTest {
         return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 0, false, false, false, 0);
     }
 
+    @Test void ordinarySynthesisRetainsReferencesAndIdentityAlongsideAllReadCarriers() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("The current files differ from the earlier unapplied proposal.", List.of())),
+                16_384);
+        var state = stateWithHistory(recorded.client(), "Cedar was proposed, not applied.", "Current label is oak.");
+        var before = List.copyOf(state.messages);
+        assertFalse(ReadOnlyFinalizationEvidence.freeze(state, ReadOnlyEvidenceContext.select(state)).proposalSelected());
+        ReadOnlyEvidenceSynthesizer.tryHandle(state, duplicate());
+        assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED, state.readOnlySynthesisStatus);
+        assertEquals(1, recorded.requests().size());
+        var request = recorded.requests().getFirst();
+        assertTrue(request.tools.isEmpty());
+        assertEquals(ToolChoiceMode.NONE, request.controls.toolChoice());
+        assertTrue(request.messages.stream().anyMatch(message -> message.content().startsWith("[RuntimeModelIdentity]")
+                && message.content().contains("Runtime-qualified model: gpt-oss-20b.")));
+        assertTrue(request.messages.stream().anyMatch(message -> "user".equals(message.role())
+                && message.content().startsWith(ReadOnlyConversationContext.DATA_PREFIX)
+                && message.content().contains("Cedar was proposed, not applied.")));
+        assertEquals(4, request.messages.stream().filter(message -> "tool".equals(message.role())
+                && message.content().contains("Current label is oak.")).count());
+        assertEquals(4, state.currentResponseReceipt.readInputBinding().preparedToolResults().size());
+        assertEquals(before, state.messages);
+    }
+
+    @Test void retainedReferencesAndReadEvidenceCannotBeSilentlyTrimmedToFitTheModelContext() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("Must not be consumed.", List.of())), 8192);
+        var state = stateWithHistory(recorded.client(), "An earlier proposal. ".repeat(450),
+                "Observed source content. ".repeat(110));
+        var before = List.copyOf(state.messages);
+        var evidence = ReadOnlyEvidenceContext.select(state);
+        assertTrue(evidence.complete());
+        var frozen = ReadOnlyFinalizationEvidence.freeze(state, evidence);
+        assertFalse(frozen.proposalSelected());
+        var request = ReadOnlyEvidenceSynthesizer.requestMessages(state, evidence, frozen);
+        assertTrue(ReadOnlyEvidenceSynthesizer.requestFits(request), "The full-request cap is distinct from model context");
+        int anchor = -1;
+        for (int i = 0; i < request.size(); i++) {
+            var message = request.get(i);
+            if (message.content().startsWith("[CurrentTurnCapability]")) anchor = i;
+            if ("tool".equals(message.role()) || message.content().startsWith(ReadOnlyConversationContext.DATA_PREFIX))
+                assertTrue(anchor >= 0 && i > anchor);
+        }
+        assertTrue(request.stream().anyMatch(message -> message.content().contains("An earlier proposal.")));
+        assertEquals(4, request.stream().filter(message -> "tool".equals(message.role())).count());
+        ReadOnlyEvidenceSynthesizer.tryHandle(state, duplicate());
+        assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, state.readOnlySynthesisStatus);
+        assertTrue(recorded.requests().isEmpty(), "No dispatch after the actual LlmClient budget refusal");
+        assertTrue(state.currentText.contains("Bounded synthesis was stopped because"), state.currentText);
+        assertEquals(TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON, state.failureDecision.reason());
+        assertEquals(before, state.messages);
+        ReadOnlyEvidenceSynthesizer.tryHandle(state, duplicate());
+        assertTrue(recorded.requests().isEmpty());
+    }
+
+    private LoopState stateWithHistory(LlmClient client, String priorAnswer, String body) throws Exception {
+        clients.add(client);
+        var seed = ReadOnlyEvidenceContextTest.state(workspace);
+        seed.messages.addAll(1, List.of(ChatMessage.user("What label was proposed?"), ChatMessage.assistant(priorAnswer)));
+        TurnTaskContractCapture.set(dev.talos.runtime.task.TaskResolution.contractOnly(TurnTaskContractCapture.get()),
+                seed.messages, dev.talos.spi.types.ModelIdentitySnapshot.builder().backend("llama_cpp")
+                        .configuredModel("gpt-oss-20b").resolvedProfile("gpt-oss-20b").artifactState("EXACT")
+                        .servedIdentityState("MATCHED").resolution("QUALIFIED").propsState("AVAILABLE")
+                        .chatAvailable(true).build());
+        var state = new LoopState("", List.of(), seed.messages, workspace,
+                Context.builder(new Config(null)).llm(client).build(), null, 10, 0);
+        for (String path : List.of("README.md", "index.html", "script.js", "scripts.js"))
+            ReadOnlyEvidenceContextTest.read(state, path, body, Map.of("path", path));
+        state.iterations = 10;
+        state.totalToolsInvoked = 4;
+        return state;
+    }
+
     @Test void oneCapturedResponseUsesAllFourBodiesWithoutToolsAndRetainsTheCap() throws Exception {
         String answer = "index.html contains the Calculate button. script.js uses the wrong selector. "
                 + "README.md names script.js, while scripts.js is the unrelated sentinel.";
@@ -309,7 +382,10 @@ class ReadOnlyEvidenceSynthesizerTest {
         ReadOnlyEvidenceSynthesizer.tryHandle(state, duplicate());
         assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, state.readOnlySynthesisStatus);
         assertTrue(recorded.requests().isEmpty(), "The larger reserve fails before any provider call");
-        assertEquals(ReadOnlyEvidenceSynthesizer.UNAVAILABLE, state.currentText);
+        assertTrue(state.currentText.startsWith(ReadOnlyEvidenceSynthesizer.UNAVAILABLE
+                + "\n\nBounded synthesis was stopped because "), state.currentText);
+        assertTrue(state.currentText.contains("budget 3996, context window 8192"), state.currentText);
+        assertEquals(TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON, state.failureDecision.reason());
         assertFalse(state.readOnlyFinalizationEvidence.available());
         assertEquals(before, state.messages);
         ReadOnlyEvidenceSynthesizer.tryHandle(state, duplicate());

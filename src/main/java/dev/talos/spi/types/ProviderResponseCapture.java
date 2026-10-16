@@ -544,6 +544,33 @@ public final class ProviderResponseCapture {
         default void attemptFailed(Source source, Failure failure) {}
     }
 
+    /** In-memory source evidence, never a grant of execution authority. */
+    public static final class TextProposalSource {
+        private final String source;
+        private final String projectedText;
+
+        private TextProposalSource(String source, String projectedText) {
+            this.source = Objects.requireNonNull(source, "provider text source");
+            this.projectedText = Objects.requireNonNull(projectedText, "projected provider text");
+        }
+
+        public static TextProposalSource captured(String source, String projectedText) {
+            return new TextProposalSource(source, projectedText);
+        }
+
+        public boolean matchesProjectedText(String text) {
+            return projectedText.equals(text);
+        }
+
+        /** Only executable projection validation consumes the unsanitized source. */
+        public String sourceTextForValidation() { return source; }
+
+        @Override
+        public String toString() {
+            return "TextProposalSource[chars=" + source.length() + ", hash=" + sha256(source) + "]";
+        }
+    }
+
     public record Response(
             String assistantText,
             int nativeToolCallCount,
@@ -552,7 +579,20 @@ public final class ProviderResponseCapture {
             Completion completion,
             boolean normalized,
             boolean truncated,
-            boolean textualToolCallPresent) {
+            boolean textualToolCallPresent,
+            TextProposalSource textProposalSource) {
+        public Response(
+                String assistantText,
+                int nativeToolCallCount,
+                List<ChatMessage.NativeToolCall> nativeToolCalls,
+                Source source,
+                Completion completion,
+                boolean normalized,
+                boolean truncated,
+                boolean textualToolCallPresent) {
+            this(assistantText, nativeToolCallCount, nativeToolCalls, source, completion,
+                    normalized, truncated, textualToolCallPresent, null);
+        }
         public Response(
                 String assistantText,
                 int nativeToolCallCount,
@@ -594,6 +634,20 @@ public final class ProviderResponseCapture {
                     textualToolCallPresent);
         }
 
+        public Response(
+                String assistantText,
+                List<ChatMessage.NativeToolCall> nativeToolCalls,
+                Source source,
+                Completion completion,
+                boolean normalized,
+                boolean truncated,
+                boolean textualToolCallPresent,
+                TextProposalSource textProposalSource) {
+            this(assistantText, nativeToolCalls == null ? 0 : nativeToolCalls.size(),
+                    nativeToolCalls, source, completion, normalized, truncated,
+                    textualToolCallPresent, textProposalSource);
+        }
+
         public Response {
             assistantText = assistantText == null ? "" : assistantText;
             if (nativeToolCallCount < 0) {
@@ -605,6 +659,9 @@ public final class ProviderResponseCapture {
             }
             source = Objects.requireNonNull(source, "response source");
             completion = Objects.requireNonNull(completion, "response completion");
+            if (textProposalSource != null && !textProposalSource.matchesProjectedText(assistantText)) {
+                throw new IllegalArgumentException("provider text source does not match projected response");
+            }
         }
 
         public boolean providerBacked() {
@@ -799,7 +856,9 @@ public final class ProviderResponseCapture {
         public String assistantHash() { return assistantHash; }
 
         public ProviderReadInputBinding readInputBinding() {
-            return readInputBinding.forSelectedResponse(selected, providerTerminalEligible());
+            boolean deliveryObserved = ownerAttempt != null && ownerAttempt.transport != null
+                    && ownerAttempt.transport.provesProviderTerminal();
+            return readInputBinding.forSelectedResponse(selected, providerTerminalEligible(), deliveryObserved);
         }
 
         /** Ownership is checked against the exact active scope, not its display identity. */

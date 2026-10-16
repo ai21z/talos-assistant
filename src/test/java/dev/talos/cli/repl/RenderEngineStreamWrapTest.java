@@ -14,15 +14,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T776 activation contract: streamed answers wrap only in fully capable
- * interactive mode; every degraded mode keeps the historical pass-through
- * bytes (the rail-shear behavior is the FROZEN contract for redirected,
- * NO_COLOR, ASCII, and dumb-terminal output - the evidence chain
- * string-matches those transcripts).
+ * Provider fragments remain private. Complete selected answers use the
+ * buffered answer pane and its width bound across terminal capabilities.
  */
 class RenderEngineStreamWrapTest {
 
@@ -37,50 +35,47 @@ class RenderEngineStreamWrapTest {
     private static final TerminalCapabilities PLAIN = TerminalCapabilities.detect(
             Map.of(), false, "Windows 11", StandardCharsets.UTF_8, ColorPolicy.NEVER);
 
-    private static String streamThrough(RenderEngine engine) {
+    private static String streamThrough(RenderEngine engine, ByteArrayOutputStream out) {
         StringBuilder collected = new StringBuilder();
         Consumer<String> sink = engine.answerStreamSink(collected::append);
-        sink.accept(LONG_LINE);
+        for (int index = 0; index < LONG_LINE.length(); index += 7) {
+            sink.accept(LONG_LINE.substring(index, Math.min(LONG_LINE.length(), index + 7)));
+            assertEquals(0, out.size(), "Provider fragments must remain private before selection");
+            assertTrue(collected.isEmpty(), "A custom writer must not receive provider fragments");
+        }
         engine.render(new Result.StreamEnd());
-        return collected.toString();
+        assertEquals(0, out.size(), "Transport completion must not commit an answer");
+        engine.render(new Result.Ok(LONG_LINE));
+        assertTrue(collected.isEmpty());
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     @Test
-    void redirectedStreamingStaysUnwrappedByteForByte() {
-        // Permanent golden for the degraded path: the full logical line must
-        // appear unwrapped, exactly as before T776.
+    void redirectedSelectedAnswerWrapsAtTheBufferedContentWidth() {
         var out = new ByteArrayOutputStream();
         var engine = new RenderEngine(new Config(), new Redactor(),
                 new PrintStream(out, true, StandardCharsets.UTF_8), false,
-                CliTheme.forCapabilities(PLAIN), null);
+                CliTheme.forCapabilities(PLAIN), () -> 96);
 
-        String rendered = streamThrough(engine);
+        String rendered = streamThrough(engine, out);
 
-        assertTrue(rendered.contains(LONG_LINE),
-                "non-interactive streaming must pass the line through unwrapped:\n" + rendered);
+        assertBufferedWidth(rendered);
     }
 
     @Test
-    void interactiveCapableStreamingWrapsAtTheContentWidth() {
+    void interactiveCapableSelectedAnswerWrapsAtTheBufferedContentWidth() {
         var out = new ByteArrayOutputStream();
         var engine = new RenderEngine(new Config(), new Redactor(),
                 new PrintStream(out, true, StandardCharsets.UTF_8), true,
                 CliTheme.forCapabilities(CAPABLE), () -> 96);
 
-        String rendered = streamThrough(engine);
+        String rendered = streamThrough(engine, out);
 
-        assertFalse(rendered.contains(LONG_LINE),
-                "interactive capable streaming must wrap the long line:\n" + rendered);
-        for (String row : rendered.split("\\R")) {
-            assertTrue(stripAnsi(row).length() <= 96,
-                    "every rendered row must fit the pane width: [" + stripAnsi(row) + "]");
-        }
+        assertBufferedWidth(rendered);
     }
 
     @Test
-    void interactiveNoColorStreamingKeepsThePassThroughBytes() {
-        // Owner decision: byte-identity beats polish in degraded interactive
-        // modes - NO_COLOR terminals keep the historical unwrapped stream.
+    void interactiveNoColorSelectedAnswerWrapsAtTheBufferedContentWidth() {
         var out = new ByteArrayOutputStream();
         TerminalCapabilities noColor = TerminalCapabilities.detect(
                 Map.of("NO_COLOR", "1", "WT_SESSION", "wt"), true, "Windows 11",
@@ -89,10 +84,23 @@ class RenderEngineStreamWrapTest {
                 new PrintStream(out, true, StandardCharsets.UTF_8), true,
                 CliTheme.forCapabilities(noColor), () -> 96);
 
-        String rendered = streamThrough(engine);
+        String rendered = streamThrough(engine, out);
 
-        assertTrue(rendered.contains(LONG_LINE),
-                "NO_COLOR interactive streaming must stay pass-through:\n" + rendered);
+        assertFalse(rendered.contains("\u001B"));
+        assertBufferedWidth(rendered);
+    }
+
+    private static void assertBufferedWidth(String rendered) {
+        assertFalse(rendered.contains(LONG_LINE), "The complete long line must be wrapped:\n" + rendered);
+        String body = stripAnsi(rendered).lines()
+                .filter(line -> line.startsWith("  │ ") || line.startsWith("  | "))
+                .map(line -> line.substring(4))
+                .collect(java.util.stream.Collectors.joining(" "));
+        assertEquals(LONG_LINE, body, "Wrapping must preserve the complete selected answer");
+        for (String row : rendered.split("\\R")) {
+            assertTrue(stripAnsi(row).length() <= 96,
+                    "Every rendered row must fit the pane width: [" + stripAnsi(row) + "]");
+        }
     }
 
     private static String stripAnsi(String s) {

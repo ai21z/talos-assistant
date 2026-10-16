@@ -281,7 +281,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos request defaults; near-greedy mutation obligations",
-                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        RequestMessageLayout.SINGLE_LEADING_SYSTEM,
                         List.of(),
                         PINNED_CROSS_PLATFORM_LANES,
                         "24 GB RAM minimum; 32 GB or more for CPU-only; not the low-resource lane",

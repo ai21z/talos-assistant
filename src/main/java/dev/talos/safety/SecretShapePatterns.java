@@ -11,6 +11,9 @@ public final class SecretShapePatterns {
     private static final Pattern PEM_PRIVATE_KEY_BLOCK = Pattern.compile(
             "-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\\s\\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----");
 
+    private static final Pattern PEM_PRIVATE_KEY_START = Pattern.compile(
+            "-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----");
+
     private static final Pattern CONNECTION_STRING_WITH_USERINFO = Pattern.compile(
             "(?i)\\b((?:jdbc:)?(?:postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|redis|amqps?|https?)://[^\\s:@/]+:[^\\s@/]+@[^\\s]+)");
 
@@ -45,5 +48,16 @@ public final class SecretShapePatterns {
                 || CONNECTION_STRING_WITH_USERINFO.matcher(text).find()
                 || TOKEN_PREFIX.matcher(text).find()
                 || EYJ_ANCHORED_JWT.matcher(text).find();
+    }
+
+    /**
+     * Redact a known bounded prefix, whose private-key closing delimiter may be unread.
+     * Complete blocks are removed first so harmless text after their end is preserved.
+     */
+    public static String redactSecretShapesInPrefix(String text, String replacement) {
+        String redacted = redactSecretShapes(text, replacement);
+        if (redacted == null || redacted.isBlank()) return redacted;
+        Matcher start = PEM_PRIVATE_KEY_START.matcher(redacted);
+        return start.find() ? redacted.substring(0, start.start()) + replacement : redacted;
     }
 }

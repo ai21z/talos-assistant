@@ -157,9 +157,8 @@ class TalosBootstrapWiringTest {
     }
 
     /**
-     * Single-writer contract (T774): the bootstrap writes streamed chunks
-     * through the ONE supplied {@code out} stream - there is no second,
-     * terminal-writer side channel. In production RunCmd supplies a
+     * The bootstrap discards provider fragments and renders the final
+     * selected answer through the supplied {@code out} stream. In production RunCmd supplies a
      * terminal-backed stream ({@code TerminalOutput.printStreamFor}), so
      * JLine's cursor/column model sees every character that reaches the
      * terminal; that routing is covered by
@@ -168,7 +167,7 @@ class TalosBootstrapWiringTest {
      * prompt-redraw corruption documented in TalosBootstrap.
      */
     @Test
-    void bootstrapWritesStreamChunksThroughTheSingleSuppliedStream() throws Exception {
+    void bootstrapDiscardsFragmentsAndRendersSelectedAnswerThroughTheSingleSuppliedStream() throws Exception {
         java.io.ByteArrayOutputStream terminalSink = new java.io.ByteArrayOutputStream();
         java.io.ByteArrayOutputStream suppliedSink = new java.io.ByteArrayOutputStream();
 
@@ -185,33 +184,34 @@ class TalosBootstrapWiringTest {
                 new java.io.PrintStream(suppliedSink),
                 WS, reader);
 
-        // Drive one chunk directly through the wired stream sink - same
-        // path a live streaming turn would exercise, but without depending
-        // on mode/placeholder/turn-executor internals.
         router.context().streamSink().accept("CHUNK-PROBE");
         assertInstanceOf(
                 ToolCallStreamFilter.class,
                 router.context().streamSink()).flush();
+        assertEquals(0, suppliedSink.size(), "Raw fragments must not reach the supplied stream");
+        assertTrue(router.getModes().setActive("ask"));
+        assertTrue(router.tryHandlePrompt("Respond with exactly: SELECTED-PROBE"));
         term.flush();
 
         String termOut = terminalSink.toString(java.nio.charset.StandardCharsets.UTF_8);
         String supplied = suppliedSink.toString(java.nio.charset.StandardCharsets.UTF_8);
 
-        assertTrue(supplied.contains("CHUNK-PROBE"),
-                "the single supplied stream must receive streamed chunks");
+        assertFalse(supplied.contains("CHUNK-PROBE"));
+        assertTrue(supplied.contains("SELECTED-PROBE"),
+                "The final selected answer must reach the single supplied stream");
         assertFalse(termOut.contains("CHUNK-PROBE"),
                 "no second terminal-writer side channel may exist (single-writer contract)");
+        assertFalse(termOut.contains("SELECTED-PROBE"),
+                "Selected answers must not acquire a second terminal-writer side channel");
     }
 
     /**
      * Back-compat path: when no {@link org.jline.reader.LineReader} is
-     * supplied (headless tests, programmatic API callers), the sink must
-     * fall back to the provided {@link java.io.PrintStream}. Prevents a
-     * silent regression where tightening the JLine path accidentally
-     * drops output for non-interactive invocations.
+     * supplied, provider fragments remain private and the selected answer
+     * is rendered to the provided {@link java.io.PrintStream}.
      */
     @Test
-    void bootstrapFallsBackToStdoutWhenLineReaderAbsent() {
+    void bootstrapRendersSelectedAnswerToStdoutWhenLineReaderAbsent() {
         java.io.ByteArrayOutputStream stdoutSink = new java.io.ByteArrayOutputStream();
         ReplRouter router = createRouter(
                 stubSession(), new Config(),
@@ -222,9 +222,13 @@ class TalosBootstrapWiringTest {
         assertInstanceOf(
                 ToolCallStreamFilter.class,
                 router.context().streamSink()).flush();
+        assertEquals(0, stdoutSink.size(), "Headless raw fragments must remain private");
+        assertTrue(router.getModes().setActive("ask"));
+        assertTrue(router.tryHandlePrompt("Respond with exactly: SELECTED-PROBE"));
         String stdOut = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
-        assertTrue(stdOut.contains("CHUNK-PROBE"),
-                "with no LineReader, sink must fall back to the passed PrintStream");
+        assertFalse(stdOut.contains("CHUNK-PROBE"));
+        assertTrue(stdOut.contains("SELECTED-PROBE"),
+                "With no LineReader, the selected answer must reach the supplied PrintStream");
     }
 
     @Test

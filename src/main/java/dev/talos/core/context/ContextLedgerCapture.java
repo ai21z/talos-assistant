@@ -11,7 +11,20 @@ public final class ContextLedgerCapture {
             new AtomicReference<>(ContextLedgerSnapshot.empty());
 
     public static void begin(String traceId, int turnNumber) {
+        ContextLedger previous = CURRENT.get();
+        if (previous != null) previous.close();
         CURRENT.set(new ContextLedger(traceId, turnNumber));
+    }
+
+    public static void bindPromptMessage(String role, String content, java.util.List<ContextItem> items) {
+        ContextLedger current = CURRENT.get();
+        if (current != null) current.bind(role, content, items);
+    }
+
+    /** The owner is captured before work is submitted to a provider worker. */
+    public static ContextDeliveryCapture deliveryCapture() {
+        ContextLedger current = CURRENT.get();
+        return current == null ? ContextDeliveryCapture.empty() : current.deliveryCapture();
     }
 
     public static void record(ContextItem item, ContextDecision decision) {
@@ -30,12 +43,14 @@ public final class ContextLedgerCapture {
     public static ContextLedgerSnapshot complete() {
         ContextLedger current = CURRENT.get();
         CURRENT.remove();
-        ContextLedgerSnapshot snapshot = current == null ? ContextLedgerSnapshot.empty() : current.snapshot();
+        ContextLedgerSnapshot snapshot = current == null ? ContextLedgerSnapshot.empty() : current.close();
         LATEST.set(snapshot);
         return snapshot;
     }
 
     public static void clear() {
+        ContextLedger current = CURRENT.get();
+        if (current != null) current.close();
         CURRENT.remove();
         LATEST.set(ContextLedgerSnapshot.empty());
     }

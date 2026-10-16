@@ -1,5 +1,6 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
@@ -61,9 +62,14 @@ final class InspectCompletenessRetry {
         if (loopResult == null) return List.of();
         LinkedHashSet<String> missing = new LinkedHashSet<>();
         TaskContract contract = plan == null ? null : plan.taskContract();
+        if (plan != null && plan.workspaceResultsApplicable()) {
+            if (!plan.requestedResults().requires(
+                    dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)) return List.of();
+            return ProjectSummaryEvidencePolicy.assess(workspace, contract, loopResult).recoverableReadTargets();
+        }
         if (contract != null && contract.type() == TaskType.WORKSPACE_EXPLAIN) {
-            for (String target : ProjectSummaryEvidencePolicy.missingAnchorReadTargets(
-                    workspace, loopResult.toolOutcomes())) {
+            for (String target : ProjectSummaryEvidencePolicy.assess(
+                    workspace, contract, loopResult).recoverableReadTargets()) {
                 String normalized = ToolCallSupport.normalizePath(target);
                 if (!normalized.isBlank()) missing.add(normalized);
             }
@@ -97,6 +103,8 @@ final class InspectCompletenessRetry {
                 || loopResult.readOnlySynthesisStatus() != ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED) {
             return new Result(answer, null, null);
         }
+        int remainingIterations = ctx.toolCallLoop().remainingIterations(loopResult);
+        if (remainingIterations == 0) return new Result(answer, null, null);
         String userRequest = plan == null ? "" : plan.originalUserRequest();
         TaskContract contract = plan == null ? null : plan.taskContract();
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
@@ -130,7 +138,7 @@ final class InspectCompletenessRetry {
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retry.provenance(),
-                        retryMessages, workspace, ctx, loopResult.readOnlyEvidenceHandoff());
+                        retryMessages, workspace, ctx, loopResult.readOnlyEvidenceHandoff(), remainingIterations);
                 ToolCallLoop.LoopResult groundedRetryLoop = mergeReadOnlyRetryEvidence(loopResult, retryLoop);
                 String mergedAnswer = retryLoop.finalAnswer();
                 boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
@@ -223,7 +231,8 @@ final class InspectCompletenessRetry {
                 retry.readFileBodies(),
                 retry.finalAnswerOutputLimitReached(),
                 selectedRetrySynthesisStatus(original, retry),
-                retry.readOnlyEvidenceHandoff(), retry.readOnlyFinalizationEvidence());
+                retry.readOnlyEvidenceHandoff(), retry.readOnlyFinalizationEvidence(),
+                original.readEvidenceCoverage().followedBy(retry.readEvidenceCoverage()));
     }
 
     static ToolCallLoop.LoopResult withRestoredAnswer(ToolCallLoop.LoopResult result, String answer,
@@ -236,7 +245,7 @@ final class InspectCompletenessRetry {
                 result.cushionFiresB3EditShortCircuit(), result.cushionFiresE1Suggestion(),
                 result.failureDecision(), result.toolOutcomes(), result.readFileBodies(),
                 result.finalAnswerOutputLimitReached(), result.readOnlySynthesisStatus(),
-                result.readOnlyEvidenceHandoff(), evidence);
+                result.readOnlyEvidenceHandoff(), evidence, result.readEvidenceCoverage());
     }
 
     static ToolCallLoop.ReadOnlySynthesisStatus selectedRetrySynthesisStatus(
@@ -257,7 +266,8 @@ final class InspectCompletenessRetry {
     }
 
     private static String retryPrompt(TaskContract contract, String userRequest, List<String> missing) {
-        String request = userRequest == null ? "" : userRequest.strip();
+        String request = userRequest == null ? ""
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest).strip();
         return """
                 You started diagnosing the workspace before reading all of the obvious primary files.
 

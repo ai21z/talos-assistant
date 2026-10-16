@@ -1,5 +1,6 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
@@ -53,7 +54,14 @@ final class ReadOnlyInspectionRetry {
     ) {
         if (answer == null) answer = "";
         TaskContract contract = plan == null ? null : plan.taskContract();
-        if (!requiresWorkspaceEvidence(contract)) {
+        boolean boundedWorkspace = plan != null && plan.workspaceResultsApplicable();
+        boolean needsDirectory = boundedWorkspace && (plan.requestedResults().requires(
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_CONTENTS)
+                || plan.requestedResults().requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT)
+                || plan.requestedResults().requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_EMPTINESS));
+        boolean needsPurpose = boundedWorkspace && plan.requestedResults().requires(
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE);
+        if (boundedWorkspace ? !needsDirectory && !needsPurpose : !requiresWorkspaceEvidence(contract)) {
             return new Result(answer, null, null);
         }
         if (contract.mutationRequested()) {
@@ -66,7 +74,8 @@ final class ReadOnlyInspectionRetry {
         String userRequest = plan.originalUserRequest();
         List<ChatMessage> retryMessages = new ArrayList<>(messages);
         retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
-        retryMessages.add(ChatMessage.user(retryPrompt(contract, userRequest, workspace)));
+        retryMessages.add(ChatMessage.user(boundedWorkspace
+                ? requestedResultRetryPrompt(plan, workspace) : retryPrompt(contract, userRequest, workspace)));
 
         LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
@@ -149,7 +158,8 @@ final class ReadOnlyInspectionRetry {
             Path workspace
     ) {
         String type = contract == null ? "READ_ONLY_QA" : contract.type().name();
-        String request = userRequest == null ? "" : userRequest.strip();
+        String request = userRequest == null ? ""
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest).strip();
         if (request.length() > 1000) {
             request = request.substring(0, 1000) + "...";
         }
@@ -189,6 +199,24 @@ final class ReadOnlyInspectionRetry {
                 User request: "%s"
 
                 Use read-only tools now. Start with talos.list_dir on "." for "this folder", "here", or "this workspace". Then read the obvious primary files if present: %s. Answer from observed file evidence only. If there are no readable relevant files, say that directly. Do not call write_file or edit_file.""".formatted(type, request, primaryFiles);
+    }
+
+    private static String requestedResultRetryPrompt(CurrentTurnPlan plan, Path workspace) {
+        var inventory = plan.requestedResults();
+        StringBuilder prompt = new StringBuilder("The requested workspace results require separate evidence. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.WORKSPACE_LOCATION))
+            prompt.append("The active workspace location is supplied by the runtime and requires no file-content read. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_CONTENTS)
+                || inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT)
+                || inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_EMPTINESS))
+            prompt.append("Use talos.list_dir on \".\" to observe directory entries, including hidden entries. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)) {
+            var anchor = ProjectSummaryEvidencePolicy.preferredAnchor(workspace);
+            if (anchor.isPresent()) prompt.append("Read the project source anchor ").append(anchor.get()).append(" for project-purpose claims. ");
+            else prompt.append("No preferred project source anchor is available. Keep project purpose unresolved unless relevant source content is admitted. ");
+        } else prompt.append("File contents are not required by these requested results. Do not read, search, or retrieve arbitrary files. ");
+        prompt.append("Do not mutate files. Answer only from the evidence for each requested result.");
+        return prompt.toString();
     }
 
     private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {

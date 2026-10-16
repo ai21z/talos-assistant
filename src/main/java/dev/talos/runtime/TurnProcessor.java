@@ -81,6 +81,16 @@ public final class TurnProcessor {
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
     private final ThreadLocal<TurnPublicationHealth> publicationHealth = new ThreadLocal<>();
     private final TerminalizerFactory terminalizerFactory;
+    private dev.talos.runtime.observation.TurnRequestFrame.ControlledContracts controlledContracts;
+
+    /** Explicit wiring is provided for controlled boundary experiments, not model interpretation. */
+    public TurnProcessor withControlledContracts(
+            dev.talos.runtime.observation.TurnRequestFrame.ControlledContracts source) {
+        var processor = new TurnProcessor(modes, approvalGate, toolRegistry, approvalPolicy,
+                checkpointService, commandProfiles, terminalizerFactory);
+        processor.controlledContracts = Objects.requireNonNull(source);
+        return processor;
+    }
 
     /**
      * Primary constructor. All policy parameters are required - the caller
@@ -267,6 +277,7 @@ public final class TurnProcessor {
         TurnExecutionStage failedAt = TurnExecutionStage.TURN_INITIALIZATION;
         Optional<Result> routed = null;
         boolean traceStarted = false;
+        dev.talos.runtime.observation.TurnRequestFrame requestFrame = null;
         try {
             // Begin every turn-owned capture before mode/provider preparation.
             // The local trace owns the stage marker and therefore its lifetime.
@@ -291,6 +302,10 @@ public final class TurnProcessor {
                 LocalTurnTraceCapture.updateRuntimeMetadata(
                         traceMode, modelBackend(model), modelName(model));
                 Path ws = session.workspace();
+                requestFrame = dev.talos.runtime.observation.TurnRequestFrame.open(
+                        userInput, ws, turn, controlledContracts);
+                ctx = ctx.withRequestFrame(requestFrame);
+                ctx = ctx.prepareRequestPins(userInput, ws);
                 LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
                 routed = Objects.requireNonNull(
                         modes.route(userInput, ws, ctx),
@@ -365,7 +380,8 @@ public final class TurnProcessor {
             // The terminal settlement is frozen before any thread-local is
             // cleared; listeners run only after cleanup so their own provider
             // activity cannot contaminate this turn's trace.
-            clearCapturedTurnState();
+            if (requestFrame == null) clearCapturedTurnState();
+            else requestFrame.finish(TurnProcessor::clearCapturedTurnState);
         }
 
         Throwable publicationFailure = null;
@@ -537,12 +553,16 @@ public final class TurnProcessor {
                                 .DIRECT_RUNTIME_API);
         LocalTurnTraceCapture.ParsedToolCallPermit permit = authority.permit();
         if (!authority.authorized()) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Deterministic runtime tool authority is unavailable (" + authority.rejectionReason().name() + ")");
             return ToolResult.fail(ToolError.invalidAuthority(
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Deterministic runtime tool authority is unavailable ("
                             + authority.rejectionReason().name() + ")"));
         }
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call)) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Tool execution requires current deterministic runtime authority");
             return ToolResult.fail(ToolError.invalidAuthority(
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires current deterministic runtime authority"));
@@ -567,6 +587,8 @@ public final class TurnProcessor {
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit
     ) {
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Tool execution requires the current exact parsed-call authority");
             return ToolResult.fail(ToolError.invalidAuthority(
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires the current exact parsed-call authority"));
@@ -595,6 +617,18 @@ public final class TurnProcessor {
             TurnAuditCapture.recordToolCall(call, "", false, "unknown tool");
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
+        var requestFrame = ctx.requestFrame();
+        if (requestFrame != null) {
+            requestFrame.requireCurrent();
+            if (requestFrame.controlled() && (!requestFrame.workspace().equals(session.workspace().toAbsolutePath().normalize())
+                    || !requestFrame.allowsTool(tool.name())
+                    || !requestFrame.allowsDirectoryTarget(call.parameters()))) {
+                TurnAuditCapture.recordToolCall(call, "", false, "request acquisition boundary");
+                return ToolResult.fail(ToolError.denied("The operation was not admitted by the current request boundary."));
+            }
+        } else if (controlledContracts != null || dev.talos.runtime.observation.TurnRequestFrame.controlledCurrent()) {
+            return ToolResult.fail(ToolError.denied("The current request boundary is missing from the tool context."));
+        }
         ToolResult surfaceRejection = rejectIfOutsideCurrentToolSurface(
                 ctx, call, tool.name(), tracePhase);
         if (surfaceRejection != null) return surfaceRejection;
@@ -614,9 +648,20 @@ public final class TurnProcessor {
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
         }
+        var capturedIntent = TurnTaskContractCapture.getIntent();
+        var selectedDraft = capturedIntent == null ? null : capturedIntent.contentSaveRequest().draftSelection();
+        if (selectedDraft != null && (!"talos.write_file".equals(call.canonicalToolName())
+                || !call.parameters().keySet().equals(java.util.Set.of("path", "content"))
+                || !selectedDraft.destination().equals(call.param("path"))
+                || !selectedDraft.content().equals(call.param("content")))) {
+            TurnAuditCapture.recordBlockedToolCall(call, resolvePathParam(call), tracePhase,
+                    "selected draft mismatch", "Only the exact selected draft and destination may be submitted for approval.");
+            return ToolResult.fail(ToolError.denied("The selected draft or destination changed. No approval or write was attempted."));
+        }
         PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
                 ProtectedPathAliasNormalizer.canonicalizeExpectedProtectedAliases(
-                        session.workspace(), call, pathParameterKeys(), taskContract.expectedTargets());
+                        session.workspace(), call, pathParameterKeys(),
+                        requestFrame != null && requestFrame.controlled() ? java.util.Set.of() : taskContract.expectedTargets());
         if (protectedAliasNormalization.changed()) {
             for (PathArgumentCanonicalizer.PathParameterChange change : protectedAliasNormalization.changes()) {
                 LocalTurnTraceCapture.recordPathArgumentNormalized(
@@ -640,7 +685,7 @@ public final class TurnProcessor {
         // the corrector is the runtime-owned ground truth for exact-write
         // contracts and, running after, restores the user's literal payload
         // even if sanitization touched it - exactness always wins.
-        if (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName())) {
+        if (selectedDraft == null && (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName()))) {
             MarkdownCommentaryCallNormalizer.Normalization sanitization =
                     isWriteFileTool(call.toolName())
                             ? MarkdownCommentaryCallNormalizer.normalizeWriteContent(call)
@@ -664,7 +709,7 @@ public final class TurnProcessor {
         }
         ExactLiteralWriteCallCorrector.Correction exactCorrection =
                 ExactLiteralWriteCallCorrector.correct(call, taskContract);
-        if (exactCorrection.corrected()) {
+        if (selectedDraft == null && exactCorrection.corrected()) {
             LocalTurnTraceCapture.recordExactLiteralWriteCorrected(
                     exactCorrection.targetPath(),
                     exactCorrection.sourcePattern(),
@@ -708,7 +753,8 @@ public final class TurnProcessor {
         // the exact bytes written. Runs after every other content rewrite
         // (sanitizer, exact-literal corrector); idempotent by construction.
         WriteFormatPolicy.Preservation formatPreservation =
-                WriteFormatPolicy.preserveWriteCall(session.workspace(), call, taskContract, userRequest);
+                selectedDraft == null ? WriteFormatPolicy.preserveWriteCall(session.workspace(), call, taskContract, userRequest)
+                        : WriteFormatPolicy.Preservation.unchanged(call);
         if (formatPreservation.changed()) {
             LocalTurnTraceCapture.recordActionObligation(
                     "WRITE_FORMAT_PRESERVATION",
@@ -752,16 +798,21 @@ public final class TurnProcessor {
         }
 
         if (mutatingTool
-                && !taskContract.mutationAllowed()
+                && (!taskContract.mutationAllowed()
+                        || TaskContractResolver.explicitlyForbidsMutation(userRequest))
                 && (userRequest != null || capturedTaskContract != null)) {
-            TurnAuditCapture.recordToolCall(
-                    call, path == null ? "" : path, false,
-                    "task-contract read-only denied " + call.toolName());
-            return ToolResult.fail(ToolError.denied(
-                    "The user did not ask to modify files on this turn, so do not call "
+            String denial = taskContract.mutationRequested()
+                    ? "A file change was requested, but its scope is not authorized by the current task contract. "
+                            + "Ask the user to clarify the target files and requested changes before retrying. "
+                            + "Earlier approval must not be reused, and assistant proposals must not supply missing authority."
+                    : "The user did not ask to modify files on this turn, so do not call "
                             + call.toolName()
                             + " for a read-only request. Answer with information only, "
-                            + "or wait for an explicit change request in a later turn."));
+                            + "or wait for an explicit change request in a later turn.";
+            TurnAuditCapture.recordBlockedToolCall(
+                    call, path == null ? "" : path, tracePhase,
+                    "task-contract mutation denied " + call.toolName(), denial);
+            return ToolResult.fail(ToolError.denied(denial));
         }
 
         if (ctx.executionPhaseState() != null) {
@@ -963,10 +1014,10 @@ public final class TurnProcessor {
                     LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
                 }
             }
-            TurnAuditCapture.recordToolCall(
-                    call, path == null ? "" : path, false,
-                    "permission policy denied " + call.toolName()
-                            + " (" + permissionDecision.reasonCode() + ")");
+            String policyDenial = "permission policy denied " + call.toolName()
+                    + " (" + permissionDecision.reasonCode() + ")";
+            TurnAuditCapture.recordBlockedToolCall(call, path == null ? "" : path,
+                    tracePhase, policyDenial, policyDenial, ToolFailureReason.PERMISSION_POLICY_DENIED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandDenied(
                         tracePhase,
@@ -1031,9 +1082,9 @@ public final class TurnProcessor {
                             call,
                             "User did not approve " + call.toolName());
                 }
-                TurnAuditCapture.recordToolCall(
-                        call, path == null ? "" : path, false,
-                        "approval denied by user for " + call.toolName());
+                String approvalDenial = "approval denied by user for " + call.toolName();
+                TurnAuditCapture.recordBlockedToolCall(call, path == null ? "" : path,
+                        tracePhase, approvalDenial, approvalDenial, ToolFailureReason.USER_APPROVAL_DENIED);
                 // Phrasing matters: previously "Operation denied by user" caused
                 // qwen2.5-coder to hallucinate a "permissions" excuse and tell
                 // the user to "ensure you have the necessary permissions" - the
@@ -1113,7 +1164,10 @@ public final class TurnProcessor {
         ToolContext toolCtx = new ToolContext(
                 session.workspace(),
                 ctx.sandbox(),
-                session.config()
+                session.config(),
+                ctx.requestFrame() == null
+                        ? dev.talos.spi.WorkspaceObservationBoundary.unrestricted()
+                        : ctx.requestFrame().observationBoundary()
         );
 
         ToolResult result;
@@ -1146,10 +1200,16 @@ public final class TurnProcessor {
                                 .EXECUTION_FAILED);
         TurnAuditCapture.recordExecutedToolCall(
                 call,
+                "talos.edit_file".equals(call.canonicalToolName())
+                        || "talos.write_file".equals(call.canonicalToolName())
+                        ? (path == null ? "" : path)
+                        : (resultPathHints.isEmpty() ? "" : resultPathHints.getFirst()),
                 resultPathHints,
                 result.success(),
                 result.success() ? "" : toolFailureReason(result),
-                result.mutationEffects());
+                result.mutationEffects(),
+                result.error() == null ? ToolFailureReason.NONE : result.error().reason(),
+                result.executedEditDetail());
         if (result.success()) {
             TurnTaskContractCapture.recordSuccessfulToolCall(call);
             if (WorkspaceOperationPlanner.isWorkspaceOperationTool(

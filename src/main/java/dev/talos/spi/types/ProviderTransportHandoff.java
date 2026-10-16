@@ -28,7 +28,8 @@ public interface ProviderTransportHandoff {
             String providerBodyHash,
             List<String> nativeTools,
             Optional<ProviderProcessLaunchReceipt> processReceipt,
-            ProviderReadInputBinding.SerializedMembership readInputMembership) {
+            ProviderReadInputBinding.SerializedMembership readInputMembership,
+            ProviderContextMembership contextMembership) {
         public DispatchEvidence {
             providerBodyHash = Objects.toString(providerBodyHash, "").strip();
             nativeTools = nativeTools == null ? List.of() : nativeTools.stream()
@@ -37,6 +38,8 @@ public interface ProviderTransportHandoff {
             processReceipt = processReceipt == null ? Optional.empty() : processReceipt;
             readInputMembership = readInputMembership == null
                     ? ProviderReadInputBinding.noSerializedMembership() : readInputMembership;
+            contextMembership = contextMembership == null
+                    ? ProviderContextMembership.unknown() : contextMembership;
             if (!providerBodyHash.isEmpty()
                     && !providerBodyHash.matches("sha256:[0-9a-f]{64}")) {
                 throw new IllegalArgumentException(
@@ -66,6 +69,13 @@ public interface ProviderTransportHandoff {
                     ProviderReadInputBinding.noSerializedMembership());
         }
 
+        public DispatchEvidence(String providerBodyHash, List<String> nativeTools,
+                                Optional<ProviderProcessLaunchReceipt> processReceipt,
+                                ProviderReadInputBinding.SerializedMembership readInputMembership) {
+            this(providerBodyHash, nativeTools, processReceipt, readInputMembership,
+                    ProviderContextMembership.unknown());
+        }
+
         public static DispatchEvidence unbound() {
             return new DispatchEvidence("", List.of());
         }
@@ -78,7 +88,8 @@ public interface ProviderTransportHandoff {
                 throw new IllegalArgumentException(
                         "dispatch evidence already carries a different process receipt");
             }
-            return new DispatchEvidence(providerBodyHash, nativeTools, Optional.of(exact), readInputMembership);
+            return new DispatchEvidence(providerBodyHash, nativeTools, Optional.of(exact),
+                    readInputMembership, contextMembership);
         }
 
         public static DispatchEvidence fromProviderBody(
@@ -100,7 +111,8 @@ public interface ProviderTransportHandoff {
                         .digest(body.getBytes(StandardCharsets.UTF_8));
                 String bodyHash = "sha256:" + HexFormat.of().formatHex(digest);
                 return new DispatchEvidence(bodyHash, names, Optional.empty(),
-                        ProviderReadInputBinding.decode(body, request, bodyHash));
+                        ProviderReadInputBinding.decode(body, request, bodyHash),
+                        ProviderContextMembership.decode(body));
             } catch (NoSuchAlgorithmException impossible) {
                 throw new IllegalStateException("SHA-256 unavailable", impossible);
             }

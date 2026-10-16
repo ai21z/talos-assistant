@@ -58,6 +58,41 @@ class SessionCommandTest {
     }
     // -- Save + Load --
     @Nested class SaveAndLoad {
+        @Test void loadKeepsRestoredHistoryWhenSessionOnlyModelIsMissing() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("missing-model-workspace");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            String savedId = wsId + "-20260612080000";
+            try (var writer = st.acquireSessionWriter(savedId)) {
+                writer.save(new SessionData(savedId, ws.toString(), "restored sketch", 1, Instant.now(),
+                        List.of(new SessionData.Turn("user", "saved question", ""),
+                                new SessionData.Turn("assistant", "saved answer", "ok")),
+                        "llama_cpp/session-only-import"));
+            }
+            Config cfg = new Config();
+            cfg.data.put("llm", java.util.Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+            cfg.data.put("engines", java.util.Map.of("llama_cpp", java.util.Map.of("mode", "managed", "model", "configured-model")));
+            SessionMemory memory = new SessionMemory();
+            ConversationManager cm = new ConversationManager(memory);
+            cm.addTurn("previous question", "previous answer");
+            try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+                Context ctx = Context.builder(cfg).llm(llm).memory(memory).conversationManager(cm).build();
+                var command = new SessionCommand(ws, st, wsId + "-20260612090000");
+
+                Result.Info result = assertInstanceOf(Result.Info.class, command.execute("load", ctx));
+
+                assertTrue(result.text.contains("Session restored"));
+                assertTrue(result.text.contains("Saved model was not restored"));
+                assertTrue(result.text.contains("previous model selection was preserved"));
+                assertEquals("llama_cpp/configured-model", llm.getModel());
+                assertFalse(llm.modelSelectionUnavailable());
+                assertEquals(1, cm.turnCount());
+                assertEquals("restored sketch", cm.sketch());
+                assertTrue(memory.get().contains("saved answer"));
+                assertFalse(memory.get().contains("previous answer"));
+            }
+        }
+
         /**
          * T800: the cross-process flow. Session A saves under its instance
          * id; a NEW session (different instance id, same workspace) runs

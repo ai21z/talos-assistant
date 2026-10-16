@@ -31,6 +31,11 @@ public final class ProviderCanonicalAnswerLineageFixture {
     private ProviderCanonicalAnswerLineageFixture() {}
 
     public static CapturedTurn run(Path workspace, Path storeRoot) throws Exception {
+        return run(workspace, storeRoot, "stop");
+    }
+
+    public static CapturedTurn run(Path workspace, Path storeRoot, String finishReason)
+            throws Exception {
         Config config = config();
         JsonSessionStore store = new JsonSessionStore(storeRoot);
         String durableSessionId = JsonSessionStore.newSessionInstanceId(
@@ -42,7 +47,7 @@ public final class ProviderCanonicalAnswerLineageFixture {
         }
 
         try (var writer = store.acquireSessionWriter(durableSessionId);
-             LlmClient llm = new LlmClient(config, new FixedProviderResolver())) {
+             LlmClient llm = new LlmClient(config, new FixedProviderResolver(finishReason))) {
             Context context = Context.builder(config).llm(llm).build();
             TurnProcessor processor = new TurnProcessor(modes);
             processor.addListener(new JsonTurnLogAppender(writer, durableSessionId));
@@ -87,6 +92,11 @@ public final class ProviderCanonicalAnswerLineageFixture {
 
     private static final class FixedProviderResolver implements LlmEngineResolver {
         private final ProviderProcessLaunchReceipt receipt = providerProcessReceipt();
+        private final String finishReason;
+
+        private FixedProviderResolver(String finishReason) {
+            this.finishReason = finishReason;
+        }
 
         @Override
         public void select(String backend, String model) {}
@@ -114,7 +124,7 @@ public final class ProviderCanonicalAnswerLineageFixture {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
-            return Stream.of(TokenChunk.of("4"), TokenChunk.eos("stop"));
+            return Stream.of(TokenChunk.of("4"), TokenChunk.eos(finishReason));
         }
 
         @Override
@@ -125,8 +135,8 @@ public final class ProviderCanonicalAnswerLineageFixture {
                     ProviderTransportHandoff.bindProcessReceipt(
                             handoff, () -> receipt);
             return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request,
                     "canonical-answer-lineage-provider-body",
-                    request.tools,
                     processBound,
                     () -> chatStream(request));
         }

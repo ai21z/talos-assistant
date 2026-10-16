@@ -31,6 +31,8 @@ public final class EvidenceGate {
         TaskContract contract = plan.taskContract();
         if (contract == null) return EvidenceObligation.NONE;
         EvidenceObligation recorded = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        if (plan.workspaceResultsApplicable() || dev.talos.runtime.observation.TurnRequestFrame.admits(plan.requestedResults()))
+            return recorded;
         EvidenceObligation derived = EvidenceObligationPolicy.derive(
                 contract,
                 phase(plan),

@@ -2,6 +2,7 @@ package dev.talos.core.security;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.util.Sanitize;
+import dev.talos.core.util.Hash;
 import dev.talos.safety.SecretShapePatterns;
 
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ public final class Redactor {
     private final boolean redactPaths;
     private final boolean redactIps;
     private final List<Pattern> secretPatterns;
+    private final String policyFingerprint;
 
     // Absolute *filesystem* paths (Windows & POSIX). Avoids matching dotted package names.
     // POSIX arm requires: (1) preceded by whitespace or start-of-line (truly absolute),
@@ -92,42 +94,95 @@ public final class Redactor {
             }
         }
         this.secretPatterns = List.copyOf(compiled);
+        StringBuilder policy = new StringBuilder("terminal-redaction-v1\n")
+                .append(redactPaths).append('\n').append(redactIps).append('\n');
+        for (Pattern pattern : secretPatterns) {
+            policy.append(pattern.flags()).append(':').append(pattern.pattern().length()).append(':')
+                    .append(pattern.pattern()).append('\n');
+        }
+        this.policyFingerprint = Hash.sha256Hex(policy.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
+
+    /** The effective immutable policy is identified without exposing configured pattern text. */
+    public String policyFingerprint() { return policyFingerprint; }
 
     public String redactLine(String s) {
         if (s == null || s.isEmpty()) return "";
-        String out = s;
+        return redactLine(s, null);
+    }
 
-        // 1) strip obviously dangerous control sequences first
-        out = Sanitize.stripAnsi(out);
-        out = Sanitize.stripControls(out);
+    private record LocationRange(int start, int end) {}
+    private record Projection(String text, LocationRange location) {}
 
-        // 2) secrets (label-aware: patterns with 2+ groups preserve group 1 as label)
+    private String redactLine(String s, LocationRange location) {
+        if (s.isEmpty()) return "";
+        // A control transform can join tokens or move the field. Its exception is revoked.
+        String cleaned = Sanitize.stripControls(Sanitize.stripAnsi(s));
+        Projection projected = new Projection(cleaned, cleaned.equals(s) ? location : null);
+
+        // Secrets are assessed over the complete line, including either side of the field.
         for (Pattern p : secretPatterns) {
-            out = p.matcher(out).replaceAll(mr -> {
+            projected = replace(projected, p, mr -> {
                 if (mr.groupCount() >= 2 && mr.group(1) != null && mr.group(2) != null) {
-                    return Matcher.quoteReplacement(mr.group(1)) + "=" + SECRET_MASK;
+                    return mr.group(1) + "=" + SECRET_MASK;
                 }
                 return SECRET_MASK;
             });
         }
 
-        // 3) IPs (avoid loopback noise; mask everything else)
         if (redactIps) {
-            out = IPV4.matcher(out).replaceAll(IP_MASK);
-            out = IPV6.matcher(out).replaceAll(IP_MASK);
+            projected = replace(projected, IPV4, ignored -> IP_MASK);
+            projected = replace(projected, IPV6, ignored -> IP_MASK);
         }
 
-        // 4) absolute filesystem paths
         if (redactPaths) {
-            out = ABS_PATH.matcher(out).replaceAll(PATH_MASK);
+            LocationRange retained = projected.location();
+            projected = replace(projected, ABS_PATH, match -> retained != null
+                    && match.start() >= retained.start() && match.end() <= retained.end()
+                    ? match.group() : PATH_MASK);
         }
+        return projected.text();
+    }
 
-        return out;
+    /** Every edit before a field is tracked. Any stronger masking overlapping it revokes it. */
+    private static Projection replace(Projection source, Pattern pattern,
+                                      java.util.function.Function<Matcher, String> replacement) {
+        Matcher matcher = pattern.matcher(source.text());
+        StringBuilder result = new StringBuilder(source.text().length());
+        LocationRange range = source.location();
+        int shift = 0;
+        int cursor = 0;
+        while (matcher.find()) {
+            String value = replacement.apply(matcher);
+            result.append(source.text(), cursor, matcher.start()).append(value);
+            if (range != null && !value.equals(matcher.group())) {
+                if (matcher.end() <= range.start()) {
+                    shift += value.length() - (matcher.end() - matcher.start());
+                } else if (matcher.start() < range.end()) {
+                    range = null;
+                }
+            }
+            cursor = matcher.end();
+        }
+        result.append(source.text(), cursor, source.text().length());
+        return new Projection(result.toString(), range == null ? null
+                : new LocationRange(range.start() + shift, range.end() + shift));
     }
 
     public String redactBlock(String s) {
+        return redactBlockWithValidatedLocation(s, -1, -1, "");
+    }
+
+    /**
+     * Low-level projection for an independently admitted exact runtime location field.
+     * This method does not admit publication. The caller must establish runtime ownership.
+     * Secret, IP and control handling retain the ordinary block's per-line semantics.
+     */
+    public String redactBlockWithValidatedLocation(String s, int start, int end, String location) {
         if (s == null) return "";
+        boolean bound = location != null && start >= 0 && end > start && end <= s.length()
+                && end - start == location.length() && s.regionMatches(start, location, 0, location.length())
+                && !LINE_TERM.matcher(location).find();
         // Preserve original line terminators (\r\n, \r, \n)
         Matcher termMatcher = LINE_TERM.matcher(s);
         List<String> terminators = new ArrayList<>();
@@ -135,9 +190,16 @@ public final class Redactor {
 
         String[] lines = LINE_TERM.split(s, -1);
         StringBuilder b = new StringBuilder(s.length());
+        int offset = 0;
         for (int i = 0; i < lines.length; i++) {
-            b.append(redactLine(lines[i]));
-            if (i < terminators.size()) b.append(terminators.get(i));
+            LocationRange range = bound && start >= offset && end <= offset + lines[i].length()
+                    ? new LocationRange(start - offset, end - offset) : null;
+            b.append(redactLine(lines[i], range));
+            offset += lines[i].length();
+            if (i < terminators.size()) {
+                b.append(terminators.get(i));
+                offset += terminators.get(i).length();
+            }
         }
         return b.toString();
     }

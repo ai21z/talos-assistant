@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
@@ -142,7 +143,7 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
         String missing = String.join(", ", missingSources);
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Create the requested source-derived output."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         String frame = "[SourceEvidenceReadBeforeWriteRepair]\n"
                 + "A source-derived write was blocked before approval because the source file(s) "
                 + "were not read in this turn. No approval was requested and no file was changed.\n"

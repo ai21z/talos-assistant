@@ -64,15 +64,18 @@ final class RenderEngineCodeLiteralTest {
     }
 
     @Test
-    void ordinaryPrefixStreamsBeforeCodeSettles() {
+    void ordinaryPrefixAndCodeRemainPrivateUntilTheCompleteAnswerIsSelected() {
         var capture = new ByteArrayOutputStream();
         RenderEngine engine = renderer(capture, true, new Redactor());
-        engine.render(new Result.StreamChunk("Ordinary prose now. "));
-        assertTrue(capture.toString(StandardCharsets.UTF_8).contains("Ordinary prose now."));
-        engine.render(new Result.StreamChunk("`" + SCRIPT));
-        assertFalse(capture.toString(StandardCharsets.UTF_8).contains(SCRIPT));
-        engine.render(new Result.StreamChunk("` Done."));
+        var sink = engine.answerStreamSink(null);
+        sink.accept("Ordinary prose now. ");
+        sink.accept("`" + SCRIPT);
+        sink.accept("` Done.");
+        assertEquals(0, capture.size(), "No provider fragment may be printed before selection");
         engine.render(new Result.StreamEnd());
+        assertEquals(0, capture.size(), "Transport completion must not select an answer");
+        engine.render(new Result.Ok("Ordinary prose now. `" + SCRIPT + "` Done."));
+        assertTrue(capture.toString(StandardCharsets.UTF_8).contains("Ordinary prose now."));
         assertTrue(capture.toString(StandardCharsets.UTF_8).contains(SCRIPT));
     }
 
@@ -108,13 +111,19 @@ final class RenderEngineCodeLiteralTest {
     void toolProtocolFilterStillDominatesLiteralPresentation() {
         var capture = new ByteArrayOutputStream();
         RenderEngine engine = renderer(capture, true, new Redactor());
-        var filter = new ToolCallStreamFilter(engine.answerStreamSink(null));
+        var selected = new StringBuilder();
+        var filter = new ToolCallStreamFilter(selected::append);
+        var sink = engine.answerStreamSink(null);
         String source = "```json\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"a.txt\"}}\n```";
         for (int index = 0; index < source.length(); index++) {
-            filter.accept(source.substring(index, index + 1));
+            String fragment = source.substring(index, index + 1);
+            sink.accept(fragment);
+            filter.accept(fragment);
         }
         filter.flush();
         engine.render(new Result.StreamEnd());
+        assertEquals(0, capture.size());
+        engine.render(new Result.Ok(selected.toString()));
         assertFalse(capture.toString(StandardCharsets.UTF_8).contains("talos.read_file"));
     }
 
@@ -125,8 +134,10 @@ final class RenderEngineCodeLiteralTest {
                 "paths", false, "ips", false, "secrets", List.of("fixture-secret"))));
         RenderEngine engine = renderer(capture, false, redactor);
         String source = "`<button onclick=\"fixture-secret\">Go — now</button>`";
-        engine.render(new Result.StreamChunk(source));
+        engine.answerStreamSink(null).accept(source);
         engine.render(new Result.StreamEnd());
+        assertEquals(0, capture.size());
+        engine.render(new Result.Ok(source));
         String output = capture.toString(StandardCharsets.UTF_8);
         assertTrue(output.contains("<button onclick=\"[secret]\">Go - now</button>"));
         assertFalse(output.contains("fixture-secret"));
@@ -140,8 +151,11 @@ final class RenderEngineCodeLiteralTest {
             var redactor = new Redactor(Map.of("redact", Map.of(
                     "secrets", List.of(java.util.regex.Pattern.quote(secret)))));
             RenderEngine engine = renderer(capture, true, redactor);
-            engine.render(new Result.StreamChunk("Before " + secret + " after. `" + SCRIPT + "`"));
+            String source = "Before " + secret + " after. `" + SCRIPT + "`";
+            engine.answerStreamSink(null).accept(source);
             engine.render(new Result.StreamEnd());
+            assertEquals(0, capture.size());
+            engine.render(new Result.Ok(source));
             String output = capture.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("[secret]"));
             assertFalse(output.contains(secret));
@@ -150,36 +164,39 @@ final class RenderEngineCodeLiteralTest {
     }
 
     @Test
-    void streamCloseAndShutdownFlushThroughTheOriginalWriterAndReset() {
+    void streamCloseAndShutdownDiscardFragmentsAndLeaveCompleteRenderingIntact() {
         var capture = new ByteArrayOutputStream();
         RenderEngine engine = renderer(capture, true, new Redactor());
         var writer = new StringBuilder();
         Consumer<String> sink = engine.answerStreamSink(writer::append);
         sink.accept("`" + SCRIPT + "`");
+        engine.render(new Result.StreamEnd());
+        assertEquals(0, capture.size());
+        assertTrue(writer.isEmpty());
         engine.render(new Result.Streamed("`" + SCRIPT + "`", ""));
-        assertTrue(writer.toString().contains(SCRIPT));
-        writer.setLength(0);
+        assertTrue(capture.toString(StandardCharsets.UTF_8).contains(SCRIPT));
+        assertTrue(writer.isEmpty(), "A custom writer must not receive raw fragments or selected text");
+        capture.reset();
         sink.accept("`" + BUTTON + "`");
         engine.shutdown();
-        assertTrue(writer.toString().contains(BUTTON));
-        assertFalse(writer.toString().contains(SCRIPT));
+        assertEquals(0, capture.size(), "Shutdown must not commit an unselected fragment");
+        assertTrue(writer.isEmpty());
+        engine.render(new Result.Ok("`" + BUTTON + "`"));
+        assertTrue(capture.toString(StandardCharsets.UTF_8).contains(BUTTON));
+        assertFalse(capture.toString(StandardCharsets.UTF_8).contains(SCRIPT));
     }
 
     @Test
-    void boundedRetentionReportsDisplayLossWithoutChangingNextAnswer() {
+    void legacyFragmentsAreRejectedBeforeOutputWithoutChangingTheNextCompleteAnswer() {
         var capture = new ByteArrayOutputStream();
         RenderEngine engine = renderer(capture, true, new Redactor());
-        engine.render(new Result.StreamChunk("`" + SCRIPT));
-        engine.render(new Result.StreamChunk("x".repeat(AnswerCodeLiteralStreamProjection.MAX_SOURCE_CHARS)));
-        engine.render(new Result.StreamChunk("overflow-tail`"));
+        for (String fragment : List.of("`" + SCRIPT,
+                "x".repeat(AnswerCodeLiteralStreamProjection.MAX_SOURCE_CHARS), "overflow-tail`")) {
+            assertThrows(IllegalArgumentException.class, () -> engine.render(new Result.StreamChunk(fragment)));
+        }
         engine.render(new Result.StreamEnd());
-        String output = capture.toString(StandardCharsets.UTF_8);
-        assertTrue(output.contains("answer display truncated"));
-        assertFalse(output.contains(SCRIPT));
-        assertFalse(output.contains("overflow-tail"));
-        capture.reset();
-        engine.render(new Result.StreamChunk("`" + SCRIPT + "`"));
-        engine.render(new Result.StreamEnd());
+        assertEquals(0, capture.size(), "Rejected legacy fragments must not produce output");
+        engine.render(new Result.Ok("`" + SCRIPT + "`"));
         assertTrue(capture.toString(StandardCharsets.UTF_8).contains(SCRIPT));
     }
 
@@ -196,13 +213,17 @@ final class RenderEngineCodeLiteralTest {
         var capture = new ByteArrayOutputStream();
         RenderEngine engine = renderer(capture, true, new Redactor());
         var writer = new StringBuilder();
-        Consumer<String> sink = useWriter ? engine.answerStreamSink(writer::append)
-                : chunk -> engine.render(new Result.StreamChunk(chunk));
+        Consumer<String> sink = engine.answerStreamSink(useWriter ? writer::append : null);
         for (int start = 0; start < source.length(); start += width) {
             sink.accept(source.substring(start, Math.min(source.length(), start + width)));
+            assertEquals(0, capture.size(), "Raw fragments must not produce output");
+            assertTrue(writer.isEmpty(), "Raw fragments must not reach a custom writer");
         }
         engine.render(new Result.StreamEnd());
-        return useWriter ? writer.toString() : capture.toString(StandardCharsets.UTF_8);
+        assertEquals(0, capture.size(), "Transport completion must not commit an answer");
+        engine.render(new Result.Ok(source));
+        assertTrue(writer.isEmpty());
+        return capture.toString(StandardCharsets.UTF_8);
     }
 
     private static RenderEngine renderer(ByteArrayOutputStream capture, boolean unicode, Redactor redactor) {

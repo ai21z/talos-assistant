@@ -4,6 +4,24 @@ package dev.talos.cli.ui;
  * Renders compact semantic progress lines outside the answer body.
  */
 public final class ProgressLineRenderer {
+    public enum TurnOutcome {
+        COMPLETED_VERIFIED, COMPLETED_UNVERIFIED, READ_ONLY_ANSWERED, PARTIAL,
+        BLOCKED_BY_APPROVAL, BLOCKED_BY_POLICY, ADVISORY_ONLY, FAILED, CANCELLED, UNKNOWN;
+
+        public static TurnOutcome from(String status, String classification) {
+            if ("ABORTED".equals(status)) return CANCELLED;
+            if ("ERROR".equals(status)) return FAILED;
+            TurnOutcome outcome;
+            try {
+                outcome = valueOf(classification == null ? "" : classification);
+            } catch (IllegalArgumentException invalid) {
+                outcome = UNKNOWN;
+            }
+            if ("BLOCKED".equals(status) && outcome != BLOCKED_BY_APPROVAL) return BLOCKED_BY_POLICY;
+            return outcome;
+        }
+    }
+
     private final CliTheme theme;
     private final SemanticGlyphSet glyphs;
 
@@ -53,6 +71,11 @@ public final class ProgressLineRenderer {
     }
 
     public String turnStats(int turnNumber, long elapsedMs, int responseLen) {
+        return turnStats(turnNumber, elapsedMs, responseLen, TurnOutcome.UNKNOWN);
+    }
+
+    public String turnStats(int turnNumber, long elapsedMs, int responseLen, TurnOutcome outcome) {
+        TurnOutcome observed = outcome == null ? TurnOutcome.UNKNOWN : outcome;
         StringBuilder sb = new StringBuilder("Turn ");
         sb.append(turnNumber);
         sb.append(" ").append(glyphs.dot()).append(" ");
@@ -64,8 +87,15 @@ public final class ProgressLineRenderer {
         if (responseLen > 0) {
             sb.append(" ").append(glyphs.dot()).append(" ~").append(responseLen).append(" chars");
         }
+        sb.append(" ").append(glyphs.dot()).append(" ").append(observed.name());
         sb.append(" ").append(glyphs.dot()).append(" /last trace");
-        return line(theme.success(glyphs.success()), sb.toString(), "");
+        String icon = switch (observed) {
+            case COMPLETED_VERIFIED -> theme.success(glyphs.success());
+            case FAILED, CANCELLED -> theme.error(glyphs.error());
+            case PARTIAL, BLOCKED_BY_APPROVAL, BLOCKED_BY_POLICY -> theme.warning(glyphs.warning());
+            default -> theme.metadata(glyphs.bullet());
+        };
+        return line(icon, sb.toString(), "");
     }
 
     private String line(String icon, String label, String detail) {

@@ -35,6 +35,14 @@ See [Model profile lifecycle](../architecture/model-profile-lifecycle.md) for ho
 
 The accepted profiles are large local-model lanes. They are not weak-PC defaults. CPU-only startup and tool turns can be slow without substantial system memory or GPU acceleration.
 
+## Session selection and local availability
+
+In Unreleased current source, `/models` lists selectable profiles with local availability and catalog disposition. The original configured model and session imports are also shown. `/models use <alias>` and `/set model <alias>` select an available local managed model. `/models add <alias> "<absolute GGUF path>"` registers another file for the current session without starting it. Full instructions are provided in [model setup](../getting-started/model-setup.md#select-a-model-in-the-current-session).
+
+Listing an exact filename establishes only a local candidate, not artifact verification, readiness or qualification. Built-in aliases require the pinned artifact bytes. Custom imports remain unverified. No model is downloaded by these commands. Selection validates local launch facts before stopping the owned backend, then requires target startup and served-identity checks. Talos remains open, and connect-only servers are not restarted.
+
+Imports and selections apply to the current session. Saved defaults, conversation history, global privacy and native-tool policy, sampling and embedding configuration are preserved. Model-specific defaults are supplied by the selected catalog profile. Session history remains restorable when a saved model is unavailable, with a warning rather than a successful model-selection claim.
+
 ## Accepted beta profiles
 
 The example paths must be replaced with existing local paths. On Windows, the server path must name `llama-server.exe`. Without `--write`, setup only prints help. If a configuration already exists, replacement requires an explicit `--force`, and a backup is created before replacement. Talos must be restarted after a configuration write.
@@ -68,6 +76,8 @@ talos doctor --start
 - Hardware guidance: 24 GB RAM minimum, 32 GB or more for CPU-only use.
 
 This profile requires the exact local GGUF path. It is a large model and is not the low-resource lane.
+
+In Unreleased current source, system instructions are combined in order into one leading system message when the artifact, engine and served identity qualify this profile. This prevents later system instructions from being omitted by its embedded Harmony template. Conversation references, workspace content and tool results retain their original roles. This delivery behavior does not establish answer correctness.
 
 gpt-oss-20b requires a concrete local GGUF model path.
 

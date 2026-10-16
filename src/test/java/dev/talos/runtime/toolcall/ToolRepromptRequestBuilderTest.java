@@ -3,6 +3,13 @@ package dev.talos.runtime.toolcall;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.llm.TextToolCallInstructions;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.failure.FailureAction;
+import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ObservedProviderTransportFixture;
@@ -11,6 +18,7 @@ import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -25,6 +33,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ToolRepromptRequestBuilderTest {
     @TempDir
     Path tempDir;
+
+    @AfterEach
+    void clearCapturedTurn() {
+        TurnTaskContractCapture.clear();
+    }
+
+    @Test
+    void boundedStaticRepairAddsSharedFormatOnlyForActualSelectedTextSurface() {
+        for (String mode : List.of("text", "native", "none")) {
+            boolean textual = mode.equals("text");
+            try (LlmClient llm = textual ? ScriptedNativeLlmClient.textToolFallbackStrings("unused")
+                    : ScriptedNativeLlmClient.of(List.of(new LlmClient.StreamResult("unused", List.of())))) {
+                List<ToolSpec> selected = mode.equals("none") ? List.of() : List.of(tool("talos.write_file"));
+                Context context = Context.builder(new Config(null)).llm(llm).nativeToolSpecs(selected).build();
+                LoopState state = new LoopState("", List.of(), ProviderResponseCapture.Receipt.none(),
+                        List.of(ChatMessage.system("old manual"), ChatMessage.user("Fix index.html.")),
+                        tempDir, context, null, 5, 0);
+
+                List<ChatMessage> messages = ToolRepromptRequestBuilder.messages(
+                        state, true, List.of("index.html"), "Fix index.html.", selected);
+                String assembled = messages.stream().map(ChatMessage::content)
+                        .collect(java.util.stream.Collectors.joining("\n"));
+
+                assertEquals(List.of("system", "system", "user"),
+                        messages.stream().map(ChatMessage::role).toList());
+                assertFalse(assembled.contains("old manual"));
+                assertTrue(assembled.contains("Call talos.write_file with complete corrected file content"));
+                assertTrue(assembled.contains("Do not write any other file in this continuation"));
+                assertTrue(assembled.contains("Fix index.html."));
+                assertEquals(textual ? 1 : 0,
+                        assembled.split("Textual tool-call format:", -1).length - 1);
+                if (textual) assertTrue(assembled.contains(TextToolCallInstructions.formatContract()));
+                assertEquals(selected, context.nativeToolSpecs());
+            }
+        }
+    }
 
     @Test
     void staticRepairProgressNarrowsToolsToWriteFileWhenAvailable() {
@@ -277,6 +321,156 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void capturedMutationRequiresNativeContinuationWithoutRaisingOrNarrowingRetryObligation() {
+        LoopState state = capturedState("Change README.md from old to new.");
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome(
+                "talos.read_file", "README.md", true, false, false, "read", ""));
+
+        ChatRequestControls controls = ToolRepromptRequestBuilder.controls(state, "continuation", true);
+
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals(List.of("current-turn-mutation-obligation", "continuation"), controls.debugTags());
+        assertEquals(ChatRequestControls.defaults().sampling(), controls.sampling());
+        assertEquals(0, controls.maxOutputTokens());
+        assertFalse(state.hasPendingActionObligation());
+        assertEquals(toolNames(broadTools()),
+                toolNames(ToolRepromptRequestBuilder.toolSpecs(state, false, false)));
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", false));
+
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome(
+                "talos.edit_file", "README.md", true, true, false, "edited", ""));
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    @Test
+    void uncapturedReadOnlyAndUnresolvedRequestsDoNotCreateContinuationAuthority() {
+        for (String request : List.of("Read README.md. Do not change files.",
+                "Implement those changes now.", "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser.")) {
+            LoopState state = capturedState(request);
+            assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true), request);
+        }
+        LoopState state = capturedState("Change README.md from old to new.");
+        TurnTaskContractCapture.clear();
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    @Test
+    void textModeUnboundAndNonmutatingSurfacesCannotAcquireRequiredNativeContinuation() {
+        LoopState state = capturedState("Change README.md from old to new.");
+        state.currentResponseReceipt = boundProviderReceipt(toolNames(broadTools()),
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON);
+        assertTrue(state.currentResponseReceipt.providerToolCallEligible());
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+        state.currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+        state.currentResponseReceipt = boundProviderReceipt(List.of("talos.read_file"));
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    @Test
+    void verificationPhaseDoesNotKeepRequiringMutation() {
+        LoopState state = capturedState("Change README.md from old to new.");
+        state.ctx.executionPhaseState().moveTo(dev.talos.runtime.phase.ExecutionPhase.VERIFY);
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    @Test
+    void terminalStopAndPreexecutionDenialsNeverRequireAnotherToolRequest() {
+        LoopState stopped = capturedState("Change README.md from old to new.");
+        stopped.failureDecision = FailureDecision.stop(FailureAction.ASK_USER, "stop");
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(stopped, "", true));
+        for (var reason : List.of(dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED,
+                dev.talos.tools.ToolFailureReason.PERMISSION_POLICY_DENIED,
+                dev.talos.tools.ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)) {
+            LoopState state = capturedState("Change README.md from old to new.");
+            state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of("README.md")));
+            state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.edit_file", "README.md",
+                    false, true, false, "blocked", "blocked", null, "", null, null, reason));
+            assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true), reason.name());
+        }
+    }
+
+    @Test
+    void nativeReceiptCannotRequireToolsWhenCurrentProviderReportsTextualAuthority() {
+        LoopState captured = capturedState("Change README.md from old to new.");
+        try (LlmClient llm = ScriptedNativeLlmClient.textToolFallbackStrings("Done.")) {
+            Context context = Context.builder(new Config(null)).llm(llm)
+                    .nativeToolSpecs(broadTools()).build();
+            LoopState state = new LoopState("", List.of(), captured.currentResponseReceipt,
+                    captured.messages, tempDir, context, null, 5, 0);
+            assertTrue(state.currentResponseReceipt.providerToolCallEligible());
+            assertEquals(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                    state.currentResponseReceipt.toolAuthorityContract().mode());
+            assertEquals(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                    llm.toolAuthorityModeForToolSurface(broadTools()));
+
+            // Isolate the current-mode gate from REQUIRED capability support.
+            assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+        }
+    }
+
+    @Test
+    void unsuccessfulMutationWithAppliedOrUncertainEffectsCannotRequireContinuation() {
+        for (var effects : List.of(dev.talos.tools.ToolMutationEffects.applied("README.md"),
+                dev.talos.tools.ToolMutationEffects.uncertain("README.md"))) {
+            LoopState state = capturedState("Change README.md from old to new.");
+            assertEquals(ToolChoiceMode.REQUIRED, ToolRepromptRequestBuilder.controls(state, "", true).toolChoice());
+            state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.edit_file", "README.md",
+                    false, true, false, "failed after effects", "failed").withMutationEffects(effects));
+
+            assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+            state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of("README.md")));
+            assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+        }
+    }
+
+    @Test
+    void currentMutationObligationRemainsRequiredUntilBothExpectedTargetsAreSatisfied() {
+        LoopState state = capturedState("Change README.md from old title to new title and NOTES.md from old note to new note.");
+        assertEquals(java.util.Set.of("README.md", "NOTES.md"),
+                TurnTaskContractCapture.getResolution().contract().expectedTargets());
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.edit_file", "README.md",
+                true, true, false, "edited", ""));
+
+        assertEquals(ToolChoiceMode.REQUIRED, ToolRepromptRequestBuilder.controls(state, "", true).toolChoice());
+        assertFalse(state.hasPendingActionObligation());
+        assertEquals(List.of("NOTES.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.edit_file", "NOTES.md",
+                true, true, false, "edited", ""));
+        assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    @Test
+    void targetlessAllowedMutationRequiresAFirstSuccessButNotAnotherMutation() {
+        String request = "Fix the typo in the current document.";
+        List<ChatMessage> messages = List.of(ChatMessage.user(request));
+        // Explicit captured-contract fixture exercises the targetless policy branch,
+        // independently of natural-language target inference.
+        TurnTaskContractCapture.set(new dev.talos.runtime.task.TaskContract(
+                dev.talos.runtime.task.TaskType.FILE_EDIT, true, true, false,
+                java.util.Set.of(), java.util.Set.of(), request));
+        LoopState state = loopState(broadTools(), messages, tempDir);
+        assertTrue(TurnTaskContractCapture.getResolution().contract().mutationAllowed());
+        assertTrue(TurnTaskContractCapture.getResolution().contract().expectedTargets().isEmpty());
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.read_file", "README.md",
+                true, false, false, "read", ""));
+        assertEquals(ToolChoiceMode.REQUIRED, ToolRepromptRequestBuilder.controls(state, "", true).toolChoice());
+
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome("talos.edit_file", "README.md",
+                true, true, false, "edited", ""));
+        assertEquals(ChatRequestControls.defaults(), ToolRepromptRequestBuilder.controls(state, "", true));
+    }
+
+    private LoopState capturedState(String request) {
+        List<ChatMessage> messages = List.of(ChatMessage.user(request));
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
+        return loopState(broadTools(), messages, tempDir);
+    }
+
+    @Test
     void executionStageDelegatesRepromptRequestAssemblyToBuilder() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
@@ -334,6 +528,13 @@ class ToolRepromptRequestBuilderTest {
     private static ProviderResponseCapture.Receipt boundProviderReceipt(
             List<String> selectedToolNames
     ) {
+        return boundProviderReceipt(selectedToolNames, ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
+    }
+
+    private static ProviderResponseCapture.Receipt boundProviderReceipt(
+            List<String> selectedToolNames,
+            ProviderResponseCapture.ToolAuthorityMode mode
+    ) {
         ProviderResponseCapture.Scope scope =
                 ProviderResponseCapture.begin(
                         new ProviderResponseCapture.Listener() {},
@@ -344,8 +545,7 @@ class ToolRepromptRequestBuilderTest {
                         ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
                         ProviderResponseCapture.Purpose.TURN_RESPONSE,
                         ProviderResponseCapture.ToolAuthorityContract.bound(
-                                ProviderResponseCapture.ToolAuthorityMode
-                                        .PROVIDER_NATIVE,
+                                mode,
                                 selectedToolNames,
                                 ToolChoiceMode.AUTO,
                                 ""));
@@ -357,15 +557,18 @@ class ToolRepromptRequestBuilderTest {
                     attempt,
                     new ProviderTransportHandoff.DispatchEvidence(
                             "sha256:" + "a".repeat(64),
-                            selectedToolNames));
+                            mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                                    ? selectedToolNames : List.of()));
             ProviderResponseCapture.Receipt receipt = attempt.respond(
                     new ProviderResponseCapture.Response(
-                            "",
-                            1,
+                            mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE ? ""
+                                    : "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE ? 1 : 0,
                             ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
                             ProviderResponseCapture.Completion.PROVIDER_EOS,
                             false,
-                            false));
+                            false,
+                            mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON));
             generation.complete(receipt);
             return receipt;
         } finally {

@@ -16,6 +16,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NoToolAnswerTruthfulnessGuardTest {
 
     @Test
+    void resolvedNoneIsNotOverruledByEvidenceLookingWords() {
+        String request = "Explain evidence policies. No project inspection is needed.";
+        CurrentTurnPlan plan = plan(TaskType.READ_ONLY_QA, false, request);
+        assertEquals("NONE", plan.evidenceObligation());
+        String answer = "Runtime policies cannot establish every generated claim. ".repeat(20);
+        assertEquals(answer, NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer, plan, List.of(ChatMessage.user(request))));
+    }
+
+    @Test
+    void retainedTraceVerificationDoesNotRequireAFileContentRead() {
+        String request = "Verify which tools were executed earlier.";
+        CurrentTurnPlan plan = plan(TaskType.VERIFY_ONLY, false, request);
+        assertEquals("VERIFY_FROM_TRACE_OR_EVIDENCE", plan.evidenceObligation());
+        String answer = "Only retained execution records were inspected. ".repeat(20);
+        assertEquals(answer, NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer, plan, List.of(ChatMessage.user(request))));
+    }
+
+    @Test
     void workspaceLocalAccessDenialGetsCapabilityCorrection() {
         CurrentTurnPlan plan = plan(
                 TaskType.WORKSPACE_EXPLAIN,
@@ -66,9 +86,10 @@ class NoToolAnswerTruthfulnessGuardTest {
     @Test
     void streamingEvidenceClaimGetsUngroundedAnnotation() {
         CurrentTurnPlan plan = plan(
-                TaskType.READ_ONLY_QA,
+                TaskType.WORKSPACE_EXPLAIN,
                 false,
                 "Inspect the files and explain the architecture.");
+        assertEquals("PROJECT_SUMMARY_EVIDENCE_REQUIRED", plan.evidenceObligation());
         List<ChatMessage> messages = List.of(ChatMessage.user("Inspect the files and explain the architecture."));
         String answer = "I inspected the repository and found a layered Java CLI architecture. "
                 + "The runtime owns task execution, the CLI owns presentation, and the tools package owns "

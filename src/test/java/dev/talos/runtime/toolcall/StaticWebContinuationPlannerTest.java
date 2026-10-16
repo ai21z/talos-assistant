@@ -41,6 +41,25 @@ class StaticWebContinuationPlannerTest {
     }
 
     @Test
+    void runtimeIdentityIsNotReintroducedByDirectoryContinuation() {
+        String request = "Who are you? Create a modern BMI calculator website. Use index.html, styles.css and script.js.";
+        LoopState state = state(request);
+        var resolution = TaskContractResolver.resolveFromMessages(state.messages);
+        TurnTaskContractCapture.set(resolution, state.messages, dev.talos.spi.types.ModelIdentitySnapshot.empty(), true);
+        var before = List.copyOf(state.messages);
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome("talos.mkdir", "bmi-website", true, true, false,
+                "Created directory bmi-website", ""));
+        state.mutatingToolSuccesses = 1;
+        var continuation = StaticWebContinuationPlanner.nextPlan(state, baseTools()).orElseThrow();
+        String projected = prompt(continuation.messages());
+        assertFalse(projected.contains("Who are you?"), projected);
+        assertTrue(projected.contains("Create a modern BMI calculator website."), projected);
+        assertTrue(projected.contains("Use index.html, styles.css and script.js."), projected);
+        assertEquals(request, TurnTaskContractCapture.get().originalUserRequest());
+        assertEquals(before, state.messages);
+    }
+
+    @Test
     void directoryOnlyPlanPrefersWriteFileAndPreservesContinuationFrame() {
         LoopState state = state(
                 "I want to create a modern BMI calculator website to use! Can you make it?");

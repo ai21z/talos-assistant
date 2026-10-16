@@ -108,7 +108,9 @@ public final class ReadOnlyFinalizationEvidence {
 
     public boolean available() {
         return reason == Reason.BOUND && receipt.providerTerminalEligible()
-                && receipt.readInputBinding().bound() && requestMeaning != null;
+                && receipt.readInputBinding().bound()
+                && receipt.readInputBinding().purpose() == ProviderReadInputBinding.Purpose.RESPONSE_ONLY
+                && requestMeaning != null;
     }
 
     /** Only exact selected text in the owning active turn can use this source association. */
@@ -138,7 +140,7 @@ public final class ReadOnlyFinalizationEvidence {
                     .sorted(Comparator.comparingInt(ReadOnlyEvidenceContext.Carrier::index)).toList()) {
                 ReadEvidence observation = carrier.evidence();
                 var bound = state.readEvidence.toolResult(observation);
-                if (bound == null || bound.body() == null || !bound.message().equals(carrier.message())
+                if (bound == null || bound.body() == null || !sameObservationMessage(bound.message(), carrier.message())
                         || observation.originId().isBlank() || observation.originOrdinal() < 1
                         || observation.ranged() || observation.truncated() || observation.redacted())
                     return Frozen.unavailable(Reason.COVERAGE_UNAVAILABLE);
@@ -172,6 +174,19 @@ public final class ReadOnlyFinalizationEvidence {
         } catch (RuntimeException invalid) {
             return Frozen.unavailable(Reason.SOURCE_FORMAT_UNAVAILABLE);
         }
+    }
+
+    private static boolean sameObservationMessage(ChatMessage original, ChatMessage projected) {
+        // Destination restrictions may tighten without changing the execution-bound observation.
+        return original != null && projected != null
+                && original.contentRestrictions().modelAllowed()
+                && projected.contentRestrictions().modelAllowed()
+                && Objects.equals(original.role(), projected.role())
+                && Objects.equals(original.content(), projected.content())
+                && Objects.equals(original.toolCallId(), projected.toolCallId())
+                && Objects.equals(original.toolCalls(), projected.toolCalls())
+                && original.contentRestrictions().intersect(projected.contentRestrictions())
+                    .equals(projected.contentRestrictions());
     }
 
     /** Only the exact complete numbered ordinary-text representation is accepted. */
@@ -258,6 +273,7 @@ public final class ReadOnlyFinalizationEvidence {
                         && selected.completion() == ProviderResponseCapture.Completion.PROVIDER_EOS
                         && selected.toolAuthorityMode() == ProviderResponseCapture.ToolAuthorityMode.NONE
                         && binding != null && binding.bound()
+                        && binding.purpose() == ProviderReadInputBinding.Purpose.RESPONSE_ONLY
                         && ProviderReadInputBinding.SANITIZER_VERSION.equals(binding.sanitizerVersion())
                         && binding.preparedToolResults().size() == reads.size();
                 if (matched) {

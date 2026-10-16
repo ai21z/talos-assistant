@@ -2,12 +2,17 @@ package dev.talos.runtime;
 
 import dev.talos.core.io.AtomicFileWriter;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.function.Consumer;
 
 /** Child-JVM holder intentionally terminated without closing its writer lease. */
 public final class JsonSessionStoreWriterLeaseCrashProcessMain {
@@ -56,11 +61,7 @@ public final class JsonSessionStoreWriterLeaseCrashProcessMain {
                     StandardCharsets.UTF_8,
                     java.nio.file.StandardOpenOption.APPEND);
         }
-        Files.createDirectories(ready.getParent());
-        Files.writeString(
-                ready,
-                lease.sessionId() + "\n",
-                StandardCharsets.UTF_8);
+        publishReady(ready, lease.sessionId(), staged -> { });
 
         // The parent forcibly terminates this process. Deliberately retain
         // strong references to the store and lease and never close either.
@@ -68,5 +69,23 @@ public final class JsonSessionStoreWriterLeaseCrashProcessMain {
             Thread.sleep(1_000L);
         }
         System.exit(65);
+    }
+
+    /** Completed readiness is published within the owned single-producer directory. */
+    static void publishReady(Path ready, String sessionId, Consumer<Path> beforePublication) throws IOException {
+        if (sessionId.isBlank()) throw new IllegalArgumentException("A nonblank session id is required");
+        Files.createDirectories(ready.getParent());
+        if (Files.exists(ready, LinkOption.NOFOLLOW_LINKS))
+            throw new FileAlreadyExistsException(ready.toString());
+        Path staged = Files.createTempFile(ready.getParent(), "ready-", ".pending");
+        try {
+            Files.writeString(staged, sessionId + "\n", StandardCharsets.UTF_8);
+            beforePublication.accept(staged);
+            if (Files.exists(ready, LinkOption.NOFOLLOW_LINKS))
+                throw new FileAlreadyExistsException(ready.toString());
+            Files.move(staged, ready, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(staged);
+        }
     }
 }

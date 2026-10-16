@@ -705,16 +705,22 @@ class InfraCommandsTest {
     @DisplayName("ModelsCommand")
     class Models {
 
-        @Test void execute_without_ollama_returns_error() throws Exception {
+        @Test void execute_lists_managed_candidates_without_running_ollama() throws Exception {
             var cmd = new ModelsCommand();
             Result r = cmd.execute("", ctx);
-            // Without running Ollama, this should fail gracefully
             assertNotNull(r);
             assertTrue(r instanceof Result.Error || r instanceof Result.Info || r instanceof Result.Ok,
                     "Should handle missing Ollama gracefully");
             if (r instanceof Result.Ok ok) {
-                assertTrue(ok.text.contains("/set model <backend/model>"));
+                assertTrue(ok.text.contains("/models use <alias>"), ok.text);
+                assertTrue(ok.text.contains("/models --verbose"), ok.text);
+                assertTrue(ok.text.contains("/help models"), ok.text);
+                assertTrue(ok.text.contains("No download is performed"), ok.text);
                 assertFalse(ok.text.contains(":set model"));
+                Result details = cmd.execute("--verbose", ctx);
+                String detailText = assertInstanceOf(Result.Ok.class, details).text;
+                assertTrue(detailText.contains("/set model <alias>"), detailText);
+                assertTrue(detailText.contains("/models add <alias>"), detailText);
             }
         }
 

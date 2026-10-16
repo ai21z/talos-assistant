@@ -94,8 +94,13 @@ public final class ReadOnlyFinalizationEvidenceTestSupport {
 
     static ProviderResponseCapture.Receipt selectedReceipt(String answer, List<ChatMessage> prepared)
             throws Exception {
+        return selectedReceipt(answer, prepared, ProviderReadInputBinding.REQUEST_TAG);
+    }
+
+    static ProviderResponseCapture.Receipt selectedReceipt(String answer, List<ChatMessage> prepared, String purposeTag)
+            throws Exception {
         var controls = new ChatRequestControls(ToolChoiceMode.NONE, "", ResponseFormatMode.TEXT, "",
-                List.of(ProviderReadInputBinding.REQUEST_TAG), null, 2048).withSingleAttempt(true);
+                List.of(purposeTag), null, 2048).withSingleAttempt(true);
         ChatRequest request = new ChatRequest("fixture", "fixture", "", "", List.of(),
                 Duration.ofSeconds(1), prepared, List.of(), controls);
         List<Map<String, Object>> serializedMessages = new ArrayList<>();

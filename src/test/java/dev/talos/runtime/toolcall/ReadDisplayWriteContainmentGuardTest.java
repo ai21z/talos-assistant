@@ -160,7 +160,7 @@ class ReadDisplayWriteContainmentGuardTest {
     ) {
         return new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> modelMessages.add(content),
+                (s, nativePath, callIndex, content, outcome) -> modelMessages.add(content),
                 (toolName, result) -> emitted.add(result));
     }
 

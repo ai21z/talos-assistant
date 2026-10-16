@@ -28,6 +28,7 @@ import dev.talos.runtime.policy.ActionObligationFailureAssessment;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationAssessment;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.runtime.policy.WorkspaceResultEvidencePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
@@ -185,6 +186,9 @@ record ExecutionOutcome(
         String current = answer == null ? "" : answer;
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
         TaskContract contract = safePlan.taskContract();
+        String readOnlyLimitationReason = dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.limitationReason(loopResult);
+        boolean readOnlyLimited = !readOnlyLimitationReason.isEmpty();
+        String selectedRuntimeLimitation = readOnlyLimited ? loopResult.finalAnswer() : null;
         boolean mutationRequested = contract.mutationRequested();
         boolean unsupportedDocumentCapabilityLimited = UnsupportedDocumentCapabilityOutcome.assess(loopResult).limited();
         ActionObligationFailureAssessment actionObligationFailure = ActionObligationFailureAssessment.assess(
@@ -211,7 +215,11 @@ record ExecutionOutcome(
                 && !commandDenied;
         boolean failedAnyActionObligation = actionObligationFailure.failed()
                 || commandRequiredButNotRun
-                || unsupportedCommandRequiredButNotRun;
+                || unsupportedCommandRequiredButNotRun
+                || (mutationRequested && extraMutationSuccesses <= 0
+                    && (loopResult == null || (loopResult.mutatingToolSuccesses() <= 0
+                    && loopResult.toolOutcomes().stream().noneMatch(outcome ->
+                        outcome != null && outcome.mutating()))));
 
         UnsupportedDocumentAnswerGuard.DocumentAnswer documentAnswer = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -229,8 +237,13 @@ record ExecutionOutcome(
         webDiagnostic = dev.talos.runtime.verification.DocumentComparisonAnswer.compose(
                 contract, workspace, loopResult, extraMutationSuccesses, webDiagnostic);
         if (requestCoverageBoundExceeded(contract)) {
+            String coverageLimitedAnswer = requestCoverageBoundNotice();
+            if (readOnlyLimited && Objects.equals(webDiagnostic.answer(), selectedRuntimeLimitation)) {
+                coverageLimitedAnswer += "\n\n" + selectedRuntimeLimitation;
+                selectedRuntimeLimitation = coverageLimitedAnswer;
+            }
             webDiagnostic = new dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult(
-                    requestCoverageBoundNotice(),
+                    coverageLimitedAnswer,
                     dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.limited(
                             dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Reason.ANSWER_REQUIREMENTS_UNMET),
                     List.of());
@@ -290,11 +303,13 @@ record ExecutionOutcome(
                 current, loopResult, extraMutationSuccesses);
 
         boolean falseMutationClaim = false;
+        boolean unresolvedMutationClaim = false;
         if (!invalidMutation) {
-            shaped = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
-                    current, loopResult, extraMutationSuccesses);
-            falseMutationClaim = !Objects.equals(current, shaped);
-            current = shaped;
+            var claimAnswer = MutationFailureAnswerRenderer.selectMutationClaimAnswer(
+                    current, loopResult, extraMutationSuccesses, workspace);
+            falseMutationClaim = claimAnswer.unsupportedCurrentClaim();
+            unresolvedMutationClaim = claimAnswer.unresolvedClaim();
+            current = claimAnswer.answer();
         }
 
         shaped = InspectUnderCompletionAnswerGuard.annotateIfInspectUnderCompletion(
@@ -334,7 +349,7 @@ record ExecutionOutcome(
 
         EvidenceObligationAssessment evidenceAssessment =
                 observedWebDiagnosis
-                ? EvidenceObligationAssessment.assessObserved(safePlan, loopResult)
+                ? EvidenceObligationAssessment.assessObserved(safePlan, loopResult, workspace)
                 : EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
         EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
         var evidenceResult = evidenceAssessment.result();
@@ -343,8 +358,13 @@ record ExecutionOutcome(
                 && !deniedProtectedRead;
         boolean protectedReadApprovalMissing = evidenceAssessment.protectedReadApprovalMissing();
         boolean approvedProtectedReadPostcondition = false;
+        boolean runtimeLimitedAnswer = readOnlyLimited && Objects.equals(current, selectedRuntimeLimitation);
         if (missingEvidence) {
-            EvidenceContainmentAnswerGuard.Containment containment = EvidenceContainmentAnswerGuard.selectMissingEvidence(
+            EvidenceContainmentAnswerGuard.Containment containment = runtimeLimitedAnswer
+                    && evidenceObligation != EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                    ? new EvidenceContainmentAnswerGuard.Containment(
+                        EvidenceContainmentAnswerGuard.missingEvidencePrefix(current), true)
+                    : EvidenceContainmentAnswerGuard.selectMissingEvidence(
                     current,
                     safePlan,
                     evidenceObligation,
@@ -352,6 +372,22 @@ record ExecutionOutcome(
                     EVIDENCE_CONTAINMENT_MARKERS);
             current = containment.answer();
             if (!containment.inputRetained()) outputLimitRelevant = false;
+            if (!containment.inputRetained() && readOnlyDeniedMutation) {
+                String runtimeRejection = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                        "", safePlan, messages, loopResult, extraMutationSuccesses);
+                if (!runtimeRejection.isBlank()) current = runtimeRejection + "\n\n" + current;
+            }
+            if (loopResult != null) {
+                if (evidenceObligation == EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED
+                        && !containment.inputRetained()) {
+                    String observations = loopResult.readEvidenceCoverage().projectSummaryObservations(
+                            loopResult.toolOutcomes(), workspace, contract);
+                    if (!observations.isBlank()) current += "\n\n" + observations;
+                }
+                var privacyNotices = loopResult.readEvidenceCoverage().missingPrivacyNotices(
+                        loopResult.toolOutcomes(), workspace, contract);
+                if (!privacyNotices.isEmpty()) current += "\n\n" + String.join("\n", privacyNotices);
+            }
             LocalTurnTraceCapture.recordProtocolSanitized(
                     EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
@@ -402,8 +438,8 @@ record ExecutionOutcome(
                             && webDiagnostic.components().render().equals(current),
                 current);
         boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimit.withoutRuntimeAnswer();
-        boolean readOnlySynthesisUnavailable = dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailable(loopResult);
-        if (readOnlyToolLimit.shouldReplaceAnswer() && !readEvidencePolicyBlocked && !deniedProtectedRead) {
+        if (readOnlyToolLimit.shouldReplaceAnswer() && !runtimeLimitedAnswer
+                && !readEvidencePolicyBlocked && !deniedProtectedRead) {
             outputLimitRelevant = false;
             current = readOnlyToolLimit.replacementAnswer();
         }
@@ -421,7 +457,8 @@ record ExecutionOutcome(
                 provisionalPartialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer || readOnlySynthesisUnavailable || limitedWebDiagnosticAnswer || unsupportedCommandOutputClaim,
+                readOnlyToolLimitWithoutRuntimeAnswer || readOnlyLimited || limitedWebDiagnosticAnswer
+                        || unsupportedCommandOutputClaim || unresolvedMutationClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -512,7 +549,8 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer || readOnlySynthesisUnavailable || limitedWebDiagnosticAnswer || unsupportedCommandOutputClaim,
+                readOnlyToolLimitWithoutRuntimeAnswer || readOnlyLimited || limitedWebDiagnosticAnswer
+                        || unsupportedCommandOutputClaim || unresolvedMutationClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -532,6 +570,8 @@ record ExecutionOutcome(
                 mutationAssessment);
         current = partialAnswer.answer();
         if (!partialAnswer.inputRetained()) outputLimitRelevant = false;
+        String unassessedClarificationResponse = current;
+        String verificationPresentation = "";
         if (verificationStatus == VerificationStatus.FAILED) {
             if (usingEmbeddedVerification) {
                 // The tool loop already rendered the static-verification failure alongside
@@ -544,21 +584,22 @@ record ExecutionOutcome(
                 outputLimitRelevant = false;
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
-            current = StaticVerificationAnswerRenderer.unavailableAnnotation(taskVerification) + current;
+            verificationPresentation = StaticVerificationAnswerRenderer.unavailableAnnotation(taskVerification);
+            current = verificationPresentation + current;
         } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(
+                verificationPresentation = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(
                         taskVerification,
                         loopResult,
                         verificationReport)
-                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
-                        + current;
+                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult);
+                current = verificationPresentation + current;
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification, verificationReport)
-                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
-                        + current;
+                verificationPresentation = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification, verificationReport)
+                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult);
+                current = verificationPresentation + current;
             }
         }
         if (unsupportedDocumentCapabilityLimited) {
@@ -573,6 +614,51 @@ record ExecutionOutcome(
             // to authoritative effect evidence. This is not a successful retry.
             current = MutationFailureAnswerRenderer.failedMutationEffectsSummary(loopResult);
         }
+        var workspaceResults = WorkspaceResultEvidencePolicy.assess(safePlan, loopResult, workspace);
+        var requestFrame = dev.talos.runtime.observation.TurnRequestFrame.current();
+        boolean controlledWorkspaceResults = requestFrame != null && requestFrame.controlled()
+                && requestFrame.state() == dev.talos.runtime.observation.TurnRequestFrame.State.ADOPTED;
+        if (controlledWorkspaceResults) requestFrame.requireCurrent();
+        if (workspaceResults.applicable() && controlledWorkspaceResults
+                && !MutationFailureAnswerRenderer.hasFailedMutationEffects(loopResult)) {
+            String composed = workspaceResults.compose("");
+            dev.talos.runtime.TurnAuditCapture.recordLocationPresentation(
+                    dev.talos.runtime.RuntimeLocationPresentation.issue(workspaceResults, ""));
+            if (!Objects.equals(current, composed)) outputLimitRelevant = false;
+            current = composed;
+        } else if (workspaceResults.applicable() && !invalidMutation && !readOnlyDeniedMutation
+                && !failedAnyActionObligation && !commandFailed && !commandDenied && !deniedMutation
+                && !deniedProtectedRead && !partialMutation && !falseMutationClaim
+                && !readOnlyLimited && !unsupportedCommandOutputClaim && !unresolvedMutationClaim
+                && !unsupportedDocumentCapabilityLimited && verificationStatus != VerificationStatus.FAILED
+                && !MutationFailureAnswerRenderer.hasFailedMutationEffects(loopResult)) {
+            String composed = workspaceResults.compose(current);
+            dev.talos.runtime.TurnAuditCapture.recordLocationPresentation(
+                    dev.talos.runtime.RuntimeLocationPresentation.issue(workspaceResults, current));
+            if (!Objects.equals(current, composed)) outputLimitRelevant = false;
+            current = composed;
+        }
+        CompletionStatus operationalStatus = completionStatus;
+        var operationalClassification = finalDecision.taskCompletionStatus();
+        if ((safePlan.contentSaveRequest().draftSelection() != null
+                || safePlan.contentSaveRequest().clarificationBinding() != null
+                && !safePlan.requestedResults().unresolvedRegions().isEmpty())
+                && completionStatus == CompletionStatus.COMPLETE) {
+            current = "[Request coverage unassessed]\n"
+                    + (safePlan.contentSaveRequest().draftSelection() != null
+                    ? "The selection established only proposed content and its destination. "
+                    : "The filename completed only a destination binding. ")
+                    + "File execution and verification do not establish that every result in the original request was fulfilled. "
+                    + "The complete original request remains the task scope.\n\n"
+                    + "Operation verification: " + verificationStatus.name() + ".\n"
+                    + verificationPresentation
+                    + "\nSelected answer text, quoted without certifying complete request coverage:\n> "
+                    + unassessedClarificationResponse.replace("\r\n", "\n").replace('\r', '\n').replace("\n", "\n> ");
+            finalDecision = new OutcomeDominancePolicy.Decision(CompletionStatus.ADVISORY_ONLY,
+                    dev.talos.runtime.outcome.TaskCompletionStatus.ADVISORY_ONLY, finalDecision.blockedByPolicy());
+            completionStatus = finalDecision.completionStatus();
+        }
+        LocalTurnTraceCapture.recordAnswerDeliverySelected(current, outputLimitRelevant, false);
         current = Objects.toString(presentation.apply(current, webDiagnostic.components()), "");
         if (webDiagnostic.components().active() && !webDiagnostic.components().deliveredIntact(current)
                 && completionStatus == CompletionStatus.COMPLETE) {
@@ -581,13 +667,16 @@ record ExecutionOutcome(
             completionStatus = finalDecision.completionStatus();
         }
         LocalTurnTraceCapture.recordReadOnlyAnswerComponentsPresented(webDiagnostic.components(), current);
+        dev.talos.runtime.TurnAuditCapture.recordReadOnlyResults(
+                contract.originalUserRequest(), webDiagnostic.components());
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 finalDecision.taskCompletionStatus(),
                 mutationAssessment.mutationOutcome(),
                 taskVerification,
                 verificationReport,
-                TaskOutcomeWarningBuilder.toolLoopWarnings(
+                TaskOutcomeWarningBuilder.withUnresolvedMutationClaim(
+                        TaskOutcomeWarningBuilder.withReadOnlyLimitation(TaskOutcomeWarningBuilder.toolLoopWarnings(
                         new TaskOutcomeWarningBuilder.ToolLoopFacts(
                                 deniedMutation,
                                 deniedProtectedRead,
@@ -608,6 +697,7 @@ record ExecutionOutcome(
                                 taskVerification.status(),
                                 missingEvidence,
                                 approvedProtectedReadPostcondition)),
+                        readOnlyLimitationReason), unresolvedMutationClaim),
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
@@ -618,19 +708,20 @@ record ExecutionOutcome(
                 : GroundingStatus.UNKNOWN;
         if (readOnlyDeniedMutation) {
             LocalTurnTraceCapture.recordProtocolSanitized(
-                    "mutating tool protocol blocked by read-only task contract");
+                    "mutating tool protocol blocked on a read-only turn");
         }
         if (embeddedPositiveVerificationSanitized) {
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "assistant-authored static verification pass marker was removed before outcome classification");
         }
-        TaskOutcomeTraceRecorder.record(
+        TaskOutcomeTraceRecorder.recordPresented(
                 completionStatus == null ? "" : completionStatus.name(),
                 verificationStatus == null ? "" : verificationStatus.name(),
                 taskOutcome,
                 taskVerification,
                 verificationReport,
-                mutationAssessment);
+                mutationAssessment, operationalStatus == null ? "" : operationalStatus.name(),
+                operationalClassification.name());
 
         return new ExecutionOutcome(
                 current,
@@ -749,6 +840,7 @@ record ExecutionOutcome(
 
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
+        boolean missingMutationExecution = mutationRequested;
         boolean commandRequiredButNotRun = CommandOutcomeRenderer.explicitCommandVerificationRequired(contract);
         boolean unsupportedCommandNotAvailable = CommandOutcomeRenderer.unsupportedCommandVerificationRequest(contract);
         if (commandRequiredButNotRun) {
@@ -756,7 +848,8 @@ record ExecutionOutcome(
         } else if (unsupportedCommandNotAvailable) {
             shaped = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement(contract);
         }
-        boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
+        boolean blocked = noToolMutationReplaced || missingMutationExecution
+                || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null
                 && (shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected
@@ -799,7 +892,7 @@ record ExecutionOutcome(
                 false,
                 malformedProtocolDebrisReplaced,
                 noToolMutationReplaced,
-                failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
+                failedActionObligation || missingMutationExecution || commandRequiredButNotRun || unsupportedCommandNotAvailable,
                 false,
                 false,
                 false,
@@ -828,7 +921,7 @@ record ExecutionOutcome(
         List<TruthWarning> warnings = TaskOutcomeWarningBuilder.noToolWarnings(
                 new TaskOutcomeWarningBuilder.NoToolFacts(
                         noToolMutationReplaced,
-                        failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
+                        failedActionObligation || missingMutationExecution || commandRequiredButNotRun || unsupportedCommandNotAvailable,
                         ungrounded,
                         malformedProtocolDebrisReplaced,
                         localAccessCapabilityCorrected,

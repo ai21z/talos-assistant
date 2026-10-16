@@ -8,6 +8,9 @@ import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
+import dev.talos.runtime.context.ContentSaveContinuation;
+import dev.talos.runtime.context.ContentDraftContinuation;
+import dev.talos.runtime.context.PendingContentDraft;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ProjectMemoryContext;
 import dev.talos.runtime.context.ProjectMemoryLimits;
@@ -21,6 +24,7 @@ import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -46,8 +50,13 @@ final class AssistantTurnPreparation {
     record PreparedTurn(
             Context ctx,
             CurrentTurnPlan plan,
-            TaskResolution taskResolution
+            TaskResolution taskResolution,
+            String directAnswer,
+            PendingContentDraft draftGeneration
     ) {
+        PreparedTurn(Context ctx, CurrentTurnPlan plan, TaskResolution taskResolution) {
+            this(ctx, plan, taskResolution, null, null);
+        }
         PreparedTurn {
             Objects.requireNonNull(plan, "plan");
             Objects.requireNonNull(taskResolution, "taskResolution");
@@ -92,6 +101,18 @@ final class AssistantTurnPreparation {
             initialResolution = TaskResolution.confirmedReplay(
                     initialResolution);
         }
+        ContentDraftContinuation.Decision draft = ContentDraftContinuation.evaluate(
+                initialResolution, ctx == null || ctx.memory() == null ? null : ctx.memory().pendingContentDraft(),
+                workspace, currentUserTurnNumber(ctx), capabilityPosture, currentUserRestrictions(messages));
+        initialResolution = draft.resolution();
+        ContentSaveContinuation.Decision saveContinuation = draft.handled()
+                ? new ContentSaveContinuation.Decision(initialResolution, null, draft.directAnswer(), "", true,
+                    initialResolution.intent().contentSaveRequest().draftSelection() != null)
+                : ContentSaveContinuation.evaluate(
+                initialResolution, ctx == null || ctx.memory() == null ? null : ctx.memory().pendingContentSave(),
+                workspace, currentUserTurnNumber(ctx), capabilityPosture,
+                currentUserRestrictions(messages));
+        initialResolution = saveContinuation.resolution();
         TaskContract rawTaskContract = WorkspaceTargetReconciler.reconcile(
                 initialResolution.contract(),
                 workspace);
@@ -100,11 +121,19 @@ final class AssistantTurnPreparation {
                 rawTaskContract,
                 TargetSource.WORKSPACE_EVIDENCE,
                 "workspace-target-reconciliation");
-        ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
+        ActiveTaskContextPolicy.Decision activeDecision = saveContinuation.handled()
+                ? new ActiveTaskContextPolicy.Decision(rawTaskContract, ActiveTaskContext.none(),
+                    ArtifactGoal.none(), ActiveTaskContext.none(), false)
+                : activeTaskContextDecision(
                 AssistantTurnExecutor.latestUserRequest(messages),
                 rawTaskContract,
                 initialResolution,
                 ctx);
+        if (ctx != null && ctx.requestFrame() != null) {
+            ctx.requestFrame().adopt(initialResolution.projectOnto(activeDecision.taskContract(),
+                    TaskIntentProjector.project(rawTaskIntent, activeDecision.taskContract(),
+                            TargetSource.REPAIR_CONTEXT, "active-task-context-projection")));
+        }
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 activeDecision.taskContract(),
                 workspace);
@@ -134,6 +163,10 @@ final class AssistantTurnPreparation {
         boolean activeDecisionUpdatesTurnSurface =
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
+        if (ctx != null && ctx.memory() != null) {
+            ctx.memory().setPendingContentSave(saveContinuation.nextPending());
+            ctx.memory().setPendingContentDraft(draft.next());
+        }
         ExecutionPhase authoritativePhase = effectiveResolution
                 .blocksUnscopedMutation()
                 ? ExecutionPhase.INSPECT
@@ -144,6 +177,7 @@ final class AssistantTurnPreparation {
                 effectiveResolution,
                 activeDecisionUpdatesTurnSurface
                         || workspaceBoundaryReplayedRequest
+                        || saveContinuation.consumed()
                         || effectiveTurn.forceNativeSurfaceRecompute());
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(
                 effectiveResolution,
@@ -159,14 +193,24 @@ final class AssistantTurnPreparation {
                 effectiveResolution.provenance());
         ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
         CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, projectMemory);
+        if (saveContinuation.consumed()) {
+            ProviderPromptSurfaceReconciler.reconcile(messages, currentTurnPlan, turnContext.nativeToolSpecs());
+        }
         CurrentTurnPromptInstructions.replaceTaskContractInstruction(messages, currentTurnPlan);
         CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(
                 messages, currentTurnPlan.taskContract(), workspace);
+        if (!saveContinuation.originPromptData().isBlank()) {
+            int currentUserIndex = messages.size();
+            for (int index = messages.size() - 1; index >= 0; index--) {
+                if ("user".equals(messages.get(index).role())) { currentUserIndex = index; break; }
+            }
+            messages.add(currentUserIndex, ChatMessage.user(saveContinuation.originPromptData()));
+        }
         recordProjectMemoryDiagnostics(projectMemory);
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, turnContext, projectMemory);
         recordPromptDebugDiagnostics(promptAudit, currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, turnContext);
-        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution);
+        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution, saveContinuation.directAnswer(), draft.generate());
     }
 
     private static void initializeExecutionPhaseForTurn(ExecutionPhase phase, Context ctx) {
@@ -312,6 +356,8 @@ final class AssistantTurnPreparation {
     }
 
     private static int currentUserTurnNumber(Context ctx) {
+        int tracedTurn = LocalTurnTraceCapture.currentTurnNumber();
+        if (tracedTurn > 0) return tracedTurn;
         if (ctx == null || ctx.memory() == null) return 1;
         int completedUserTurns = 0;
         for (ChatMessage turn : ctx.memory().getTurns()) {
@@ -320,6 +366,16 @@ final class AssistantTurnPreparation {
             }
         }
         return completedUserTurns + 1;
+    }
+
+    private static dev.talos.safety.ContentRestrictions currentUserRestrictions(List<ChatMessage> messages) {
+        var restrictions = dev.talos.safety.ContentRestrictionScope.current();
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            if ("user".equals(messages.get(index).role())) {
+                return restrictions.intersect(messages.get(index).contentRestrictions());
+            }
+        }
+        return restrictions;
     }
 
     private static void applyActiveTaskMemoryDecision(
@@ -560,7 +616,7 @@ final class AssistantTurnPreparation {
     private static void emitPromptAuditIfEnabled(PromptAuditSnapshot snapshot, Context ctx) {
         if (snapshot == null || ctx == null || ctx.streamSink() == null || ctx.session() == null) return;
         if (ctx.session().getDebugLevel() != DebugLevel.PROMPT) return;
-        ctx.streamSink().accept("\n" + snapshot.renderCompact() + "\n");
+        PromptDebugCapture.putTurnDiagnostic("promptAudit", snapshot.renderCompact());
     }
 
     private static ProjectMemoryContext loadProjectMemory(Path workspace, TaskContract contract) {

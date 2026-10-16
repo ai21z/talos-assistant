@@ -58,7 +58,8 @@ public final class TaskIntentProjector {
                 prior.verificationRequired(),
                 targets,
                 prior.originalUserRequest(),
-                prior.classificationReason());
+                prior.classificationReason(),
+                prior.contentSaveRequest());
     }
 
     public static TaskIntent project(
@@ -141,7 +142,8 @@ public final class TaskIntentProjector {
                 contract.verificationRequired(),
                 targets,
                 contract.originalUserRequest(),
-                contract.classificationReason());
+                contract.classificationReason(),
+                sameCanonicalRequest ? prior.contentSaveRequest() : null);
     }
 
     private static TargetRole projectedRole(

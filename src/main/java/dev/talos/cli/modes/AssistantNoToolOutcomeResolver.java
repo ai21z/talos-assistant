@@ -167,6 +167,10 @@ final class AssistantNoToolOutcomeResolver {
                     inspectionRetry.outputLimit().apply(outputLimitReached));
         }
 
+        if (safePlan.workspaceResultsApplicable()) {
+            return resolution(toolAnswerShaper.shape(inspectionRetry.answer(), noToolLoopResult, 0, false),
+                    null, inspectionRetry.outputLimit().apply(outputLimitReached));
+        }
         return resolution(
                 noToolAnswerShaper.shape(
                         inspectionRetry.answer(),

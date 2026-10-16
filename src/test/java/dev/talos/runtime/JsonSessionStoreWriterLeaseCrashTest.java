@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,6 +29,47 @@ final class JsonSessionStoreWriterLeaseCrashTest {
 
     @TempDir
     Path temp;
+
+    @Test
+    void readinessIsInvisibleUntilTheCompletePayloadIsPublished() throws Exception {
+        Path ready = temp.resolve("publication-control").resolve("ready");
+        byte[] payload = "session-ready-001\n".getBytes(StandardCharsets.UTF_8);
+        var stagedPath = new java.util.concurrent.atomic.AtomicReference<Path>();
+        JsonSessionStoreWriterLeaseCrashProcessMain.publishReady(ready, "session-ready-001", staged -> {
+            stagedPath.set(staged);
+            assertFalse(Files.exists(ready, LinkOption.NOFOLLOW_LINKS));
+            assertEquals(ready.getParent(), staged.getParent());
+            assertArrayEquals(payload, assertDoesNotThrow(() -> Files.readAllBytes(staged)));
+        });
+        assertArrayEquals(payload, Files.readAllBytes(ready));
+        assertFalse(Files.exists(stagedPath.get(), LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void failedReadinessPublicationDoesNotExposeThePayloadOrLeaveStaging() {
+        Path ready = temp.resolve("failed-publication-control").resolve("ready");
+        var stagedPath = new java.util.concurrent.atomic.AtomicReference<Path>();
+        assertThrows(IllegalStateException.class, () ->
+                JsonSessionStoreWriterLeaseCrashProcessMain.publishReady(ready, "session-ready-002", staged -> {
+                    stagedPath.set(staged);
+                    throw new IllegalStateException("Synthetic publication interruption");
+                }));
+        assertFalse(Files.exists(ready, LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(stagedPath.get(), LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void readinessPublicationPreservesAnExistingTarget() throws Exception {
+        Path ready = temp.resolve("existing-publication-control").resolve("ready");
+        Files.createDirectories(ready.getParent());
+        byte[] existing = "existing-payload\n".getBytes(StandardCharsets.UTF_8);
+        Files.write(ready, existing);
+        assertThrows(FileAlreadyExistsException.class, () ->
+                JsonSessionStoreWriterLeaseCrashProcessMain.publishReady(ready, "session-ready-003", staged -> {
+                    throw new AssertionError("An existing target must prevent staging");
+                }));
+        assertArrayEquals(existing, Files.readAllBytes(ready));
+    }
 
     @Test
     void forcedProcessDeathReleasesLockWithoutConsumingOrRewritingReservation() throws Exception {

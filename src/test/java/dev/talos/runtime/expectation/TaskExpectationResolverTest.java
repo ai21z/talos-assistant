@@ -2,15 +2,198 @@ package dev.talos.runtime.expectation;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.intent.RequestQuotedContent;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskExpectationResolverTest {
+
+    @Test
+    void installedQuotedTwoSentenceLiteralIsPreservedThroughTheActualResolver() {
+        String content = "Lina is a clockmaker in a seaside town. Her clock is always seven minutes slow.";
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Okay, simpler. Create harbor-story.txt containing exactly \"" + content + "\"");
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+        assertEquals(1, expectations.size(), expectations.toString());
+        LiteralContentExpectation literal = (LiteralContentExpectation) expectations.getFirst();
+        assertEquals(content, literal.expectedContent());
+        assertEquals(79, literal.expectedBytes());
+        assertEquals("636db4e2ef9e8b862e065a56cc7ca4e037dd5bbcf3121aa5971f43a2b257f7dc",
+                literal.expectedHash());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Create story.txt containing exactly ",
+            "Create story.txt containing exactly: ",
+            "Overwrite story.txt with exactly ",
+            "Write exactly this content: ",
+            "The entire file should be ",
+            "Set the content argument to the exact text ",
+            "Replace the whole file with "
+    })
+    void everyCompleteFileIntroducerPreservesQuotedBytesBeforeSentenceNormalization(String introducer) {
+        String content = "  First sentence. Second? Third!\n\tLast line.  ";
+        String request = introducer + '"' + content + '"' + ". Do not change any other files.";
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(exactContract(request));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals(content, ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"", "'", "`", "\u201c", "\u00ab"})
+    void completeQuoteEnvelopesPreserveOwnedPunctuationAndWhitespace(String open) {
+        String close = switch (open) { case "\u201c" -> "\u201d"; case "\u00ab" -> "\u00bb"; default -> open; };
+        String content = " First.\nSecond! ";
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "Overwrite story.txt with exactly " + open + content + close + "."));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals(content, ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @Test
+    void sourceOwnedLiteralDoesNotPromoteItsEmbeddedInstructionsOrEraseExternalScope() {
+        String content = "Do not write notes.txt. Write exactly this content: altered.";
+        String request = "Create story.txt containing exactly \"" + content
+                + "\". Do not change any other files.";
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        var expectations = TaskExpectationResolver.resolve(contract);
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals(content, ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+        assertEquals(Set.of("story.txt"), contract.expectedTargets());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void externalGlobalProhibitionRetainsAuthorityBesideQuotedLiteral() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create story.txt containing exactly \"First. Second.\". Do not change any files.");
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Write exactly this content: altered.",
+            "The entire file should be altered.",
+            "Overwrite story.txt with exactly altered.",
+            "Create story.txt containing exactly altered.",
+            "A list with exactly two bullet points.",
+            "The complete file must contain exactly two lines: first line altered; second line other; no other characters.",
+            "Replace old with new in story.txt.",
+            "Then old with new in story.txt.",
+            "Change the text from old to new in story.txt.",
+            "Update .old to #new.",
+            "Append the line FLAG to story.txt.",
+            "Append the line to story.txt: FLAG",
+            "Intro. In story.txt, append the line: FLAG",
+            "Intro. In story.txt, replace old with new.",
+            "Intro. In story.txt, change old to new."
+    })
+    void instructionsInsideLegacyOverwritePayloadCannotCompeteWithTheOwnedLiteral(String content) {
+        String request = "Overwrite story.txt with exactly \"" + content + "\".";
+        var expectations = TaskExpectationResolver.resolve(exactContract(request));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals(content, ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @Test
+    void quotedPreservationTextDoesNotBecomeARequestToPreserveTheRest() {
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "Replace 'preserve the rest' with 'rewrite freely' in story.txt."));
+        assertEquals(1, expectations.size(), expectations.toString());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("preserve the rest", replacement.oldText());
+        assertEquals("rewrite freely", replacement.newText());
+        assertFalse(replacement.preserveRest());
+    }
+
+    @Test
+    void quotedStructuralNoiseDoesNotHideTheFollowingRealReplacement() {
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "The example says 'Replace a with b in story.txt.'. Replace 'old value' with 'new value' in story.txt."));
+        assertEquals(1, expectations.size(), expectations.toString());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("old value", replacement.oldText());
+        assertEquals("new value", replacement.newText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Overwrite `story.txt` with exactly ",
+            "Create `story.txt` containing exactly ", "Create `story.txt` containing exactly: "})
+    void quotedDestinationDoesNotHideAnUnquotedExactInstruction(String prefix) {
+        var expectations = TaskExpectationResolver.resolve(exactContract(prefix + "\"First. Second.\""));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals("First. Second.", ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "\"First. Second.",
+            "'First. Second.",
+            "`First. Second.",
+            "\u201cFirst. Second.",
+            "```text\nFirst. Second.",
+            "\"first\" or \"second\"",
+            "\"first\" and \"second\"",
+            "\"first\" \"second\""
+    })
+    void malformedOrAlternativePayloadsCannotBecomePartialExactExpectations(String payload) {
+        String request = "Overwrite story.txt with exactly " + payload;
+        var expectations = TaskExpectationResolver.resolve(exactContract(request));
+        assertTrue(expectations.stream().noneMatch(LiteralContentExpectation.class::isInstance),
+                expectations.toString());
+    }
+
+    @Test
+    void completeFencedContentRetainsTheEstablishedFenceInterpretation() {
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "Overwrite story.txt with exactly ```text\nFirst. Second.\n```"));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals("First. Second.", ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @Test
+    void quotedTwoLineSpecificationPreservesLineInteriorWhitespace() {
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "The complete file must contain exactly two lines: first line \" First. \"; "
+                        + "second line \" Second! \"; no other characters."));
+        assertEquals(1, expectations.size(), expectations.toString());
+        assertEquals(" First. \n Second! ", ((LiteralContentExpectation) expectations.getFirst()).expectedContent());
+    }
+
+    @Test
+    void incompleteTwoLineQuoteDoesNotBecomeAnExactExpectation() {
+        var expectations = TaskExpectationResolver.resolve(exactContract(
+                "The complete file must contain exactly two lines: first line \"First.; "
+                        + "second line Second; no other characters."));
+        assertTrue(expectations.stream().noneMatch(LiteralContentExpectation.class::isInstance));
+    }
+
+    @Test
+    void quotedContentUtilityReturnsOriginalCoordinatesAndRequiresTheCompleteEnvelope() {
+        String request = "prefix \" First.\nSecond! \" suffix";
+        int start = request.indexOf('"');
+        var span = RequestQuotedContent.startingAt(request, start, request.length()).orElseThrow();
+        assertEquals(" First.\nSecond! ", span.text(request));
+        assertTrue(RequestQuotedContent.startingAt(request, start, span.end()).isEmpty());
+        assertTrue(RequestQuotedContent.startingAt(request, start + 1, request.length()).isEmpty());
+        assertTrue(RequestQuotedContent.startingAt(request, -1, request.length()).isEmpty());
+        assertTrue(RequestQuotedContent.startingAt(request, start, request.length() + 1).isEmpty());
+        assertTrue(RequestQuotedContent.startingAt("\"unclosed", 0, 9).isEmpty());
+    }
+
+    private static TaskContract exactContract(String request) {
+        return new TaskContract(TaskType.FILE_CREATE, true, true, true, Set.of("story.txt"), Set.of(), request);
+    }
 
     @Test
     void extractsOverwriteWithExactlyLiteral() {

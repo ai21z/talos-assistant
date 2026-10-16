@@ -42,6 +42,8 @@ public final class CurrentTurnPromptInstructions {
         // content is untrusted data and rides in USER role right after the
         // system prompt; the [ProjectMemory] framing travels with it.
         messages.add(insertAt, ChatMessage.user(rendered));
+        dev.talos.core.context.ContextLedgerCapture.bindPromptMessage("user", rendered,
+                projectMemory.includedSources().stream().map(dev.talos.runtime.context.ProjectMemorySource::contextItem).toList());
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {

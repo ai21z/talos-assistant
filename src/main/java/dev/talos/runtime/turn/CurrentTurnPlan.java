@@ -7,6 +7,8 @@ import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.VerifierProfile;
 import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.obligation.RequestObligationCompiler;
+import dev.talos.runtime.intent.RequestedResultInventory;
+import dev.talos.runtime.intent.ContentSaveRequest;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -38,10 +40,17 @@ public record CurrentTurnPlan(
         String verifierProfile,
         RequestObligation requestObligation,
         WorkspaceOperationAuthorityPlan workspaceOperationPlan,
-        List<String> contentMutationPredecessorPaths
+        List<String> contentMutationPredecessorPaths,
+        RequestedResultInventory requestedResults,
+        ContentSaveRequest contentSaveRequest
 ) {
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
     public static final String NOT_DERIVED = "NOT_DERIVED";
+
+    public boolean workspaceResultsApplicable() {
+        return !requestedResults.retainedWork() && (requestedResults.boundedWorkspaceQuery()
+                || dev.talos.runtime.observation.TurnRequestFrame.admits(requestedResults));
+    }
 
     public CurrentTurnPlan {
         taskContract = taskContract == null ? TaskContract.unknown("") : taskContract;
@@ -76,6 +85,19 @@ public record CurrentTurnPlan(
                     "Supplied request obligation differs from the runtime-compiled obligation");
         }
         requestObligation = compiledRequestObligation;
+        var requestFrame = dev.talos.runtime.observation.TurnRequestFrame.current();
+        RequestedResultInventory admittedResults = requestFrame == null ? null : requestFrame.inventoryFor(taskContract);
+        RequestedResultInventory compiledResults = admittedResults == null
+                ? RequestedResultInventory.compile(taskContract) : admittedResults;
+        if (requestedResults != null && !requestedResults.equals(compiledResults)) {
+            throw new IllegalArgumentException("Supplied requested results differ from runtime compilation");
+        }
+        requestedResults = requestedResults == null ? compiledResults : requestedResults;
+        contentSaveRequest = contentSaveRequest == null
+                ? ContentSaveRequest.empty(originalUserRequest) : contentSaveRequest;
+        if (!originalUserRequest.equals(contentSaveRequest.originalRequest())) {
+            throw new IllegalArgumentException("Save interpretation does not bind the complete original task");
+        }
         workspaceOperationPlan = workspaceOperationPlan == null
                 ? WorkspaceOperationAuthorityPlan.none(originalUserRequest)
                 : workspaceOperationPlan;
@@ -90,11 +112,42 @@ public record CurrentTurnPlan(
                         .map(CurrentTurnPlan::normalizePath)
                         .distinct()
                         .toList();
-        evidenceObligation = evidenceObligation == null ? NONE_OR_NOT_DERIVED : evidenceObligation;
+        evidenceObligation = (requestedResults.boundedWorkspaceQuery()
+                || dev.talos.runtime.observation.TurnRequestFrame.admits(requestedResults))
+                ? EvidenceObligationPolicy.forRequestedResults(requestedResults,
+                    EvidenceObligationPolicy.parse(evidenceObligation)).name()
+                : evidenceObligation == null ? NONE_OR_NOT_DERIVED : evidenceObligation;
         outputObligation = outputObligation == null ? NOT_DERIVED : outputObligation;
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
         artifactGoal = artifactGoal == null ? NONE_OR_NOT_DERIVED : artifactGoal;
         verifierProfile = verifierProfile == null ? NONE_OR_NOT_DERIVED : verifierProfile;
+    }
+
+    public CurrentTurnPlan(TaskContract taskContract, String originalUserRequest, ExecutionPhase phaseInitial,
+                           ExecutionPhase phaseFinal, ActionObligation actionObligation,
+                           List<TaskExpectation> taskExpectations, List<String> nativeTools, List<String> promptTools,
+                           List<String> blockedTools, String evidenceObligation, String outputObligation,
+                           String activeTaskContext, String artifactGoal, String verifierProfile,
+                           RequestObligation requestObligation, WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+                           List<String> contentMutationPredecessorPaths, RequestedResultInventory requestedResults) {
+        this(taskContract, originalUserRequest, phaseInitial, phaseFinal, actionObligation, taskExpectations,
+                nativeTools, promptTools, blockedTools, evidenceObligation, outputObligation, activeTaskContext,
+                artifactGoal, verifierProfile, requestObligation, workspaceOperationPlan,
+                contentMutationPredecessorPaths, requestedResults, null);
+    }
+
+    /** Compatibility callers cannot supply independently interpreted requested results. */
+    public CurrentTurnPlan(TaskContract taskContract, String originalUserRequest, ExecutionPhase phaseInitial,
+                           ExecutionPhase phaseFinal, ActionObligation actionObligation,
+                           List<TaskExpectation> taskExpectations, List<String> nativeTools, List<String> promptTools,
+                           List<String> blockedTools, String evidenceObligation, String outputObligation,
+                           String activeTaskContext, String artifactGoal, String verifierProfile,
+                           RequestObligation requestObligation, WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+                           List<String> contentMutationPredecessorPaths) {
+        this(taskContract, originalUserRequest, phaseInitial, phaseFinal, actionObligation, taskExpectations,
+                nativeTools, promptTools, blockedTools, evidenceObligation, outputObligation, activeTaskContext,
+                artifactGoal, verifierProfile, requestObligation, workspaceOperationPlan,
+                contentMutationPredecessorPaths, null);
     }
 
     /** Exact provider-visible authority across native and text-tool surfaces. */
@@ -358,7 +411,9 @@ public record CurrentTurnPlan(
                 verifierProfile,
                 null,
                 safeResolution.workspaceOperationPlan(),
-                safeResolution.contentMutationPredecessorPaths());
+                safeResolution.contentMutationPredecessorPaths(),
+                null,
+                safeResolution.intent().contentSaveRequest());
     }
 
     public static CurrentTurnPlan create(

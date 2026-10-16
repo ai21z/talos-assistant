@@ -1,5 +1,7 @@
 package dev.talos.runtime.failure;
 
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 
@@ -78,7 +80,13 @@ public record FailurePolicy(
             LoopState state,
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
-        if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0) {
+        var contract = TurnTaskContractCapture.get();
+        boolean readOnlyAcquisition = contract != null
+                && !contract.mutationAllowed() && !contract.mutationRequested()
+                && (contract.type() == TaskType.DIAGNOSE_ONLY || contract.type() == TaskType.READ_ONLY_QA);
+        int progressSuccesses = readOnlyAcquisition
+                ? outcome.progressSuccessesThisIteration() : outcome.successesThisIteration();
+        if (progressSuccesses > 0 || outcome.mutationsThisIteration() > 0) {
             state.noProgressIterations = 0;
         } else if (outcome.failuresThisIteration() > 0) {
             state.noProgressIterations++;

@@ -21,7 +21,11 @@ public record ToolContentMetadata(
         boolean ragIndexAllowed,
         String decisionReason,
         List<String> sourcePaths,
-        DocumentPairReceipt documentPairReceipt) {
+        DocumentPairReceipt documentPairReceipt,
+        ReadCoverage readCoverage,
+        DirectoryObservation directoryObservation) {
+
+    public enum ReadCoverage { UNSPECIFIED, COMPLETE, REQUESTED_RANGE, LIMITED }
 
     public enum ContentPrivacyClass {
         NORMAL,
@@ -31,6 +35,21 @@ public record ToolContentMetadata(
         PRIVATE_RAG_SNIPPET,
         COMMAND_OUTPUT,
         GENERATED_TEXT
+    }
+
+    /** Compatibility metadata does not establish directory scope or completeness. */
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths,
+                               DocumentPairReceipt documentPairReceipt, ReadCoverage readCoverage) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, documentPairReceipt, readCoverage, null);
+    }
+
+    public ToolContentMetadata withDirectoryObservation(DirectoryObservation observation) {
+        return new ToolContentMetadata(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, sourcePaths,
+                documentPairReceipt, readCoverage, observation);
     }
 
     public enum ContentSource {
@@ -51,6 +70,7 @@ public record ToolContentMetadata(
         sourcePath = sourcePath == null ? "" : sourcePath;
         decisionReason = decisionReason == null ? "" : decisionReason;
         sourcePaths = normalizeSourcePaths(sourcePaths);
+        readCoverage = readCoverage == null ? ReadCoverage.UNSPECIFIED : readCoverage;
         if (documentPairReceipt != null) {
             var decision = documentPairReceipt.decision();
             source = ContentSource.DOCUMENT_COMPARISON;
@@ -64,6 +84,20 @@ public record ToolContentMetadata(
             ragIndexAllowed = decision.ragIndexAllowed() && ragIndexAllowed;
             decisionReason = "Both admitted document policies are required.";
         }
+    }
+
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths,
+                               DocumentPairReceipt documentPairReceipt) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, documentPairReceipt, ReadCoverage.UNSPECIFIED);
+    }
+
+    public ToolContentMetadata withReadCoverage(ReadCoverage coverage) {
+        return new ToolContentMetadata(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, sourcePaths,
+                documentPairReceipt, coverage, directoryObservation);
     }
 
     public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
@@ -179,7 +213,7 @@ public record ToolContentMetadata(
         if (source == ContentSource.DOCUMENT_COMPARISON) {
             return new ToolContentMetadata(privacyClass, source, sourcePath,
                     modelHandoffAllowed && allowed, rawArtifactPersistenceAllowed, ragIndexAllowed,
-                    decisionReason, sourcePaths, documentPairReceipt);
+                    decisionReason, sourcePaths, documentPairReceipt, readCoverage, directoryObservation);
         }
         return new ToolContentMetadata(
                 privacyClass,
@@ -189,7 +223,7 @@ public record ToolContentMetadata(
                 rawArtifactPersistenceAllowed,
                 ragIndexAllowed,
                 reason == null || reason.isBlank() ? decisionReason : reason,
-                sourcePaths);
+                sourcePaths, documentPairReceipt, readCoverage, directoryObservation);
     }
 
     private static List<String> normalizeSourcePaths(List<String> values) {

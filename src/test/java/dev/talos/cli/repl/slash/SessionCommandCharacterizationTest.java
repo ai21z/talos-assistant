@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Exact-byte pins of the /session surface, originally T797 baselines.
  * Updated deliberately by T800 (the diff is the behavioral-delta
- * documentation): the info block gained a {@code Session:} row for the
- * active instance id, and the usage line grew
+ * documentation): the info block names the workspace hash and active
+ * session id accurately, and the usage line grew
  * {@code list|resume|export}. The no-saved-session, save, and clear
  * strings are byte-identical to the T797 pins.
  */
@@ -36,10 +36,10 @@ class SessionCommandCharacterizationTest {
 
         assertInstanceOf(Result.Info.class, result);
         assertEquals(
-                "Session ID:  " + sessionId.substring(0, 8) + "…\n"
+                "Workspace ID: " + sessionId.substring(0, 8) + "…\n"
                         // Legacy wiring: the active session is the bare-hash
                         // slot, so its display id is the short hash form.
-                        + "Session:     " + sessionId.substring(0, 8) + "…\n"
+                        + "Session ID:  " + sessionId.substring(0, 8) + "…\n"
                         + "Workspace:   demo-ws\n"
                         + "Turns:       0\n"
                         + "Has sketch:  no\n"
@@ -55,7 +55,7 @@ class SessionCommandCharacterizationTest {
 
         Result result = command.execute("info", Context.builder(new Config()).build());
 
-        assertTrue(((Result.Info) result).text.contains("Session:     20260612083005\n"),
+        assertTrue(((Result.Info) result).text.contains("Session ID:  20260612083005\n"),
                 "instance ids display as their timestamp suffix");
     }
 

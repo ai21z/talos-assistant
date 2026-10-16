@@ -225,7 +225,7 @@ public final class EvidenceObligationVerifier {
                 "Required read evidence was gathered.");
     }
 
-    private static Set<String> withoutUnsupportedTargetsCoveredByTextFallback(
+    static Set<String> withoutUnsupportedTargetsCoveredByTextFallback(
             Set<String> expectedTargets,
             List<ToolCallLoop.ToolOutcome> outcomes
     ) {

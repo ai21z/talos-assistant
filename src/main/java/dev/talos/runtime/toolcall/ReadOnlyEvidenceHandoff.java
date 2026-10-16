@@ -23,21 +23,26 @@ import java.util.Objects;
  */
 public final class ReadOnlyEvidenceHandoff {
     private static final ReadOnlyEvidenceHandoff EMPTY =
-            new ReadOnlyEvidenceHandoff(null, null, "", 0, List.of());
+            new ReadOnlyEvidenceHandoff(null, null, "", 0, List.of(), false, false);
 
     private final Path workspace;
     private final TaskContract contract;
     private final String traceId;
     private final int turn;
     private final List<Entry> entries;
+    private final boolean generalEvidenceContext;
+    private final boolean unretainedReadEvidence;
 
     private ReadOnlyEvidenceHandoff(Path workspace, TaskContract contract, String traceId,
-                                    int turn, List<Entry> entries) {
+                                    int turn, List<Entry> entries, boolean generalEvidenceContext,
+                                    boolean unretainedReadEvidence) {
         this.workspace = workspace;
         this.contract = contract;
         this.traceId = traceId;
         this.turn = turn;
         this.entries = List.copyOf(entries);
+        this.generalEvidenceContext = generalEvidenceContext;
+        this.unretainedReadEvidence = unretainedReadEvidence;
     }
 
     public static ReadOnlyEvidenceHandoff empty() { return EMPTY; }
@@ -69,7 +74,10 @@ public final class ReadOnlyEvidenceHandoff {
                 || TurnTaskContractCapture.get() == null) return EMPTY;
         try {
             var selected = ReadOnlyEvidenceContext.select(state);
-            if (selected.carriers().isEmpty()) return EMPTY;
+            boolean unretainedReads = state.inheritedUnretainedReadEvidence
+                    || !selected.available() && !state.readEvidence.isEmpty();
+            boolean generalContext = ReadOnlyEvidenceContext.requiresGeneralEvidenceContext(state) || unretainedReads;
+            if (selected.carriers().isEmpty() && !generalContext) return EMPTY;
             List<Entry> captured = new ArrayList<>();
             for (var carrier : selected.carriers()) {
                 LocatedCall originalCall = locateCall(state.messages, carrier.index(),
@@ -88,7 +96,8 @@ public final class ReadOnlyEvidenceHandoff {
             }
             var result = new ReadOnlyEvidenceHandoff(normalize(state.workspace),
                     TurnTaskContractCapture.get(), LocalTurnTraceCapture.currentTraceId(),
-                    LocalTurnTraceCapture.currentTurnNumber(), captured);
+                    LocalTurnTraceCapture.currentTurnNumber(), captured,
+                    generalContext, unretainedReads);
             return result.matches(state.messages, state.workspace) ? result : EMPTY;
         } catch (RuntimeException invalid) {
             return EMPTY;
@@ -121,6 +130,8 @@ public final class ReadOnlyEvidenceHandoff {
                 || state.failureDecision.shouldStop()
                 || state.readOnlySynthesisStatus != ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED
                 || !matches(state.messages, state.workspace)) return;
+        state.inheritedGeneralEvidenceContext = generalEvidenceContext;
+        state.inheritedUnretainedReadEvidence = unretainedReadEvidence;
         for (Entry entry : entries) {
             state.readEvidence.importReusable(entry.evidence(),
                     new ReadEvidenceLedger.BoundToolResult(entry.resultIndex(), entry.result(), entry.body()));
@@ -129,7 +140,7 @@ public final class ReadOnlyEvidenceHandoff {
     }
 
     private boolean matches(List<ChatMessage> messages, Path currentWorkspace) {
-        if (entries.isEmpty() || messages == null || workspace == null
+        if (entries.isEmpty() && !generalEvidenceContext || messages == null || workspace == null
                 || !workspace.equals(normalize(currentWorkspace))
                 || !LocalTurnTraceCapture.isActive()
                 || !traceId.equals(LocalTurnTraceCapture.currentTraceId())
@@ -139,17 +150,21 @@ public final class ReadOnlyEvidenceHandoff {
             var targets = new LinkedHashSet<>(contract.expectedTargets());
             targets.addAll(contract.sourceEvidenceTargets());
             if (targets.isEmpty() || targets.size() > ReadOnlyEvidenceContext.MAX_TARGETS
-                    || entries.size() > targets.size()) return false;
+                    || entries.size() > ReadOnlyEvidenceContext.MAX_TARGETS) return false;
             for (String target : targets) if (!safePath(target)) return false;
             var ids = new java.util.HashSet<String>();
             var indexes = new java.util.HashSet<Integer>();
             var pathIdentity = new ReadEvidenceLedger(workspace);
+            var observedPaths = new ArrayList<String>();
             int characters = 0;
             for (Entry entry : entries) {
-                if (!targets.contains(entry.target()) || !safePath(entry.evidence().effectivePath())
+                if (!safePath(entry.target()) || !safePath(entry.evidence().effectivePath())
                         || !pathIdentity.sameEffectivePath(entry.evidence().effectivePath(), entry.target())
+                        || observedPaths.stream().anyMatch(path -> pathIdentity.sameEffectivePath(
+                            path, entry.evidence().effectivePath()))
                         || entry.resultIndex() < 0 || entry.resultIndex() >= messages.size()
                         || !ids.add(entry.result().toolCallId()) || !indexes.add(entry.resultIndex())) return false;
+                observedPaths.add(entry.evidence().effectivePath());
                 ChatMessage current = messages.get(entry.resultIndex());
                 if (current == null || !"tool".equals(current.role()) || current.hasNativeToolCalls()
                         || !Objects.equals(current.toolCallId(), entry.result().toolCallId())

@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
@@ -165,7 +166,8 @@ final class CompactMutationContinuationPlanner {
                     .append("do not substitute paraphrases or invented office facts.\n");
         }
 
-        String currentRequest = userTask == null ? "" : userTask.strip();
+        String currentRequest = userTask == null ? ""
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.

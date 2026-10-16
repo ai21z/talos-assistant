@@ -24,15 +24,20 @@ public final class LoopState {
     public final RuntimeTurnContext ctx;
     public final Session toolSession;
     public final int maxIterations;
+    final dev.talos.runtime.policy.ProjectSummaryEvidencePolicy.AnchorSelection summaryRequirement;
     final DocumentComparisonContinuation.Scope comparisonScope;
 
     public String currentText;
     public List<NativeToolCall> currentNativeCalls;
     public ProviderResponseCapture.Receipt currentResponseReceipt;
     public boolean currentAnswerOutputLimitReached;
+    public boolean currentProviderAnswerIncomplete;
     public dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus readOnlySynthesisStatus =
             dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED;
     public boolean readOnlySynthesisAtLimit;
+    public boolean readOnlyAcquisitionAtLimit;
+    boolean inheritedGeneralEvidenceContext;
+    boolean inheritedUnretainedReadEvidence;
     public ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence = ReadOnlyFinalizationEvidence.empty();
     public LocalTurnTraceCapture.ToolCallSource currentToolCallSource;
     public LocalTurnTraceCapture.RuntimeToolAuthorityReason currentRuntimeToolAuthorityReason;
@@ -52,6 +57,7 @@ public final class LoopState {
 
     public final List<String> toolNames = new ArrayList<>();
     public final List<dev.talos.runtime.ToolCallLoop.ToolOutcome> toolOutcomes = new ArrayList<>();
+    final ToolOutcomeResults toolOutcomeResults = new ToolOutcomeResults();
     public final Set<String> failedCallSignatures = new HashSet<>();
     public final Map<String, Integer> editFailuresByPath = new HashMap<>();
     public final Map<String, Integer> failureCountsByTool = new HashMap<>();
@@ -118,6 +124,14 @@ public final class LoopState {
                 LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         this.messages = messages;
         this.workspace = workspace;
+        var contract = dev.talos.runtime.TurnTaskContractCapture.get();
+        var requestedResults = dev.talos.runtime.TurnTaskContractCapture.requestedResults();
+        this.summaryRequirement = contract != null
+                && (requestedResults != null && (requestedResults.boundedWorkspaceQuery()
+                    || dev.talos.runtime.observation.TurnRequestFrame.admits(requestedResults))
+                    ? requestedResults.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)
+                    : contract.type() == dev.talos.runtime.task.TaskType.WORKSPACE_EXPLAIN)
+                ? dev.talos.runtime.policy.ProjectSummaryEvidencePolicy.selectAnchor(workspace) : null;
         this.readEvidence = new ReadEvidenceLedger(workspace);
         this.ctx = ctx;
         this.toolSession = toolSession;
@@ -164,6 +178,7 @@ public final class LoopState {
 
     public void finishWithAnswer(String answer) {
         readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
+        currentProviderAnswerIncomplete = false;
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -184,6 +199,7 @@ public final class LoopState {
             String answer,
             ProviderResponseCapture.Receipt receipt) {
         readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
+        currentProviderAnswerIncomplete = false;
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = receipt == null
@@ -202,6 +218,7 @@ public final class LoopState {
 
     public void finishWithToolAnswer(String answer) {
         readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
+        currentProviderAnswerIncomplete = false;
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -214,6 +231,7 @@ public final class LoopState {
 
     public void finishWithOperatorAnswer(String answer) {
         readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
+        currentProviderAnswerIncomplete = false;
         currentAnswerOutputLimitReached = false;
         currentText = answer;
         currentNativeCalls = List.of();
@@ -237,6 +255,19 @@ public final class LoopState {
     }
 
     public void applyProviderResult(dev.talos.core.llm.LlmClient.StreamResult result) {
+        currentProviderAnswerIncomplete = false;
+        if (result != null && result.aborted()) {
+            LocalTurnTraceCapture.recordModelGenerationAborted(result.abortOrigin(),
+                    result.abandonment().orElse(null), !result.text().isBlank());
+            throw dev.talos.runtime.IncompleteGenerationPresentation.abortedFailure(result);
+        }
+        if (dev.talos.runtime.IncompleteGenerationPresentation.required(result)) {
+            finishWithOperatorAnswer(dev.talos.runtime.IncompleteGenerationPresentation.NOTICE);
+            currentProviderAnswerIncomplete = true;
+            currentAnswerOutputLimitReached = result.outputLimitReached();
+            dev.talos.runtime.IncompleteGenerationPresentation.record(currentText);
+            return;
+        }
         readOnlyFinalizationEvidence = readOnlyFinalizationEvidence.invalidate();
         currentAnswerOutputLimitReached = result != null && result.outputLimitReached();
         currentText = result == null ? "" : result.text();

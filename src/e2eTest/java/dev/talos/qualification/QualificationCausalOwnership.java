@@ -1,6 +1,8 @@
 package dev.talos.qualification;
 
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.trace.FinalAnswerStatus;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
@@ -410,6 +412,11 @@ final class QualificationCausalOwnership {
         }
         JsonNode events = root.path("events");
         if (!events.isArray()) return QualificationRecords.AnswerOrigin.NONE;
+        if (hasEventBetween(events, FinalAnswerStatus.TYPE, -1, events.size())
+                && !FinalAnswerStatus.decode(
+                        QualificationJson.read(traceBytes, LocalTurnTrace.class)).available()) {
+            return QualificationRecords.AnswerOrigin.NONE;
+        }
         QualificationProviderAttemptLedger.Ledger ledger =
                 QualificationProviderAttemptLedger.parse(root);
         if (!allRestorationsBound(events, ledger)) {
@@ -615,6 +622,7 @@ final class QualificationCausalOwnership {
             List<AnswerFingerprint> expected) {
         int terminalIndex = -1;
         int routedIndex = -1;
+        int finalStatusIndex = -1;
         int outcomeIndex = -1;
         int completeIndex = -1;
         JsonNode terminalData = null;
@@ -644,6 +652,10 @@ final class QualificationCausalOwnership {
                     routedIndex = index;
                     routedData = data;
                 }
+                case FinalAnswerStatus.TYPE -> {
+                    if (finalStatusIndex >= 0) return null;
+                    finalStatusIndex = index;
+                }
                 case "OUTCOME_RENDERED" -> {
                     if (outcomeIndex >= 0 || !exactKeys(data, Set.of(
                             "status", "classification"))
@@ -664,8 +676,10 @@ final class QualificationCausalOwnership {
                 || outcomeIndex <= routedIndex || completeIndex != outcomeIndex + 1
                 || completeIndex != events.size() - 1 || terminalData == null
                 || routedData == null
+                || (finalStatusIndex >= 0 && finalStatusIndex != outcomeIndex - 1)
                 || !onlyEventTypesBetween(
-                        events, routedIndex, outcomeIndex, Set.of("VERIFICATION_COMPLETED"))) {
+                        events, routedIndex, outcomeIndex,
+                        Set.of("VERIFICATION_COMPLETED", FinalAnswerStatus.TYPE))) {
             return null;
         }
 

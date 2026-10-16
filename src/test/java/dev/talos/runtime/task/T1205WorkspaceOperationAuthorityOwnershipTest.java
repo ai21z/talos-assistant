@@ -45,7 +45,7 @@ class T1205WorkspaceOperationAuthorityOwnershipTest {
                 RESOLVE_FROM_USER_REQUEST);
 
         Map<String, Integer> approvedOwners = Map.of(
-                "dev/talos/runtime/task/TaskContractResolver.java", 4,
+                "dev/talos/runtime/task/TaskContractResolver.java", 5,
                 "dev/talos/runtime/JsonSessionStore.java", 2,
                 "dev/talos/runtime/TurnProcessor.java", 1,
                 "dev/talos/runtime/TurnPolicyTrace.java", 1,
@@ -57,6 +57,12 @@ class T1205WorkspaceOperationAuthorityOwnershipTest {
                 "Only the canonical task compiler and the enumerated lexical/contract/intent "
                         + "compatibility edges may parse a user request. A downstream reparse "
                         + "must never derive workspace-operation authority.");
+
+        assertEquals(
+                Map.of("dev/talos/runtime/task/TaskContractResolver.java", 1),
+                occurrenceOwners(sources, Pattern.compile(
+                        "\\bresolveFromUserRequest\\s*\\(\\s*previousUser\\s*\\)")),
+                "Previous user scope must be compiled only at the canonical reference edge.");
 
         for (String intentOnlyOwner : List.of(
                 "dev/talos/runtime/TurnProcessor.java",

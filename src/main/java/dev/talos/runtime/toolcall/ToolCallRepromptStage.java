@@ -30,8 +30,11 @@ public final class ToolCallRepromptStage {
                     "tool-call execution authority was rejected");
             state.stopWithFailure(
                     decision,
-                    "[Tool loop stopped because executable tool authority "
-                            + "was invalid. No follow-up provider request was sent.]");
+                    "[Tool execution was blocked because executable tool authority was invalid"
+                            + (outcome.authorityRejections().isEmpty() ? ""
+                                    : " (" + outcome.authorityRejections().stream().map(Enum::name)
+                                            .collect(java.util.stream.Collectors.joining(", ")) + ")")
+                            + ". No follow-up provider request was sent.]");
             LOG.debug(
                     "Stopping tool-call loop after executable authority "
                             + "rejection; not re-prompting.");
@@ -52,6 +55,10 @@ public final class ToolCallRepromptStage {
             } else {
                 state.finishWithAnswer(synthesis.text());
             }
+            if (synthesis.incompleteGeneration()) {
+                state.currentProviderAnswerIncomplete = true;
+                dev.talos.runtime.IncompleteGenerationPresentation.record(state.currentText);
+            }
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
             return false;
         }
@@ -67,8 +74,20 @@ public final class ToolCallRepromptStage {
             return staleRereadStop.get();
         }
 
+        if (ReadOnlyEvidenceContext.select(state).retentionLimited()) {
+            state.stopWithFailure(FailureDecision.stop(FailureAction.ASK_USER,
+                            TerminalReadOnlyStopAnswer.RETENTION_LIMIT_REASON),
+                    TerminalReadOnlyStopAnswer.retentionLimitAnswer());
+            return false;
+        }
+
         Optional<Boolean> readOnlySynthesis = ReadOnlyEvidenceSynthesizer.tryHandle(state, outcome);
         if (readOnlySynthesis.isPresent()) return readOnlySynthesis.get();
+
+        if (state.iterations >= state.maxIterations) {
+            Optional<Boolean> pendingReadsAtLimit = ReadOnlyEvidenceContinuation.tryHandle(state);
+            if (pendingReadsAtLimit.isPresent()) return pendingReadsAtLimit.get();
+        }
 
         TerminalReadOnlyStopAnswer.Answer terminalReadOnlyAnswer =
                 TerminalReadOnlyStopAnswer.select(state, outcome);
@@ -129,6 +148,9 @@ public final class ToolCallRepromptStage {
         Optional<Boolean> pendingDiagnosisReads = ReadOnlyEvidenceContinuation.tryHandle(state);
         if (pendingDiagnosisReads.isPresent()) return pendingDiagnosisReads.get();
 
+        Optional<Boolean> supportingAcquisition = ReadOnlyEvidenceContinuation.tryContinueAcquisition(state);
+        if (supportingAcquisition.isPresent()) return supportingAcquisition.get();
+
         if (state.iterations >= 3) {
             ToolCallSupport.compactOlderToolResultsInPlace(
                     state.messages, state.compactedToolResultOriginals);
@@ -162,7 +184,7 @@ public final class ToolCallRepromptStage {
     }
 
     public boolean hitIterationLimit(LoopState state) {
-        return state.readOnlySynthesisAtLimit || state.iterations >= state.maxIterations
+        return state.readOnlySynthesisAtLimit || state.readOnlyAcquisitionAtLimit || state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
     }
 

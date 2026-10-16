@@ -15,6 +15,21 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolCallRepromptStageTest {
 
     @Test
+    void authorityRejectionExposesFiniteReasonsAndNeverRequestsAnotherGeneration() {
+        LoopState state = new LoopState("", List.of(), new ArrayList<>(), Path.of("."),
+                null, null, 10, 0);
+        var reason = dev.talos.runtime.trace.LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.TEXT_PROJECTION_MISMATCH;
+        var outcome = new ToolCallExecutionStage.IterationOutcome(0, List.of(), 2,
+                false, false, false, 0, List.of(), true, 0, List.of(reason, reason));
+        assertFalse(new ToolCallRepromptStage().reprompt(state, outcome));
+        assertEquals(List.of(reason), outcome.authorityRejections());
+        assertEquals("[Tool execution was blocked because executable tool authority was invalid "
+                + "(TEXT_PROJECTION_MISMATCH). No follow-up provider request was sent.]", state.currentText);
+        assertTrue(state.currentNativeCalls.isEmpty());
+        assertTrue(state.messages.isEmpty());
+    }
+
+    @Test
     void directoryListingStopsAfterSuccessfulListDir() {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),

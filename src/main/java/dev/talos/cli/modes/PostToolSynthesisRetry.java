@@ -1,5 +1,6 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -74,7 +75,8 @@ final class PostToolSynthesisRetry {
         LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
 
         String originalRequest =
-                TurnTaskContractCapture.originalUserRequestOrResolve(messages);
+                RuntimeModelIdentityAnswerPolicy.capturedProviderTask(
+                        TurnTaskContractCapture.originalUserRequestOrResolve(messages));
         String retryPrompt;
         if (originalRequest != null && !originalRequest.isBlank()) {
             String pinned = originalRequest.length() <= 2000

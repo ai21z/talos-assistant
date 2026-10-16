@@ -49,11 +49,9 @@ public final class RenderEngine {
     private final Object spinnerMonitor = new Object();
     private Thread spinnerThread;
     private Instant spinnerStartTime;
-    private AnswerPaneRenderer.Stream activeAnswerStream;
-    private dev.talos.cli.ui.StreamShaper activeAnswerShaper;
-    private Consumer<String> activeAnswerStreamWriter;
-    private AnswerCodeLiteralStreamProjection activeAnswerProjection;
-    private Consumer<String> pendingAnswerStreamWriter;
+    private final java.util.Map<dev.talos.runtime.PreparedAnswer, dev.talos.runtime.AnswerDeliveryObservation> deliveries =
+            new java.util.WeakHashMap<>();
+    private dev.talos.runtime.AnswerDeliveryObservation lastDelivery;
 
     // Braille spinner for Unicode-capable terminals, classic for others
     private static final String[] SPINNER_UNICODE = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
@@ -179,10 +177,29 @@ public final class RenderEngine {
      * @param responseLen  approximate response length in characters (0 to omit)
      */
     public void printTurnStats(int turnNumber, long elapsedMs, int responseLen) {
+        printTurnStats(turnNumber, elapsedMs, responseLen, ProgressLineRenderer.TurnOutcome.UNKNOWN);
+    }
+
+    public void printTurnStats(dev.talos.runtime.TurnResult turn, int responseLen) {
+        var trace = turn.audit().localTrace();
+        var outcome = trace == null ? ProgressLineRenderer.TurnOutcome.UNKNOWN
+                : ProgressLineRenderer.TurnOutcome.from(trace.outcome().status(), trace.outcome().classification());
+        if (turn.result() instanceof Result.Error && outcome != ProgressLineRenderer.TurnOutcome.CANCELLED) {
+            outcome = ProgressLineRenderer.TurnOutcome.FAILED;
+        }
+        printTurnStats(turn.turnNumber(), turn.elapsed().toMillis(), responseLen, outcome);
+        if (interactive && showTimingAfterAnswer && !(turn.result() instanceof Result.Error)) {
+            for (String line : dev.talos.cli.ui.FinalAnswerStatusRenderer.lines(trace)) out.println("  " + line);
+            out.flush();
+        }
+    }
+
+    private void printTurnStats(int turnNumber, long elapsedMs, int responseLen,
+                               ProgressLineRenderer.TurnOutcome outcome) {
         if (!showTimingAfterAnswer) return;
         if (!interactive) return;
 
-        out.println(progressRenderer.turnStats(turnNumber, elapsedMs, responseLen));
+        out.println(progressRenderer.turnStats(turnNumber, elapsedMs, responseLen, outcome));
         out.flush();
     }
 
@@ -307,30 +324,55 @@ public final class RenderEngine {
      */
     public void shutdown() {
         stopSpinner();
-        closeAnswerStream("answer");
         if (statusRow != null) {
             statusRow.close();
         }
     }
 
     /**
-     * Build a JLine-safe display sink for user-visible streamed assistant text.
-     * Tool protocol filtering must wrap this sink, so only natural-language
-     * chunks receive answer-pane chrome.
+     * Raw transport fragments are not public answers. The selected result is rendered later.
      */
     public Consumer<String> answerStreamSink(Consumer<String> trustedOutput) {
-        Consumer<String> writer = trustedOutput == null ? this::print : trustedOutput;
-        return chunk -> {
-            stopSpinner();
-            String rendered = projectedStreamChunk(chunk, writer);
-            if (!rendered.isEmpty()) {
-                writer.accept(rendered);
-            }
-        };
+        return ignored -> { };
+    }
+
+    /** Built-in command output is kept separate from generated answers. */
+    public void renderCommand(String command, Result result) {
+        if (!(result instanceof Result.Ok || result instanceof Result.Info
+                || result instanceof Result.TrustedInfo || result instanceof Result.Error
+                || result instanceof Result.Table)) {
+            render(result);
+            return;
+        }
+        stopSpinner();
+        closeAnswerStream("answer");
+        int width = dev.talos.cli.ui.CommandTextLayout.width(terminalWidth);
+        String heading = "/" + sroInline(command);
+        String body;
+        if (result instanceof Result.Ok ok) body = redactor.redactBlock(answerTerminalText(
+                AnswerCodeLiteralStreamProjection.complete(ok.text)));
+        else if (result instanceof Result.Info info) body = sro(info.text);
+        else if (result instanceof Result.TrustedInfo info) body = trustedText(info.text);
+        else if (result instanceof Result.Error error) {
+            heading += error.code > 0 ? " [error " + error.code + "]" : " [error]";
+            body = sro(error.message);
+        } else {
+            Result.Table table = (Result.Table) result;
+            body = sro(table.title) + "\n\n" + dev.talos.cli.ui.CommandTextLayout.table(
+                    table.columns.stream().map(this::sro).toList(),
+                    table.rows.stream().map(row -> row.stream().map(this::sro).toList()).toList(), width);
+        }
+        String title = dev.talos.cli.ui.CommandTextLayout.wrap(heading, width);
+        println("");
+        println(result instanceof Result.Error ? theme.error(title) : theme.section(title));
+        println("");
+        println(dev.talos.cli.ui.CommandTextLayout.wrap(body.strip(), width));
+        println("");
     }
 
     public void render(Result r) {
         stopSpinner();
+        lastDelivery = null;
 
         if (r == null) {
             println(sro("(null result)"));
@@ -339,8 +381,12 @@ public final class RenderEngine {
 
         if (r instanceof Result.Ok ok) {
             closeAnswerStream("answer");
-            printResponse(redactor.redactBlock(answerTerminalText(
-                    AnswerCodeLiteralStreamProjection.complete(ok.text))));
+            if (ok.presentation == null) {
+                printResponse(redactor.redactBlock(answerTerminalText(
+                        AnswerCodeLiteralStreamProjection.complete(ok.text))));
+            } else {
+                renderPreparedAnswer(ok.text, ok.presentation);
+            }
             return;
         }
         if (r instanceof Result.Info info) {
@@ -370,21 +416,20 @@ public final class RenderEngine {
             return;
         }
         if (r instanceof Result.StreamChunk chunk) {
-            stopSpinner();
-            print(projectedStreamChunk(chunk.text, null));
-            return;
+            throw new IllegalArgumentException("An unselected answer fragment cannot be rendered.");
         }
         if (r instanceof Result.StreamEnd) {
             closeAnswerStream("answer");
             return;
         }
         if (r instanceof Result.Streamed streamed) {
-            // Body was already printed during streaming; only render the suffix
             closeAnswerStream("answer");
-            if (!streamed.suffix.isEmpty()) {
-                printResponseSuffix(sro(streamed.suffix));
-            }
-            println("");
+            String text = streamed.fullText.endsWith(streamed.suffix)
+                    ? streamed.fullText : streamed.fullText + streamed.suffix;
+            if (streamed.presentation == null) {
+                printResponse(redactor.redactBlock(answerTerminalText(
+                        AnswerCodeLiteralStreamProjection.complete(text))));
+            } else renderPreparedAnswer(text, streamed.presentation);
             return;
         }
         if (r instanceof Result.ToolProgress tp) {
@@ -394,6 +439,25 @@ public final class RenderEngine {
 
         println(sro(r.toString()));
     }
+
+    private void renderPreparedAnswer(String selected, dev.talos.runtime.PreparedAnswer prepared) {
+        if (deliveries.containsKey(prepared)) {
+            lastDelivery = deliveries.get(prepared);
+            return;
+        }
+        var state = dev.talos.runtime.AnswerDeliveryObservation.State.FAILED_OR_UNCERTAIN;
+        try {
+            String projected = prepared.project(selected, redactor);
+            String normalized = answerTerminalText(projected);
+            printResponse(prepared.limitApproved(normalized.equals(projected) ? projected : redactor.redactBlock(normalized)));
+            if (!out.checkError()) state = dev.talos.runtime.AnswerDeliveryObservation.State.NO_DETECTED_SINK_ERROR;
+        } finally {
+            lastDelivery = new dev.talos.runtime.AnswerDeliveryObservation(prepared.id(), prepared.turn(), state);
+            deliveries.put(prepared, lastDelivery);
+        }
+    }
+
+    public dev.talos.runtime.AnswerDeliveryObservation lastAnswerDelivery() { return lastDelivery; }
 
     /**
      * Answer-pane renderer at the current terminal width. Constructed
@@ -412,80 +476,7 @@ public final class RenderEngine {
                 ANSWER_PANE_DEFAULT_WIDTH));
     }
 
-    private String streamChunk(String chunk, Consumer<String> writer) {
-        if (chunk == null || chunk.isEmpty()) return "";
-        if (activeAnswerStream == null) {
-            AnswerPaneRenderer renderer = answerRenderer();
-            activeAnswerStream = renderer.openStream("answer");
-            activeAnswerShaper = !styledStreamingEnabled() ? null
-                    : markdownEnabled
-                            ? new dev.talos.cli.ui.md.StreamingMarkdownShaper(renderer.contentWidth(), theme)
-                            : new dev.talos.cli.ui.StreamingAnswerShaper(renderer.contentWidth());
-            activeAnswerStreamWriter = writer;
-        } else if (activeAnswerStreamWriter == null && writer != null) {
-            activeAnswerStreamWriter = writer;
-        }
-        if (activeAnswerShaper == null) {
-            return activeAnswerStream.accept(chunk);
-        }
-        String shaped = activeAnswerShaper.accept(chunk);
-        return shaped.isEmpty() ? "" : activeAnswerStream.accept(shaped);
-    }
-
-    private String projectedStreamChunk(String chunk, Consumer<String> writer) {
-        if (chunk == null || chunk.isEmpty()) return "";
-        if (activeAnswerProjection == null) {
-            activeAnswerProjection = new AnswerCodeLiteralStreamProjection();
-        }
-        if (pendingAnswerStreamWriter == null && writer != null) {
-            pendingAnswerStreamWriter = writer;
-        }
-        // Redact before introducing a delimiter seam: a secret contained in
-        // one input chunk must not evade redaction by straddling the held tail.
-        // The final pass below also covers secrets wholly within that tail.
-        String projected = activeAnswerProjection.accept(redactor.redactLine(chunk));
-        return streamChunk(redactor.redactLine(answerTerminalText(projected)), writer);
-    }
-
-    /**
-     * Width-reactive wrapping (T776) - and from T777 markdown styling - is
-     * an interactive-only enhancement. Every degraded mode (redirected,
-     * scripted, NO_COLOR, ASCII glyphs, dumb terminal) keeps the historical
-     * pass-through stream bytes: the evidence chain string-matches those
-     * transcripts.
-     */
-    private boolean styledStreamingEnabled() {
-        var caps = theme.capabilities();
-        return interactive && caps.colorEnabled() && caps.unicodeSafe() && !caps.dumbTerminal();
-    }
-
-    private void closeAnswerStream(String footer) {
-        StringBuilder rendered = new StringBuilder();
-        if (activeAnswerProjection != null) {
-            String tail = activeAnswerProjection.finish();
-            activeAnswerProjection = null;
-            rendered.append(streamChunk(
-                    redactor.redactBlock(answerTerminalText(tail)), pendingAnswerStreamWriter));
-        }
-        pendingAnswerStreamWriter = null;
-        if (activeAnswerStream == null) return;
-        if (activeAnswerShaper != null) {
-            String tail = activeAnswerShaper.flush();
-            if (!tail.isEmpty()) {
-                rendered.append(activeAnswerStream.accept(tail));
-            }
-            activeAnswerShaper = null;
-        }
-        rendered.append(activeAnswerStream.close(footer));
-        Consumer<String> writer = activeAnswerStreamWriter;
-        activeAnswerStream = null;
-        activeAnswerStreamWriter = null;
-        if (writer != null) {
-            writer.accept(rendered.toString());
-        } else {
-            print(rendered.toString());
-        }
-    }
+    private void closeAnswerStream(String footer) { }
 
     // ── Response rendering (semantic answer pane) ─────────────────────────
 
@@ -659,6 +650,31 @@ public final class RenderEngine {
 
     private boolean unicodeSafe() {
         return theme.capabilities().unicodeSafe();
+    }
+
+    public ExactAnswerPresentation exactAnswerPresentation() {
+        return new ExactAnswerPresentation(this::preservesExactAnswer,
+                () -> render(new Result.StreamEnd()));
+    }
+
+    /** Character preservation is required, ordinary single-space word wrapping is layout only. */
+    private boolean preservesExactAnswer(String source) {
+        if (source == null || source.length() > AnswerCodeLiteralStreamProjection.MAX_SOURCE_CHARS
+                || source.indexOf('\r') >= 0 || source.indexOf('\u2028') >= 0
+                || source.indexOf('\u2029') >= 0) return false;
+        if (!source.equals(new String(source.getBytes(out.charset()), out.charset()))) return false;
+        String complete = redactor.redactBlock(answerTerminalText(AnswerCodeLiteralStreamProjection.complete(source)));
+        if (!source.equals(complete) || !source.equals(splitSources(complete).body())) return false;
+
+        int width = answerRenderer().contentWidth();
+        for (String line : source.split("\n", -1)) {
+            if (!preservesWrappedLine(line, String.join("\n", AnswerPaneRenderer.wrapLine(line, width)))) return false;
+        }
+        return true;
+    }
+
+    private static boolean preservesWrappedLine(String source, String displayed) {
+        return source.equals(displayed) || source.equals(displayed.replace('\n', ' '));
     }
 
     private void print(String s) { out.print(s); out.flush(); }

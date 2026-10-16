@@ -48,6 +48,15 @@ import java.util.regex.Pattern;
  */
 public final class ToolCallStreamFilter implements Consumer<String> {
 
+    /** Display filtering is applied to one complete selected value, never used as execution authority. */
+    public static String projectComplete(String source) {
+        StringBuilder selected = new StringBuilder();
+        var filter = new ToolCallStreamFilter(selected::append);
+        filter.accept(source == null ? "" : source);
+        filter.flush();
+        return selected.toString();
+    }
+
     private final Consumer<String> delegate;
     private final StringBuilder buffer = new StringBuilder();
     private final StringBuilder leadingJsonBuffer = new StringBuilder();

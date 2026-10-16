@@ -82,14 +82,14 @@ public final class CoordinatedMutationTailParser {
                     + "(?:but|except)\\s*$|"
                     + "\\bwithout\\s+(?:changing|editing|modifying|updating|"
                     + "rewriting|adjusting|touching)\\b)");
-    private static final Pattern DIRECT_TARGET_PREFIX = Pattern.compile(
+    // Discovery and binding use the same file-object output slot. Locative and
+    // naming markers belong to that object, never to arbitrary payload prose.
+    private static final String DIRECT_TARGET_LEAD =
             "(?i)^[\\s:,-]*(?:(?:exactly|only)\\s+)*"
-                    + "(?:(?:the|a|an|both|current|existing|local)\\s+)*"
-                    + "(?:(?:file|files)\\s+)?$");
-    private static final Pattern DISCOVERABLE_DIRECT_TARGET_PREFIX = Pattern.compile(
-            "(?i)^[\\s:,-]*(?:(?:exactly|only)\\s+)*"
-                    + "(?:(?:the|a|an|both|current|existing|local)\\s+)*"
-                    + "(?:(?:file|files)\\s+)?");
+                    + "(?:(?:the|a|an|both|current|existing|local|new)\\s+)*"
+                    + "(?:(?:file|files)\\s+(?:(?:named|called|at)\\s+)?)?";
+    private static final Pattern DIRECT_TARGET_PREFIX = Pattern.compile(DIRECT_TARGET_LEAD + "$");
+    private static final Pattern DISCOVERABLE_DIRECT_TARGET_PREFIX = Pattern.compile(DIRECT_TARGET_LEAD);
     private static final Pattern DISCOVERABLE_WORKSPACE_TARGET_PREFIX =
             Pattern.compile(
                     "(?i)^[\\s:,-]*(?:(?:named|called|as)\\s+)?"
@@ -1452,6 +1452,41 @@ public final class CoordinatedMutationTailParser {
         }
         return new BoundTargets(
                 List.copyOf(selected.values()), priorEnd, disjunctive);
+    }
+
+    /** Operand ownership only. The caller retains the action's authority. */
+    static ContentOutputBinding contentOutputBinding(
+            RequestLexicalView view,
+            Set<String> candidateTargets,
+            CanonicalMutationClauseMatcher.Action action,
+            int operandEnd,
+            List<CanonicalMutationClauseMatcher.Action> actions
+    ) {
+        if (view == null || action == null || candidateTargets == null
+                || action.family() != CanonicalMutationClauseMatcher.Family.CONTENT_MUTATION) {
+            return new ContentOutputBinding(List.of(), true);
+        }
+        List<String> candidates = normalizedCandidates(candidateTargets);
+        int limit = Math.min(view.request().length(), Math.max(action.end(), operandEnd));
+        TargetOccurrenceIndex index = TargetOccurrenceIndex.build(view, candidates,
+                action.end(), limit, new MutableParseWork());
+        BoundTargets outputs = directTargets(view, candidates, action.family(), action.end(), limit, index);
+        boolean workspaceOwned = naturalBatchWorkspaceCreate(view, candidates, action, outputs, index,
+                limit, WorkspaceActionIndex.build(actions)) != null;
+        if (!workspaceOwned && ("create".equals(action.verb()) || "make".equals(action.verb()))) {
+            workspaceOwned = WORKSPACE_TARGET_KIND_SUFFIX.matcher(view.masked().substring(
+                    outputs.lastEnvelopeEnd(), limit)).find();
+        }
+        List<TargetOccurrence> occurrences = index.between(candidates, action.end(), limit);
+        return new ContentOutputBinding(outputs.targets().stream().map(output -> occurrences.stream()
+                        .filter(occurrence -> occurrence.path().equals(output.path())
+                                && occurrence.envelopeStart() == output.envelopeStart()
+                                && occurrence.envelopeEnd() == output.envelopeEnd())
+                        .findFirst().orElseThrow()).toList(), workspaceOwned);
+    }
+
+    record ContentOutputBinding(List<TargetOccurrence> targets, boolean workspaceOwned) {
+        ContentOutputBinding { targets = List.copyOf(targets); }
     }
 
     static LocalContentActionBinding requiredLocalContentActionBinding(

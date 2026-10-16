@@ -38,6 +38,13 @@ final class TurnTerminalizer {
         Objects.requireNonNull(result, "completed turn result");
         beginFreeze();
         try {
+            if (result instanceof Result.Ok ok) {
+                result = new Result.Ok(ok.text, PreparedAnswer.freeze(ok.text, ctx, turnNumber));
+            } else if (result instanceof Result.Streamed legacy) {
+                String text = legacy.fullText.endsWith(legacy.suffix)
+                        ? legacy.fullText : legacy.fullText + legacy.suffix;
+                result = new Result.Streamed(legacy.fullText, legacy.suffix, PreparedAnswer.freeze(text, ctx, turnNumber));
+            }
             RetrievalTrace retrieval = consumeRetrieval();
             updateFinalPhase(ctx);
             String assistantText = MemoryUpdateListener.extractText(result);
@@ -48,6 +55,11 @@ final class TurnTerminalizer {
             String committedAssistantText = assistantText == null
                     ? ""
                     : TurnAuditCapture.currentContentRestrictions().forHistory(deliveredAssistantText);
+            TurnAuditCapture.validateWorkStatusPresentation(
+                    TurnUserRequestCapture.get(), deliveredAssistantText, committedAssistantText);
+            TurnAuditCapture.settleReadOnlyResults(deliveredAssistantText, committedAssistantText,
+                    assistantText != null && !dev.talos.core.util.UiChrome.containsTurnAbortMarker(assistantText)
+                            && MemoryUpdateListener.isMemorizableAssistantReply(result, committedAssistantText));
             LocalTurnTraceCapture.recordAnswerTransformedForRouting(
                     committedAssistantText,
                     LocalTurnTraceCapture.AnswerTransformationReason.SESSION_COMMIT_NORMALIZATION);

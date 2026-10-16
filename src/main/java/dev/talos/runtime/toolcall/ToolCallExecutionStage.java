@@ -9,6 +9,7 @@ import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -51,11 +52,48 @@ public final class ToolCallExecutionStage {
                                    boolean pathPolicyBlockedThisIteration,
                                    int successesThisIteration,
                                    List<String> unsupportedReadPathsThisIteration,
-                                   boolean executionAuthorityRejectedThisIteration) {
+                                   boolean executionAuthorityRejectedThisIteration,
+                                   int unchangedFullReadsThisIteration,
+                                   List<LocalTurnTraceCapture.ToolCallAuthorityRejectionReason> authorityRejections) {
         public IterationOutcome {
             unsupportedReadPathsThisIteration = unsupportedReadPathsThisIteration == null
                     ? List.of()
                     : List.copyOf(unsupportedReadPathsThisIteration);
+            unchangedFullReadsThisIteration = Math.max(0, Math.min(
+                    successesThisIteration, unchangedFullReadsThisIteration));
+            authorityRejections = authorityRejections == null ? List.of()
+                    : authorityRejections.stream().distinct().toList();
+        }
+
+        public IterationOutcome(int mutationsThisIteration, List<String> mutationSummaries,
+                                int failuresThisIteration, boolean approvalDeniedThisIteration,
+                                boolean mutatingDeniedThisIteration, boolean pathPolicyBlockedThisIteration,
+                                int successesThisIteration, List<String> unsupportedReadPathsThisIteration,
+                                boolean executionAuthorityRejectedThisIteration, int unchangedFullReadsThisIteration) {
+            this(mutationsThisIteration, mutationSummaries, failuresThisIteration,
+                    approvalDeniedThisIteration, mutatingDeniedThisIteration, pathPolicyBlockedThisIteration,
+                    successesThisIteration, unsupportedReadPathsThisIteration,
+                    executionAuthorityRejectedThisIteration, unchangedFullReadsThisIteration, List.of());
+        }
+
+        /** Successful execution is retained separately from new admitted source evidence. */
+        public int progressSuccessesThisIteration() {
+            return Math.max(0, successesThisIteration - unchangedFullReadsThisIteration);
+        }
+
+        public IterationOutcome(int mutationsThisIteration,
+                                List<String> mutationSummaries,
+                                int failuresThisIteration,
+                                boolean approvalDeniedThisIteration,
+                                boolean mutatingDeniedThisIteration,
+                                boolean pathPolicyBlockedThisIteration,
+                                int successesThisIteration,
+                                List<String> unsupportedReadPathsThisIteration,
+                                boolean executionAuthorityRejectedThisIteration) {
+            this(mutationsThisIteration, mutationSummaries, failuresThisIteration,
+                    approvalDeniedThisIteration, mutatingDeniedThisIteration,
+                    pathPolicyBlockedThisIteration, successesThisIteration,
+                    unsupportedReadPathsThisIteration, executionAuthorityRejectedThisIteration, 0);
         }
 
         public IterationOutcome(int mutationsThisIteration,
@@ -124,12 +162,14 @@ public final class ToolCallExecutionStage {
         int mutationsThisIter = 0;
         int failuresThisIter = 0;
         int successesThisIter = 0;
+        int unchangedFullReadsThisIter = 0;
         boolean approvalDeniedThisIter = false;
         boolean mutatingDeniedThisIter = false;
         boolean pathPolicyBlockedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
         List<String> unsupportedReadPathsThisIter = new ArrayList<>();
         Set<String> staleRereadRequiredAtStart = staleRereadRequiredPaths(state);
+        List<LocalTurnTraceCapture.ToolCallAuthorityRejectionReason> authorityRejections = new ArrayList<>();
         Set<String> fullRewriteRepairTargets = strict
                 ? Set.of()
                 : fullRewriteRepairTargets(state);
@@ -140,22 +180,52 @@ public final class ToolCallExecutionStage {
                     LocalTurnTraceCapture.authorizeParsedToolCallForExecution(
                             "tool_loop", call, parsed.lineage(i));
             if (!authority.authorized()) {
+                authorityRejections.add(authority.rejectionReason());
+                emitProgress(call.toolName(), "error", "authority: " + authority.rejectionReason().name());
                 String diagnostic = "Tool call blocked because executable authority is invalid ("
                         + authority.rejectionReason().name() + ").";
                 ToolResult blocked = ToolResult.fail(ToolError.invalidAuthority(
                         ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                         diagnostic));
-                state.addToolOutcome(ToolOutcomeFactory.failedAuthority(call, diagnostic));
+                var outcome = ToolOutcomeFactory.failedAuthority(call, diagnostic);
+                state.addToolOutcome(outcome);
+                var requestFrame = state.ctx.requestFrame();
+                if (requestFrame != null) {
+                    requestFrame.requireCurrent();
+                    if (requestFrame.controlled()) state.toolOutcomeResults.bindPreExecutionRejection(outcome);
+                }
                 ToolFailureStateAccounting.recordFailure(state, call, "");
                 failuresThisIter++;
                 appendResultMessage(
                         state,
                         parsed.useNativePath(),
                         i,
-                        ToolCallSupport.formatToolResult(call, blocked));
+                        ToolCallSupport.formatToolResult(call, blocked), outcome);
                 continue;
             }
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit = authority.permit();
+
+            var requestFrame = state.ctx.requestFrame();
+            if (requestFrame != null) {
+                requestFrame.requireCurrent();
+                if (requestFrame.controlled() && (!requestFrame.allowsTool(call.canonicalToolName())
+                        || !requestFrame.allowsDirectoryTarget(call.parameters()))) {
+                    String diagnostic = "The operation was not admitted by the current request boundary.";
+                    ToolResult blocked = ToolResult.fail(ToolError.denied(diagnostic));
+                    dev.talos.runtime.TurnAuditCapture.recordBlockedToolCall(call, "", "tool_loop", diagnostic);
+                    var registeredTool = turnProcessor.toolRegistry().get(call.toolName());
+                    boolean mutating = registeredTool == null
+                            || registeredTool.descriptor().operationMetadata().mutatesWorkspace();
+                    var outcome = ToolOutcomeFactory.requestDenied(call, blocked, parsedPermit, mutating);
+                    state.addClassifiedToolOutcome(outcome);
+                    state.toolOutcomeResults.bindPreExecutionRejection(outcome);
+                    ToolFailureStateAccounting.recordFailure(state, call, "");
+                    failuresThisIter++;
+                    appendResultMessage(state, parsed.useNativePath(), i,
+                            ToolCallSupport.formatToolResult(call, blocked), outcome);
+                    continue;
+                }
+            }
 
             ToolCall effective = ToolCallSupport.repairMissingPath(call);
             recordTransformation(
@@ -164,7 +234,7 @@ public final class ToolCallExecutionStage {
                     effective,
                     LocalTurnTraceCapture.ToolCallTransformationReason.MISSING_PATH_REPAIR);
             TaskContract currentTaskContract = TurnTaskContractCapture.get();
-            if (currentTaskContract != null) {
+            if (currentTaskContract != null && !dev.talos.runtime.observation.TurnRequestFrame.controlledCurrent()) {
                 PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
                         ProtectedPathAliasNormalizer.canonicalizeExpectedProtectedAliases(
                                 state.workspace, effective, currentTaskContract.expectedTargets());
@@ -256,6 +326,9 @@ public final class ToolCallExecutionStage {
                 successesThisIter++;
             }
 
+            ReadEvidence previousRead = isReadOnlyEvidenceAcquisition(currentTaskContract)
+                    && ReadEvidenceStateAccounting.isReadFileTool(effective)
+                    ? state.readEvidence.latestReadFileForPath(pathHint, true) : null;
             ReadEvidenceStateAccounting.recordSuccessfulToolResult(state, effective, pathHint, result);
             ToolMutationEvidence mutationEvidence =
                     result.success() ? ToolMutationEvidenceFactory.from(effective, state, pathHint) : null;
@@ -284,14 +357,15 @@ public final class ToolCallExecutionStage {
             if (failureSignals.approvalDenied()) {
                 approvalDeniedThisIter = true;
             }
-            state.addClassifiedToolOutcome(ToolOutcomeFactory.executed(
+            var outcome = ToolOutcomeFactory.executed(
                     effective,
                     pathHint,
                     result,
                     failureClassification,
                     workspaceOperationPlan,
                     mutationEvidence,
-                    parsedPermit));
+                    parsedPermit);
+            state.addClassifiedToolOutcome(outcome);
 
             if (!result.success()) {
                 if (ToolFailureStateAccounting.recordFailure(
@@ -319,15 +393,31 @@ public final class ToolCallExecutionStage {
                     effective,
                     result,
                     handoffDecision.preserveModelResultForToolFormatting());
+            state.toolOutcomeResults.bindSourceAdmission(outcome,
+                    !handoffDecision.contentWithheldFromModelContext() && result.contentMetadata().modelHandoffAllowed());
+            state.toolOutcomeResults.bindDirectory(outcome, effective);
+            if (ReadEvidenceStateAccounting.isReadFileTool(effective)) {
+                boolean formattingLimited = result.output() != null && !result.output().isBlank()
+                        && (formattedResult.body() == null || !formattedResult.body().observedBody()
+                            .equals(formattedResult.body().displayedBody()));
+                state.toolOutcomeResults.bindRead(outcome,
+                        state.readEvidence.latestIdenticalCall(effective, true),
+                        handoffDecision.contentWithheldFromModelContext() || formattingLimited,
+                        result.contentMetadata(), handoffDecision.userVisiblePrivacyNotice());
+            }
             String resultText = formattedResult.text();
             if (readBeforeWriteNudge != null) {
                 resultText = resultText + readBeforeWriteNudge;
             }
-            appendResultMessage(state, parsed.useNativePath(), i, resultText);
+            appendResultMessage(state, parsed.useNativePath(), i, resultText, outcome);
             if (result.success() && parsed.useNativePath()) {
                 int resultIndex = state.messages.size() - 1;
                 state.readEvidence.bindToolResult(
                         effective, resultIndex, state.messages.get(resultIndex), formattedResult);
+                if (state.readEvidence.unchangedFullReadObservation(previousRead,
+                        state.readEvidence.latestIdenticalCall(effective, true))) {
+                    unchangedFullReadsThisIter++;
+                }
             }
 
             LOG.debug("  Tool {} -> {}", effective.toolName(),
@@ -351,7 +441,14 @@ public final class ToolCallExecutionStage {
                 pathPolicyBlockedThisIter,
                 successesThisIter,
                 unsupportedReadPathsThisIter,
-                executionAuthorityRejectedSince(state, outcomeStart));
+                executionAuthorityRejectedSince(state, outcomeStart),
+                unchangedFullReadsThisIter,
+                authorityRejections);
+    }
+
+    private static boolean isReadOnlyEvidenceAcquisition(TaskContract contract) {
+        return contract != null && !contract.mutationAllowed() && !contract.mutationRequested()
+                && (contract.type() == TaskType.DIAGNOSE_ONLY || contract.type() == TaskType.READ_ONLY_QA);
     }
 
     private static boolean executionAuthorityRejectedSince(
@@ -422,16 +519,19 @@ public final class ToolCallExecutionStage {
         return Set.copyOf(targets);
     }
 
-    private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {
+    private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content,
+                                     dev.talos.runtime.ToolCallLoop.ToolOutcome outcome) {
         if (nativePath && callIndex < state.currentNativeCalls.size()) {
             String callId = state.currentNativeCalls.get(callIndex).id();
             state.messages.add(ChatMessage.toolResult(callId, content));
         } else {
             state.messages.add(ChatMessage.user(content));
         }
+        state.toolOutcomeResults.bind(outcome, state.messages.size() - 1, state.messages.getLast());
     }
 
     private void emitProgress(String toolName, String action, String detail) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.controlledCurrent()) return;
         if (progressSink != null) {
             try {
                 progressSink.onToolProgress(toolName, action, detail);

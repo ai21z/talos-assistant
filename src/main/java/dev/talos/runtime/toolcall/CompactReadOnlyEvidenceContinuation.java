@@ -8,6 +8,7 @@ import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -40,6 +41,10 @@ final class CompactReadOnlyEvidenceContinuation {
                     List.of(),
                     ChatRequestControls.defaults());
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            if (result.aborted() || dev.talos.runtime.IncompleteGenerationPresentation.required(result)) {
+                state.applyProviderResult(result);
+                return true;
+            }
             String text = result.text() == null ? "" : result.text().strip();
             if (result.hasToolCalls() || ToolCallParser.containsToolCalls(text)) {
                 LocalTurnTraceCapture.warning(
@@ -74,6 +79,9 @@ final class CompactReadOnlyEvidenceContinuation {
                     ee.getMessage() == null ? ee.getClass().getSimpleName() : ee.getMessage());
             return false;
         } catch (Exception e) {
+            if (e instanceof RuntimeException runtime
+                    && (dev.talos.runtime.IncompleteGenerationPresentation.isAbortedFailure(runtime)
+                        || runtime instanceof dev.talos.runtime.GenerationWatchdogException)) throw runtime;
             if (TurnFailureClassifier.isCancellation(e)
                     || TurnFailureClassifier.isInterruption(e)) {
                 throw TurnFailureClassifier.propagateControlFlow(e);
@@ -175,7 +183,7 @@ final class CompactReadOnlyEvidenceContinuation {
                         + "\nOlder conversation history is intentionally omitted from this compact frame."),
                 ChatMessage.user(
                         "Current user request:\n"
-                                + answer.userTask()
+                                + RuntimeModelIdentityAnswerPolicy.capturedProviderTask(answer.userTask())
                                 + "\n\nCurrent read_file evidence for " + answer.target() + ":\n"
                                 + answer.readback()
                                 + "\n\nAnswer now without tools."));

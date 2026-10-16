@@ -107,8 +107,8 @@ public final class SessionCommand implements Command {
         String sketch = ctx.conversationManager() != null
                 ? ctx.conversationManager().sketch() : null;
         boolean hasSaved = store.load(activeSessionId).isPresent();
-        String info = "Session ID:  " + workspaceId.substring(0, Math.min(8, workspaceId.length())) + "…\n"
-                + "Session:     " + displayId(activeSessionId) + '\n'
+        String info = "Workspace ID: " + workspaceId.substring(0, Math.min(8, workspaceId.length())) + "…\n"
+                + "Session ID:  " + displayId(activeSessionId) + '\n'
                 + "Workspace:   " + workspace.getFileName() + '\n'
                 + "Turns:       " + turns + '\n'
                 + "Has sketch:  " + (sketch != null && !sketch.isBlank() ? "yes" : "no") + '\n'
@@ -197,13 +197,12 @@ public final class SessionCommand implements Command {
 
         ConversationManager targetCm = cm != null ? cm : new ConversationManager(mem);
         TalosBootstrap.RestoreSummary restored = TalosBootstrap.restoreSavedSession(store, targetId, mem, targetCm);
-        if (ctx.llm() != null && restored.model() != null && !restored.model().isBlank()) {
-            ctx.llm().setModel(restored.model());
-        }
+        String modelNotice = TalosBootstrap.restoreSavedModel(ctx.llm(), restored.model());
         String age = formatAge(restored.createdAt());
         return new Result.Info("Session restored: " + restored.pairsReplayed() + " exchange"
                 + (restored.pairsReplayed() == 1 ? "" : "s")
-                + " (saved " + age + " ago).");
+                + " (saved " + age + " ago)."
+                + (modelNotice.isBlank() ? "" : "\n" + modelNotice));
     }
     private Result save(Context ctx) {
         SessionData data = snapshot(ctx);

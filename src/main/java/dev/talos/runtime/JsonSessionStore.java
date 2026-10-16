@@ -154,6 +154,10 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             "name", "pathHint", "success", "reason");
     private static final Set<String> TURN_TOOL_CALL_EFFECT_KEYS = Set.of(
             "name", "pathHint", "pathHints", "success", "reason", "mutationEffects");
+    private static final Set<String> TURN_TOOL_CALL_DISPOSITION_KEYS = Set.of(
+            "name", "pathHint", "pathHints", "success", "reason", "mutationEffects", "executionDisposition");
+    private static final Set<String> TURN_TOOL_CALL_FAILURE_KEYS = Set.of(
+            "name", "pathHint", "pathHints", "success", "reason", "mutationEffects", "executionDisposition", "failureReason");
     private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
             "path", "role", "source", "reason", "sourceText",
             "confidence", "startOffset", "authorityEndOffset", "endOffset");
@@ -443,6 +447,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             c.put("reason", s.reason());
             c.put("mutationEffects", Map.of("appliedPaths", s.mutationEffects().appliedPaths(),
                     "uncertainPaths", s.mutationEffects().uncertainPaths()));
+            c.put("executionDisposition", s.executionDisposition().name());
+            c.put("failureReason", s.failureReason().name());
             calls.add(c);
         }
         row.put("toolCalls", calls);
@@ -478,15 +484,45 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         }
         for (Object value : calls) {
             if (!(value instanceof Map<?, ?> call)
-                    || (!TURN_TOOL_CALL_KEYS.equals(call.keySet())
-                        && !TURN_TOOL_CALL_EFFECT_KEYS.equals(call.keySet()))
-                    || !exactToolCallValueTypes(call)) {
+                    || !exactToolCallShape(call)) {
                 return false;
             }
-            if (call.containsKey("mutationEffects") && (!exactStringList(call.get("pathHints"))
-                    || !exactMutationEffects(call.get("mutationEffects")))) return false;
         }
         return true;
+    }
+
+    private static boolean exactToolCallShape(Map<?, ?> call) {
+        boolean legacy = TURN_TOOL_CALL_KEYS.equals(call.keySet());
+        boolean withDisposition = TURN_TOOL_CALL_DISPOSITION_KEYS.equals(call.keySet());
+        boolean withFailure = TURN_TOOL_CALL_FAILURE_KEYS.equals(call.keySet());
+        if ((!legacy && !TURN_TOOL_CALL_EFFECT_KEYS.equals(call.keySet()) && !withDisposition && !withFailure)
+                || !exactToolCallValueTypes(call)) return false;
+        dev.talos.tools.ToolFailureReason failureReason = dev.talos.tools.ToolFailureReason.NONE;
+        if (withFailure) {
+            if (!(call.get("failureReason") instanceof String cause)) return false;
+            try { failureReason = dev.talos.tools.ToolFailureReason.valueOf(cause); }
+            catch (IllegalArgumentException unknownCause) { return false; }
+        }
+        if (!legacy && (!exactStringList(call.get("pathHints"))
+                || !exactMutationEffects(call.get("mutationEffects")))) return false;
+        if (!withDisposition && !withFailure) return true;
+        if (!(call.get("executionDisposition") instanceof String value)) return false;
+        TurnRecord.ToolCallDisposition disposition;
+        try {
+            disposition = TurnRecord.ToolCallDisposition.valueOf(value);
+        } catch (IllegalArgumentException unknownDisposition) {
+            return false;
+        }
+        if (disposition != TurnRecord.ToolCallDisposition.BLOCKED) {
+            return failureReason != dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED
+                    && failureReason != dev.talos.tools.ToolFailureReason.PERMISSION_POLICY_DENIED
+                    && failureReason != dev.talos.tools.ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID;
+        }
+        Map<?, ?> effects = (Map<?, ?>) call.get("mutationEffects");
+        // Check raw arrays before normalization can erase contradictory effect rows.
+        return Boolean.FALSE.equals(call.get("success"))
+                && ((List<?>) effects.get("appliedPaths")).isEmpty()
+                && ((List<?>) effects.get("uncertainPaths")).isEmpty();
     }
 
     private static boolean exactToolCallValueTypes(Map<?, ?> call) {
@@ -837,19 +873,29 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         JsonNode physical = MAPPER.valueToTree(physicalRow);
         JsonNode currentWriter = MAPPER.readTree(
                 sanitizedCompactJson(turnRow(decoded)));
-        // The recognized previous writer emitted exactly four tool-call fields.
-        // Compare that shape without inventing new historical effect evidence.
-        // Partial or malformed six-field rows are never treated as legacy rows.
+        // Only exact previous four-, six- and seven-field call shapes are recognized.
+        // Added fields are removed for comparison, never inferred from success
+        // or reason text. This establishes encoding identity, not work coverage.
         JsonNode physicalCalls = physical.path("toolCalls");
         JsonNode currentCalls = currentWriter.path("toolCalls");
         if (physicalCalls.isArray() && currentCalls.isArray()
                 && physicalCalls.size() == currentCalls.size()) {
             for (int index = 0; index < physicalCalls.size(); index++) {
                 JsonNode call = physicalCalls.get(index);
+                if (!(currentCalls.get(index) instanceof ObjectNode currentCall)) continue;
+                if (!call.has("failureReason")
+                        && decoded.toolCalls().get(index).failureReason() == dev.talos.tools.ToolFailureReason.NONE)
+                    currentCall.remove("failureReason");
                 if (call.isObject() && call.size() == TURN_TOOL_CALL_KEYS.size()
                         && TURN_TOOL_CALL_KEYS.stream().allMatch(call::has)
-                        && currentCalls.get(index) instanceof ObjectNode currentCall) {
-                    currentCall.remove(List.of("pathHints", "mutationEffects"));
+                        && decoded.toolCalls().get(index).executionDisposition()
+                            == TurnRecord.ToolCallDisposition.UNKNOWN) {
+                    currentCall.remove(List.of("pathHints", "mutationEffects", "executionDisposition"));
+                } else if (call.isObject() && call.size() == TURN_TOOL_CALL_EFFECT_KEYS.size()
+                        && TURN_TOOL_CALL_EFFECT_KEYS.stream().allMatch(call::has)
+                        && decoded.toolCalls().get(index).executionDisposition()
+                            == TurnRecord.ToolCallDisposition.UNKNOWN) {
+                    currentCall.remove("executionDisposition");
                 }
             }
         }
@@ -1454,18 +1500,25 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             boolean success = c.get("success") instanceof Boolean b && b;
             String reason = c.get("reason") == null ? "" : String.valueOf(c.get("reason"));
             dev.talos.tools.ToolMutationEffects effects = dev.talos.tools.ToolMutationEffects.none();
-            if (c.containsKey("mutationEffects") || c.containsKey("pathHints")) {
-                if (!TURN_TOOL_CALL_EFFECT_KEYS.equals(c.keySet())
-                        || !exactToolCallValueTypes(c)
-                        || !exactMutationEffects(c.get("mutationEffects")) || !exactStringList(c.get("pathHints"))) {
-                    throw new IllegalArgumentException("Invalid stored tool mutation effects");
+            TurnRecord.ToolCallDisposition disposition = TurnRecord.ToolCallDisposition.UNKNOWN;
+            dev.talos.tools.ToolFailureReason failureReason = dev.talos.tools.ToolFailureReason.NONE;
+            if (c.containsKey("mutationEffects") || c.containsKey("pathHints")
+                    || c.containsKey("executionDisposition") || c.containsKey("failureReason")) {
+                if (!exactToolCallShape(c)) {
+                    throw new IllegalArgumentException("Invalid stored tool call evidence");
                 }
                 Map<?, ?> storedEffects = (Map<?, ?>) c.get("mutationEffects");
                 effects = new dev.talos.tools.ToolMutationEffects(
                         stringList(storedEffects.get("appliedPaths")), stringList(storedEffects.get("uncertainPaths")));
+                if (c.containsKey("executionDisposition")) {
+                    disposition = TurnRecord.ToolCallDisposition.valueOf((String) c.get("executionDisposition"));
+                }
+                if (c.containsKey("failureReason")) {
+                    failureReason = dev.talos.tools.ToolFailureReason.valueOf((String) c.get("failureReason"));
+                }
             }
             calls.add(new TurnRecord.ToolCallSummary(name, pathHint, stringList(c.get("pathHints")),
-                    success, reason, effects));
+                    success, reason, effects, disposition, failureReason));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
                 calls, reqd, grnt, deny, traceSummary, status, policyTrace, traceId);

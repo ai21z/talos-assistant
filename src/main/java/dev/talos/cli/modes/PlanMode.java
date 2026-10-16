@@ -18,6 +18,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,7 +85,8 @@ public final class PlanMode implements Mode {
 
         LocalTurnTraceCapture.enterExecutionStage(
                 TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
-        boolean nativeTools = ctx.llm().prepareNativeTools();
+        boolean nativeTools = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(rawContract).isEmpty()
+                && ctx.llm().prepareNativeTools();
         LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forPlan()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
@@ -93,12 +95,14 @@ public final class PlanMode implements Mode {
                 .withNativeTools(nativeTools)
                 .withHistory(!history.isEmpty());
         if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(plannedNativeToolNames)) {
-            promptBuilder.withWorkspace(workspace);
+            promptBuilder.withWorkspace(dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent() ? null : workspace);
         }
         String system = promptBuilder.build();
 
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "plan",
                 "plan",
@@ -106,9 +110,10 @@ public final class PlanMode implements Mode {
                 turnCtx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(responseMaxChars)
                 .capabilityPosture(CapabilityPosture.PLAN_READ_ONLY);

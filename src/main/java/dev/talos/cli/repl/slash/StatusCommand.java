@@ -42,7 +42,7 @@ public final class StatusCommand implements Command {
 
     @Override public CommandSpec spec() {
         return new CommandSpec("status",
-                java.util.List.of("--verbose", "-v"),
+                java.util.List.of(),
                 "/status [--verbose]",
                 "Show configuration.",
                 CommandGroup.SESSION);
@@ -63,13 +63,15 @@ public final class StatusCommand implements Command {
                 ? CliStatusDashboard.resolveModel(cfg)
                 : ctx.llm().getModel();
         var activeRuntime = EngineRuntimeConfig.fromActiveModel(cfg, activeModel);
+        boolean unavailable = ctx.llm() != null && ctx.llm().modelSelectionUnavailable();
+        String displayedModel = activeModel + (unavailable ? " (unavailable)" : "");
 
         if (!verbose) {
             var snapshot = CliStatusDashboard.snapshot(
                     workspace,
                     cfg,
                     modes.getActiveName(),
-                    activeModel,
+                    displayedModel,
                     ctx.session() == null ? "off" : ctx.session().getDebugLevel().label(),
                     "/status --verbose for diagnostics",
                     activeRuntime);
@@ -109,14 +111,18 @@ public final class StatusCommand implements Command {
         String retrievalMode = retrievalMode(cfg, vectors, activeRuntime.embeddingProvider(), embedHost);
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
-        sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
-        if (!activeRuntime.modelSourceLabel().isBlank()) {
-            sb.append(AnsiColor.grey("  ModelFile ")).append(activeRuntime.modelSourceLabel()).append("\n");
+        sb.append(AnsiColor.grey("  Model     ")).append(displayedModel).append("\n");
+        ModelIdentitySnapshot identity = "llama_cpp".equals(activeRuntime.backend()) && !unavailable
+                ? resolvedIdentity(ctx, cfg) : ModelIdentitySnapshot.empty();
+        String modelFile = identity.available() ? identity.configuredModelFile() : activeRuntime.modelSourceLabel();
+        if (!unavailable && !modelFile.isBlank()) {
+            sb.append(AnsiColor.grey("  ModelFile ")).append(modelFile).append("\n");
         }
         if ("llama_cpp".equals(activeRuntime.backend())) {
-            ModelIdentitySnapshot identity = resolvedIdentity(ctx, cfg);
-            for (ModelIdentityPresentation.Row row : ModelIdentityPresentation.statusRows(identity)) {
-                sb.append(AnsiColor.grey(String.format("  %-12s", row.label())))
+            var identityRows = ModelIdentityPresentation.statusRows(identity);
+            int labelWidth = identityRows.stream().mapToInt(row -> row.label().length()).max().orElse(0) + 2;
+            for (ModelIdentityPresentation.Row row : identityRows) {
+                sb.append(AnsiColor.grey("  " + row.label() + " ".repeat(labelWidth - row.label().length())))
                         .append(row.value()).append("\n");
             }
         }
@@ -213,7 +219,7 @@ public final class StatusCommand implements Command {
         ModelIdentitySnapshot current = ctx == null || ctx.llm() == null
                 ? ModelIdentitySnapshot.empty()
                 : ctx.llm().modelIdentity();
-        if (current.available() && "AVAILABLE".equals(current.propsState())) {
+        if (current.available()) {
             return current;
         }
         Path talosHome = Path.of(System.getProperty("user.home", "."), ".talos")

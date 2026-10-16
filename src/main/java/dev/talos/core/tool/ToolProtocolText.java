@@ -85,6 +85,80 @@ public final class ToolProtocolText {
         STANDALONE_JSON
     }
 
+    /** Observational tail shapes, never executable identity or argument validation. */
+    public enum SelectedFenceTailShape {
+        COMPLETE_RECOGNIZED_OBJECT_SEQUENCE,
+        COMPLETE_OTHER_JSON_SEQUENCE,
+        MALFORMED_INCOMPLETE_OR_OTHER,
+        INSPECTION_LIMIT_REACHED
+    }
+
+    // Aggregate bounds for one diagnostic selection, not parser acceptance limits.
+    public static final int MAX_DIAGNOSTIC_FENCE_TAILS = 64;
+    static final int MAX_DIAGNOSTIC_FENCE_TAIL_CHARS = 65_536;
+
+    /**
+     * Inspects complete affected tails once in source order. Only enum values escape.
+     * A positive shape consumes every tail value, with JSON whitespace separating
+     * it from the selected root and preceding values. Recognition uses the same
+     * canonical identity rules as selection, not argument or authority validation.
+     * Limits apply to the whole supplied selection, never independently per tail.
+     */
+    public static Set<SelectedFenceTailShape> inspectSelectedFenceTails(
+            String source, List<SelectedExecutableJsonSpan> affectedFences) {
+        if (source == null || affectedFences == null)
+            return Set.of(SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER);
+        if (affectedFences.size() > MAX_DIAGNOSTIC_FENCE_TAILS)
+            return Set.of(SelectedFenceTailShape.INSPECTION_LIMIT_REACHED);
+        long characters = 0;
+        int previousEnd = -1;
+        for (var fence : affectedFences) {
+            if (fence == null || fence.kind() != JsonProtocolKind.FENCED_JSON
+                    || fence.rootEndExclusive() < previousEnd
+                    || fence.envelopeContentEndExclusive() > source.length())
+                return Set.of(SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER);
+            previousEnd = fence.envelopeContentEndExclusive();
+            characters += fence.envelopeContentEndExclusive() - fence.rootEndExclusive();
+            if (characters > MAX_DIAGNOSTIC_FENCE_TAIL_CHARS)
+                return Set.of(SelectedFenceTailShape.INSPECTION_LIMIT_REACHED);
+        }
+        var shapes = java.util.EnumSet.noneOf(SelectedFenceTailShape.class);
+        for (var fence : affectedFences) {
+            shapes.add(inspectSelectedFenceTail(source.substring(
+                    fence.rootEndExclusive(), fence.envelopeContentEndExclusive())));
+        }
+        return Set.copyOf(shapes);
+    }
+
+    private static SelectedFenceTailShape inspectSelectedFenceTail(String tail) {
+        boolean any = false;
+        boolean recognizedOnly = true;
+        try (JsonParser parser = MAPPER.createParser(tail)) {
+            while (parser.nextToken() != null) {
+                long start = parser.currentTokenLocation().getCharOffset();
+                // Checking the actual boundary also rejects adjacent object/string
+                // roots accepted by a streaming parser without a separator.
+                if (start <= 0 || start >= tail.length()
+                        || !isJsonWhitespace(tail.charAt((int) start - 1)))
+                    return SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER;
+                JsonNode value = MAPPER.readTree(parser);
+                if (value == null) return SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER;
+                any = true;
+                recognizedOnly &= value.isObject() && isRecognizedToolCallObject(value);
+            }
+            return !any ? SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER
+                    : recognizedOnly ? SelectedFenceTailShape.COMPLETE_RECOGNIZED_OBJECT_SEQUENCE
+                    : SelectedFenceTailShape.COMPLETE_OTHER_JSON_SEQUENCE;
+        } catch (Exception | StackOverflowError invalidOrLimited) {
+            // Diagnostic parsing must not replace or escape the existing rejection.
+            return SelectedFenceTailShape.MALFORMED_INCOMPLETE_OR_OTHER;
+        }
+    }
+
+    private static boolean isJsonWhitespace(char value) {
+        return value == ' ' || value == '\t' || value == '\r' || value == '\n';
+    }
+
     /**
      * Exact first JSON root selected by the text fallback parser, plus the
      * surrounding protocol envelope that carried it.

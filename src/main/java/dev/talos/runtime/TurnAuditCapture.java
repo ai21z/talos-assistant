@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolMutationEffects;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.ArrayList;
@@ -44,8 +45,15 @@ public final class TurnAuditCapture {
         final List<DocumentPairReceipt> includedPairs = new ArrayList<>();
         final List<DocumentComparison> comparisons = new ArrayList<>();
         final List<TurnRecord.ToolCallSummary> toolCalls = new ArrayList<>();
+        int remainingEditDetailChars = 4096;
         final List<String> policyBlocks = new ArrayList<>();
         TurnPolicyTrace policyTrace = TurnPolicyTrace.empty();
+        WorkStatusReceipt workStatusReceipt = WorkStatusReceipt.none();
+        String typedRequest;
+        dev.talos.runtime.verification.ReadOnlyAnswerComponents typedComponents;
+        TypedResultSettlement typedResults = TypedResultSettlement.none();
+        RuntimeLocationPresentation locationPresentation;
+        long answerPresentationLimit = Long.MAX_VALUE;
         int approvalsRequired;
         int approvalsGranted;
         int approvalsDenied;
@@ -59,7 +67,73 @@ public final class TurnAuditCapture {
         ContentRestrictionScope.begin();
     }
 
+    public static void recordLocationPresentation(RuntimeLocationPresentation presentation) {
+        Bag bag = HOLDER.get();
+        if (bag != null) bag.locationPresentation = presentation;
+    }
+
+    public static void setAnswerPresentationLimit(long limit) {
+        Bag bag = HOLDER.get();
+        if (bag != null) bag.answerPresentationLimit = Math.max(0, limit);
+    }
+
+    static long answerPresentationLimit() {
+        Bag bag = HOLDER.get();
+        return bag == null ? Long.MAX_VALUE : bag.answerPresentationLimit;
+    }
+
+    public static String projectPublicAnswer(String answer, dev.talos.core.security.Redactor redactor) {
+        Bag bag = HOLDER.get();
+        var frame = dev.talos.runtime.observation.TurnRequestFrame.current();
+        if (bag != null && bag.locationPresentation != null && frame != null) {
+            return bag.locationPresentation.project(redactor, answer, TurnUserRequestCapture.get(),
+                    frame.workspace(), frame.revision());
+        }
+        return redactor.redactBlock(answer);
+    }
+
+    public static void recordWorkStatus(WorkStatusReceipt receipt) {
+        Bag bag = HOLDER.get();
+        if (bag != null) {
+            bag.workStatusReceipt = java.util.Objects.requireNonNull(receipt);
+            LocalTurnTraceCapture.recordWorkStatusAssessment(receipt);
+        }
+    }
+
+    public static void validateWorkStatusPresentation(String request, String delivered, String retained) {
+        Bag bag = HOLDER.get();
+        if (bag == null || !bag.workStatusReceipt.active()) return;
+        if (!bag.workStatusReceipt.presentationComplete()
+                || !bag.workStatusReceipt.matches(request, delivered)
+                || !delivered.strip().equals(retained.strip())) {
+            bag.workStatusReceipt = bag.workStatusReceipt.incomplete();
+            LocalTurnTraceCapture.recordAnswerPresentationLimitation(
+                    LocalTurnTraceCapture.AnswerPresentationLimitation.WORK_STATUS_INCOMPLETE);
+        }
+    }
+
     public record DocumentCapture(DocumentPairAdmission.Result admission, DocumentPairReceipt receipt) {}
+
+    public static void recordReadOnlyResults(String request,
+            dev.talos.runtime.verification.ReadOnlyAnswerComponents components) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.typedRequest = request;
+        bag.typedComponents = components;
+        bag.typedResults = TypedResultSettlement.none();
+    }
+
+    static void settleReadOnlyResults(String delivered, String retained, boolean conversational) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.typedResults = TypedResultSettlement.settle(bag.documentTurn, bag.typedRequest,
+                TurnUserRequestCapture.get(), bag.typedComponents, delivered, retained,
+                currentContentRestrictions());
+        if (!conversational)
+            bag.typedResults = bag.typedResults.unavailable(TypedResultSettlement.Loss.TERMINAL_UNAVAILABLE);
+        bag.typedRequest = null;
+        bag.typedComponents = null;
+    }
 
     public record DocumentComparison(String request, Path workspace, DocumentPairReceipt receipt,
             DocumentPairAdmission.CapturedPair pair, dev.talos.core.diff.DocumentTextDiff.Result result) {
@@ -95,6 +169,7 @@ public final class TurnAuditCapture {
 
     public static boolean comparisonEvidenceComplete(dev.talos.runtime.task.TaskContract contract, Path workspace) {
         var request = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (!request.unresolved().isEmpty()) return false;
         if (!request.active()) return true;
         var observations = currentComparisons(request.request(), workspace);
         return request.requirements().stream().allMatch(requirement -> observations.stream().filter(value ->
@@ -225,13 +300,35 @@ public final class TurnAuditCapture {
             ToolCall call, List<String> pathHints, boolean success, String reason,
             ToolMutationEffects effects) {
         String primary = pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
+        recordExecutedToolCall(call, primary, pathHints, success, reason, effects);
+    }
+
+    /** A file request target is retained separately from its parent and other observed effects. */
+    public static void recordExecutedToolCall(
+            ToolCall call, String primary, List<String> pathHints, boolean success, String reason,
+            ToolMutationEffects effects) {
+        recordExecutedToolCall(call, primary, pathHints, success, reason, effects, ToolFailureReason.NONE);
+    }
+
+    public static void recordExecutedToolCall(
+            ToolCall call, String primary, List<String> pathHints, boolean success, String reason,
+            ToolMutationEffects effects, ToolFailureReason failureReason) {
+        recordExecutedToolCall(call, primary, pathHints, success, reason, effects, failureReason,
+                dev.talos.tools.impl.ExecutedEditDetail.none());
+    }
+
+    public static void recordExecutedToolCall(
+            ToolCall call, String primary, List<String> pathHints, boolean success, String reason,
+            ToolMutationEffects effects, ToolFailureReason failureReason,
+            dev.talos.tools.impl.ExecutedEditDetail executedEditDetail) {
         recordToolCallSummary(
                 call == null ? "" : call.toolName(),
                 primary,
                 pathHints,
                 success,
                 reason,
-                effects);
+                effects,
+                TurnRecord.ToolCallDisposition.EXECUTED, failureReason, executedEditDetail);
         LocalTurnTraceCapture.recordToolExecuted(
                 "", call, success, reason == null ? "" : reason.strip(), pathHints, effects);
     }
@@ -276,11 +373,25 @@ public final class TurnAuditCapture {
             String auditReason,
             String traceReason
     ) {
+        recordBlockedToolCall(call, pathHint, phase, auditReason, traceReason, ToolFailureReason.NONE);
+    }
+
+    public static void recordBlockedToolCall(
+            ToolCall call, String pathHint, String phase, String auditReason,
+            String traceReason, ToolFailureReason failureReason) {
         String name = call == null ? "" : call.toolName();
-        recordToolCallSummary(name, pathHint, List.of(), false, auditReason);
+        recordToolCallSummary(name, pathHint, List.of(), false, auditReason,
+                ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.BLOCKED, failureReason);
         if (call != null) {
             LocalTurnTraceCapture.recordToolCallBlocked(phase, call, traceReason);
         }
+    }
+
+    /** The authority gate already owns its trace event. Retain only finite audit metadata here. */
+    public static void recordAuthorityRejectedToolCall(ToolCall call, String reason) {
+        recordToolCallSummary(call == null ? "" : call.toolName(), "", List.of(), false, reason,
+                ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.BLOCKED,
+                ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID);
     }
 
     private static boolean recordToolCallSummary(
@@ -290,16 +401,49 @@ public final class TurnAuditCapture {
             boolean success,
             String reason
     ) {
-        return recordToolCallSummary(name, pathHint, pathHints, success, reason, ToolMutationEffects.none());
+        return recordToolCallSummary(name, pathHint, pathHints, success, reason,
+                ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.UNKNOWN);
     }
 
     private static boolean recordToolCallSummary(
             String name, String pathHint, List<String> pathHints, boolean success,
-            String reason, ToolMutationEffects effects) {
+            String reason, ToolMutationEffects effects, TurnRecord.ToolCallDisposition executionDisposition) {
+        return recordToolCallSummary(name, pathHint, pathHints, success, reason, effects,
+                executionDisposition, ToolFailureReason.NONE);
+    }
+
+    private static boolean recordToolCallSummary(
+            String name, String pathHint, List<String> pathHints, boolean success,
+            String reason, ToolMutationEffects effects, TurnRecord.ToolCallDisposition executionDisposition,
+            ToolFailureReason failureReason) {
+        return recordToolCallSummary(name, pathHint, pathHints, success, reason, effects,
+                executionDisposition, failureReason, dev.talos.tools.impl.ExecutedEditDetail.none());
+    }
+
+    private static boolean recordToolCallSummary(
+            String name, String pathHint, List<String> pathHints, boolean success,
+            String reason, ToolMutationEffects effects, TurnRecord.ToolCallDisposition executionDisposition,
+            ToolFailureReason failureReason, dev.talos.tools.impl.ExecutedEditDetail executedEditDetail) {
         Bag b = HOLDER.get();
         if (b == null) return false;
         String normalizedReason = reason == null ? "" : reason.strip();
-        b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason, effects));
+        var restrictions = ContentRestrictionScope.current();
+        var detail = executedEditDetail == null
+                ? dev.talos.tools.impl.ExecutedEditDetail.none() : executedEditDetail;
+        if (!restrictions.modelAllowed() || !restrictions.historyAllowed() || !restrictions.artifactAllowed())
+            detail = dev.talos.tools.impl.ExecutedEditDetail.none();
+        var summary = new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success,
+                normalizedReason, effects, executionDisposition, failureReason, detail);
+        if (summary.executedEditDetail().available()) {
+            int chars = detail.before().length() + detail.after().length();
+            if (chars > b.remainingEditDetailChars) {
+                summary = new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success,
+                        normalizedReason, effects, executionDisposition, failureReason);
+            } else {
+                b.remainingEditDetailChars -= chars;
+            }
+        }
+        b.toolCalls.add(summary);
         if (!success && !normalizedReason.isBlank()) {
             b.policyBlocks.add(normalizedReason);
         }
@@ -364,6 +508,7 @@ public final class TurnAuditCapture {
      */
     public static TurnAudit end() {
         Bag b = HOLDER.get();
+        if (b != null && b.typedComponents != null) settleReadOnlyResults("", "", false);
         HOLDER.remove();
         ContentRestrictions restrictions = ContentRestrictionScope.current();
         ContentRestrictionScope.end();
@@ -374,7 +519,7 @@ public final class TurnAuditCapture {
                 b.approvalsRequired,
                 b.approvalsGranted,
                 b.approvalsDenied,
-                trace, null, restrictions, List.copyOf(b.includedPairs)
+                trace, null, restrictions, List.copyOf(b.includedPairs), b.workStatusReceipt, b.typedResults
         );
     }
 

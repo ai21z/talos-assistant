@@ -40,6 +40,16 @@ class AssistantToolLoopBoundedSynthesisOutcomeTest {
     @Test
     void nestedInspectRetryPreservesItsSynthesisAndDoesNotDispatchAfterward(@TempDir Path workspace)
             throws Exception {
+        resolveNestedInspectRetry(workspace, 2);
+    }
+
+    @Test
+    void exhaustedTurnAllowanceDoesNotDispatchNestedInspectionOrSynthesis(@TempDir Path workspace)
+            throws Exception {
+        resolveNestedInspectRetry(workspace, 1);
+    }
+
+    private static void resolveNestedInspectRetry(Path workspace, int totalIterations) throws Exception {
         String html = "<html><body><script src=\"script.js\"></script></body></html>\n";
         Files.writeString(workspace.resolve("index.html"), html);
         Files.writeString(workspace.resolve("script.js"), "const value = 72 / (1.8 * 1.8);\n");
@@ -65,7 +75,7 @@ class AssistantToolLoopBoundedSynthesisOutcomeTest {
         var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         var ctx = Context.builder(new Config()).llm(provider.client())
                 .sandbox(new Sandbox(workspace, Map.of())).toolRegistry(registry)
-                .toolCallLoop(new ToolCallLoop(processor, 1))
+                .toolCallLoop(new ToolCallLoop(processor, totalIterations))
                 .nativeToolSpecs(registry.descriptors().stream().map(descriptor -> new ToolSpec(
                         descriptor.name(), descriptor.description(), descriptor.parametersSchema())).toList())
                 .build();
@@ -78,14 +88,31 @@ class AssistantToolLoopBoundedSynthesisOutcomeTest {
                     original.finalAnswer(), messages, plan, original, workspace, ctx,
                     (selected, mutations) -> phases.add(selected),
                     (answer, selected, mutations, failed) -> {
+                        if (totalIterations == 1) {
+                            assertSame(original, selected);
+                            assertEquals(original.finalAnswer(), answer);
+                            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED,
+                                    selected.readOnlySynthesisStatus());
+                            assertEquals(1, selected.iterations());
+                            assertEquals(1, selected.toolsInvoked());
+                            return new AnswerOutputLimit.Presentation(answer, true);
+                        }
                         assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED, selected.readOnlySynthesisStatus());
                         assertEquals(selectedAnswer, selected.finalAnswer());
                         assertTrue(selected.hitIterLimit());
+                        assertEquals(2, selected.iterations(), "One original plus one nested iteration");
                         assertEquals(3, selected.toolsInvoked());
                         return new AnswerOutputLimit.Presentation(answer, true);
                     });
-            assertEquals(selectedAnswer, resolution.answer());
             assertEquals(1, phases.size());
+            if (totalIterations == 1) {
+                assertEquals(original.finalAnswer(), resolution.answer());
+                assertSame(original, phases.getFirst());
+                assertTrue(provider.requests().isEmpty(), "Exhausted allowance cannot reopen dispatch");
+                return;
+            }
+            assertEquals(selectedAnswer, resolution.answer());
+            assertEquals(2, phases.getFirst().iterations());
             assertEquals(2, provider.requests().size(), "Inspection request plus one synthesis, no later recovery");
             assertTrue(provider.requests().getLast().tools.isEmpty());
             assertTrue(provider.requests().getLast().controls.singleAttempt());

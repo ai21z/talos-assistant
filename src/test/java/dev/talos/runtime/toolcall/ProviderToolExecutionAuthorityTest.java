@@ -35,6 +35,8 @@ import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -51,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ProviderToolExecutionAuthorityTest {
     private static final String TOOL = "talos.authority_probe";
@@ -673,6 +676,122 @@ class ProviderToolExecutionAuthorityTest {
     }
 
     @Test
+    void normalizedLegacyTextWithoutSourceStopsBeforeEveryEffectAndShowsReason() {
+        beginTrace("normalized-source-missing");
+        String text = textProposal("missing-source.txt");
+        var receipt = capture(text, List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, true, false, true);
+        var harness = harness(text, List.of(), receipt);
+        var outcome = execute(harness);
+        assertEquals(List.of(LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.TEXT_PROJECTION_SOURCE_MISSING),
+                outcome.authorityRejections());
+        assertEquals(1, outcome.failuresThisIteration());
+        assertEquals(0, harness.approvals().get());
+        assertEquals(0, harness.checkpoints().get());
+        assertEquals(0, harness.invocations().get());
+        assertFalse(Files.exists(workspace.resolve("missing-source.txt")));
+        assertFalse(new ToolCallRepromptStage().reprompt(harness.state(), outcome));
+        assertTrue(harness.state().currentText.contains("TEXT_PROJECTION_SOURCE_MISSING"));
+    }
+
+    @Test
+    void changedArgumentsOrOrderCannotBorrowNormalizedSourceEvidence() {
+        String first = textProposal("first-source.txt");
+        String second = textProposal("second-source.txt");
+        String source = "<button>Presentation</button>\n" + first + "\n" + second;
+        for (String projected : List.of(second + "\n" + first,
+                first.replace("first-source.txt", "altered-source.txt") + "\n" + second)) {
+            beginTrace("normalized-proposal-mismatch");
+            var receipt = capture(projected, List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                    ProviderResponseCapture.Completion.PROVIDER_EOS, true, false, true,
+                    ProviderResponseCapture.TextProposalSource.captured(source, projected));
+            var harness = harness(projected, List.of(), receipt);
+            var outcome = execute(harness);
+            assertEquals(2, outcome.failuresThisIteration());
+            assertEquals(List.of(LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.TEXT_PROJECTION_MISMATCH),
+                    outcome.authorityRejections());
+            assertEquals(0, harness.approvals().get());
+            assertEquals(0, harness.checkpoints().get());
+            assertEquals(0, harness.invocations().get());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertEquals(List.of("EXACT_ROOTS_MISMATCH", "EXACT_ROOTS_MISMATCH"), trace.events().stream()
+                    .filter(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type()))
+                    .map(event -> (Map<?, ?>) event.data().get("executionAuthority"))
+                    .map(authority -> authority.get("projectionFailure"))
+                    .toList());
+        }
+    }
+
+    @Test
+    void exactNormalizedTextCannotBeExecutedTwiceOrAfterANewerGeneration() {
+        beginTrace("normalized-one-use");
+        String text = textProposal("normalized-once.txt");
+        var source = ProviderResponseCapture.TextProposalSource.captured("<button>Presentation</button>\n" + text, text);
+        var receipt = capture(text, List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, true, false, true, source);
+        var first = harness(text, List.of(), receipt);
+        assertEquals(1, execute(first).successesThisIteration());
+        var repeated = harness(text, List.of(), receipt);
+        assertEquals(1, execute(repeated).failuresThisIteration());
+        assertEquals(0, repeated.approvals().get());
+        assertEquals(0, repeated.checkpoints().get());
+        assertEquals(0, repeated.invocations().get());
+        var stale = harness(text, List.of(), receipt);
+        capture(textProposal("newer.txt"), List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, false, false, true);
+        assertEquals(1, execute(stale).failuresThisIteration());
+        assertEquals(0, stale.approvals().get());
+        assertEquals(0, stale.invocations().get());
+    }
+
+    @Test
+    void suppressedNormalizedInventoryReportsFiniteStageBeforeAnyEffect() {
+        String first = rawTextProposal("suppressed-first.txt", "first");
+        String second = rawTextProposal("suppressed-second.txt", "second");
+        String source = "```json\n" + first + "\n" + second + "\n```";
+        String projected = dev.talos.core.util.Sanitize.sanitizeForOutputPreservingToolCalls(source);
+        beginTrace("normalized-suppression-stage");
+        var receipt = capture(projected, List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, true, false, true,
+                ProviderResponseCapture.TextProposalSource.captured(source, projected));
+        var harness = harness(projected, List.of(), receipt);
+        var outcome = execute(harness);
+        assertEquals(1, outcome.failuresThisIteration());
+        assertEquals(0, outcome.successesThisIteration());
+        assertEquals(0, harness.approvals().get());
+        assertEquals(0, harness.checkpoints().get());
+        assertEquals(0, harness.invocations().get());
+        assertFalse(Files.exists(workspace.resolve("suppressed-first.txt")));
+        assertFalse(Files.exists(workspace.resolve("suppressed-second.txt")));
+        var trace = LocalTurnTraceCapture.complete();
+        var rejected = trace.events().stream()
+                .filter(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())).toList();
+        assertEquals(1, rejected.size());
+        var authority = (Map<?, ?>) rejected.getFirst().data().get("executionAuthority");
+        assertEquals("SUPPRESSED_OR_UNSELECTED_PROPOSALS", authority.get("projectionFailure"));
+        assertEquals("SOURCE_SUPPRESSION", authority.get("projectionFailureStage"));
+        assertEquals(List.of("SELECTED_FENCE_TAIL_POTENTIAL"), authority.get("projectionSuppressionKinds"));
+        assertEquals(List.of("COMPLETE_RECOGNIZED_OBJECT_SEQUENCE"), authority.get("projectionFenceTailShapes"));
+        assertFalse(authority.toString().contains("suppressed-second.txt"));
+        assertFalse(authority.containsKey("source"));
+        assertFalse(authority.containsKey("arguments"));
+    }
+
+    @Test
+    void sourceEvidenceDoesNotExposeHiddenTextOrBindAnotherProjectedResponse() {
+        var source = ProviderResponseCapture.TextProposalSource.captured("HIDDEN_SOURCE_CANARY", textProposal("safe.txt"));
+        assertFalse(source.toString().contains("HIDDEN_SOURCE_CANARY"));
+        assertThrows(IllegalArgumentException.class, () -> new ProviderResponseCapture.Response(
+                textProposal("another.txt"), List.of(), ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, true, false, true, source));
+        var response = new ProviderResponseCapture.Response(textProposal("safe.txt"), List.of(),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER, ProviderResponseCapture.Completion.PROVIDER_EOS,
+                true, false, true, source);
+        assertFalse(response.toString().contains("HIDDEN_SOURCE_CANARY"));
+        assertFalse(response.completedNormally());
+    }
+
+    @Test
     void adjacentJsonTextCallsWithBracesUseProviderOwnedParserLineage() {
         beginTrace("json-text-adjacent");
         String firstTarget = "json-adjacent-a.txt";
@@ -975,10 +1094,306 @@ class ProviderToolExecutionAuthorityTest {
                         countEvents(trace, "TOOL_CALL_AUTHORITY_REJECTED")));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"write_file", "file_create", "tool_use.write_file", "file_utils:write_file"})
+    void registeredTextAliasUsesSelectedCanonicalIdentityWithoutRewritingProposal(String name) {
+        beginTrace("text-alias-positive");
+        String text = textProposal("alias.txt").replace(TOOL, name);
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.NAMED, WRITE_TOOL);
+        var harness = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        var outcome = execute(harness);
+        var trace = LocalTurnTraceCapture.complete();
+        assertEquals(1, outcome.successesThisIteration(), outcome.toString());
+        assertEquals(0, outcome.failuresThisIteration());
+        assertEquals(1, harness.approvals().get());
+        assertEquals(1, harness.checkpoints().get());
+        assertEquals(1, harness.invocations().get());
+        assertTrue(Files.exists(workspace.resolve("alias.txt")));
+        var parsed = trace.events().stream().filter(event -> "TOOL_CALL_PARSED".equals(event.type())).findFirst().orElseThrow();
+        var authority = (Map<?, ?>) parsed.data().get("executionAuthority");
+        assertEquals(ProviderResponseCapture.toolNameHash(name), authority.get("toolNameHash"));
+        assertEquals(receipt.assistantHash(), authority.get("providerAssistantHash"));
+        assertEquals(ProviderResponseCapture.canonicalArgumentsHash(
+                Map.of("path", "alias.txt", "content", "authority probe")), authority.get("argumentsHash"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"WRITE_FILE", " write_file", "write_file ", "talos:write_file"})
+    void unregisteredSpellingsCannotBorrowCanonicalTextAuthority(String name) {
+        beginTrace("text-alias-exact-spelling");
+        String text = textProposal("spelling.txt").replace(TOOL, name);
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        assertAuthorityBlocked(harness(text, List.of(), receipt, List.of(WRITE_TOOL)), "spelling.txt");
+    }
+
+    @Test
+    void unknownNamespaceIsNotAdmittedByTheTextParser() {
+        beginTrace("text-alias-unknown-namespace");
+        String text = textProposal("namespace.txt").replace(TOOL, "other.write_file");
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var harness = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        assertTrue(new ToolCallParseStage().parse(harness.state(), 1).calls().isEmpty());
+        assertEquals(0, execute(harness).successesThisIteration());
+        assertEquals(0, harness.approvals().get());
+        assertEquals(0, harness.checkpoints().get());
+        assertEquals(0, harness.invocations().get());
+        assertFalse(Files.exists(workspace.resolve("namespace.txt")));
+    }
+
+    @Test
+    void aliasCannotWidenSelectedSurfaceOrNamedChoice() {
+        for (var selected : List.of(List.of(EDIT_TOOL), List.of(WRITE_TOOL, EDIT_TOOL))) {
+            beginTrace("text-alias-named-boundary");
+            String text = textProposal("outside.txt").replace(TOOL, "write_file");
+            var receipt = captureTextSurface(text, selected, ToolChoiceMode.NAMED, EDIT_TOOL);
+            assertAuthorityBlocked(harness(text, List.of(), receipt, List.of(WRITE_TOOL, EDIT_TOOL)), "outside.txt");
+        }
+    }
+
+    @Test
+    void selectedAliasDoesNotExpandIntoUnadvertisedCanonicalOrSiblingNames() {
+        for (String name : List.of(WRITE_TOOL, "file_create")) {
+            beginTrace("text-selected-alias");
+            String text = textProposal("selected-alias.txt").replace(TOOL, name);
+            var receipt = captureTextSurface(text, List.of("write_file"), ToolChoiceMode.NAMED, "write_file");
+            assertAuthorityBlocked(harness(text, List.of(), receipt, List.of(WRITE_TOOL)), "selected-alias.txt");
+        }
+    }
+
+    @Test
+    void nativeAliasStillRequiresItsExactAdvertisedName() {
+        beginTrace("native-alias-exact");
+        var proposal = new NativeToolCall("alias-call", "write_file",
+                Map.of("path", "native-alias.txt", "content", "authority probe"));
+        var receipt = captureNative(List.of(proposal), List.of(WRITE_TOOL));
+        assertAuthorityBlocked(harness("", List.of(proposal), receipt, List.of(WRITE_TOOL)), "native-alias.txt");
+    }
+
+    @Test
+    void equivalentAliasCannotReplaceExactParsedProposal() {
+        beginTrace("text-alias-proposal-binding");
+        String text = textProposal("altered-alias.txt").replace(TOOL, "write_file");
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var harness = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        var parsed = new ToolCallParseStage().parse(harness.state(), 1);
+        var altered = new ToolCall("file_create", parsed.calls().getFirst().parameters());
+        var decision = LocalTurnTraceCapture.authorizeParsedToolCallForExecution("tool_loop", altered, parsed.lineage(0));
+        assertFalse(decision.authorized());
+        assertEquals(LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.LINEAGE_CALL_MISMATCH,
+                decision.rejectionReason());
+        assertEquals(0, harness.approvals().get());
+        assertEquals(0, harness.invocations().get());
+        assertFalse(Files.exists(workspace.resolve("altered-alias.txt")));
+    }
+
+    @Test
+    void acceptedAliasRemainsOneUseAndIsRevokedByNewGeneration() {
+        beginTrace("text-alias-one-use");
+        String text = textProposal("one-use-alias.txt").replace(TOOL, "write_file");
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var first = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        assertEquals(1, execute(first).successesThisIteration());
+        var repeated = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        assertEquals(1, execute(repeated).failuresThisIteration());
+        assertEquals(0, repeated.approvals().get());
+        assertEquals(0, repeated.invocations().get());
+        captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var stale = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        assertEquals(1, execute(stale).failuresThisIteration());
+        assertEquals(0, stale.approvals().get());
+        assertEquals(0, stale.invocations().get());
+    }
+
+    @Test
+    void newerGenerationRevokesAnUnconsumedTextAliasPermit() {
+        beginTrace("text-alias-revoked");
+        String text = textProposal("revoked-alias.txt").replace(TOOL, "write_file");
+        var receipt = captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var harness = harness(text, List.of(), receipt, List.of(WRITE_TOOL));
+        var parsed = new ToolCallParseStage().parse(harness.state(), 1);
+        var call = parsed.calls().getFirst();
+        var authority = LocalTurnTraceCapture.authorizeParsedToolCallForExecution(
+                "tool_loop", call, parsed.lineage(0));
+        assertTrue(authority.authorized());
+
+        captureTextSurface(text, List.of(WRITE_TOOL), ToolChoiceMode.AUTO, "");
+        var result = harness.processor().executeToolAfterParsed(
+                harness.state().toolSession, call, harness.state().ctx, authority.permit());
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
+        assertEquals(0, harness.approvals().get());
+        assertEquals(0, harness.checkpoints().get());
+        assertEquals(0, harness.invocations().get());
+        assertFalse(Files.exists(workspace.resolve("revoked-alias.txt")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    void textAliasTransformationRetainsSelectedAndNamedRestrictions(int scenario) throws Exception {
+        beginTrace("text-alias-transformation");
+        Files.writeString(workspace.resolve("transformed-alias.txt"), "original");
+        String text = textProposal("transformed-alias.txt").replace(TOOL, "write_file");
+        var selected = scenario == 0 ? List.of(WRITE_TOOL) : List.of(WRITE_TOOL, EDIT_TOOL);
+        var choice = scenario == 1 ? ToolChoiceMode.NAMED : ToolChoiceMode.AUTO;
+        var receipt = captureTextSurface(text, selected, choice, scenario == 1 ? WRITE_TOOL : "");
+        var harness = harness(text, List.of(), receipt, List.of(WRITE_TOOL, EDIT_TOOL));
+        var parsed = new ToolCallParseStage().parse(harness.state(), 1);
+        var authority = LocalTurnTraceCapture.authorizeParsedToolCallForExecution(
+                "tool_loop", parsed.calls().getFirst(), parsed.lineage(0));
+        assertTrue(authority.authorized());
+        var transformed = new ToolCall("edit_file", Map.of(
+                "path", "transformed-alias.txt", "old_string", "original", "new_string", "replacement"));
+        boolean allowed = scenario == 2;
+        assertEquals(allowed, LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                authority.permit(), "tool_loop", transformed,
+                LocalTurnTraceCapture.ToolCallTransformationReason.APPEND_WRITE_TO_EDIT));
+        var result = harness.processor().executeToolAfterParsed(
+                harness.state().toolSession, transformed, harness.state().ctx, authority.permit());
+
+        assertEquals(allowed, result.success(), result.toString());
+        if (!allowed) assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
+        assertEquals(allowed ? 1 : 0, harness.approvals().get());
+        assertEquals(allowed ? 1 : 0, harness.checkpoints().get());
+        assertEquals(allowed ? 1 : 0, harness.invocations().get());
+        assertEquals(allowed ? "replacement" : "original",
+                Files.readString(workspace.resolve("transformed-alias.txt")));
+    }
+
+    private static ProviderResponseCapture.Receipt captureTextSurface(
+            String text, List<String> selected, ToolChoiceMode choice, String named) {
+        var generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON, selected, choice, named));
+        var attempt = generation.startAttempt(ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        ObservedProviderTransportFixture.completeTerminal(attempt,
+                new ProviderTransportHandoff.DispatchEvidence("sha256:" + "c".repeat(64), List.of()));
+        var receipt = attempt.respond(providerResponse(text, List.of(),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS, false, false, true));
+        generation.complete(receipt);
+        return receipt;
+    }
+
     private ToolCallExecutionStage.IterationOutcome execute(Harness harness) {
         ToolCallParseStage.ParsedCalls parsed =
                 new ToolCallParseStage().parse(harness.state(), 1);
         return harness.stage().execute(harness.state(), parsed);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"talos.list_dir", "talos.write_file"})
+    void controlledRequestRejectionPreservesDenialAndParsedIdentity(String tool) {
+        beginTrace("controlled-request-denial");
+        String request = "Count top-level workspace entries without showing names.";
+        var inventory = new dev.talos.runtime.intent.RequestedResultInventory(request, List.of(
+                new dev.talos.runtime.intent.RequestedResultInventory.RequestedResult("count",
+                        new dev.talos.runtime.intent.RequestedResultInventory.SourceRegion(0, request.length()),
+                        dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT,
+                        "active workspace", "top-level, observation time",
+                        dev.talos.runtime.intent.RequestedResultInventory.EvidenceBasis.SCOPED_DIRECTORY_OBSERVATION)), List.of());
+        try (var frame = dev.talos.runtime.observation.TurnRequestFrame.open(request, workspace, 1,
+                (current, task) -> new dev.talos.runtime.observation.TurnRequestFrame.Meaning(inventory,
+                        java.util.Set.of(dev.talos.runtime.observation.TurnRequestFrame.Action.METADATA,
+                                dev.talos.runtime.observation.TurnRequestFrame.Action.ENUMERATE),
+                        dev.talos.runtime.observation.TurnRequestFrame.Publication.NO_NAMES, false, false))) {
+            frame.adopt(TaskContractResolver.resolveFromUserRequest(request));
+            NativeToolCall proposal = new NativeToolCall("request-denied-call", tool,
+                    tool.equals("talos.write_file") ? Map.of("path", "private-child", "content", "never")
+                            : Map.of("path", "private-child", "max_depth", "1"));
+            var receipt = captureNative(List.of(proposal), List.of(tool));
+            Harness base = harness("", List.of(proposal), receipt, List.of(tool));
+            var state = new LoopState("", List.of(proposal), receipt,
+                    new ArrayList<>(List.of(ChatMessage.user(request))), workspace,
+                    base.state().ctx.withRequestFrame(frame), base.state().toolSession, 5, 0);
+            AtomicInteger progress = new AtomicInteger();
+            var stage = new ToolCallExecutionStage(base.processor(),
+                    (name, action, detail) -> progress.incrementAndGet(), false);
+            var parsed = new ToolCallParseStage().parse(state, 1);
+            var result = stage.execute(state, parsed);
+            var outcome = state.toolOutcomes.getFirst();
+            assertAll(
+                    () -> assertEquals(1, result.failuresThisIteration()),
+                    () -> assertEquals(0, result.successesThisIteration()),
+                    () -> assertEquals(0, base.invocations().get()),
+                    () -> assertEquals(0, base.approvals().get()),
+                    () -> assertEquals(0, progress.get()),
+                    () -> assertTrue(frame.observations().isEmpty()),
+                    () -> assertTrue(outcome.denied()),
+                    () -> assertEquals(tool.equals("talos.write_file"), outcome.mutating()),
+                    () -> assertEquals(ToolError.DENIED, outcome.errorCode()),
+                    () -> assertEquals(ToolFailureReason.NONE, outcome.failureReason()),
+                    () -> assertFalse(outcome.toolCallId().isBlank()),
+                    () -> assertFalse(outcome.mutationEffects().hasEffects()),
+                    () -> assertTrue(state.messages.stream().anyMatch(message ->
+                            message.content().contains("[error] " + outcome.errorMessage()))));
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertTrue(trace.events().stream().filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                    .anyMatch(event -> outcome.toolCallId().equals(event.data().get("toolCallId"))));
+        }
+    }
+
+    @Test
+    void controlledRejectionUsesRegisteredMutationMetadataOutsideTheNameList() {
+        beginTrace("controlled-custom-descriptor-denial");
+        String request = "Count top-level workspace entries without showing names.";
+        var inventory = new dev.talos.runtime.intent.RequestedResultInventory(request, List.of(
+                new dev.talos.runtime.intent.RequestedResultInventory.RequestedResult("count",
+                        new dev.talos.runtime.intent.RequestedResultInventory.SourceRegion(0, request.length()),
+                        dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT,
+                        "active workspace", "top-level, observation time",
+                        dev.talos.runtime.intent.RequestedResultInventory.EvidenceBasis.SCOPED_DIRECTORY_OBSERVATION)), List.of());
+        try (var frame = dev.talos.runtime.observation.TurnRequestFrame.open(request, workspace, 1,
+                (current, task) -> new dev.talos.runtime.observation.TurnRequestFrame.Meaning(inventory,
+                        java.util.Set.of(dev.talos.runtime.observation.TurnRequestFrame.Action.METADATA,
+                                dev.talos.runtime.observation.TurnRequestFrame.Action.ENUMERATE),
+                        dev.talos.runtime.observation.TurnRequestFrame.Publication.NO_NAMES, false, false))) {
+            frame.adopt(TaskContractResolver.resolveFromUserRequest(request));
+            NativeToolCall proposal = proposal("custom-descriptor-private.txt");
+            var receipt = captureNative(List.of(proposal), List.of(TOOL));
+            Harness base = harness("", List.of(proposal), receipt, List.of(TOOL));
+            assertFalse(ToolCallSupport.isMutatingTool(TOOL), "The registered probe must be absent from the name list");
+            assertTrue(((Context) base.state().ctx).toolRegistry().get(TOOL).descriptor().operationMetadata().mutatesWorkspace(),
+                    "The actual registered descriptor must declare mutation");
+            var state = new LoopState("", List.of(proposal), receipt,
+                    new ArrayList<>(List.of(ChatMessage.user(request))), workspace,
+                    base.state().ctx.withRequestFrame(frame), base.state().toolSession, 5, 0);
+            AtomicInteger progress = new AtomicInteger();
+            var stage = new ToolCallExecutionStage(base.processor(),
+                    (name, action, detail) -> progress.incrementAndGet(), false);
+            var parsed = new ToolCallParseStage().parse(state, 1);
+
+            var result = stage.execute(state, parsed);
+            var outcome = state.toolOutcomes.getFirst();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertAll(
+                    () -> assertEquals(1, result.failuresThisIteration()),
+                    () -> assertEquals(0, result.successesThisIteration()),
+                    () -> assertTrue(outcome.mutating(), "Denied classification must use registered metadata, not the tool name"),
+                    () -> assertTrue(outcome.denied()),
+                    () -> assertFalse(outcome.success()),
+                    () -> assertEquals(ToolError.DENIED, outcome.errorCode()),
+                    () -> assertEquals(ToolFailureReason.NONE, outcome.failureReason()),
+                    () -> assertFalse(outcome.toolCallId().isBlank()),
+                    () -> assertFalse(outcome.mutationEffects().hasEffects()),
+                    () -> assertTrue(outcome.sourcePaths().isEmpty()),
+                    () -> assertEquals(0, base.invocations().get()),
+                    () -> assertEquals(0, base.approvals().get()),
+                    () -> assertEquals(0, base.checkpoints().get()),
+                    () -> assertEquals(0, state.totalToolsInvoked),
+                    () -> assertEquals(0, progress.get()),
+                    () -> assertTrue(frame.observations().isEmpty()),
+                    () -> assertFalse(Files.exists(workspace.resolve("custom-descriptor-private.txt"))),
+                    () -> assertEquals(0, countEvents(trace, "TOOL_EXECUTED")),
+                    () -> assertEquals(0, countEvents(trace, "TOOL_CALL_AUTHORITY_REJECTED")),
+                    () -> assertTrue(trace.events().stream()
+                            .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                            .anyMatch(event -> outcome.toolCallId().equals(event.data().get("toolCallId")))));
+        }
     }
 
     private Harness harness(
@@ -1085,6 +1500,15 @@ class ProviderToolExecutionAuthorityTest {
             boolean truncated,
             boolean textualToolCallPresent
     ) {
+        return capture(assistantText, proposals, source, completion, normalized, truncated, textualToolCallPresent, null);
+    }
+
+    private static ProviderResponseCapture.Receipt capture(
+            String assistantText, List<NativeToolCall> proposals,
+            ProviderResponseCapture.Source source, ProviderResponseCapture.Completion completion,
+            boolean normalized, boolean truncated, boolean textualToolCallPresent,
+            ProviderResponseCapture.TextProposalSource textProposalSource
+    ) {
         ProviderResponseCapture.Purpose purpose = switch (source) {
             case FOREGROUND_PROVIDER -> ProviderResponseCapture.Purpose.TURN_RESPONSE;
             case BACKGROUND_PROVIDER ->
@@ -1130,14 +1554,14 @@ class ProviderToolExecutionAuthorityTest {
                 ObservedProviderTransportFixture.completeBodyEof(attempt, evidence);
             }
         }
-        ProviderResponseCapture.Receipt receipt = attempt.respond(providerResponse(
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
                 assistantText,
                 proposals,
                 source,
                 completion,
                 normalized,
                 truncated,
-                textualToolCallPresent));
+                textualToolCallPresent, textProposalSource));
         generation.complete(receipt);
         return receipt;
     }
@@ -1253,17 +1677,22 @@ class ProviderToolExecutionAuthorityTest {
 
         @Override
         public ToolDescriptor descriptor() {
+            boolean inspection = "talos.list_dir".equals(name);
+            ToolRiskLevel risk = inspection ? ToolRiskLevel.READ_ONLY : ToolRiskLevel.WRITE;
             return new ToolDescriptor(
                     name,
                     description(),
                     "{}",
-                    ToolRiskLevel.WRITE,
-                    ToolOperationMetadata.defaultFor(name, ToolRiskLevel.WRITE));
+                    risk,
+                    inspection ? ToolOperationMetadata.inspect(name,
+                            Map.of("path", ToolOperationMetadata.PathRole.TARGET_DIRECTORY), "DIRECTORY_LISTED")
+                            : ToolOperationMetadata.defaultFor(name, risk));
         }
 
         @Override
         public ToolResult execute(ToolCall call, ToolContext ctx) {
             invocations.incrementAndGet();
+            if ("talos.list_dir".equals(name)) return ToolResult.ok("probe inspected");
             try {
                 String content = call.param("content");
                 if (content == null) content = call.param("new_string");

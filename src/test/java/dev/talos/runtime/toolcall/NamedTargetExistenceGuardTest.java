@@ -40,7 +40,7 @@ class NamedTargetExistenceGuardTest {
         List<ToolResult> emitted = new ArrayList<>();
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> modelMessages.add(content),
+                (s, nativePath, callIndex, content, outcome) -> modelMessages.add(content),
                 (toolName, result) -> emitted.add(result));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -93,7 +93,7 @@ class NamedTargetExistenceGuardTest {
         List<ToolResult> emitted = new ArrayList<>();
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> modelMessages.add(content),
+                (s, nativePath, callIndex, content, outcome) -> modelMessages.add(content),
                 (toolName, result) -> emitted.add(result));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -135,7 +135,7 @@ class NamedTargetExistenceGuardTest {
                 """);
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> fail("create/add function request should not trigger named-target guard"),
+                (s, nativePath, callIndex, content, outcome) -> fail("create/add function request should not trigger named-target guard"),
                 (toolName, result) -> fail("create/add function request should not emit a failed result"));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -170,7 +170,7 @@ class NamedTargetExistenceGuardTest {
         List<ToolResult> emitted = new ArrayList<>();
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> assertTrue(content.contains("Named target `foo()`")),
+                (s, nativePath, callIndex, content, outcome) -> assertTrue(content.contains("Named target `foo()`")),
                 (toolName, result) -> emitted.add(result));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -203,7 +203,7 @@ class NamedTargetExistenceGuardTest {
         List<ToolResult> emitted = new ArrayList<>();
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> assertTrue(content.contains("requires complete same-turn read evidence")),
+                (s, nativePath, callIndex, content, outcome) -> assertTrue(content.contains("requires complete same-turn read evidence")),
                 (toolName, result) -> emitted.add(result));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -242,7 +242,7 @@ class NamedTargetExistenceGuardTest {
                 """);
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> fail("valid named target should not append a block result"),
+                (s, nativePath, callIndex, content, outcome) -> fail("valid named target should not append a block result"),
                 (toolName, result) -> fail("valid named target should not emit a failed result"));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
@@ -273,7 +273,7 @@ class NamedTargetExistenceGuardTest {
                 """);
         ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> fail("unnamed target request should not trigger named-target guard"),
+                (s, nativePath, callIndex, content, outcome) -> fail("unnamed target request should not trigger named-target guard"),
                 (toolName, result) -> fail("unnamed target request should not emit a failed result"));
 
         ToolCallPreExecutionGuardChain.Result result = chain.evaluate(

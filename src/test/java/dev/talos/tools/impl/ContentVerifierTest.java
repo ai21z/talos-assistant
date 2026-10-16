@@ -23,6 +23,26 @@ class ContentVerifierTest {
 
     @TempDir Path tmp;
 
+    @Test
+    void readbackScopeIsIndependentOfFormatStatusAndLegacySummaries() throws IOException {
+        var legacy = new ContentVerifier.VerifyResult(VerificationStatus.PASS, "read-back OK");
+        assertEquals(ExecutedEditDetail.ReadBack.NOT_RECORDED, legacy.readBack());
+        Path invalid = writeFile("invalid.json", "not json");
+        var formatFailure = ContentVerifier.verify(invalid, "not json");
+        assertEquals(VerificationStatus.FAIL, formatFailure.status());
+        assertEquals(ExecutedEditDetail.ReadBack.MATCHED_AT_EXECUTION, formatFailure.readBack());
+        var mismatch = ContentVerifier.verify(invalid, "different");
+        assertEquals(VerificationStatus.INTEGRITY_FAIL, mismatch.status());
+        assertEquals(ExecutedEditDetail.ReadBack.MISMATCH_AT_EXECUTION, mismatch.readBack());
+        var unavailable = ContentVerifier.verify(tmp.resolve("missing.txt"), "expected");
+        assertEquals(VerificationStatus.INTEGRITY_FAIL, unavailable.status());
+        assertEquals(ExecutedEditDetail.ReadBack.UNAVAILABLE_AT_EXECUTION, unavailable.readBack());
+        Path plain = writeFile("plain.txt", "unchanged");
+        var matched = ContentVerifier.verify(plain, "unchanged");
+        assertEquals(VerificationStatus.UNKNOWN, matched.status());
+        assertEquals(ExecutedEditDetail.ReadBack.MATCHED_AT_EXECUTION, matched.readBack());
+    }
+
     private Path writeFile(String name, String content) throws IOException {
         Path file = tmp.resolve(name);
         Files.writeString(file, content);

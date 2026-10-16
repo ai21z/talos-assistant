@@ -5,7 +5,6 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
-import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
@@ -41,8 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Abort truth (release-blocker follow-up to T988): an aborted generation
  * must be recorded as FAILED / LLM_ABORTED on BOTH provider paths, must
- * stay honestly visible to the user, and its partial output must never be
- * dressed up as a normal answer. The dangerous shape is partial text PLUS
+ * reach the failure boundary without presenting partial provider output.
+ * The dangerous shape is partial text PLUS
  * a trailing abort marker - a prefix check on the final text misses it.
  */
 @DisplayName("AssistantTurnExecutor abort truth")
@@ -323,7 +322,7 @@ class AssistantTurnExecutorAbortTruthTest {
     }
 
     @Test
-    void streamingAbortAfterPartialOutputRecordsLlmAbortedAndShowsTheMarker(@TempDir Path workspace) {
+    void streamingAbortAfterPartialOutputRecordsLlmAbortedWithoutPresentingPartialText(@TempDir Path workspace) {
         LlmClient llm = ScriptedNativeLlmClient.transientAfterPartialOutput(PARTIAL);
         List<String> chunks = new ArrayList<>();
         Context ctx = Context.builder(new Config())
@@ -356,11 +355,14 @@ class AssistantTurnExecutorAbortTruthTest {
             assertNotNull(trace.outcome(), "a streamed abort must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
-            assertTrue(String.join("", chunks).contains(PARTIAL));
-            assertTrue(String.join("", chunks).contains(UiChrome.TURN_ABORTED_PREFIX),
-                    "the abort must be visible on the streamed surface, got chunks: " + chunks);
+            assertTrue(chunks.isEmpty(), "An aborted generation must not present provider fragments: " + chunks);
             assertFalse(String.join("", chunks).contains("retry-output"),
                     "an aborted streaming turn must not silently re-generate");
+            assertEquals(1, trace.events().stream()
+                    .filter(event -> "GENERATION_REQUEST_DISPATCHED".equals(event.type()))
+                    .count(), "an aborted turn must not dispatch another provider request");
+            assertTrue(trace.events().stream().noneMatch(event ->
+                    "TOOL_EXECUTED".equals(event.type())));
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -477,16 +479,19 @@ class AssistantTurnExecutorAbortTruthTest {
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
             assertEquals("turn generation ended without a completed response", failure.getMessage());
-            assertTrue(String.join("", chunks).contains("Visible prefix."));
+            assertTrue(chunks.isEmpty(), "An aborted generation must not present provider fragments: " + chunks);
             assertFalse(String.join("", chunks).contains("talos.write_file"),
                     "incomplete provider protocol must remain hidden");
             assertNotNull(trace.outcome(), "an aborted turn with text tool JSON must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
-            assertTrue(String.join("", chunks).contains(UiChrome.TURN_ABORTED_PREFIX),
-                    "the abort must be visible on the streamed surface, got chunks: " + chunks);
             assertFalse(String.join("", chunks).contains("retry-output"),
                     "an aborted turn must not enter the tool loop or continue generation");
+            assertEquals(1, trace.events().stream()
+                    .filter(event -> "GENERATION_REQUEST_DISPATCHED".equals(event.type()))
+                    .count(), "an aborted turn must not dispatch another provider request");
+            assertTrue(trace.events().stream().noneMatch(event ->
+                    "TOOL_EXECUTED".equals(event.type())));
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -586,6 +591,7 @@ class AssistantTurnExecutorAbortTruthTest {
 
             assertTrue(failure.getCause() instanceof IllegalStateException,
                     "quarantine must reject the same-process retry");
+            assertTrue(chunks.isEmpty(), "Unsettled transport output must not be presented: " + chunks);
             assertFalse(String.join("", chunks).contains("talos.read_file"),
                     "raw tool protocol must not reach the streamed surface: " + chunks);
             assertEquals(0, approvals.get(), "unsettled provider output must not request approval");

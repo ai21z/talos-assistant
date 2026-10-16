@@ -2,6 +2,7 @@ package dev.talos.runtime.task;
 
 import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.intent.TaskIntentProjector;
@@ -46,7 +47,13 @@ public final class WorkspaceTargetReconciler {
     }
 
     public static TaskContract reconcile(TaskContract contract, Path workspace) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent()) return contract;
         if (contract == null || workspace == null) {
+            return contract;
+        }
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) return contract;
+        if (ConversationEvidenceRequest.interpret(contract.originalUserRequest()).source()
+                != ConversationEvidenceRequest.Source.NORMAL) {
             return contract;
         }
         NoFollowPathPolicy.GuardedRoot workspaceFiles;

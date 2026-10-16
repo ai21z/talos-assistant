@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
 import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
+import dev.talos.runtime.toolcall.ReadEvidenceCoverage;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolLoopResultSummaryFormatter;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
@@ -35,6 +36,7 @@ public final class ToolCallLoop {
 
     private final ToolCallLoopEngine engine;
     private final boolean strict;
+    private final int maxIterations;
 
     public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations, ToolProgressSink progressSink) {
         this(turnProcessor, maxIterations, progressSink, false);
@@ -43,15 +45,21 @@ public final class ToolCallLoop {
     public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations,
                         ToolProgressSink progressSink, boolean strict) {
         this.strict = strict;
+        this.maxIterations = Math.max(1, maxIterations);
         this.engine = new ToolCallLoopEngine(
                 turnProcessor,
-                Math.max(1, maxIterations),
+                this.maxIterations,
                 progressSink,
                 strict);
     }
 
     public boolean isStrict() {
         return strict;
+    }
+
+    /** Remaining acquisition iterations after the accumulated result of this turn. */
+    public int remainingIterations(LoopResult prior) {
+        return Math.max(0, maxIterations - (prior == null ? 0 : Math.max(0, prior.iterations())));
     }
 
     public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations) {
@@ -86,7 +94,8 @@ public final class ToolCallLoop {
             boolean finalAnswerOutputLimitReached,
             ReadOnlySynthesisStatus readOnlySynthesisStatus,
             ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff,
-            ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence
+            ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence,
+            ReadEvidenceCoverage readEvidenceCoverage
     ) {
         public LoopResult {
             toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
@@ -103,6 +112,25 @@ public final class ToolCallLoop {
                     ? ReadOnlyEvidenceHandoff.empty() : readOnlyEvidenceHandoff;
             readOnlyFinalizationEvidence = readOnlyFinalizationEvidence == null
                     ? ReadOnlyFinalizationEvidence.empty() : readOnlyFinalizationEvidence;
+            readEvidenceCoverage = readEvidenceCoverage == null ? ReadEvidenceCoverage.empty() : readEvidenceCoverage;
+        }
+
+        /** Legacy construction does not establish executed read coverage. */
+        public LoopResult(
+                String finalAnswer, int iterations, int toolsInvoked, List<String> toolNames,
+                List<ChatMessage> messages, int failedCalls, int retriedCalls, boolean hitIterLimit,
+                int mutatingToolSuccesses, List<String> readPaths, int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue, int cushionFiresB3EditShortCircuit, int cushionFiresE1Suggestion,
+                FailureDecision failureDecision, List<ToolOutcome> toolOutcomes, Map<String, String> readFileBodies,
+                boolean finalAnswerOutputLimitReached, ReadOnlySynthesisStatus readOnlySynthesisStatus,
+                ReadOnlyEvidenceHandoff readOnlyEvidenceHandoff,
+                ReadOnlyFinalizationEvidence readOnlyFinalizationEvidence) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls, retriedCalls,
+                    hitIterLimit, mutatingToolSuccesses, readPaths, cushionFiresRedundantRead,
+                    cushionFiresAliasRescue, cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, readFileBodies, finalAnswerOutputLimitReached,
+                    readOnlySynthesisStatus, readOnlyEvidenceHandoff, readOnlyFinalizationEvidence,
+                    ReadEvidenceCoverage.empty());
         }
 
         /** Compatibility callers do not mint observation and selected-request associations. */
@@ -255,7 +283,8 @@ public final class ToolCallLoop {
             dev.talos.tools.ToolFailureReason failureReason,
             List<String> sourcePaths,
             String toolCallId,
-            dev.talos.tools.ToolMutationEffects mutationEffects
+            dev.talos.tools.ToolMutationEffects mutationEffects,
+            dev.talos.tools.DirectoryObservation directoryObservation
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -268,6 +297,18 @@ public final class ToolCallLoop {
             sourcePaths = normalizeSourcePaths(sourcePaths);
             toolCallId = toolCallId == null ? "" : toolCallId.strip();
             mutationEffects = mutationEffects == null ? dev.talos.tools.ToolMutationEffects.none() : mutationEffects;
+        }
+
+        /** Older observations have no directory completeness metadata. */
+        public ToolOutcome(String toolName, String pathHint, boolean success, boolean mutating,
+                           boolean denied, String summary, String errorMessage,
+                           dev.talos.tools.VerificationStatus fileVerificationStatus, String errorCode,
+                           WorkspaceOperationPlan workspaceOperationPlan, ToolMutationEvidence mutationEvidence,
+                           dev.talos.tools.ToolFailureReason failureReason, List<String> sourcePaths, String toolCallId,
+                           dev.talos.tools.ToolMutationEffects mutationEffects) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, sourcePaths, toolCallId, mutationEffects, null);
         }
 
         /** Compatibility shape before effect reporting was independent of success. */
@@ -284,7 +325,7 @@ public final class ToolCallLoop {
         public ToolOutcome withMutationEffects(dev.talos.tools.ToolMutationEffects effects) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, failureReason, sourcePaths, toolCallId, effects);
+                    mutationEvidence, failureReason, sourcePaths, toolCallId, effects, directoryObservation);
         }
 
         /** Pre-T1154 canonical shape: exact parsed-call identity was not retained. */
@@ -418,7 +459,7 @@ public final class ToolCallLoop {
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects);
+                    mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects, directoryObservation);
         }
 
         private static List<String> normalizeSourcePaths(List<String> values) {
@@ -514,6 +555,16 @@ public final class ToolCallLoop {
             ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
             Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff) {
         return engine.run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx, handoff);
+    }
+
+    /** Continues acquisition within a caller's remaining same-turn iteration allowance. */
+    public LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff,
+            int remainingIterations) {
+        return engine.run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx, handoff,
+                Math.min(maxIterations, Math.max(0, remainingIterations)));
     }
 
     /**

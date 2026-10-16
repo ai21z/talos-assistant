@@ -36,6 +36,17 @@ public final class MutationActionEvidence {
         return completeToken && permits(start, end);
     }
 
+    /** The typed content-save request frame does not widen legacy fallback recognition. */
+    public boolean permitsLegacyFallback(int start, int end) {
+        var action = actions.get(start);
+        return action != null && !action.firstPersonDesireFrame() && permits(start, end);
+    }
+
+    public boolean permitsLegacyFallbackMarker(int start, int end) {
+        var action = actions.get(start);
+        return action != null && !action.firstPersonDesireFrame() && permitsMarker(start, end);
+    }
+
     public boolean permits(int start, int end) {
         var action = actions.get(start);
         if (action == null || end < action.end() || end > view.request().length()) return false;

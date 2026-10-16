@@ -7,6 +7,7 @@ import dev.talos.spi.types.SourceIdentity;
 import dev.talos.spi.types.SourceType;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
+import dev.talos.core.privacy.ContextSourcePolicy;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
@@ -49,6 +50,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
 
     // Source identity fields (StringField, stored + filterable)
     public static final String F_SOURCE_TYPE   = "sourceType";
+    public static final String F_SOURCE_PATH   = "sourcePath";
     public static final String F_SOURCE_FORMAT = "sourceFormat";
     public static final String F_MEDIA_TYPE    = "mediaType";
 
@@ -147,6 +149,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                 // Source identity
                 if (metadata.sourceIdentity() != null) {
                     SourceIdentity si = metadata.sourceIdentity();
+                    doc.add(new StoredField(F_SOURCE_PATH, si.path()));
                     doc.add(new StringField(F_SOURCE_TYPE, si.type().name(), Field.Store.YES));
                     doc.add(new StringField(F_SOURCE_FORMAT, si.format().name(), Field.Store.YES));
                     doc.add(new StringField(F_MEDIA_TYPE, si.mediaType().name(), Field.Store.YES));
@@ -307,21 +310,16 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         String typeName   = d.get(F_SOURCE_TYPE);
         String formatName = d.get(F_SOURCE_FORMAT);
         String mediaName  = d.get(F_MEDIA_TYPE);
+        String sourcePath = d.get(F_SOURCE_PATH);
 
-        if (typeName == null && formatName == null && mediaName == null) return null;
+        if (typeName == null && formatName == null && mediaName == null && sourcePath == null) return null;
 
         SourceType type     = safeEnum(SourceType.class, typeName, SourceType.UNKNOWN);
         SourceFormat format = safeEnum(SourceFormat.class, formatName, SourceFormat.UNKNOWN);
         MediaType media     = safeEnum(MediaType.class, mediaName, MediaType.UNKNOWN);
 
-        // Use the path from doc if available; fallback to empty
-        String docPath = d.get(F_PATH);
-        if (docPath != null) {
-            int hash = docPath.indexOf('#');
-            if (hash >= 0) docPath = docPath.substring(0, hash);
-        } else {
-            docPath = "";
-        }
+        // New entries retain original provenance. Older indexes only have the serialized chunk path.
+        String docPath = sourcePath != null ? sourcePath : ContextSourcePolicy.basePath(d.get(F_PATH));
 
         return new SourceIdentity(docPath, type, format, media);
     }

@@ -17,6 +17,8 @@ import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.privacy.PrivacyConfigFacts;
+import dev.talos.core.privacy.ContextSourcePolicy;
+import dev.talos.safety.ContentRestrictionScope;
 import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
@@ -133,6 +135,13 @@ public class RagService {
     }
 
     public Indexer getIndexer() { return indexer; }
+
+    /** Recheck retained snippets against this service's current configuration. */
+    public ContextResult.Snippet admitSnippet(Path workspace, ContextResult.Snippet snippet) {
+        return ContextSourcePolicy.admit(cfg, workspace, snippet);
+    }
+
+    protected LlmClient createLlmClient() { return new LlmClient(cfg); }
 
     public record ReindexOutcome(boolean indexed, String message) {}
 
@@ -259,16 +268,23 @@ public class RagService {
                     continue;
                 }
                 String sanitized = ProtectedContentSanitizer.sanitizeText(text);
-                snippets.add(new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                var snippet = ContextSourcePolicy.admit(cfg, ws,
+                        new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                snippets.add(snippet);
                 ContextLedgerCapture.record(
                         ContextItem.fromText(
                                 ContextItemSource.RAG_SNIPPET,
                                 ExecutionBoundary.RAG_INDEX,
-                                ContextPrivacyClass.NORMAL,
+                                snippet.contentDecision() == null ? ContextPrivacyClass.NORMAL
+                                        : snippet.contentDecision().privateDocumentContent()
+                                        ? ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                                        : ContextPrivacyClass.EXTRACTED_DOCUMENT_TEXT,
                                 c.path(),
                                 sanitized,
                                 0),
-                        ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE"));
+                        snippet.contentRestrictions().modelAllowed()
+                                ? ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE")
+                                : ContextDecision.withheldFromModel("RAG_DOCUMENT_MODEL_HANDOFF_DENIED"));
             }
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));
@@ -355,7 +371,8 @@ public class RagService {
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()), prepared.snippets());
+            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()),
+                    prepared.snippets().stream().map(snippet -> admitSnippet(ws, snippet)).toList());
 
             // Warn if trimming occurred
             if (packed.wasTrimmed()) {
@@ -363,8 +380,9 @@ public class RagService {
                     packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
             }
 
-            try (LlmClient llm = new LlmClient(cfg)) {
-                String text = llm.chat(sys, question, packed.toSnippetMaps());
+            try (LlmClient llm = createLlmClient()) {
+                String text = ContentRestrictionScope.callWithRestrictions(packed.contentRestrictions(),
+                        () -> llm.chat(sys, question, packed.toSnippetMaps()));
                 if (text == null) text = "";
 
                 // Defensive: strip any tool-call blocks the model may emit.

@@ -50,6 +50,7 @@ final class CompactMutationContinuationExecutor {
                                     compact.tools())));
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
             state.applyProviderResult(result);
+            if (dev.talos.runtime.IncompleteGenerationPresentation.required(result)) return Outcome.STOP_TURN;
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION",
                     "used compact mutation continuation after " + retryName

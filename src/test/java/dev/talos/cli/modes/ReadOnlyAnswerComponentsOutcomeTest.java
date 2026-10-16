@@ -51,6 +51,32 @@ class ReadOnlyAnswerComponentsOutcomeTest {
     }
 
     @Test
+    void derivedProducerResultsSurviveActualSettlementAndMemoryPublication(@TempDir Path workspace) throws Exception {
+        var memory = new dev.talos.runtime.SessionMemory();
+        var config = new dev.talos.core.Config();
+        var processor = new dev.talos.runtime.TurnProcessor((raw, root, context) -> {
+            var fixture = turn(root);
+            var outcome = finish(fixture, root, (answer, components) -> components.present(
+                    answer, UnaryOperator.identity(), 20_000));
+            return java.util.Optional.of(new dev.talos.runtime.Result.Ok(outcome.finalAnswer()));
+        });
+        processor.addListener(new dev.talos.runtime.MemoryUpdateListener(
+                new dev.talos.core.context.ConversationManager(memory, new dev.talos.core.context.TokenBudget()),
+                null, memory));
+        var result = processor.process(new dev.talos.runtime.Session(workspace, config), REQUEST,
+                dev.talos.cli.repl.Context.builder(config).build());
+        var retained = result.audit().typedResults();
+        assertEquals(dev.talos.runtime.TypedResultSettlement.Loss.NONE, retained.loss());
+        assertTrue(retained.presentationIntact());
+        assertTrue(retained.historyProjectionIntact());
+        assertTrue(retained.results().size() >= 4);
+        assertTrue(retained.results().stream().anyMatch(component -> component.text().contains("22.2")));
+        assertTrue(retained.results().stream().anyMatch(component -> !component.references().isEmpty()));
+        assertEquals(retained, memory.typedResultHistory().turns().getFirst().settlement());
+        assertFalse(memory.typedResultHistory().scopeEstablished());
+    }
+
+    @Test
     void completeDerivedAnswerHasBoundObservationsAndRecordedReadOnlyCompletion(@TempDir Path workspace) throws Exception {
         Turn turn = turn(workspace);
         ExecutionOutcome outcome = finish(turn, workspace, (answer, components) -> {
@@ -141,6 +167,11 @@ class ReadOnlyAnswerComponentsOutcomeTest {
         LocalTurnTrace trace = settleTrace(answer);
 
         assertEquals("[Answer incomplete]", answer);
+        var status = dev.talos.runtime.trace.FinalAnswerStatus.decode(trace);
+        assertTrue(status.available());
+        assertEquals("COMPLETE", status.operational().status());
+        assertEquals("READ_ONLY_ANSWERED", status.operational().classification());
+        assertEquals(List.of(dev.talos.runtime.trace.FinalAnswerStatus.Cause.LOCAL_PRESENTATION_LIMIT), status.causes());
         assertEquals(Boolean.TRUE, event(trace, "READ_ONLY_ANSWER_COMPONENTS_DERIVED").data().get("requirementsComplete"));
         assertEquals(Boolean.FALSE, event(trace, "READ_ONLY_ANSWER_COMPONENTS_PRESENTED").data().get("deliveredIntact"));
         assertTraceStatus(trace, "ADVISORY_ONLY", "ADVISORY_ONLY");

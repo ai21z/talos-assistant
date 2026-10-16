@@ -24,7 +24,7 @@ public final class AnswerPaneRenderer {
         StringBuilder sb = new StringBuilder();
         sb.append(header("answer"));
         for (String line : lines(content)) {
-            for (String wrapped : wrap(line, contentWidth())) {
+            for (String wrapped : wrapLine(line, contentWidth())) {
                 sb.append(rail()).append(wrapped).append(System.lineSeparator());
             }
         }
@@ -66,7 +66,7 @@ public final class AnswerPaneRenderer {
         return List.of(safe.split("\n", -1));
     }
 
-    private static List<String> wrap(String line, int maxWidth) {
+    public static List<String> wrapLine(String line, int maxWidth) {
         if (line == null || line.isEmpty()) return List.of("");
         if (line.length() <= maxWidth) return List.of(line);
         List<String> out = new ArrayList<>();

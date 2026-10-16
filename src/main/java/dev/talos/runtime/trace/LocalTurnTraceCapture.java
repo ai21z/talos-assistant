@@ -21,8 +21,10 @@ import dev.talos.runtime.verification.StaticWebDiagnostic;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
+import dev.talos.core.tool.ToolNamePolicy;
 import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.RuntimeArtifactIdentity;
+import dev.talos.core.util.Sanitize;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolCall;
@@ -59,6 +61,11 @@ public final class LocalTurnTraceCapture {
         String requestObligationSha256 = "";
         AnswerCandidate answerCandidate;
         OutcomeCandidate outcomeCandidate;
+        OutcomeCandidate operationalOutcome;
+        DeliveryFacts routedDelivery = DeliveryFacts.unavailable();
+        String routedAnswerHash = "";
+        final Set<AnswerPresentationLimitation> answerPresentationLimitations =
+                java.util.EnumSet.noneOf(AnswerPresentationLimitation.class);
         dev.talos.runtime.verification.ReadOnlyAnswerComponents answerComponents;
         ProviderResponseCapture.Receipt selectedResponseReceipt;
         ProviderResponseCapture.Response selectedProviderResponse;
@@ -109,6 +116,13 @@ public final class LocalTurnTraceCapture {
         TOOL_LOOP_FINALIZATION
     }
 
+    public enum AnswerPresentationLimitation {
+        RUNTIME_IDENTITY_INCOMPLETE,
+        WORK_STATUS_INCOMPLETE,
+        OUTPUT_TRUNCATED,
+        UNCOMMITTED_PROVIDER_ANSWER
+    }
+
     public enum ProviderToolSuppressionReason {
         TASK_CONTRACT_BLOCKED_TOOL_CALLS
     }
@@ -136,7 +150,8 @@ public final class LocalTurnTraceCapture {
         NONE,
         DIRECT_RUNTIME_API,
         READ_EVIDENCE_HANDOFF,
-        EXPECTED_TARGET_SCOPE_REPAIR
+        EXPECTED_TARGET_SCOPE_REPAIR,
+        SELECTED_CONTENT_DRAFT
     }
 
     public enum ToolCallAuthorityRejectionReason {
@@ -163,6 +178,8 @@ public final class LocalTurnTraceCapture {
         PROVIDER_PROPOSAL_ALREADY_USED,
         TEXT_PARSER_LINEAGE_REQUIRED,
         TEXT_PROTOCOL_INELIGIBLE,
+        TEXT_PROJECTION_SOURCE_MISSING,
+        TEXT_PROJECTION_MISMATCH,
         XML_COMPATIBILITY_NOT_AUTHORIZED,
         RUNTIME_AUTHORITY_REASON_MISSING,
         RUNTIME_AUTHORITY_SCOPE_INVALID,
@@ -654,6 +671,11 @@ public final class LocalTurnTraceCapture {
         boolean candidateMatches = candidate != null
                 && candidate.answerHash().equals(routedHash)
                 && Objects.equals(candidate.rawAnswer(), Objects.toString(retainedAssistantText, ""));
+        bag.routedDelivery = candidateMatches ? candidate.delivery() : DeliveryFacts.unavailable();
+        bag.routedAnswerHash = routedHash;
+        if (bag.routedDelivery.causes().stream().anyMatch(cause -> cause != FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION)) {
+            recordAnswerPresentationLimitation(AnswerPresentationLimitation.OUTPUT_TRUNCATED);
+        }
         ProviderResponseCapture.AnswerOrigin origin = candidateMatches
                 ? candidate.origin()
                 : ProviderResponseCapture.AnswerOrigin.NONE;
@@ -741,6 +763,24 @@ public final class LocalTurnTraceCapture {
     public static void recordReadOnlyAnswerComponentsPresented(
             dev.talos.runtime.verification.ReadOnlyAnswerComponents components, String answer) {
         recordReadOnlyAnswerComponents(components, Objects.toString(answer, ""));
+    }
+
+    public static void recordWorkStatusAssessment(dev.talos.runtime.WorkStatusReceipt receipt) {
+        Bag bag = HOLDER.get();
+        if (bag == null || receipt == null || !receipt.active()) return;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded) return;
+            bag.builder.event(TurnTraceEvent.simple("WORK_STATUS_ASSESSED", now(), Map.of(
+                    "coverage", receipt.coverage().name(),
+                    "resultDecisions", receipt.resultDecisions().stream().map(result -> Map.of(
+                            "idHash", result.idHash(), "kind", result.kind(), "disposition", result.disposition(),
+                            "start", result.start(), "end", result.end())).toList(),
+                    "roles", receipt.roles().stream().map(Enum::name).sorted().toList(),
+                    "presentationComplete", receipt.presentationComplete(),
+                    "requestHash", receipt.requestHash(), "answerHash", receipt.answerHash(),
+                    "evidenceScope", "RETAINED_RUNTIME_METADATA",
+                    "testing", "UNESTABLISHED", "release", "UNESTABLISHED")));
+        }
     }
 
     private static void recordReadOnlyAnswerComponents(
@@ -846,7 +886,7 @@ public final class LocalTurnTraceCapture {
                     target,
                     current.origin(),
                     current.sourceGenerationId(),
-                    current.sourceAttemptId());
+                    current.sourceAttemptId(), current.delivery().transformed(current.rawAnswer(), target));
         }
     }
 
@@ -935,7 +975,103 @@ public final class LocalTurnTraceCapture {
             String rawAnswer,
             ProviderResponseCapture.AnswerOrigin origin,
             String sourceGenerationId,
-            String sourceAttemptId) {}
+            String sourceAttemptId, DeliveryFacts delivery) {}
+
+    private record DeliveryFacts(boolean associated, Set<FinalAnswerStatus.Cause> causes,
+                                 int providerStart, int providerEnd) {
+        DeliveryFacts { causes = Set.copyOf(causes); }
+        static DeliveryFacts unavailable() { return new DeliveryFacts(false, Set.of(), -1, -1); }
+        static DeliveryFacts runtime() { return new DeliveryFacts(true, Set.of(), 0, 0); }
+        DeliveryFacts transformed(String input, String output) {
+            if (providerEnd == 0 || input.equals(output)) return this;
+            int offset = input.isEmpty() ? -1 : output.indexOf(input);
+            if (providerStart < 0 || offset < 0 || output.indexOf(input, offset + 1) >= 0)
+                return new DeliveryFacts(associated, causes, -1, -1);
+            return new DeliveryFacts(associated, causes, providerStart + offset, providerEnd + offset);
+        }
+        DeliveryFacts retainedPrefix(int chars) {
+            if (providerEnd == 0) return this;
+            if (providerStart >= 0 && chars > providerStart)
+                return new DeliveryFacts(associated, causes, providerStart, Math.min(providerEnd, chars));
+            var retained = java.util.EnumSet.noneOf(FinalAnswerStatus.Cause.class);
+            if (causes.contains(FinalAnswerStatus.Cause.LOCAL_PRESENTATION_LIMIT))
+                retained.add(FinalAnswerStatus.Cause.LOCAL_PRESENTATION_LIMIT);
+            return new DeliveryFacts(providerStart >= 0, retained, providerStart >= 0 ? 0 : -1,
+                    providerStart >= 0 ? 0 : -1);
+        }
+        DeliveryFacts clipped() {
+            var combined = java.util.EnumSet.noneOf(FinalAnswerStatus.Cause.class);
+            combined.addAll(causes);
+            combined.add(FinalAnswerStatus.Cause.LOCAL_PRESENTATION_LIMIT);
+            return new DeliveryFacts(associated, combined, providerStart, providerEnd);
+        }
+        static DeliveryFacts provider(ProviderResponseCapture.Response response) {
+            if (response == null) return unavailable();
+            var causes = java.util.EnumSet.noneOf(FinalAnswerStatus.Cause.class);
+            if (response.completion() == ProviderResponseCapture.Completion.PROVIDER_LENGTH)
+                causes.add(FinalAnswerStatus.Cause.PROVIDER_LENGTH);
+            if (response.completion() == ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP || response.truncated())
+                causes.add(FinalAnswerStatus.Cause.RUNTIME_SAFE_CAP);
+            boolean observed = response.completion() == ProviderResponseCapture.Completion.PROVIDER_EOS
+                    || response.completion() == ProviderResponseCapture.Completion.PROVIDER_LENGTH
+                    || response.completion() == ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP;
+            return new DeliveryFacts(observed, causes, 0, response.assistantText().length());
+        }
+    }
+
+    /** Selection ownership is updated without changing author or executable authority. */
+    public static void recordAnswerDeliverySelected(String answer, boolean inputRetained, boolean locallyClipped) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded || bag.outcomeRendered) return;
+            recordAnswerTransformedForRouting(answer, AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+            DeliveryFacts facts = !inputRetained ? DeliveryFacts.runtime()
+                    : bag.answerCandidate == null ? DeliveryFacts.unavailable() : bag.answerCandidate.delivery();
+            if (locallyClipped) facts = facts.clipped();
+            AnswerCandidate current = bag.answerCandidate;
+            bag.answerCandidate = current == null
+                    ? new AnswerCandidate(TraceRedactor.hash(answer), Objects.toString(answer, ""),
+                            ProviderResponseCapture.AnswerOrigin.NONE, "", "", facts)
+                    : new AnswerCandidate(current.answerHash(), current.rawAnswer(), current.origin(),
+                            current.sourceGenerationId(), current.sourceAttemptId(), facts);
+        }
+    }
+
+    /** The operator notice retains a known omission, not provider text or terminal delivery proof. */
+    public static void recordUncommittedProviderAnswer(String answer) {
+        recordAnswerDeliverySelected(answer, false, false);
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        synchronized (bag) {
+            AnswerCandidate current = bag.answerCandidate;
+            if (current != null && !bag.routedAnswerRecorded && !bag.outcomeRendered) {
+                bag.answerCandidate = new AnswerCandidate(current.answerHash(), current.rawAnswer(), current.origin(),
+                        current.sourceGenerationId(), current.sourceAttemptId(),
+                        new DeliveryFacts(true, Set.of(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION), 0, 0));
+            }
+        }
+        recordAnswerPresentationLimitation(AnswerPresentationLimitation.UNCOMMITTED_PROVIDER_ANSWER);
+    }
+
+    /** A producer-owned prefix projection cannot retain delivery facts from an excluded component. */
+    public static void recordAnswerPrefixPresented(String input, String answer, int retainedChars, boolean clipped) {
+        Bag bag = HOLDER.get();
+        if (bag == null || input == null || retainedChars < 0 || retainedChars > input.length()) return;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded || bag.outcomeRendered) return;
+            recordAnswerTransformedForRouting(input, AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+            DeliveryFacts selected = bag.answerCandidate == null ? DeliveryFacts.unavailable() : bag.answerCandidate.delivery();
+            DeliveryFacts facts = retainedChars == 0 ? DeliveryFacts.runtime()
+                    : (retainedChars == input.length() ? selected : selected.retainedPrefix(retainedChars))
+                            .transformed(input.substring(0, retainedChars), answer);
+            if (clipped) facts = facts.clipped();
+            recordAnswerDeliverySelected(answer, retainedChars > 0, clipped);
+            AnswerCandidate current = bag.answerCandidate;
+            bag.answerCandidate = new AnswerCandidate(current.answerHash(), current.rawAnswer(), current.origin(),
+                    current.sourceGenerationId(), current.sourceAttemptId(), facts);
+        }
+    }
 
     private record PendingProviderResponse(
             String generationId,
@@ -1113,7 +1249,7 @@ public final class LocalTurnTraceCapture {
                                     : "",
                             origin == ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER
                                     ? receipt.attemptId()
-                                    : "")
+                                    : "", DeliveryFacts.provider(pending.response()))
                     : null;
         }
     }
@@ -1154,7 +1290,7 @@ public final class LocalTurnTraceCapture {
                 Objects.toString(answer, ""),
                 ProviderResponseCapture.AnswerOrigin.RUNTIME_DETERMINISTIC,
                 "",
-                "");
+                "", DeliveryFacts.runtime());
     }
 
     public static void recordToolAnswerSelected(String answer) {
@@ -1174,7 +1310,7 @@ public final class LocalTurnTraceCapture {
         if (bag == null) return;
         DeterministicAnswerTraceRecorder.record(bag.builder, answer, origin);
         bag.answerCandidate = new AnswerCandidate(
-                TraceRedactor.hash(answer), Objects.toString(answer, ""), origin, "", "");
+                TraceRedactor.hash(answer), Objects.toString(answer, ""), origin, "", "", DeliveryFacts.runtime());
     }
 
     /** Explicitly selects provider-returned prose as the terminal answer candidate. */
@@ -1188,6 +1324,8 @@ public final class LocalTurnTraceCapture {
                 : receipt;
         boolean exactProviderBytes = bag.selectedResponseReceipt == safeReceipt
                 && safeReceipt.selected()
+                && bag.selectedProviderResponse != null
+                && bag.selectedProviderResponse.assistantText().equals(Objects.toString(answer, ""))
                 && !safeReceipt.assistantHash().isBlank()
                 && safeReceipt.assistantHash().equals(TraceRedactor.hash(answer));
         ProviderResponseCapture.AnswerOrigin origin = switch (safeReceipt.source()) {
@@ -1209,7 +1347,8 @@ public final class LocalTurnTraceCapture {
                         : "",
                 origin == ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER
                         ? safeReceipt.attemptId()
-                        : "");
+                        : "", exactProviderBytes ? DeliveryFacts.provider(bag.selectedProviderResponse)
+                                : DeliveryFacts.unavailable());
     }
 
     /**
@@ -1295,7 +1434,7 @@ public final class LocalTurnTraceCapture {
                         response.assistantText(),
                         ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER,
                         receipt.generationId(),
-                        receipt.attemptId());
+                        receipt.attemptId(), DeliveryFacts.provider(response));
                 recordAnswerTransformedForRouting(
                         transformedAnswer,
                         AnswerTransformationReason.TASK_CONTRACT_TOOL_CALL_SUPPRESSION);
@@ -1882,8 +2021,6 @@ public final class LocalTurnTraceCapture {
             ProviderResponseCapture.Response response
     ) {
         if (receipt.completion() != ProviderResponseCapture.Completion.PROVIDER_EOS
-                || !receipt.providerTerminalEligible()
-                || response.normalized()
                 || response.truncated()
                 || !response.textualToolCallPresent()
                 || response.nativeToolCallCount() != 0) {
@@ -1892,6 +2029,28 @@ public final class LocalTurnTraceCapture {
                     phase,
                     call,
                     lineage,
+                    ToolCallAuthorityRejectionReason.TEXT_PROTOCOL_INELIGIBLE);
+        }
+        if (response.normalized()) {
+            ProviderResponseCapture.TextProposalSource source = response.textProposalSource();
+            if (source == null) {
+                return rejectToolCallAuthority(bag, phase, call, lineage,
+                        ToolCallAuthorityRejectionReason.TEXT_PROJECTION_SOURCE_MISSING);
+            }
+            if (!source.matchesProjectedText(response.assistantText())) {
+                return rejectToolCallAuthority(bag, phase, call, lineage,
+                        ToolCallAuthorityRejectionReason.TEXT_PROJECTION_MISMATCH);
+            }
+            Sanitize.ExecutableJsonProjectionInspection projection = Sanitize.inspectExecutableJsonProjection(
+                    source.sourceTextForValidation(), response.assistantText());
+            if (projection.result() != Sanitize.ExecutableJsonProjectionResult.EXACT) {
+                return rejectToolCallAuthority(bag, phase, call, lineage,
+                        ToolCallAuthorityRejectionReason.TEXT_PROJECTION_MISMATCH,
+                        projection.result(), projection.suppressionStage(), projection.suppressionKinds(),
+                        projection.fenceTailShapes());
+            }
+        } else if (!receipt.providerTerminalEligible()) {
+            return rejectToolCallAuthority(bag, phase, call, lineage,
                     ToolCallAuthorityRejectionReason.TEXT_PROTOCOL_INELIGIBLE);
         }
         if (!Objects.equals(response.assistantText(), lineage.providerText)) {
@@ -1924,7 +2083,7 @@ public final class LocalTurnTraceCapture {
                     lineage,
                     ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_MISMATCH);
         }
-        if (!receipt.authorizesExactToolName(call.toolName())) {
+        if (!authorizesProviderToolIdentity(receipt, call.toolName())) {
             return rejectToolCallAuthority(
                     bag,
                     phase,
@@ -1948,6 +2107,19 @@ public final class LocalTurnTraceCapture {
                 ToolCallAuthorityKind.PROVIDER_TEXT_JSON,
                 null,
                 null);
+    }
+
+    private static boolean authorizesProviderToolIdentity(
+            ProviderResponseCapture.Receipt receipt, String rawName) {
+        if (receipt == null || rawName == null) return false;
+        if (receipt.authorizesExactToolName(rawName)) return true;
+        if (receipt.toolAuthorityMode() != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON
+                || !ToolNamePolicy.acceptedToolNames().contains(rawName)) {
+            return false;
+        }
+        ToolAliasPolicy.Decision identity = ToolAliasPolicy.resolve(rawName);
+        return identity.status() == ToolAliasPolicy.AliasDecisionStatus.ACCEPTED_ALIAS
+                && receipt.authorizesExactToolName(identity.canonicalToolName());
     }
 
     private static boolean reserveProposal(
@@ -2054,13 +2226,37 @@ public final class LocalTurnTraceCapture {
             ParsedToolCallLineage lineage,
             ToolCallAuthorityRejectionReason reason
     ) {
+        return rejectToolCallAuthority(bag, phase, call, lineage, reason, null);
+    }
+
+    private static ToolCallAuthorityDecision rejectToolCallAuthority(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage,
+            ToolCallAuthorityRejectionReason reason,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure
+    ) {
+        return rejectToolCallAuthority(bag, phase, call, lineage, reason, projectionFailure,
+                Sanitize.ExecutableJsonSuppressionStage.NONE, Set.of(), Set.of());
+    }
+
+    private static ToolCallAuthorityDecision rejectToolCallAuthority(
+            Bag bag, String phase, ToolCall call, ParsedToolCallLineage lineage,
+            ToolCallAuthorityRejectionReason reason,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure,
+            Sanitize.ExecutableJsonSuppressionStage suppressionStage,
+            Set<Sanitize.ExecutableJsonSuppressionKind> suppressionKinds,
+            Set<dev.talos.core.tool.ToolProtocolText.SelectedFenceTailShape> fenceTailShapes
+    ) {
         ToolCallAuthorityKind candidateKind = candidateAuthorityKind(lineage);
         bag.builder.event(TurnTraceEvent.toolCallAuthorityRejected(
                 now(),
                 phase,
                 call,
                 candidateKind == null ? "UNBOUND" : candidateKind.name(),
-                reason.name()));
+                reason.name(),
+                projectionFailure, suppressionStage, suppressionKinds, fenceTailShapes));
         return ToolCallAuthorityDecision.rejected(reason);
     }
 
@@ -2115,9 +2311,7 @@ public final class LocalTurnTraceCapture {
                     && !Objects.equals(
                             permit.currentCall.toolName(), to.toolName());
             boolean providerTargetOutsideSelectedSurface = providerNameChanged
-                    && (permit.providerReceipt == null
-                        || !permit.providerReceipt.authorizesExactToolName(
-                                to.toolName()));
+                    && !authorizesProviderToolIdentity(permit.providerReceipt, to.toolName());
             if (!permitScopeMatches(permit)
                     || (permit.state != PermitState.ACTIVE
                         && permit.state != PermitState.EXECUTING)
@@ -2193,8 +2387,7 @@ public final class LocalTurnTraceCapture {
                 && receipt.source() == ProviderResponseCapture.Source.FOREGROUND_PROVIDER
                 && receipt.purpose() == ProviderResponseCapture.Purpose.TURN_RESPONSE
                 && receipt.providerToolCallEligible()
-                && receipt.authorizesExactToolName(
-                        permit.currentCall.toolName())
+                && authorizesProviderToolIdentity(receipt, permit.currentCall.toolName())
                 && ((permit.authorityKind == ToolCallAuthorityKind.PROVIDER_NATIVE
                         && receipt.toolAuthorityMode()
                             == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE)
@@ -2217,6 +2410,14 @@ public final class LocalTurnTraceCapture {
                     "talos.read_file".equals(call.toolName());
             case EXPECTED_TARGET_SCOPE_REPAIR ->
                     "talos.edit_file".equals(call.toolName());
+            case SELECTED_CONTENT_DRAFT -> {
+                var intent = dev.talos.runtime.TurnTaskContractCapture.getIntent();
+                var draft = intent == null ? null : intent.contentSaveRequest().draftSelection();
+                yield draft != null && "talos.write_file".equals(call.toolName())
+                        && call.parameters().keySet().equals(java.util.Set.of("path", "content"))
+                        && draft.destination().equals(call.param("path"))
+                        && draft.content().equals(call.param("content"));
+            }
         };
     }
 
@@ -2849,8 +3050,28 @@ public final class LocalTurnTraceCapture {
             String mutationStatus,
             String classification
     ) {
+        recordPresentedOutcome(status, verificationStatus, approvalStatus, mutationStatus, classification,
+                status, classification);
+    }
+
+    /** The authoritative pre-presentation outcome is retained without publishing it as a final verdict. */
+    public static void recordPresentedOutcome(String status, String verificationStatus, String approvalStatus,
+                                              String mutationStatus, String classification,
+                                              String operationalStatus, String operationalClassification) {
         Bag bag = HOLDER.get();
         if (bag == null || bag.outcomeRendered) return;
+        bag.operationalOutcome = new OutcomeCandidate(operationalStatus, operationalClassification,
+                verificationStatus, approvalStatus, mutationStatus);
+        recordOutcomeCandidate(bag, new OutcomeCandidate(status, classification, verificationStatus, approvalStatus, mutationStatus));
+    }
+
+    private static void recordOutcomeCandidate(Bag bag, OutcomeCandidate input) {
+        OutcomeCandidate candidate = reconcilePresentationOutcome(bag, input);
+        String status = candidate.status();
+        String classification = candidate.classification();
+        String verificationStatus = candidate.verification();
+        String approvalStatus = candidate.approval();
+        String mutationStatus = candidate.mutation();
         recordVerificationFromOutcomeIfAbsent(bag, verificationStatus);
         if (bag.routedAnswerRecorded) {
             OutcomeTraceRecorder.recordSummary(
@@ -2870,8 +3091,38 @@ public final class LocalTurnTraceCapture {
                     classification);
         }
         bag.outcomeRecorded = true;
-        bag.outcomeCandidate = new OutcomeCandidate(status, classification, verificationStatus, approvalStatus, mutationStatus);
+        bag.outcomeCandidate = candidate;
         renderOutcomeIfReady(bag);
+    }
+
+    /** Typed presentation loss limits completion without changing execution evidence. */
+    public static void recordAnswerPresentationLimitation(AnswerPresentationLimitation reason) {
+        Bag bag = HOLDER.get();
+        if (bag == null || reason == null) return;
+        synchronized (bag) {
+            if (bag.routedAnswerRecorded || bag.outcomeRendered
+                    || !bag.answerPresentationLimitations.add(reason)) return;
+            bag.builder.event(TurnTraceEvent.simple("ANSWER_PRESENTATION_INCOMPLETE", now(),
+                    Map.of("reasonCode", reason.name())));
+            if (bag.outcomeCandidate != null) {
+                OutcomeCandidate prior = bag.outcomeCandidate;
+                OutcomeCandidate limited = reconcilePresentationOutcome(bag, prior);
+                if (!prior.equals(limited)) {
+                    recordOutcomeCandidate(bag, limited);
+                }
+            }
+        }
+    }
+
+    private static OutcomeCandidate reconcilePresentationOutcome(Bag bag, OutcomeCandidate candidate) {
+        if (bag.answerPresentationLimitations.isEmpty() || !"COMPLETE".equals(candidate.status())) return candidate;
+        boolean readOnly = "READ_ONLY_ANSWERED".equals(candidate.classification());
+        boolean completed = "COMPLETED_VERIFIED".equals(candidate.classification())
+                || "COMPLETED_UNVERIFIED".equals(candidate.classification());
+        if (!readOnly && !completed) return candidate;
+        String incomplete = completed && "SUCCEEDED".equals(candidate.mutation()) ? "PARTIAL" : "ADVISORY_ONLY";
+        return new OutcomeCandidate(incomplete, incomplete, candidate.verification(),
+                candidate.approval(), candidate.mutation());
     }
 
     private static void reconcileCommittedAnswerCoverage(
@@ -2882,7 +3133,8 @@ public final class LocalTurnTraceCapture {
         RoutedAnswerTraceRecorder.recordComponentsCommitted(bag.builder, retainedAssistantText, delivered, retained);
         if (!delivered && bag.outcomeCandidate != null && "COMPLETE".equals(bag.outcomeCandidate.status())) {
             OutcomeCandidate prior = bag.outcomeCandidate;
-            recordOutcome("ADVISORY_ONLY", prior.verification(), prior.approval(), prior.mutation(), "ADVISORY_ONLY");
+            recordOutcomeCandidate(bag, new OutcomeCandidate("ADVISORY_ONLY", "ADVISORY_ONLY",
+                    prior.verification(), prior.approval(), prior.mutation()));
         }
         bag.answerComponents = null;
     }
@@ -2894,6 +3146,9 @@ public final class LocalTurnTraceCapture {
                 || bag.outcomeCandidate == null) {
             return;
         }
+        bag.builder.event(FinalAnswerStatus.event(now(), bag.traceId, bag.turnNumber, bag.routedAnswerHash,
+                outcomeSummary(bag.operationalOutcome), outcomeSummary(bag.outcomeCandidate),
+                bag.routedDelivery.associated(), bag.routedDelivery.causes()));
         OutcomeTraceRecorder.recordRendered(
                 bag.builder,
                 bag.outcomeCandidate.status(),
@@ -2913,12 +3168,14 @@ public final class LocalTurnTraceCapture {
             return;
         }
         if (bag.routedAnswerRecorded && bag.outcomeCandidate != null) {
-            OutcomeTraceRecorder.recordRendered(
-                    bag.builder,
-                    bag.outcomeCandidate.status(),
-                    bag.outcomeCandidate.classification());
-            bag.outcomeRendered = true;
+            renderOutcomeIfReady(bag);
         }
+    }
+
+    private static LocalTurnTrace.OutcomeSummary outcomeSummary(OutcomeCandidate candidate) {
+        return candidate == null ? LocalTurnTrace.OutcomeSummary.empty()
+                : new LocalTurnTrace.OutcomeSummary(candidate.status(), candidate.verification(),
+                        candidate.approval(), candidate.mutation(), candidate.classification());
     }
 
     private static void recordVerificationFromOutcomeIfAbsent(Bag bag, String verificationStatus) {
@@ -2986,6 +3243,16 @@ public final class LocalTurnTraceCapture {
         ProviderResponseCapture.clear();
         ContextLedgerSnapshot ledger = ContextLedgerCapture.complete();
         bag.builder.contextLedgerSummary(ledger.summary());
+        ledger.entries().stream().filter(entry -> !entry.requestId().isEmpty()).forEach(entry ->
+                bag.builder.event(TurnTraceEvent.simple("CONTEXT_DELIVERY", now(), Map.of(
+                        "requestId", entry.requestId(),
+                        "source", entry.item().source().name(),
+                        "sourcePath", entry.item().pathHint(),
+                        "boundary", entry.item().executionBoundary().name(),
+                        "sourceHash", entry.item().textHash(),
+                        "providerBodyHash", entry.providerBodyHash(),
+                        "action", entry.decision().action().name(),
+                        "reason", entry.decision().reasonCode()))));
         bag.builder.event(TurnTraceEvent.simple("TRACE_COMPLETED", now(), Map.of()));
         return bag.builder.build();
     }

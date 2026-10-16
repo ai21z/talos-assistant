@@ -32,8 +32,99 @@ class ReadOnlyFinalizationEvidenceTest {
     }
 
     @AfterEach void clear() {
+        dev.talos.safety.ContentRestrictionScope.end();
         TurnTaskContractCapture.clear();
         LocalTurnTraceCapture.clear();
+    }
+
+    @Test void ambientRestrictionsMayTightenDestinationsWithoutChangingObservedEvidence() throws Exception {
+        var contract = contract("script.js");
+        TurnTaskContractCapture.set(contract);
+        var state = ReadOnlyFinalizationEvidenceTestSupport.recordedState(workspace, contract,
+                Map.of("script.js", "before\n"));
+        var original = state.messages.getLast();
+        dev.talos.safety.ContentRestrictionScope.begin();
+        var restrictions = new dev.talos.safety.ContentRestrictions(true, false, false, false);
+        dev.talos.safety.ContentRestrictionScope.restrict(restrictions);
+        var selected = ReadOnlyEvidenceContext.select(state);
+        assertEquals(restrictions, selected.carriers().getFirst().message().contentRestrictions());
+        assertEquals(original, state.messages.getLast(), "Durable execution evidence is not rewritten");
+        var frozen = ReadOnlyFinalizationEvidence.freeze(state, selected);
+        var receipt = ReadOnlyFinalizationEvidenceTestSupport.selectedReceipt("Observed.", prepared(selected));
+        var bound = frozen.bind("Observed.", receipt);
+        assertEquals(ReadOnlyFinalizationEvidence.Reason.BOUND, bound.reason());
+        assertTrue(bound.available());
+    }
+
+    @Test void currentCarrierRestrictionsSurviveSuccessfulFinalizationBinding() throws Exception {
+        var contract = contract("script.js");
+        TurnTaskContractCapture.set(contract);
+        for (int mask = 0; mask < 8; mask++) {
+            var state = ReadOnlyFinalizationEvidenceTestSupport.recordedState(workspace, contract,
+                    Map.of("script.js", "before\n"));
+            var restrictions = new dev.talos.safety.ContentRestrictions(true,
+                    (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0);
+            int index = state.messages.size() - 1;
+            state.messages.set(index, state.messages.get(index).withContentRestrictions(restrictions));
+            var selected = ReadOnlyEvidenceContext.select(state);
+            assertEquals(restrictions, selected.carriers().getFirst().message().contentRestrictions());
+            var frozen = ReadOnlyFinalizationEvidence.freeze(state, selected);
+            var prepared = prepared(selected);
+            var request = new dev.talos.spi.types.ChatRequest("fixture", "fixture", "", "", List.of(),
+                    java.time.Duration.ofSeconds(1), prepared, List.of());
+            assertEquals(restrictions, request.contentRestrictions, "mask=" + mask);
+            var receipt = ReadOnlyFinalizationEvidenceTestSupport.selectedReceipt("Observed.", prepared);
+            var bound = frozen.bind("Observed.", receipt);
+            assertEquals(ReadOnlyFinalizationEvidence.Reason.BOUND, bound.reason(), "mask=" + mask);
+            assertTrue(bound.available(), "mask=" + mask);
+        }
+    }
+
+    @Test void tighteningDoesNotPermitPayloadProtocolOrModelPermissionChanges() throws Exception {
+        var contract = contract("script.js");
+        TurnTaskContractCapture.set(contract);
+        var state = ReadOnlyFinalizationEvidenceTestSupport.recordedState(workspace, contract,
+                Map.of("script.js", "before\n"));
+        var selected = ReadOnlyEvidenceContext.select(state);
+        var carrier = selected.carriers().getFirst();
+        var original = carrier.message();
+        var denied = new dev.talos.safety.ContentRestrictions(false, false, false, false);
+        for (var changed : List.of(
+                new ChatMessage("assistant", original.content(), original.toolCalls(), original.toolCallId()),
+                ChatMessage.toolResult(original.toolCallId(), original.content() + "altered"),
+                ChatMessage.toolResult("different-call", original.content()),
+                new ChatMessage(original.role(), original.content(), List.of(
+                        new ChatMessage.NativeToolCall("extra", "talos.read_file", Map.of("path", "other.txt"))),
+                        original.toolCallId()),
+                original.withContentRestrictions(denied))) {
+            var altered = new ReadOnlyEvidenceContext.Selection(List.of(new ReadOnlyEvidenceContext.Carrier(
+                    carrier.index(), changed, carrier.call(), carrier.evidence(), carrier.target())),
+                    true, List.of(), false, false);
+            assertEquals(ReadOnlyFinalizationEvidence.Reason.COVERAGE_UNAVAILABLE,
+                    ReadOnlyFinalizationEvidence.freeze(state, altered)
+                            .bind("Observed.", ProviderResponseCapture.Receipt.none()).reason());
+        }
+    }
+
+    @Test void projectedCarrierCannotRelaxBoundDestinationRestrictions() throws Exception {
+        var contract = contract("script.js");
+        TurnTaskContractCapture.set(contract);
+        dev.talos.safety.ContentRestrictionScope.begin();
+        dev.talos.safety.ContentRestrictionScope.restrict(
+                new dev.talos.safety.ContentRestrictions(true, false, false, false));
+        var state = ReadOnlyFinalizationEvidenceTestSupport.recordedState(workspace, contract,
+                Map.of("script.js", "before\n"));
+        dev.talos.safety.ContentRestrictionScope.end();
+        var selected = ReadOnlyEvidenceContext.select(state);
+        var carrier = selected.carriers().getFirst();
+        var original = carrier.message();
+        var relaxed = new ChatMessage(original.role(), original.content(), original.toolCalls(), original.toolCallId());
+        var altered = new ReadOnlyEvidenceContext.Selection(List.of(new ReadOnlyEvidenceContext.Carrier(
+                carrier.index(), relaxed, carrier.call(), carrier.evidence(), carrier.target())),
+                true, List.of(), false, false);
+        assertEquals(ReadOnlyFinalizationEvidence.Reason.COVERAGE_UNAVAILABLE,
+                ReadOnlyFinalizationEvidence.freeze(state, altered)
+                        .bind("Observed.", ProviderResponseCapture.Receipt.none()).reason());
     }
 
     private static TaskContract contract(String... paths) {
@@ -71,6 +162,21 @@ class ReadOnlyFinalizationEvidenceTest {
         assertTrue(evidence.matches("Observed.", workspace, contract));
         assertEquals("before\n", evidence.sources().getFirst().text());
         assertEquals("script.js", evidence.sources().getFirst().path());
+    }
+
+    @Test void exactDeliveryReceiptCannotAcquireResponseOnlyFinalizationAuthority() throws Exception {
+        TaskContract contract = contract("script.js");
+        TurnTaskContractCapture.set(contract);
+        var state = ReadOnlyFinalizationEvidenceTestSupport.recordedState(workspace, contract,
+                Map.of("script.js", "before\n"));
+        var selection = ReadOnlyEvidenceContext.select(state);
+        var frozen = ReadOnlyFinalizationEvidence.freeze(state, selection);
+        var receipt = ReadOnlyFinalizationEvidenceTestSupport.selectedReceipt("Observed.", prepared(selection),
+                dev.talos.spi.types.ProviderReadInputBinding.DELIVERY_TAG);
+        assertTrue(receipt.readInputBinding().bound());
+        assertFalse(frozen.bind("Observed.", receipt).available());
+        assertEquals(ReadOnlyFinalizationEvidence.Reason.REQUEST_ASSOCIATION_UNAVAILABLE,
+                frozen.bind("Observed.", receipt).reason());
     }
 
     @Test void sourceProjectionKeepsLiteralDelimitersBlankLinesAndNestedNumberedText() {
@@ -309,7 +415,8 @@ class ReadOnlyFinalizationEvidenceTest {
 
     private static List<ChatMessage> prepared(ReadOnlyEvidenceContext.Selection selection) {
         return selection.carriers().stream().map(carrier -> ChatMessage.toolResult(
-                carrier.message().toolCallId(), Sanitize.sanitizeMessageContent(carrier.message().content()))).toList();
+                carrier.message().toolCallId(), Sanitize.sanitizeMessageContent(carrier.message().content()))
+                .withContentRestrictions(carrier.message().contentRestrictions())).toList();
     }
 
     @Test void selectedProposalRouteSurvivesEveryCandidateInvalidation() throws Exception {

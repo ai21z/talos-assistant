@@ -123,8 +123,17 @@ public final class ReplRouter {
         );
 
         if (quit.get()) return true;
-        render.render(r);
+        render.renderCommand(name, r);
         return true;
+    }
+
+    /** Local aliases are read without starting or validating a model. */
+    public java.util.List<String> modelCompletionAliases() {
+        if (ctx.llm() == null || !ctx.llm().supportsManagedModelSelection()
+                || !ctx.llm().getModel().startsWith("llama_cpp/")) return java.util.List.of();
+        return ctx.llm().managedModelLibrary().entries().stream()
+                .filter(entry -> !"unavailable locally".equals(entry.availability()))
+                .map(dev.talos.engine.llamacpp.ManagedModelLibrary.Entry::alias).toList();
     }
 
     /** Try to handle a non-command prompt. Returns true if handled. */
@@ -158,18 +167,9 @@ public final class ReplRouter {
             render.printRouteHint(label);
         }
 
-        // T802: resolve @-file pins before the spinner so skip/refusal
-        // notices print as plain lines above the turn. Pins ride a
-        // turn-scoped Context copy; the long-lived ctx never carries them.
-        AtFilePins.Resolution pinResolution =
-                AtFilePins.resolve(rawLine, workspace, ctx.sandbox());
-        AtFilePins.recordLast(pinResolution); // /context pinned-bytes row (T803)
-        for (String notice : pinResolution.notices()) {
-            render.render(new Result.TrustedInfo(notice));
-        }
-        final Context turnCtx = pinResolution.pins().isEmpty()
-                ? ctx
-                : ctx.withPinnedFiles(pinResolution.pins());
+        // Pin resolution is owned by the turn boundary. Its notices are rendered after processing.
+        AtFilePins.recordLast(AtFilePins.Resolution.empty());
+        final Context turnCtx = ctx;
 
         render.startSpinner();
 
@@ -184,7 +184,23 @@ public final class ReplRouter {
 
         var publicationHealth = turnProcessor.consumePublicationHealth();
 
-        render.render(r);
+        for (String notice : AtFilePins.lastResolution().notices()) {
+            render.render(new Result.TrustedInfo(notice));
+        }
+
+        try {
+            render.render(r);
+        } finally {
+            var delivery = render.lastAnswerDelivery();
+            if (delivery != null && lastTurnResult != null && delivery.turn() == lastTurnResult.turnNumber()) {
+                try {
+                    ctx.audit().log("answer_delivery", java.util.Map.of(
+                            "presentationId", delivery.presentationId().toString(),
+                            "turn", delivery.turn(), "state", delivery.state().name(),
+                            "humanObservation", "UNKNOWN"));
+                } catch (RuntimeException ignored) { }
+            }
+        }
         if (publicationHealth != null && !publicationHealth.healthy()) {
             String reasons = publicationHealth.reasons().stream()
                     .map(Enum::name)
@@ -205,8 +221,7 @@ public final class ReplRouter {
                     : (r instanceof Result.Streamed st) ? st.fullText.length()
                     : 0;
             render.printTurnStats(
-                    lastTurnResult.turnNumber(),
-                    lastTurnResult.elapsed().toMillis(),
+                    lastTurnResult,
                     responseLen
             );
             lastTurnResult = null;

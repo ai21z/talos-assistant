@@ -54,13 +54,13 @@ public final class TaskOutcomeWarningBuilder {
             warnings.add(TruthWarning.of(
                     TruthWarningType.DENIED_MUTATION,
                     facts.readOnlyDeniedMutation()
-                            ? "A mutating tool call was blocked by the read-only task contract."
+                            ? "A mutating tool call was blocked on a read-only turn."
                             : "A mutating tool call was denied by approval."));
         }
         if (facts.failedActionObligation()) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.FAILED_ACTION_OBLIGATION,
-                    "A required tool action was not performed after retry."));
+                    "A required tool action was not performed."));
         }
         if (facts.commandFailed()) {
             warnings.add(TruthWarning.of(
@@ -96,7 +96,7 @@ public final class TaskOutcomeWarningBuilder {
         if (facts.falseMutationClaim()) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.FALSE_MUTATION_CLAIM,
-                    "The answer claimed a mutation without a successful mutating tool outcome."));
+                    "A current Talos mutation claim has no matching successful execution record."));
         }
         if (facts.inspectUnderCompleted()) {
             warnings.add(TruthWarning.of(
@@ -143,6 +143,21 @@ public final class TaskOutcomeWarningBuilder {
                     "A generic model refusal after an approved protected read was replaced with current read evidence."));
         }
         return List.copyOf(warnings);
+    }
+
+    public static List<TruthWarning> withReadOnlyLimitation(List<TruthWarning> warnings, String reason) {
+        if (reason == null || reason.isBlank()) return warnings;
+        List<TruthWarning> result = new ArrayList<>(warnings);
+        result.add(TruthWarning.of(TruthWarningType.READ_ONLY_ANSWER_INCOMPLETE, reason));
+        return List.copyOf(result);
+    }
+
+    public static List<TruthWarning> withUnresolvedMutationClaim(List<TruthWarning> warnings, boolean unresolved) {
+        if (!unresolved) return warnings;
+        List<TruthWarning> result = new ArrayList<>(warnings);
+        result.add(TruthWarning.of(TruthWarningType.UNRESOLVED_MUTATION_CLAIM,
+                "The actor or time of a mutation claim is not established by current execution records."));
+        return List.copyOf(result);
     }
 
     public static List<TruthWarning> noToolWarnings(NoToolFacts facts) {

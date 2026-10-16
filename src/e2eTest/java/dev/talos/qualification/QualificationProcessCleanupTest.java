@@ -171,7 +171,8 @@ class QualificationProcessCleanupTest {
                 unusedPort,
                 Instant.now());
 
-        assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome());
+        assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome(),
+                () -> result.evidence().toString());
         assertTrue(result.campaignServerDiscoveryVerified());
         assertTrue(result.campaignServerPids().isEmpty());
         assertTrue(result.errors().isEmpty());

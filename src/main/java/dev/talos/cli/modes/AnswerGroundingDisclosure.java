@@ -43,6 +43,7 @@ final class AnswerGroundingDisclosure {
             Path workspace,
             List<ChatMessage> messages
     ) {
+        if (plan != null && dev.talos.runtime.observation.TurnRequestFrame.admits(plan.requestedResults())) return null;
         return ToolLoopResultSummaryFormatter.format(
                 loopResult,
                 toolLoopDisclosure(loopResult, plan, workspace, messages));
@@ -85,6 +86,10 @@ final class AnswerGroundingDisclosure {
     }
 
     private static boolean workspaceScoped(CurrentTurnPlan plan) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.controlledCurrent()) return false;
+        if (plan != null && plan.workspaceResultsApplicable()
+                && !plan.requestedResults().requires(
+                    dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)) return false;
         TaskContract contract = plan == null ? null : plan.taskContract();
         return contract != null
                 && contract.type() == TaskType.WORKSPACE_EXPLAIN

@@ -12,6 +12,11 @@ import java.util.Locale;
 /** Selects deterministic terminal answers after read-only tool evidence is already gathered. */
 public final class TerminalReadOnlyStopAnswer {
     public static final String SYNTHESIS_UNAVAILABLE_REASON = "READ_ONLY_SYNTHESIS_UNAVAILABLE";
+    public static final String RETENTION_LIMIT_REASON = "READ_ONLY_EVIDENCE_RETENTION_LIMIT";
+    public static final String INSPECTION_UNAVAILABLE_REASON = "READ_ONLY_INSPECTION_UNAVAILABLE";
+    public static final String INSPECTION_REQUEST_LIMIT_REASON = "READ_ONLY_INSPECTION_REQUEST_LIMIT";
+    public static final String ACQUISITION_LIMIT_REASON = "READ_ONLY_ACQUISITION_LIMIT";
+    public static final String DELIVERY_UNAVAILABLE_REASON = "READ_EVIDENCE_DELIVERY_UNAVAILABLE";
     private TerminalReadOnlyStopAnswer() {
     }
 
@@ -24,6 +29,29 @@ public final class TerminalReadOnlyStopAnswer {
     public static boolean synthesisUnavailable(dev.talos.runtime.ToolCallLoop.LoopResult result) {
         return result != null && result.failureDecision().action() == dev.talos.runtime.failure.FailureAction.ASK_USER
                 && SYNTHESIS_UNAVAILABLE_REASON.equals(result.failureDecision().reason());
+    }
+
+    public static boolean retentionLimited(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return result != null && result.failureDecision().action() == dev.talos.runtime.failure.FailureAction.ASK_USER
+                && RETENTION_LIMIT_REASON.equals(result.failureDecision().reason());
+    }
+
+    /** Only runtime-owned read-only stops establish this limitation, never answer wording. */
+    public static String limitationReason(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        if (result == null || result.failureDecision().action() != dev.talos.runtime.failure.FailureAction.ASK_USER)
+            return "";
+        return switch (result.failureDecision().reason()) {
+            case SYNTHESIS_UNAVAILABLE_REASON, RETENTION_LIMIT_REASON, INSPECTION_UNAVAILABLE_REASON,
+                    INSPECTION_REQUEST_LIMIT_REASON, ACQUISITION_LIMIT_REASON,
+                    DELIVERY_UNAVAILABLE_REASON -> result.failureDecision().reason();
+            default -> "";
+        };
+    }
+
+    static String retentionLimitAnswer() {
+        return "The acquired source observations exceed the bounded answer context. "
+                + "A complete diagnosis cannot be established without discarding evidence. "
+                + "No further tools were executed and no files were changed. The diagnosis remains incomplete.";
     }
 
     /** A rejected answer generation is distinguished from failed read evidence. */

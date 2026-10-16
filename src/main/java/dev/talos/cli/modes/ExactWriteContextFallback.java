@@ -125,14 +125,17 @@ final class ExactWriteContextFallback {
                 plan.verifierProfile(),
                 plan.requestObligation(),
                 plan.workspaceOperationPlan(),
-                plan.contentMutationPredecessorPaths());
+                plan.contentMutationPredecessorPaths(),
+                plan.requestedResults(),
+                plan.contentSaveRequest());
     }
 
     private static List<ChatMessage> compactMessages(CurrentTurnPlan plan) {
         List<ChatMessage> out = new ArrayList<>();
         out.add(ChatMessage.system(COMPACT_EXACT_WRITE_CONTEXT_FALLBACK_SYSTEM_PROMPT));
         out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
-        out.add(ChatMessage.user(Objects.toString(plan.originalUserRequest(), "")));
+        out.add(ChatMessage.user(dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy
+                .capturedProviderTask(Objects.toString(plan.originalUserRequest(), ""))));
         return out;
     }
 

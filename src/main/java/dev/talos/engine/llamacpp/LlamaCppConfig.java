@@ -94,6 +94,18 @@ record LlamaCppConfig(
     }
 
     String baseUrl() {
+        if (managed()) {
+            URI endpoint = managedEndpoint();
+            String endpointHost = endpoint.getHost();
+            if ("localhost".equalsIgnoreCase(endpointHost)) endpointHost = "127.0.0.1";
+            try {
+                return trimTrailingSlash(new URI(endpoint.getScheme(), endpoint.getUserInfo(), endpointHost,
+                        endpoint.getPort() < 0 ? port : endpoint.getPort(), endpoint.getPath(),
+                        endpoint.getQuery(), endpoint.getFragment()).toString());
+            } catch (java.net.URISyntaxException invalid) {
+                throw new IllegalArgumentException("Invalid managed llama.cpp endpoint", invalid);
+            }
+        }
         String h = host == null || host.isBlank() ? "http://127.0.0.1" : host.trim();
         if (h.startsWith("http://") || h.startsWith("https://")) {
             URI uri = URI.create(h);
@@ -106,6 +118,12 @@ record LlamaCppConfig(
     }
 
     String listenHost() {
+        if (managed()) {
+            String endpointHost = Objects.toString(managedEndpoint().getHost(), "");
+            if ("localhost".equalsIgnoreCase(endpointHost)) return "127.0.0.1";
+            return endpointHost.startsWith("[") && endpointHost.endsWith("]")
+                    ? endpointHost.substring(1, endpointHost.length() - 1) : endpointHost;
+        }
         String h = host == null || host.isBlank() ? "127.0.0.1" : host.trim();
         if (h.startsWith("http://") || h.startsWith("https://")) {
             URI uri = URI.create(h);
@@ -113,6 +131,15 @@ record LlamaCppConfig(
         }
         int colon = h.indexOf(':');
         return colon >= 0 ? h.substring(0, colon) : h;
+    }
+
+    private URI managedEndpoint() {
+        String value = host == null || host.isBlank() ? "http://127.0.0.1" : host.trim();
+        if (!value.contains("://")) {
+            if (!value.startsWith("[") && value.indexOf(':') != value.lastIndexOf(':')) value = "[" + value + "]";
+            value = "http://" + value;
+        }
+        return URI.create(value);
     }
 
     String catalogFallbackModel() {

@@ -144,6 +144,190 @@ public final class Sanitize {
         return unicodeSafe ? cleaned : toAsciiFallback(cleaned);
     }
 
+    /** Finite diagnostics only. No source text or proposal payload is retained. */
+    public enum ExecutableJsonProjectionResult {
+        EXACT,
+        MISSING_INPUT,
+        UNSETTLED_PROTOCOL,
+        XML_PROTOCOL_PRESENT,
+        EMPTY_VISIBLE_SELECTION,
+        SUPPRESSED_OR_UNSELECTED_PROPOSALS,
+        NONBLANK_FENCE_TAIL,
+        EXACT_ROOTS_MISMATCH
+    }
+
+    public enum ExecutableJsonSuppressionStage {
+        NONE,
+        SOURCE_SUPPRESSION,
+        VISIBLE_SOURCE_SUPPRESSION,
+        PROJECTED_SUPPRESSION,
+        HIDDEN_SELECTION_CHANGE,
+        SOURCE_CANDIDATE_COUNT,
+        PROJECTED_CANDIDATE_COUNT
+    }
+
+    public enum ExecutableJsonSuppressionKind {
+        DUPLICATE_RECOGNIZED_ROOT,
+        UNSELECTED_RECOGNIZED_ROOT,
+        SELECTED_FENCE_TAIL_POTENTIAL,
+        OTHER_POTENTIAL_ENVELOPE
+    }
+
+    public record ExecutableJsonProjectionInspection(
+            ExecutableJsonProjectionResult result, ExecutableJsonSuppressionStage suppressionStage,
+            java.util.Set<ExecutableJsonSuppressionKind> suppressionKinds,
+            java.util.Set<ToolProtocolText.SelectedFenceTailShape> fenceTailShapes) {
+        public ExecutableJsonProjectionInspection(ExecutableJsonProjectionResult result,
+                                                  ExecutableJsonSuppressionStage suppressionStage) {
+            this(result, suppressionStage, java.util.Set.of());
+        }
+        public ExecutableJsonProjectionInspection(ExecutableJsonProjectionResult result,
+                                                  ExecutableJsonSuppressionStage suppressionStage,
+                                                  java.util.Set<ExecutableJsonSuppressionKind> suppressionKinds) {
+            this(result, suppressionStage, suppressionKinds, java.util.Set.of());
+        }
+        public ExecutableJsonProjectionInspection {
+            java.util.Objects.requireNonNull(result);
+            java.util.Objects.requireNonNull(suppressionStage);
+            suppressionKinds = java.util.Set.copyOf(suppressionKinds);
+            fenceTailShapes = java.util.Set.copyOf(fenceTailShapes);
+            if ((result == ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS)
+                    != (suppressionStage != ExecutableJsonSuppressionStage.NONE)) {
+                throw new IllegalArgumentException("suppression stage requires a suppression failure");
+            }
+            if (!suppressionKinds.isEmpty()
+                    && result != ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS)
+                throw new IllegalArgumentException("suppression kinds require a suppression failure");
+            if (!fenceTailShapes.isEmpty()
+                    && !suppressionKinds.contains(ExecutableJsonSuppressionKind.SELECTED_FENCE_TAIL_POTENTIAL))
+                throw new IllegalArgumentException("tail shapes require selected fence tail suppression");
+        }
+    }
+
+    /** Display normalization cannot change the selected executable proposal inventory. */
+    public static boolean hasExactExecutableJsonProjection(String source, String projected) {
+        return executableJsonProjectionResult(source, projected) == ExecutableJsonProjectionResult.EXACT;
+    }
+
+    /** Reports the first failed validation stage without relaxing its predicate order. */
+    public static ExecutableJsonProjectionResult executableJsonProjectionResult(String source, String projected) {
+        return inspectExecutableJsonProjection(source, projected).result();
+    }
+
+    /** Source, roots, arguments and offsets are not retained in diagnostics. */
+    public static ExecutableJsonProjectionInspection inspectExecutableJsonProjection(String source, String projected) {
+        if (source == null || projected == null) return projection(ExecutableJsonProjectionResult.MISSING_INPUT);
+        if (ToolProtocolText.unsettledJsonProtocolTailStart(source) >= 0
+                || ToolProtocolText.unsettledJsonProtocolTailStart(projected) >= 0) {
+            return projection(ExecutableJsonProjectionResult.UNSETTLED_PROTOCOL);
+        }
+        if (ToolProtocolText.containsRecognizedXmlToolCall(source)
+                || ToolProtocolText.containsRecognizedXmlToolCall(projected)) {
+            return projection(ExecutableJsonProjectionResult.XML_PROTOCOL_PRESENT);
+        }
+        ToolProtocolText.JsonProposalSelection raw = ToolProtocolText.selectExecutableJsonProposals(source);
+        java.util.List<int[]> hidden = externalThinkBlocks(source, raw.recognizedCandidates());
+        ToolProtocolText.JsonProposalSelection selected = selectedOutsideThinkBlocks(source, raw, hidden);
+        ToolProtocolText.JsonProposalSelection output = ToolProtocolText.selectExecutableJsonProposals(projected);
+        if (selected.executionOrder().isEmpty()) return projection(ExecutableJsonProjectionResult.EMPTY_VISIBLE_SELECTION);
+        if (!raw.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.SOURCE_SUPPRESSION, source, raw);
+        if (!selected.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.VISIBLE_SOURCE_SUPPRESSION, source, selected);
+        if (!output.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.PROJECTED_SUPPRESSION, projected, output);
+        if (!raw.executionOrder().equals(selected.executionOrder()))
+            return suppression(ExecutableJsonSuppressionStage.HIDDEN_SELECTION_CHANGE);
+        if (raw.recognizedCandidates().size() != selected.executionOrder().size())
+            return suppression(ExecutableJsonSuppressionStage.SOURCE_CANDIDATE_COUNT);
+        if (output.recognizedCandidates().size() != output.executionOrder().size())
+            return suppression(ExecutableJsonSuppressionStage.PROJECTED_CANDIDATE_COUNT);
+        for (var span : selected.executionOrder()) {
+            if (span.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON
+                    && !source.substring(span.rootEndExclusive(), span.envelopeContentEndExclusive()).isBlank()) {
+                return projection(ExecutableJsonProjectionResult.NONBLANK_FENCE_TAIL);
+            }
+        }
+        return projection(sameExactJsonRoots(source, selected.sourceOrder(), projected, output.sourceOrder())
+                && sameExactJsonRoots(source, selected.executionOrder(), projected, output.executionOrder())
+                ? ExecutableJsonProjectionResult.EXACT
+                : ExecutableJsonProjectionResult.EXACT_ROOTS_MISMATCH);
+    }
+
+    private static ExecutableJsonProjectionInspection projection(ExecutableJsonProjectionResult result) {
+        return new ExecutableJsonProjectionInspection(result, ExecutableJsonSuppressionStage.NONE);
+    }
+
+    private static ExecutableJsonProjectionInspection suppression(ExecutableJsonSuppressionStage stage) {
+        return new ExecutableJsonProjectionInspection(
+                ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS, stage);
+    }
+
+    private static ExecutableJsonProjectionInspection suppression(ExecutableJsonSuppressionStage stage,
+            String source, ToolProtocolText.JsonProposalSelection selection) {
+        var kinds = java.util.EnumSet.noneOf(ExecutableJsonSuppressionKind.class);
+        var selected = java.util.Set.copyOf(selection.executionOrder());
+        var candidates = new java.util.HashMap<ToolProtocolText.SourceRange,
+                ToolProtocolText.SelectedExecutableJsonSpan>();
+        for (var value : selection.recognizedCandidates()) {
+            if (!selected.contains(value)) candidates.put(new ToolProtocolText.SourceRange(
+                    value.envelopeStartInclusive(), value.envelopeEndExclusive()), value);
+        }
+        var selectedRoots = new java.util.HashSet<String>();
+        for (var value : selection.executionOrder()) selectedRoots.add(value.rootFrom(source));
+        var fences = selection.sourceOrder().stream().filter(value ->
+                value.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON).toList();
+        var affectedFences = new java.util.ArrayList<ToolProtocolText.SelectedExecutableJsonSpan>();
+        int fenceIndex = 0;
+        int lastAffectedFence = -1;
+        for (var span : selection.suppressionOnlyEnvelopes()) {
+            while (fenceIndex < fences.size()
+                    && fences.get(fenceIndex).envelopeContentEndExclusive() <= span.startInclusive()) fenceIndex++;
+            var candidate = span.endExclusive() > span.startInclusive() ? candidates.get(
+                    new ToolProtocolText.SourceRange(span.startInclusive(), span.endExclusive())) : null;
+            if (candidate != null) {
+                kinds.add(selectedRoots.contains(candidate.rootFrom(source))
+                        ? ExecutableJsonSuppressionKind.DUPLICATE_RECOGNIZED_ROOT
+                        : ExecutableJsonSuppressionKind.UNSELECTED_RECOGNIZED_ROOT);
+            } else if (fenceIndex < fences.size()
+                    && span.startInclusive() >= fences.get(fenceIndex).rootEndExclusive()
+                    && span.endExclusive() <= fences.get(fenceIndex).envelopeContentEndExclusive()) {
+                kinds.add(ExecutableJsonSuppressionKind.SELECTED_FENCE_TAIL_POTENTIAL);
+                // Suppressed subspans can share a fence. Inspect its whole tail
+                // only once, including text outside the individual subspans.
+                if (lastAffectedFence != fenceIndex) {
+                    // Retain at most the bound plus one overflow witness.
+                    if (affectedFences.size() <= ToolProtocolText.MAX_DIAGNOSTIC_FENCE_TAILS)
+                        affectedFences.add(fences.get(fenceIndex));
+                    lastAffectedFence = fenceIndex;
+                }
+            } else kinds.add(ExecutableJsonSuppressionKind.OTHER_POTENTIAL_ENVELOPE);
+        }
+        return new ExecutableJsonProjectionInspection(
+                ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS, stage, kinds,
+                ToolProtocolText.inspectSelectedFenceTails(source, affectedFences));
+    }
+
+    private static boolean sameExactJsonRoots(
+            String source, java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> sourceSpans,
+            String projected, java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> projectedSpans) {
+        if (sourceSpans.size() != projectedSpans.size()) return false;
+        for (int index = 0; index < sourceSpans.size(); index++) {
+            var before = sourceSpans.get(index);
+            var after = projectedSpans.get(index);
+            if (before.kind() != after.kind() || !before.rootFrom(source).equals(after.rootFrom(projected))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ToolProtocolText.JsonProposalSelection selectedOutsideThinkBlocks(
+            String source, ToolProtocolText.JsonProposalSelection raw, java.util.List<int[]> hidden) {
+        return hidden.isEmpty() ? raw : ToolProtocolText.selectExecutableJsonProposalsOutside(source,
+                hidden.stream().map(block -> new ToolProtocolText.SourceRange(block[0], block[1])).toList());
+    }
+
     /**
      * Sanitizes streamed LLM output while preserving {@code <tool_call>} blocks intact.
      *
@@ -167,14 +351,7 @@ public final class Sanitize {
         java.util.List<int[]> externalThinkBlocks =
                 externalThinkBlocks(s, rawSelection.recognizedCandidates());
         ToolProtocolText.JsonProposalSelection selection =
-                externalThinkBlocks.isEmpty()
-                        ? rawSelection
-                        : ToolProtocolText.selectExecutableJsonProposalsOutside(
-                                s,
-                                externalThinkBlocks.stream()
-                                        .map(block -> new ToolProtocolText.SourceRange(
-                                                block[0], block[1]))
-                                        .toList());
+                selectedOutsideThinkBlocks(s, rawSelection, externalThinkBlocks);
         java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> protectedJson =
                 selection.sourceOrder();
         java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> protectedExecution =

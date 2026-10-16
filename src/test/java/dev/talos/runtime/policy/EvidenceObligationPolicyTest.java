@@ -6,6 +6,8 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -14,9 +16,29 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class EvidenceObligationPolicyTest {
     private static final Path WORKSPACE = Path.of("").toAbsolutePath();
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Read the main HTML, CSS, and JS files and tell me 3 concrete improvement opportunities. "
+                    + "Use evidence from the actual files, not generic website advice.",
+            "Use evidence from the actual files."
+    })
+    void explicitUnnamedFileEvidenceCannotBeSatisfiedWithoutAnInspection(String request) {
+        var contract = TaskContractResolver.fromUserRequest(request);
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.compatibility(contract, ExecutionPhase.INSPECT,
+                java.util.List.of("talos.read_file"), java.util.List.of("talos.read_file"), java.util.List.of());
+        assertEquals(EvidenceObligation.FILE_CONTENT_LOOKUP_REQUIRED.name(), plan.evidenceObligation());
+        assertNotEquals(EvidenceObligationVerifier.Status.SATISFIED,
+                EvidenceObligationAssessment.assess(plan, null, null).result().status());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard.shouldAppendStreamingGroundingAnnotation(
+                        "An unsupported source claim. ".repeat(40), plan,
+                        java.util.List.of(dev.talos.spi.types.ChatMessage.user(request))));
+    }
 
     @Test
     void explicitTextReadRequiresReadingExpectedTarget() {
@@ -62,6 +84,27 @@ class EvidenceObligationPolicyTest {
         assertEquals(
                 EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE,
                 EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "Is this BMI page working now?|VERIFY_FROM_TRACE_OR_EVIDENCE",
+            "Did you make the changes? Explain why it is incomplete.|VERIFY_FROM_TRACE_OR_EVIDENCE",
+            "What are you unsure about from this session? Explain why it is incomplete.|VERIFY_FROM_TRACE_OR_EVIDENCE",
+            "Did you read settings.properties? Explain its current value.|READ_TARGET_REQUIRED",
+            "Is this BMI page working now? Read settings.properties.|READ_TARGET_REQUIRED",
+            "What are you unsure about from this session? Read .env.|PROTECTED_READ_APPROVAL_REQUIRED",
+            "Is this BMI page working now? Locate the config port.|FILE_CONTENT_LOOKUP_REQUIRED",
+            "What port does HTTPS normally use?|NONE"
+    })
+    void historicalShortcutRejectionPreservesEvidenceWithoutWeakeningCurrentWork(
+            String request, EvidenceObligation expected) {
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type(), contract.toString());
+        assertFalse(contract.verificationRequired(), contract.toString());
+        assertFalse(contract.mutationAllowed(), contract.toString());
+        assertEquals(expected, EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
     }
 
     @Test

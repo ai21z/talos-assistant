@@ -108,7 +108,7 @@ class ExplainLastTurnFailedSettlementTest {
     }
 
     @Test
-    void completedResultErrorRetainsOrdinaryLastSummaryBytes(
+    void completedResultErrorRetainsOrdinaryOutcomeWithUnavailableAnswerStatus(
             @TempDir Path dir
     ) {
         String sessionId = "completed-result-error";
@@ -126,6 +126,9 @@ class ExplainLastTurnFailedSettlementTest {
                   Turn:      7
                   Status:    error
                   Outcome:   ERROR
+                  Answer delivery: unavailable
+                  Whole-request coverage: unavailable
+                  Terminal sink delivery: not recorded in this trace
                   Duration:  0ms
                   Approvals: required=0 granted=0 denied=0
 
@@ -139,7 +142,7 @@ class ExplainLastTurnFailedSettlementTest {
     }
 
     @Test
-    void legacyCompletedAbortMarkerRetainsOrdinaryLastSummaryBytes(
+    void legacyCompletedAbortMarkerRetainsOrdinaryOutcomeWithUnavailableAnswerStatus(
             @TempDir Path dir
     ) {
         String sessionId = "completed-abort-marker";
@@ -158,6 +161,9 @@ class ExplainLastTurnFailedSettlementTest {
                   Turn:      8
                   Status:    aborted
                   Outcome:   ABORTED
+                  Answer delivery: unavailable
+                  Whole-request coverage: unavailable
+                  Terminal sink delivery: not recorded in this trace
                   Duration:  0ms
                   Approvals: required=0 granted=0 denied=0
 
@@ -401,11 +407,12 @@ class ExplainLastTurnFailedSettlementTest {
             assertTrue(text.contains("Settlement: INVALID/UNKNOWN"), text);
             assertTrue(text.contains("Tools: unavailable in terminal projection"), text);
             assertTrue(text.contains("Sources: unavailable in terminal projection"), text);
+            assertNoFinalAnswerStatus(text);
         }
     }
 
     @Test
-    void ordinaryCompletedSummaryRenderingRemainsByteCompatible() {
+    void ordinaryCompletedSummaryPreservesTextAndReportsUnavailableAnswerStatus() {
         TurnRecord ordinary = new TurnRecord(
                 3,
                 Instant.parse("2026-07-21T00:00:00Z"),
@@ -427,6 +434,9 @@ class ExplainLastTurnFailedSettlementTest {
                   Turn:      3
                   Status:    ok
                   Outcome:   NO_TOOL_RESPONSE
+                  Answer delivery: unavailable
+                  Whole-request coverage: unavailable
+                  Terminal sink delivery: not recorded in this trace
                   Duration:  5ms
                   Approvals: required=0 granted=0 denied=0
 
@@ -709,9 +719,16 @@ class ExplainLastTurnFailedSettlementTest {
     }
 
     private static void assertNoHostileCanary(String text) {
+        assertNoFinalAnswerStatus(text);
         for (String canary : HOSTILE_CANARIES) {
             assertFalse(text.contains(canary), () -> canary + " leaked through:\n" + text);
         }
+    }
+
+    private static void assertNoFinalAnswerStatus(String text) {
+        assertFalse(text.contains("Work outcome:"), text);
+        assertFalse(text.contains("Answer delivery:"), text);
+        assertFalse(text.contains("Whole-request coverage:"), text);
     }
 
     private static void assertOrdinaryViewsHaveNoTerminalMarkers(

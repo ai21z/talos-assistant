@@ -1,6 +1,9 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.rag.RagService;
+import dev.talos.core.Config;
+import dev.talos.core.privacy.ContextSourcePolicy;
+import dev.talos.core.privacy.DocumentContentDecision;
 import dev.talos.core.index.SymbolHit;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
@@ -51,10 +54,10 @@ public final class RetrieveTool implements TalosTool {
 
     @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        return doRetrieve(call, ctx != null ? ctx.workspace() : null);
+        return doRetrieve(call, ctx != null ? ctx.workspace() : null, ctx != null ? ctx.config() : null);
     }
 
-    private ToolResult doRetrieve(ToolCall call, Path workspace) {
+    private ToolResult doRetrieve(ToolCall call, Path workspace, Config cfg) {
         String query = call.param("query");
         if (query == null || query.isBlank()) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: query"));
@@ -90,9 +93,11 @@ public final class RetrieveTool implements TalosTool {
             sb.append("Found ").append(prepared.snippets().size()).append(" snippet result(s):\n\n");
             int protectedSnippets = 0;
             int redactedSnippets = 0;
+            DocumentContentDecision contentDecision = null;
 
             for (int i = 0; i < prepared.snippets().size(); i++) {
-                var snippet = prepared.snippets().get(i);
+                var snippet = ragService.admitSnippet(ws, prepared.snippets().get(i));
+                if (cfg != null) snippet = ContextSourcePolicy.admit(cfg, ws, snippet);
                 String sourcePath = baseSourcePath(snippet.path());
                 if (!sourcePath.isBlank()) sourcePaths.add(sourcePath);
                 sb.append("--- [").append(i + 1).append("] ");
@@ -105,11 +110,15 @@ public final class RetrieveTool implements TalosTool {
                     sb.append(snippet.path());
                 }
                 sb.append(" ---\n");
-                Path snippetPath = ws.resolve(snippet.path()).normalize();
+                Path snippetPath = ws.resolve(sourcePath).normalize();
                 if (ProtectedWorkspacePaths.isProtectedPath(ws, snippetPath)) {
                     protectedSnippets++;
                     sb.append("[protected content omitted from retrieval result]");
                 } else {
+                    if (snippet.contentDecision() != null) {
+                        contentDecision = contentDecision == null ? snippet.contentDecision()
+                                : DocumentContentDecision.forDerivedPair(contentDecision, snippet.contentDecision());
+                    }
                     String rawText = snippet.text() == null ? "" : snippet.text();
                     String safeText = ProtectedContentSanitizer.sanitizeText(rawText);
                     if (!safeText.equals(rawText)) redactedSnippets++;
@@ -124,12 +133,21 @@ public final class RetrieveTool implements TalosTool {
                 sb.append("Some retrieval snippets contained protected markers or secret-like values and were redacted.\n");
             }
 
-            return ToolResult.ok(
-                    sb.toString(),
-                    ToolContentMetadata.workspaceEvidence(
+            ToolContentMetadata metadata = ToolContentMetadata.workspaceEvidence(
                             ToolContentMetadata.ContentSource.RAG_RETRIEVE,
                             List.copyOf(sourcePaths),
-                            "retrieval result source paths"));
+                            "retrieval result source paths");
+            if (contentDecision != null) {
+                // One tool result is one handoff. Every included source must allow the destination.
+                metadata = new ToolContentMetadata(
+                        contentDecision.privateDocumentContent()
+                                ? ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                                : ToolContentMetadata.ContentPrivacyClass.EXTRACTED_DOCUMENT_TEXT,
+                        ToolContentMetadata.ContentSource.RAG_RETRIEVE, metadata.sourcePath(),
+                        contentDecision.modelHandoffAllowed(), contentDecision.rawArtifactPersistenceAllowed(),
+                        contentDecision.ragIndexAllowed(), contentDecision.reason(), List.copyOf(sourcePaths));
+            }
+            return ToolResult.ok(sb.toString(), metadata);
         } catch (Exception e) {
             if (ControlFlowFailure.classify(e) != ControlFlowFailure.Kind.NONE) {
                 throw ControlFlowFailure.propagate(e);

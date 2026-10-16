@@ -22,6 +22,27 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolRepromptChatExecutorTest {
 
     @Test
+    void incompletePostToolAnswerIsWithheldWithoutLosingExecutedWorkOrRetrying() {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("SYNTHETIC_PRIVATE_PARTIAL", List.of(), "length")), 4096);
+        LoopState state = state(recorded.client());
+        state.totalToolsInvoked = 1;
+        state.mutatingToolSuccesses = 1;
+        state.pendingMutationSummaries.add("[ok] Updated README.md");
+        boolean continued = ToolRepromptChatExecutor.execute(state, state.messages, tools(),
+                ChatRequestControls.defaults(), "test reprompt");
+        assertFalse(continued);
+        assertFalse(state.currentText.contains("SYNTHETIC_PRIVATE"));
+        assertTrue(state.currentText.contains("withheld"));
+        assertFalse(state.currentText.contains("No files were changed"));
+        assertEquals(1, state.totalToolsInvoked);
+        assertEquals(1, state.mutatingToolSuccesses);
+        assertEquals(List.of("[ok] Updated README.md"), state.pendingMutationSummaries);
+        assertTrue(state.currentNativeCalls.isEmpty());
+        assertEquals(1, recorded.requests().size());
+    }
+
+    @Test
     void executeCopiesTextAndNativeToolCallsIntoState() {
         ChatMessage.NativeToolCall call = new ChatMessage.NativeToolCall(
                 "call-1",

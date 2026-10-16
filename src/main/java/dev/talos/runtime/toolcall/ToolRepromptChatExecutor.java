@@ -17,6 +17,19 @@ final class ToolRepromptChatExecutor {
     private ToolRepromptChatExecutor() {
     }
 
+    private enum RequestPurpose { EVIDENCE_CONTINUATION, TOOL_ARGUMENT_SELECTION }
+
+    /** Argument selection is bounded by its caller and cannot itself finalize an answer. */
+    static boolean executeToolSelectionResult(LoopState state, List<ChatMessage> requestMessages,
+                                             List<ToolSpec> tools, ChatRequestControls controls,
+                                             String noAnswerFallback) {
+        if (tools == null || tools.isEmpty() || controls == null || !controls.singleAttempt()
+                || controls.toolChoice() != dev.talos.spi.types.ToolChoiceMode.REQUIRED)
+            throw new IllegalArgumentException("Tool selection requires one bounded required-tool request.");
+        return executeResult(state, requestMessages, tools, controls, noAnswerFallback, true,
+                RequestPurpose.TOOL_ARGUMENT_SELECTION);
+    }
+
     static boolean execute(
             LoopState state,
             List<ChatMessage> requestMessages,
@@ -63,7 +76,7 @@ final class ToolRepromptChatExecutor {
                 repromptToolSpecs,
                 controls,
                 noAnswerFallback,
-                true);
+                true, RequestPurpose.EVIDENCE_CONTINUATION);
     }
 
     static boolean executeRetryResult(
@@ -79,7 +92,7 @@ final class ToolRepromptChatExecutor {
                 repromptToolSpecs,
                 controls,
                 noAnswerFallback,
-                false);
+                false, RequestPurpose.EVIDENCE_CONTINUATION);
     }
 
     private static boolean executeResult(
@@ -88,13 +101,26 @@ final class ToolRepromptChatExecutor {
             List<ToolSpec> repromptToolSpecs,
             ChatRequestControls controls,
             String noAnswerFallback,
-            boolean failPendingObligationOnEmptyResult
+            boolean failPendingObligationOnEmptyResult,
+            RequestPurpose purpose
     ) {
         ChatRequestControls authorityBoundControls =
                 (controls == null ? ChatRequestControls.defaults() : controls)
                         .withToolAuthorityMode(
                                 state.ctx.llm().toolAuthorityModeForToolSurface(
                                         repromptToolSpecs));
+        var delivery = purpose == RequestPurpose.EVIDENCE_CONTINUATION
+                ? ReadOnlyEvidenceContext.delivery(state) : ReadOnlyEvidenceContext.Delivery.unavailable();
+        if (delivery.retentionLimited()) return ReadEvidenceDeliveryRequest.stop(state, "SOURCE_RETENTION_LIMIT");
+        if (delivery.excludedSourceCount() > 0)
+            LocalTurnTraceCapture.recordRepair("READ_EVIDENCE_DELIVERY_EXCLUSIONS",
+                    "excludedSources=" + delivery.excludedSourceCount());
+        var expectedInputs = ReadEvidenceDeliveryRequest.expected(delivery);
+        if (!expectedInputs.isEmpty()) {
+            if (!ReadEvidenceDeliveryRequest.contains(requestMessages, expectedInputs))
+                return ReadEvidenceDeliveryRequest.stop(state, "REQUEST_SOURCE_MEMBERSHIP_MISMATCH");
+            authorityBoundControls = ReadEvidenceDeliveryRequest.controls(authorityBoundControls);
+        }
         TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         LocalTurnTraceCapture.enterExecutionStage(
                 TurnExecutionStage.GENERATION_COORDINATION);
@@ -108,6 +134,12 @@ final class ToolRepromptChatExecutor {
             throw failure;
         }
         LocalTurnTraceCapture.enterExecutionStage(priorStage);
+        if (!expectedInputs.isEmpty() && (repromptResult == null
+                || !ReadEvidenceDeliveryRequest.delivered(repromptResult.provenance(), expectedInputs)))
+            return ReadEvidenceDeliveryRequest.stop(state, "SERIALIZED_SOURCE_MEMBERSHIP_UNAVAILABLE");
+        if (!expectedInputs.isEmpty())
+            LocalTurnTraceCapture.recordRepair("READ_EVIDENCE_DELIVERED",
+                    "sourceCount=" + expectedInputs.size() + ", semanticCompleteness=notEstablished");
         return applyResult(
                 state,
                 repromptResult,
@@ -130,6 +162,9 @@ final class ToolRepromptChatExecutor {
             boolean failPendingObligationOnEmptyResult
     ) {
         state.applyProviderResult(repromptResult);
+        if (dev.talos.runtime.IncompleteGenerationPresentation.required(repromptResult)) {
+            return false;
+        }
         if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
             if (failPendingObligationOnEmptyResult
                     && state.failPendingActionObligationAfterNoExecutableToolCalls()) {

@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.nio.file.Files;
@@ -44,6 +45,24 @@ public final class ProjectSummaryEvidencePolicy {
         }
     }
 
+    public enum Reason { AVAILABLE, MISSING, LIMITED, BLOCKED, ASSOCIATION_UNAVAILABLE }
+
+    /** Acquisition and settlement share one assessment, never new execution permission. */
+    public record Assessment(EvidenceObligationVerifier.Result result, Reason reason,
+                             List<String> recoverableReadTargets) {
+        public Assessment { recoverableReadTargets = List.copyOf(recoverableReadTargets); }
+    }
+
+    public static Assessment assess(Path workspace, TaskContract contract, ToolCallLoop.LoopResult loop) {
+        if (loop != null && loop.readEvidenceCoverage().captured())
+            return loop.readEvidenceCoverage().assessProjectSummary(loop.toolOutcomes(), workspace, contract);
+        List<ToolCallLoop.ToolOutcome> outcomes = loop == null ? List.of() : loop.toolOutcomes();
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED, Set.of(), outcomes, workspace);
+        return new Assessment(result, result.status() == EvidenceObligationVerifier.Status.SATISFIED
+                ? Reason.AVAILABLE : Reason.MISSING, missingAnchorReadTargets(workspace, outcomes));
+    }
+
     public static Optional<String> preferredAnchor(Path workspace) {
         AnchorSelection selection = selectAnchor(workspace);
         return selection.status() == SelectionStatus.FOUND
@@ -52,6 +71,8 @@ public final class ProjectSummaryEvidencePolicy {
     }
 
     public static AnchorSelection selectAnchor(Path workspace) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent())
+            return new AnchorSelection(SelectionStatus.UNAVAILABLE, "");
         if (workspace == null) return new AnchorSelection(SelectionStatus.UNAVAILABLE, "");
         Path root;
         try {

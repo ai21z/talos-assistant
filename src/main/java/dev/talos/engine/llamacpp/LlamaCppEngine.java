@@ -70,6 +70,9 @@ final class LlamaCppEngine implements ModelEngine {
     @Override
     public Capabilities caps() {
         LlamaCppResolvedProfileService.Snapshot snapshot = preparedProfile;
+        if (snapshot != null && !preparedProcessCurrent()) {
+            return Capabilities.of(false, false, false, snapshot.profile().effectiveContextTokens());
+        }
         if (snapshot == null) snapshot = profileService.inspectLocal();
         return capabilities(snapshot);
     }
@@ -79,7 +82,10 @@ final class LlamaCppEngine implements ModelEngine {
         Optional<LlamaCppQualificationLaunchExpectation> expectation =
                 profileService.qualificationLaunchExpectation();
         if (preparedProfile != null) {
-            if (expectation.isEmpty()) return capabilities(preparedProfile);
+            if (expectation.isEmpty()) {
+                serverManager.requireActiveManagedProcess();
+                return capabilities(preparedProfile);
+            }
             try {
                 serverManager.requireActiveQualificationReceipt();
                 return capabilities(preparedProfile);
@@ -94,10 +100,12 @@ final class LlamaCppEngine implements ModelEngine {
             serverManager.ensureStarted();
         }
         try {
+            if (expectation.isEmpty()) serverManager.requireActiveManagedProcess();
             LlamaCppResolvedProfileService.Snapshot snapshot = expectation.isPresent()
                     ? profileService.resolveAvailable(
                             serverManager.fetchQualificationProps(expectation.get()), true)
                     : profileService.resolveAvailable(true);
+            if (expectation.isEmpty()) serverManager.requireActiveManagedProcess();
             if (snapshot.profile().resolution()
                     == LlamaCppProfileResolver.ResolutionState.REFUSED) {
                 throw new IllegalStateException(
@@ -121,8 +129,28 @@ final class LlamaCppEngine implements ModelEngine {
     @Override
     public ModelIdentitySnapshot modelIdentity() {
         LlamaCppResolvedProfileService.Snapshot snapshot = preparedProfile;
+        if (snapshot != null && !preparedProcessCurrent()) {
+            return ModelIdentitySnapshot.builder().backend(BACKEND).configuredModel(config.model())
+                    .configuredModelFile(config.modelPath()).resolution("UNVERIFIED")
+                    .servedIdentityState("UNVERIFIED").propsState("UNAVAILABLE").chatAvailable(false)
+                    .reasonCodes(List.of("MANAGED_PROCESS_UNAVAILABLE")).build();
+        }
         if (snapshot == null) snapshot = profileService.inspectLocal();
         return snapshot.identity();
+    }
+
+    private boolean preparedProcessCurrent() {
+        if (!config.managed() || profileService.qualificationLaunchExpectation().isPresent()) return true;
+        try {
+            serverManager.requireActiveManagedProcess();
+            return true;
+        } catch (RuntimeException failure) {
+            if (dev.talos.spi.types.ControlFlowFailure.classify(failure)
+                    != dev.talos.spi.types.ControlFlowFailure.Kind.NONE) {
+                throw dev.talos.spi.types.ControlFlowFailure.propagate(failure);
+            }
+            return false;
+        }
     }
 
     @Override

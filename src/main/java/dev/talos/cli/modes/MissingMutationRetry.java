@@ -1,5 +1,6 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
@@ -671,7 +672,7 @@ final class MissingMutationRetry {
     ) {
         String request = plan == null || plan.originalUserRequest() == null
                 ? ""
-                : plan.originalUserRequest().strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(plan.originalUserRequest()).strip();
         String operationTool = plan == null
                 ? ""
                 : String.join(", ", plan.workspaceOperationPlan().toolNames());
@@ -718,7 +719,7 @@ final class MissingMutationRetry {
     ) {
         String request = plan == null || plan.originalUserRequest() == null
                 ? ""
-                : plan.originalUserRequest().strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(plan.originalUserRequest()).strip();
         String targets = String.join(", ", remainingTargets);
         StringBuilder frame = new StringBuilder();
         frame.append("[RemainingExpectedTargetsAfterMutationRetry]\n")
@@ -1020,7 +1021,8 @@ final class MissingMutationRetry {
     ) {
         TaskContract contract = plan == null ? TaskContract.unknown("") : plan.taskContract();
         ActionObligation obligation = plan == null ? ActionObligation.UNKNOWN : plan.actionObligation();
-        String request = plan == null ? "" : Objects.toString(plan.originalUserRequest(), "");
+        String request = plan == null ? "" : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(
+                Objects.toString(plan.originalUserRequest(), ""));
         List<String> allowedTools = retryToolSpecs == null || retryToolSpecs.isEmpty()
                 ? (fallbackToolNames == null || fallbackToolNames.isEmpty()
                 ? List.of("talos.write_file", "talos.edit_file")
@@ -1210,14 +1212,14 @@ final class MissingMutationRetry {
         if (priorMutationRequest != null && !priorMutationRequest.isBlank()
                 && !Objects.equals(priorMutationRequest, userRequest)) {
             return "The current user message is a retry/repair follow-up:\n\n«"
-                    + pinForRetryPrompt(userRequest)
+                    + pinForRetryPrompt(RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest))
                     + "»\n\n"
                     + "The previous mutation request to reissue is:\n\n«"
                     + pinForRetryPrompt(priorMutationRequest)
                     + "»\n\n";
         }
         return "The user's request was:\n\n«"
-                + pinForRetryPrompt(userRequest)
+                + pinForRetryPrompt(RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest))
                 + "»\n\n";
     }
 

@@ -1,11 +1,18 @@
 package dev.talos.core.engine;
 
 import dev.talos.core.Config;
+import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.spi.EngineConfig;
 import dev.talos.spi.ModelCatalog;
 import dev.talos.spi.ModelEngine;
 import dev.talos.spi.ModelEngineProvider;
 import dev.talos.spi.types.ModelRef;
+import dev.talos.spi.types.Capabilities;
+import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.TokenChunk;
 
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -31,9 +38,13 @@ public final class EngineRegistry implements AutoCloseable {
     private String activeBackend;
     private String activeModel;
     private ModelEngine activeEngine;
+    private EngineConfig engineConfig;
+    private boolean selectionUnavailable;
+    private int activeRequests;
 
     public EngineRegistry(Config cfg) {
         this.cfg = (cfg == null ? new Config() : cfg);
+        this.engineConfig = this.cfg;
 
         ServiceLoader<ModelEngineProvider> sl = ServiceLoader.load(ModelEngineProvider.class);
         for (ModelEngineProvider p : sl) {
@@ -51,26 +62,112 @@ public final class EngineRegistry implements AutoCloseable {
         boolean backendChanged = backend != null && !backend.isBlank() && !Objects.equals(activeBackend, backend);
         boolean modelChanged   = model   != null && !model.isBlank()   && !Objects.equals(activeModel,   model);
 
-        if (backendChanged) {
-            activeBackend = backend;
-        }
-        if (modelChanged) {
-            activeModel = model;
-        }
         if (backendChanged || modelChanged) {
+            requireIdle();
+            if (selectionUnavailable) throw unavailable();
+            selectionUnavailable = true;
             closeEngine();
         }
+        if (backendChanged) activeBackend = backend;
+        if (modelChanged) activeModel = model;
+        if (backendChanged || modelChanged) selectionUnavailable = false;
     }
 
     /** Active engine for the selected backend. Lazily creates via Provider.create(cfg). */
     public synchronized ModelEngine engine() {
+        if (selectionUnavailable) throw unavailable();
         ensureDefaults();
         if (activeEngine == null) {
             ModelEngineProvider p = providers.get(activeBackend);
             if (p == null) throw new IllegalStateException("No ModelEngineProvider for backend: " + activeBackend);
-            activeEngine = p.create(this.cfg);
+            activeEngine = p.create(engineConfig);
         }
         return activeEngine;
+    }
+
+    /** The selected identity is committed only after owned shutdown and target preparation. */
+    public synchronized Capabilities switchManagedModel(EngineConfig target, String alias) throws Exception {
+        requireIdle();
+        Objects.requireNonNull(target, "target configuration");
+        Map<String, Object> targetBlock = CfgUtil.map(CfgUtil.map(target.data().get("engines")).get("llama_cpp"));
+        Map<String, Object> previousBlock = CfgUtil.map(CfgUtil.map(engineConfig.data().get("engines")).get("llama_cpp"));
+        if (!"managed".equals(previousBlock.getOrDefault("mode", "managed"))
+                || !"managed".equals(targetBlock.get("mode"))
+                || alias == null || !alias.equals(targetBlock.get("model"))) {
+            throw new IllegalArgumentException("Managed model switching requires an owned managed llama.cpp configuration.");
+        }
+        ModelEngineProvider provider = providers.get("llama_cpp");
+        if (provider == null) throw new IllegalStateException("The managed llama.cpp provider is unavailable.");
+        ModelEngine candidate = provider.create(target);
+        selectionUnavailable = true;
+        try {
+            closeEngine();
+        } catch (RuntimeException | Error stopFailure) {
+            try { candidate.close(); } catch (RuntimeException cleanupFailure) { stopFailure.addSuppressed(cleanupFailure); }
+            throw stopFailure;
+        }
+        activeEngine = candidate;
+        try {
+            Capabilities capabilities = candidate.prepareCapabilities();
+            requireSelectedIdentity(candidate.modelIdentity(), alias);
+            if (capabilities == null || !capabilities.chat()) {
+                throw new IllegalStateException("The selected model is not available for chat.");
+            }
+            engineConfig = target;
+            activeBackend = "llama_cpp";
+            activeModel = alias;
+            selectionUnavailable = false;
+            return capabilities;
+        } catch (Exception | Error failure) {
+            try { closeEngine(); } catch (RuntimeException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+            throw failure;
+        }
+    }
+
+    private static void requireSelectedIdentity(ModelIdentitySnapshot identity, String alias) {
+        if (identity == null || !identity.chatAvailable()
+                || !"llama_cpp".equals(identity.backend())
+                || !alias.equals(identity.configuredModel())
+                || !"AVAILABLE".equals(identity.propsState())
+                || !"MATCHED".equals(identity.servedIdentityState())
+                || "REFUSED".equals(identity.resolution())) {
+            throw new IllegalStateException("The selected model identity was not verified. No model is available until an explicit successful selection.");
+        }
+    }
+
+    public synchronized boolean selectionUnavailable() { return selectionUnavailable; }
+
+    public synchronized Capabilities prepareCapabilities() throws Exception {
+        return engine().prepareCapabilities();
+    }
+
+    /** A live transport retains the selected engine until its stream is closed. */
+    public Stream<TokenChunk> chatStream(ChatRequest request, ProviderTransportHandoff handoff,
+                                        boolean buffered) throws Exception {
+        ModelEngine selected;
+        synchronized (this) {
+            selected = engine();
+            activeRequests++;
+        }
+        try {
+            Stream<TokenChunk> stream = buffered
+                    ? selected.chatStreamNonStreaming(request, handoff)
+                    : selected.chatStream(request, handoff);
+            return Objects.requireNonNull(stream, "provider stream").onClose(this::releaseRequest);
+        } catch (Exception | Error failure) {
+            releaseRequest();
+            throw failure;
+        }
+    }
+
+    private synchronized void releaseRequest() { activeRequests--; }
+
+    private void requireIdle() {
+        if (activeRequests != 0) throw new IllegalStateException("A model request is still active. Model switching was not started.");
+    }
+
+    private IllegalStateException unavailable() {
+        return new IllegalStateException("Model switching did not complete. No model is available until an explicit successful selection.");
     }
 
     /** Catalog for a specific backend (may be null if none). */
@@ -150,9 +247,7 @@ public final class EngineRegistry implements AutoCloseable {
     }
 
     private synchronized void closeEngine() {
-        if (activeEngine instanceof AutoCloseable ac) {
-            try { ac.close(); } catch (Exception ignore) {}
-        }
+        if (activeEngine != null) activeEngine.close();
         activeEngine = null;
     }
 

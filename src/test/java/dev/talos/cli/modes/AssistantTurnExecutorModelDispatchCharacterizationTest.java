@@ -8,6 +8,7 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
+import dev.talos.runtime.IncompleteGenerationPresentation;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnProcessor;
@@ -16,6 +17,7 @@ import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.FinalAnswerStatus;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -1248,8 +1250,11 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                         .build(),
                 new AssistantTurnExecutor.Options());
 
-        assertTrue(streamingOut.streamed(), "stream sink should select the streaming provider path");
-        assertFalse(bufferedOut.streamed(), "missing stream sink should select the buffered provider path");
+        assertFalse(streamingOut.streamed(), "Transport fragments must remain private");
+        assertFalse(bufferedOut.streamed());
+        assertTrue(chunks.isEmpty());
+        assertEquals(1, streamed.requests().size());
+        assertEquals(1, buffered.requests().size());
         assertEquals(bufferedOut.text(), streamingOut.text());
         assertEquals(answer, streamingOut.text());
     }
@@ -1299,7 +1304,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
     }
 
     @Test
-    void lengthLimitedNoToolAnswerAddsVisibleWarningAndTrace(@TempDir Path workspace) {
+    void lengthLimitedNoToolAnswerWithholdsProviderTextAndRecordsLimitedAdvisory(@TempDir Path workspace) {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(new LlmClient.StreamResult("Partial answer", List.of(), "length")),
                 4096);
@@ -1324,10 +1329,14 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                     workspace,
                     ctx,
                     new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains("Partial answer"), out.text());
-            assertTrue(out.text().contains("output limit"), out.text());
+            assertEquals(IncompleteGenerationPresentation.NOTICE, out.text());
+            assertFalse(out.text().contains("Partial answer"));
+            assertFalse(out.streamed());
+            assertEquals(1, recorded.requests().size(), "An incomplete candidate must not trigger another request");
+            assertLimitedAdvisory(trace);
             assertTrue(trace.warnings().stream().anyMatch(warning ->
                     "LLM_OUTPUT_LIMIT_REACHED".equals(warning.code())
                             && warning.message().contains("finish_reason=length")));
@@ -1337,13 +1346,54 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
     }
 
     @Test
-    void recoveredReadAnswerDoesNotInheritInitialOutputLimit(@TempDir Path workspace) throws Exception {
-        assertReadHandoffOutputLimit(workspace, "length", "stop", false);
+    void terminalLengthLimitedReadAnswerRemainsUnresolvedWithoutFurtherGeneration(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                new LlmClient.StreamResult("I need the current notes.", List.of(), "length"),
+                new LlmClient.StreamResult("I still need the current notes.", List.of(), "length")), 4096);
+        var ctx = Context.builder(new Config()).llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of())).toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry)).build();
+        ProviderAuthorityTestTrace.begin("initial-output-limit-no-read-handoff", null);
+        try {
+            var out = AssistantTurnExecutor.execute(messages("Read notes.txt and tell me the observed value. Do not change files."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            var trace = LocalTurnTraceCapture.complete();
+            assertEquals(2, recorded.requests().size(), "Only the existing bounded initial-generation cap retry is permitted");
+            assertTrue(recorded.requests().getFirst().controls.maxOutputTokens() > 0);
+            assertEquals(0, recorded.requests().getLast().controls.maxOutputTokens());
+            assertTrue(recorded.requests().getLast().controls.debugTags().contains("output-cap-lifted-retry"));
+            var attempts = trace.events().stream().filter(event -> "GENERATION_ATTEMPT_STARTED".equals(event.type())).toList();
+            assertEquals(2, attempts.size());
+            assertEquals("PRIMARY", attempts.getFirst().data().get("attemptKind"));
+            assertEquals("OUTPUT_CAP_LIFT_RETRY", attempts.getLast().data().get("attemptKind"));
+            org.junit.jupiter.api.Assertions.assertNotNull(attempts.getFirst().data().get("generationId"));
+            assertEquals(attempts.getFirst().data().get("generationId"), attempts.getLast().data().get("generationId"));
+            assertEquals(1L, trace.events().stream().filter(event -> "GENERATION_STARTED".equals(event.type())).count());
+            assertTrue(out.text().contains("Evidence incomplete"), out.text());
+            assertFalse(out.text().contains("I need the current notes."), out.text());
+            assertFalse(out.text().contains("I still need the current notes."), out.text());
+            assertFalse(out.text().contains("42"), out.text());
+            assertTrue(trace.events().stream().noneMatch(event -> "TOOL_EXECUTED".equals(event.type())));
+            assertLimitedAdvisory(trace);
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
     }
 
     @Test
     void recoveredReadAnswerKeepsItsOwnOutputLimit(@TempDir Path workspace) throws Exception {
-        assertReadHandoffOutputLimit(workspace, "stop", "length", true);
+        assertReadHandoffOutputLimit(workspace, "length", true);
+    }
+
+    @Test
+    void normalStopReadRecoveryRetainsItsCompletedAnswer(@TempDir Path workspace) throws Exception {
+        assertReadHandoffOutputLimit(workspace, "stop", false);
     }
 
     @Test
@@ -1369,15 +1419,21 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
             var out = AssistantTurnExecutor.execute(messages("Read notes.txt and tell me the observed value."),
                     workspace, ctx, new AssistantTurnExecutor.Options());
             assertEquals(2, recorded.requests().size());
-            assertTrue(out.text().contains("42"), out.text());
-            assertTrue(out.text().contains("provider reported finish_reason=length"), out.text());
+            assertFalse(out.text().contains("The observed value in notes.txt is 42."), out.text());
+            assertTrue(out.text().contains("uncommitted provider text was withheld"), out.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            var trace = LocalTurnTraceCapture.complete();
+            assertLimitedAdvisory(trace);
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                    && "talos.read_file".equals(event.toolName())));
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
         } finally {
             ProviderAuthorityTestTrace.clear();
         }
     }
 
     @Test
-    void directOutputLimitWarningsDoNotRequireTraceCapture(@TempDir Path workspace) {
+    void incompleteCandidateNoticeDoesNotRequireTraceCapture(@TempDir Path workspace) {
         LocalTurnTraceCapture.clear();
         for (boolean streaming : List.of(false, true)) {
             var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
@@ -1388,25 +1444,21 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
             if (streaming) builder.streamSink(chunks::add).onStreamComplete(() -> {});
             var out = AssistantTurnExecutor.execute(messages("Explain briefly."), workspace,
                     builder.build(), new AssistantTurnExecutor.Options());
-            assertEquals(streaming, out.streamed());
-            assertTrue(out.text().contains("provider reported finish_reason=length"), out.text());
-            assertEquals(1, out.text().split("provider reported finish_reason=length", -1).length - 1);
-            if (streaming) assertTrue(String.join("", chunks).contains("provider reported finish_reason=length"));
+            assertFalse(out.streamed());
+            assertEquals(IncompleteGenerationPresentation.NOTICE, out.text());
+            assertFalse(out.text().contains("Partial answer"));
+            assertTrue(chunks.isEmpty());
+            assertEquals(1, recorded.requests().size());
         }
     }
 
     private static void assertReadHandoffOutputLimit(
-            Path workspace, String initialFinish, String finalFinish, boolean expectedNotice) throws Exception {
+            Path workspace, String finalFinish, boolean expectedNotice) throws Exception {
         Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
         var registry = new ToolRegistry();
         registry.register(new dev.talos.tools.impl.ReadFileTool());
         var responses = new ArrayList<LlmClient.StreamResult>();
-        responses.add(new LlmClient.StreamResult("I need the current notes.", List.of(), initialFinish));
-        if ("length".equals(initialFinish)) {
-            // The first dispatch has one internal output-cap recovery attempt;
-            // both initial attempts stop at LENGTH before the read handoff.
-            responses.add(new LlmClient.StreamResult("I still need to read the current notes.", List.of(), "length"));
-        }
+        responses.add(new LlmClient.StreamResult("I need the current notes.", List.of(), "stop"));
         responses.add(new LlmClient.StreamResult("The observed value in notes.txt is 42.", List.of(), finalFinish));
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(responses, 4096);
         var ctx = Context.builder(new Config())
@@ -1421,11 +1473,17 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages("Read notes.txt and tell me the observed value. Do not change files."),
                     workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
             assertEquals(responses.size(), recorded.requests().size(),
-                    "the explicit initial attempt(s) and one post-read synthesis must all be consumed");
-            assertTrue(out.text().contains("42"), out.text());
-            assertEquals(expectedNotice, out.text().contains("provider reported finish_reason=length"), out.text());
+                    "One normal initial response and one post-read synthesis must be consumed");
+            assertEquals(expectedNotice, out.text().contains("uncommitted provider text was withheld"), out.text());
+            if (expectedNotice) {
+                assertFalse(out.text().contains("The observed value in notes.txt is 42."), out.text());
+                assertLimitedAdvisory(trace);
+            } else {
+                assertTrue(out.text().contains("The observed value in notes.txt is 42."), out.text());
+            }
             assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
                             && "talos.read_file".equals(event.toolName())),
                     "this witness must execute the real deterministic read handoff");
@@ -1433,6 +1491,14 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         } finally {
             ProviderAuthorityTestTrace.clear();
         }
+    }
+
+    private static void assertLimitedAdvisory(LocalTurnTrace trace) {
+        var status = FinalAnswerStatus.decode(trace);
+        assertTrue(status.available(), trace.events().toString());
+        assertEquals(FinalAnswerStatus.Delivery.LIMITED, status.delivery());
+        assertTrue(status.causes().contains(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION), status.toString());
+        assertEquals("ADVISORY_ONLY", trace.outcome().status());
     }
 
     @Test

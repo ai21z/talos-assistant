@@ -55,6 +55,15 @@ final class ToolCallLoopEngine {
             String initialAnswer, List<NativeToolCall> nativeToolCalls,
             ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
             Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff) {
+        return run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx, handoff,
+                maxIterations);
+    }
+
+    ToolCallLoop.LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff,
+            int remainingIterations) {
         return run(
                 initialAnswer,
                 nativeToolCalls,
@@ -64,7 +73,8 @@ final class ToolCallLoopEngine {
                 messages,
                 workspace,
                 ctx,
-                handoff);
+                handoff,
+                remainingIterations);
     }
 
     ToolCallLoop.LoopResult runRuntimeDeterministic(
@@ -84,7 +94,8 @@ final class ToolCallLoopEngine {
                 messages,
                 workspace,
                 ctx,
-                ReadOnlyEvidenceHandoff.empty());
+                ReadOnlyEvidenceHandoff.empty(),
+                maxIterations);
     }
 
     private ToolCallLoop.LoopResult run(
@@ -96,7 +107,8 @@ final class ToolCallLoopEngine {
             List<ChatMessage> messages,
             Path workspace,
             RuntimeTurnContext ctx,
-            ReadOnlyEvidenceHandoff handoff
+            ReadOnlyEvidenceHandoff handoff,
+            int iterationAllowance
     ) {
         if (initialAnswer == null) initialAnswer = "";
 
@@ -122,7 +134,7 @@ final class ToolCallLoopEngine {
                 workspace,
                 ctx,
                 toolSession,
-                maxIterations,
+                iterationAllowance,
                 turnProcessor.toolRegistry().aliasRescueCount());
         state.seedReadOnlyEvidence(handoff);
         if (initialSource == LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC) {
@@ -133,7 +145,7 @@ final class ToolCallLoopEngine {
         ToolCallExecutionStage executionStage = new ToolCallExecutionStage(turnProcessor, progressSink, strict);
         ToolCallRepromptStage repromptStage = new ToolCallRepromptStage();
 
-        while (state.iterations < maxIterations) {
+        while (state.iterations < state.maxIterations) {
             ToolCallParseStage.ParsedCalls parsed =
                     parseStage.parse(state, state.iterations + 1);
             if (!parsed.useNativePath() && !parsed.useTextPath()) {
@@ -168,14 +180,21 @@ final class ToolCallLoopEngine {
             }
 
             ToolCallExecutionStage.IterationOutcome outcome = executionStage.execute(state, parsed);
+            if (runtimeReason == LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT) {
+                state.finishWithAnswer(state.mutatingToolSuccesses == 1 && state.failedCalls == 0
+                        ? "The selected draft was written. Content meaning and complete request coverage remain unverified."
+                        : "The selected draft save did not complete successfully. No follow-up generation or retry was attempted.");
+                break;
+            }
             if (!repromptStage.reprompt(state, outcome)) {
                 break;
             }
         }
 
-        boolean hitIterLimit = repromptStage.hitIterationLimit(state);
+        boolean hitIterLimit = runtimeReason != LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT
+                && repromptStage.hitIterationLimit(state);
         if (hitIterLimit && state.readOnlySynthesisStatus != ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED) {
-            LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
+            LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", state.maxIterations);
             state.transformAnswer(
                     ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText),
                     LocalTurnTraceCapture.AnswerTransformationReason.TOOL_LOOP_ITERATION_LIMIT);
@@ -213,6 +232,7 @@ final class ToolCallLoopEngine {
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
                 state.readEvidence.latestReadFileBodiesByNormalizedPath(), state.currentAnswerOutputLimitReached,
                 state.readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.capture(state),
-                state.readOnlyFinalizationEvidence);
+                state.readOnlyFinalizationEvidence,
+                dev.talos.runtime.toolcall.ReadEvidenceCoverage.capture(state));
     }
 }

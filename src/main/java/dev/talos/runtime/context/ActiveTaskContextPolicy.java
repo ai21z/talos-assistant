@@ -1,6 +1,7 @@
 package dev.talos.runtime.context;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.task.TaskType;
 
@@ -142,6 +143,10 @@ public final class ActiveTaskContextPolicy {
                     false);
         }
 
+        if (TaskContractResolver.explicitlyForbidsMutation(userRequest)) {
+            return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), savedContext, false);
+        }
+
         if (isRepairContinuation(userRequest)
                 && savedContext.hasTargets()
                 && savedContext.kind() == ActiveTaskContext.Kind.VERIFIER_FINDINGS) {
@@ -177,6 +182,7 @@ public final class ActiveTaskContextPolicy {
     }
 
     private static boolean suppressesContext(String userRequest, TaskContract contract) {
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) return true;
         if (contract != null && contract.type() == TaskType.SMALL_TALK) return true;
         String lower = normalized(userRequest);
         if (lower.startsWith("/")) return true;

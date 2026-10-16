@@ -84,6 +84,19 @@ public final class ReadEvidenceLedger {
         return entries.isEmpty();
     }
 
+    /** Latest observation per physical source, including unusable observations. */
+    List<ReadEvidence> latestReadFileObservations() {
+        List<ReadEvidence> latest = new ArrayList<>();
+        for (int index = entries.size() - 1; index >= 0; index--) {
+            ReadEvidence evidence = entries.get(index);
+            if (!evidence.readFile() || evidence.effectivePath().isBlank()) continue;
+            if (latest.stream().noneMatch(existing -> sameEffectivePath(
+                    existing.effectivePath(), evidence.effectivePath()))) latest.add(evidence);
+        }
+        java.util.Collections.reverse(latest);
+        return List.copyOf(latest);
+    }
+
     /** Bind at execution time, after privacy handling and final tool formatting. */
     void bindToolResult(ToolCall call, int messageIndex, dev.talos.spi.types.ChatMessage message) {
         ReadEvidence evidence = latestIdenticalCall(call, true);
@@ -106,6 +119,22 @@ public final class ReadEvidenceLedger {
 
     BoundToolResult toolResult(ReadEvidence evidence) {
         return evidence == null ? null : toolResults.get(evidence.sequence());
+    }
+
+    /** Protocol IDs and observation ordinals do not make unchanged full source evidence new. */
+    boolean unchangedFullReadObservation(ReadEvidence previous, ReadEvidence current) {
+        return boundFullRead(previous) && boundFullRead(current)
+                && sameEffectivePath(previous.effectivePath(), current.effectivePath())
+                && previous.body().equals(current.body());
+    }
+
+    private boolean boundFullRead(ReadEvidence evidence) {
+        if (evidence == null || !evidence.readFile() || evidence.ranged() || evidence.truncated()
+                || evidence.redacted() || evidence.body().isBlank()) return false;
+        BoundToolResult bound = toolResult(evidence);
+        return bound != null && bound.body() != null
+                && bound.body().observedBody().equals(evidence.body())
+                && bound.body().displayedBody().equals(evidence.body());
     }
 
     record BoundToolResult(int index, dev.talos.spi.types.ChatMessage message,
@@ -201,6 +230,11 @@ public final class ReadEvidenceLedger {
                     : entry.getValue());
         }
         return out;
+    }
+
+    static boolean sameCallIdentity(ToolCall call, String canonicalTool, Map<String, String> parameters) {
+        return call != null && ToolAliasPolicy.localCanonicalName(call.toolName()).equals(canonicalTool)
+                && identityParams(call.parameters()).equals(identityParams(parameters));
     }
 
     /**

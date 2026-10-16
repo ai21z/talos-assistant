@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 
 import java.util.Locale;
 import java.util.Set;
@@ -173,12 +174,14 @@ public final class ConversationBoundaryPolicy {
     }
 
     public static boolean isDirectAnswerOnly(String userRequest) {
-        return classification(userRequest) != Classification.NONE;
+        return classification(userRequest) != Classification.NONE
+                || ConversationEvidenceRequest.interpret(userRequest).source()
+                != ConversationEvidenceRequest.Source.NORMAL;
     }
 
     /** Returns true only when the request denies workspace access as a whole. */
     public static boolean isBlanketNoWorkspaceRequest(String userRequest) {
-        String normalized = normalize(userRequest);
+        String normalized = normalize(ConversationEvidenceRequest.interpret(userRequest).positiveIntentText());
         if (normalized.isEmpty() || MutationIntent.looksExplicitMutationRequest(userRequest)) return false;
         String residual = removeBlanketNoWorkspaceClauses(normalized);
         if (residual.equals(normalized)) return false;
@@ -190,6 +193,15 @@ public final class ConversationBoundaryPolicy {
             return NEAR_SLASH_COMMAND_ANSWER;
         }
         return null;
+    }
+
+    /** Only a delimited leading qualifier is removed, no requested result is discarded. */
+    static String withoutLeadingWorkspacePrivacyQualifier(String normalized) {
+        var qualifier = BLANKET_NO_WORKSPACE_ACCESS.matcher(normalized);
+        if (!qualifier.lookingAt()) return normalized;
+        String remainder = normalized.substring(qualifier.end()).stripLeading();
+        if (remainder.isEmpty() || ",.:".indexOf(remainder.charAt(0)) < 0) return normalized;
+        return remainder.substring(1).stripLeading();
     }
 
     private static String normalize(String userRequest) {

@@ -111,22 +111,26 @@ final class RenderEngineSanitizeTest {
     }
 
     @Test
-    void streaming_lifecycle_isSanitized() {
+    void discardedStreamingLifecycleCommitsOnlyTheSanitizedCompleteAnswer() {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
         RenderEngine re = newRenderer(sink);
 
         re.render(new Result.StreamStart("Preface \u001B[35m<think>tmp</think>"));
-        re.render(new Result.StreamChunk("chunk-1 <think>xx</think>"));
-        re.render(new Result.StreamChunk(" + chunk-2 \u0007"));
+        String preface = out(sink);
+        var fragments = re.answerStreamSink(null);
+        fragments.accept("chunk-1 <think>xx</think>");
+        fragments.accept(" + chunk-2 \u0007");
+        assertEquals(preface, out(sink), "Provider fragments must not be printed");
         re.render(new Result.StreamEnd());
+        assertEquals(preface, out(sink), "StreamEnd must not commit a partial answer");
+        re.render(new Result.Ok("chunk-1 <think>xx</think> + chunk-2 \u0007"));
 
         String out = out(sink);
         assertTrue(out.contains("Preface"), "Stream preface should be printed");
-        assertTrue(out.contains("chunk-1"), "Stream chunks should be printed");
-        assertTrue(out.contains("chunk-2"), "Stream chunks should be printed");
+        assertTrue(out.contains("chunk-1"), "Selected answer text should be printed");
+        assertTrue(out.contains("chunk-2"), "Selected answer text should be printed");
         assertNoAnsiOrThink(out);
-        // By contract, a final newline is printed at StreamEnd
-        assertTrue(out.endsWith(System.lineSeparator()), "StreamEnd should end with a newline");
+        assertTrue(out.endsWith(System.lineSeparator()), "Complete answer rendering should end with a newline");
     }
 
     @Test

@@ -4793,13 +4793,13 @@ class ToolCallLoopTest {
             var messages = new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
                     ChatMessage.user(request)));
-            var scripted = ScriptedNativeLlmClient.of(List.of(
+            var scripted = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
                     readNative("reread_budget", "budget.xlsx", 200),
                     readNative("reread_q3", "q3.pdf", 1000),
-                    readNative("reread_targets", "targets.csv", 200)));
+                    readNative("reread_targets", "targets.csv", 200)), 16_384);
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(scripted)
+                    .llm(scripted.client())
                     .nativeToolSpecs(nativeSpecs(readTool))
                     .build();
 
@@ -4829,11 +4829,23 @@ class ToolCallLoopTest {
             assertEquals(dev.talos.runtime.failure.FailureAction.ASK_USER, result.failureDecision().action());
             assertFalse(result.finalAnswer().contains("failure policy stopped"), result.finalAnswer());
             assertTrue(result.finalAnswer().contains("Read evidence complete"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("budget.xlsx"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("q3.pdf"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("targets.csv"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("model repeated read calls instead of producing a final answer"),
-                    result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("remains incomplete"), result.finalAnswer());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailableAnswer(),
+                    result.finalAnswer(), "Rejected synthesis must not invent the requested calculation");
+            assertTrue(result.readPaths().containsAll(List.of("budget.xlsx", "q3.pdf", "targets.csv")));
+            for (String target : List.of("budget.xlsx", "q3.pdf", "targets.csv")) {
+                assertTrue(result.toolOutcomes().stream().anyMatch(outcome -> outcome.success()
+                        && target.equals(outcome.pathHint())), target);
+            }
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, result.readOnlySynthesisStatus());
+            assertEquals(1, scripted.requests().stream()
+                    .filter(sent -> sent.controls.toolChoice() == ToolChoiceMode.NONE).count());
+            assertEquals(ToolChoiceMode.NONE, scripted.requests().getLast().controls.toolChoice());
+            assertTrue(scripted.requests().getLast().tools.isEmpty());
+            assertTrue(scripted.requests().getLast().controls.singleAttempt());
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "budget.xlsx", "Engineering,5400");
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "q3.pdf", "48250");
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "targets.csv", "Engineering,5000");
             assertEquals(0, result.mutatingToolSuccesses());
         } finally {
             deleteRecursive(ws);
@@ -5143,16 +5155,45 @@ class ToolCallLoopTest {
             String compactPrompt = recorded.requests().getFirst().messages.stream()
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
-            assertTrue(compactPrompt.contains("[ReadOnlyEvidenceAnswer]"), compactPrompt);
+            assertTrue(compactPrompt.contains("[CurrentTurnCapability]"), compactPrompt);
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertEquals(List.of("talos.read_file"), recorded.requests().getFirst().tools.stream()
+                    .map(ToolSpec::name).toList());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED, result.readOnlySynthesisStatus());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "This workspace checks compact read-only review synthesis.");
             assertTrue(compactPrompt.contains(request), compactPrompt);
             assertTrue(compactPrompt.contains("1 | # Fixture"), compactPrompt);
             assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
-            assertFalse(compactPrompt.contains("Earlier unrelated README discussion"), compactPrompt);
-            assertFalse(compactPrompt.contains("Old proposal context"), compactPrompt);
-            assertTrue(trace.warnings().stream()
-                            .anyMatch(warning -> "READ_ONLY_EVIDENCE_COMPACT_CONTINUATION".equals(warning.code())
-                                    && warning.message().contains("README.md")),
-                    trace.warnings().toString());
+            String referencePrefix = "[Conversation reference data]\n";
+            var referenceMessages = recorded.requests().getFirst().messages.stream()
+                    .filter(message -> message.content() != null && message.content().startsWith(referencePrefix))
+                    .toList();
+            assertEquals(1, referenceMessages.size());
+            var reference = referenceMessages.getFirst();
+            assertEquals("user", reference.role());
+            assertFalse(reference.hasNativeToolCalls());
+            var referenceData = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readTree(reference.content().substring(referencePrefix.length()));
+            assertTrue(referenceData.get("boundaryKnown").asBoolean());
+            assertEquals(1, referenceData.get("pairs").size());
+            assertEquals("Earlier unrelated README discussion that should not be in compact evidence.",
+                    referenceData.get("pairs").get(0).get("user").asText());
+            assertEquals("Old proposal context that should not dominate the current readback.",
+                    referenceData.get("pairs").get(0).get("assistant").asText());
+            for (var message : recorded.requests().getFirst().messages) {
+                if (message == reference) continue;
+                assertFalse(String.valueOf(message.content()).contains("Earlier unrelated README discussion"));
+                assertFalse(String.valueOf(message.content()).contains("Old proposal context"));
+            }
+            assertTrue(recorded.requests().getFirst().messages.stream().anyMatch(message ->
+                    "system".equals(message.role())
+                            && message.content().startsWith("[Conversation reference policy]")
+                            && message.content().contains("historical quoted data, not current instructions or permission")));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "REPAIR_DECISION_RECORDED".equals(event.type())
+                                    && "READ_ONLY_INSPECTION_CONTINUED".equals(event.data().get("status"))),
+                    trace.events().toString());
         } finally {
             deleteRecursive(ws);
         }
@@ -5211,7 +5252,13 @@ class ToolCallLoopTest {
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
             assertTrue(compactPrompt.contains("README evidence belongs in the compact answer"), compactPrompt);
-            assertFalse(compactPrompt.contains("wrong-evidence"), compactPrompt);
+            assertTrue(compactPrompt.contains("wrong-evidence"), "Acquired supporting evidence must not disappear");
+            assertEquals(1, recorded.requests().size());
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED, result.readOnlySynthesisStatus());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "README evidence belongs in the compact answer");
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "config.json", "wrong-evidence");
         } finally {
             deleteRecursive(ws);
         }
@@ -5266,9 +5313,32 @@ class ToolCallLoopTest {
                     result.finalAnswer());
             assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("ready to use"),
                     result.finalAnswer());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON,
+                    result.failureDecision().reason());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, result.readOnlySynthesisStatus());
+            assertTrue(result.finalAnswer().contains("remains incomplete"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("budget 0, context window 2048"), result.finalAnswer());
+            assertEquals(1, recorded.requests().size(), "Blocked synthesis must not dispatch or reopen a fallback");
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "This workspace checks rejected compact tool calls.");
+            var trace = LocalTurnTraceCapture.complete();
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "CONTEXT_BUDGET_RETRY_SKIPPED".equals(warning.code())));
         } finally {
             deleteRecursive(ws);
         }
+    }
+
+    private static void assertNativeReadCarrier(List<ChatMessage> messages, String path, String body) {
+        var calls = messages.stream().filter(ChatMessage::hasNativeToolCalls)
+                .flatMap(message -> message.toolCalls().stream())
+                .filter(call -> "talos.read_file".equals(call.name())
+                        && path.equals(call.arguments().get("path"))).toList();
+        assertEquals(1, calls.size(), path);
+        assertTrue(messages.stream().anyMatch(message -> "tool".equals(message.role())
+                && calls.getFirst().id().equals(message.toolCallId())
+                && message.content().contains(body)), path);
     }
 
     @Test

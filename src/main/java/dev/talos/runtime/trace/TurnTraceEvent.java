@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.core.util.Sanitize;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
@@ -150,11 +151,79 @@ public record TurnTraceEvent(
             String candidateKind,
             String reasonCode
     ) {
+        return toolCallAuthorityRejected(timestamp, phase, call, candidateKind, reasonCode, null);
+    }
+
+    public static TurnTraceEvent toolCallAuthorityRejected(
+            String timestamp,
+            String phase,
+            ToolCall call,
+            String candidateKind,
+            String reasonCode,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure
+    ) {
+        return toolCallAuthorityRejected(timestamp, phase, call, candidateKind, reasonCode,
+                projectionFailure, Sanitize.ExecutableJsonSuppressionStage.NONE);
+    }
+
+    public static TurnTraceEvent toolCallAuthorityRejected(
+            String timestamp, String phase, ToolCall call, String candidateKind, String reasonCode,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure,
+            Sanitize.ExecutableJsonSuppressionStage suppressionStage
+    ) {
+        return toolCallAuthorityRejected(timestamp, phase, call, candidateKind, reasonCode,
+                projectionFailure, suppressionStage, java.util.Set.of());
+    }
+
+    public static TurnTraceEvent toolCallAuthorityRejected(
+            String timestamp, String phase, ToolCall call, String candidateKind, String reasonCode,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure,
+            Sanitize.ExecutableJsonSuppressionStage suppressionStage,
+            java.util.Set<Sanitize.ExecutableJsonSuppressionKind> suppressionKinds
+    ) {
+        return toolCallAuthorityRejected(timestamp, phase, call, candidateKind, reasonCode,
+                projectionFailure, suppressionStage, suppressionKinds, java.util.Set.of());
+    }
+
+    public static TurnTraceEvent toolCallAuthorityRejected(
+            String timestamp, String phase, ToolCall call, String candidateKind, String reasonCode,
+            Sanitize.ExecutableJsonProjectionResult projectionFailure,
+            Sanitize.ExecutableJsonSuppressionStage suppressionStage,
+            java.util.Set<Sanitize.ExecutableJsonSuppressionKind> suppressionKinds,
+            java.util.Set<dev.talos.core.tool.ToolProtocolText.SelectedFenceTailShape> fenceTailShapes
+    ) {
+        if (projectionFailure != null
+                && (projectionFailure == Sanitize.ExecutableJsonProjectionResult.EXACT
+                || !"TEXT_PROJECTION_MISMATCH".equals(reasonCode))) {
+            throw new IllegalArgumentException("projection failure requires a rejected projection");
+        }
         Map<String, Object> authority = new LinkedHashMap<>();
         authority.put("schemaVersion", 1);
         authority.put("status", "REJECTED");
         authority.put("kind", safe(candidateKind));
         authority.put("reasonCode", safe(reasonCode));
+        if (projectionFailure != null) {
+            authority.put("projectionFailure", projectionFailure.name());
+        }
+        if (suppressionStage != null && suppressionStage != Sanitize.ExecutableJsonSuppressionStage.NONE) {
+            if (projectionFailure != Sanitize.ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS)
+                throw new IllegalArgumentException("suppression stage requires a suppression failure");
+            authority.put("projectionFailureStage", suppressionStage.name());
+        }
+        if (suppressionKinds != null && !suppressionKinds.isEmpty()) {
+            if (projectionFailure != Sanitize.ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS
+                    || suppressionStage == null || suppressionStage == Sanitize.ExecutableJsonSuppressionStage.NONE)
+                throw new IllegalArgumentException("suppression kinds require a suppression stage");
+            authority.put("projectionSuppressionKinds", suppressionKinds.stream().sorted()
+                    .map(Enum::name).toList());
+        }
+        if (fenceTailShapes != null && !fenceTailShapes.isEmpty()) {
+            if (suppressionKinds == null || !suppressionKinds.contains(
+                    Sanitize.ExecutableJsonSuppressionKind.SELECTED_FENCE_TAIL_POTENTIAL))
+                throw new IllegalArgumentException("tail shapes require selected fence tail suppression");
+            authority.put("projectionFenceTailShapes", fenceTailShapes.stream().sorted()
+                    .map(Enum::name).toList());
+        }
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("executionAuthority", Map.copyOf(authority));
         return toolCallEvent(

@@ -3261,6 +3261,9 @@ final class QualificationTraceEvidence {
             case EXPECTED_TARGET_SCOPE_REPAIR ->
                     exactRuntimeToolIdentity(
                             toolName, toolNameHash, "talos.edit_file");
+            case SELECTED_CONTENT_DRAFT ->
+                    exactRuntimeToolIdentity(
+                            toolName, toolNameHash, "talos.write_file");
         };
     }
 

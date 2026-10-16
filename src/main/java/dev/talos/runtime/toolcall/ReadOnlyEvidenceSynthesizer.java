@@ -12,9 +12,11 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.NativeReadOnlyAnswerProposal;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ProviderResponseCapture;
@@ -27,7 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
-/** One response-only transition as soon as bounded diagnosis evidence is safely complete. */
+/** One response-only transition with a bounded, authenticated source set. */
 final class ReadOnlyEvidenceSynthesizer {
     private static final ObjectMapper REQUEST_MAPPER = new ObjectMapper();
     static final int MAX_REQUEST_CHARS = 32_000;
@@ -46,6 +48,24 @@ final class ReadOnlyEvidenceSynthesizer {
         if (!dev.talos.runtime.TurnAuditCapture.comparisonEvidenceComplete(TurnTaskContractCapture.get(), state.workspace))
             return Optional.empty();
         var finalization = ReadOnlyFinalizationEvidence.freeze(state, evidence);
+        var contract = TurnTaskContractCapture.get();
+        boolean supportedStaticDiagnosis = contract != null && !ReadOnlyEvidenceContext.requiresGeneralEvidenceContext(state)
+                && dev.talos.runtime.verification.StaticTaskVerifier.canSynthesizeObservedReadOnlyDiagnosis(
+                    finalization.sources(), contract.originalUserRequest());
+        // Named-source coverage does not establish semantic dependency coverage.
+        // Supported structured verification keeps its existing bounded transition.
+        if (!atLimit && !finalization.proposalSelected() && !supportedStaticDiagnosis
+                && (outcome == null || outcome.progressSuccessesThisIteration() > 0
+                    || outcome.failuresThisIteration() > 0 || outcome.mutationsThisIteration() > 0))
+            return Optional.empty();
+        if (state.inheritedUnretainedReadEvidence
+                || !finalization.proposalSelected() && ReadOnlyEvidenceContext.requiresGeneralEvidenceContext(state)) {
+            state.stopWithFailure(FailureDecision.stop(FailureAction.ASK_USER,
+                            TerminalReadOnlyStopAnswer.RETENTION_LIMIT_REASON),
+                    "Some acquired evidence cannot be retained by the bounded source-only answer. "
+                            + "No further tools were executed and no files were changed. The diagnosis remains incomplete.");
+            return Optional.of(false);
+        }
         if (finalization.requestMeaning() != null)
             LocalTurnTraceCapture.recordReadOnlyRequestMeaning(finalization.requestMeaning());
         LocalTurnTraceCapture.recordReadOnlySynthesisSources(finalization.requestMeaning(), finalization.sources());
@@ -90,6 +110,14 @@ final class ReadOnlyEvidenceSynthesizer {
             state.readOnlySynthesisStatus = ReadOnlySynthesisStatus.ACCEPTED;
             LocalTurnTraceCapture.recordRepair("READ_ONLY_SYNTHESIS_SELECTED",
                     "response-only candidate selected; existing evidence and answer guards still apply");
+        } catch (EngineException.ContextBudgetExceeded budget) {
+            String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
+            state.stopWithFailure(FailureDecision.stop(FailureAction.ASK_USER,
+                    TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON),
+                    UNAVAILABLE + "\n\nBounded synthesis was stopped because " + detail);
+            LocalTurnTraceCapture.warning("CONTEXT_BUDGET_RETRY_SKIPPED", detail);
+            LocalTurnTraceCapture.recordRepair("READ_ONLY_SYNTHESIS_REJECTED",
+                    "context budget prevented response-only synthesis; no retry or further tool execution");
         } catch (Exception failure) {
             if (TurnFailureClassifier.isCancellation(failure) || TurnFailureClassifier.isInterruption(failure))
                 throw TurnFailureClassifier.propagateControlFlow(failure);
@@ -127,9 +155,11 @@ final class ReadOnlyEvidenceSynthesizer {
                         + "Answer the original request from the supplied observed results. Distinguish source inference "
                         + "from executed behavior. No new inspection, tool calls or mutations are allowed. "
                         + "If the evidence does not support a requested conclusion, state the limitation."));
-        messages.add(ChatMessage.user(resolution.contract().originalUserRequest()));
+        ChatMessage currentTask = ChatMessage.user(resolution.contract().originalUserRequest());
+        messages.add(currentTask);
         // Install the budget anchor BEFORE every required body, so LlmClient cannot trim it as old history.
         ProviderPromptSurfaceReconciler.reconcile(messages, plan, List.of());
+        if (!finalization.proposalSelected()) ReadOnlyConversationContext.project(messages, state.messages, currentTask);
         for (var carrier : evidence.carriers().stream().sorted(Comparator.comparingInt(
                 ReadOnlyEvidenceContext.Carrier::index)).toList()) {
             messages.add(ChatMessage.assistantWithToolCalls("", List.of(carrier.call())));

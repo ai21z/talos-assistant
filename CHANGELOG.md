@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- System instructions are combined into one leading message for the qualified
+  GPT-OSS profile before its embedded Harmony template is applied. Conversation
+  references, workspace content and native tool bindings retain their roles.
+
+- Managed model startup rejects occupied ports before launching a replacement.
+  Listener ownership is checked against the launched process, and stale readiness
+  cannot authorize a dead or replaced process. Both model selection commands share
+  the same recovery guidance. Invalid imports are reported as validation errors.
+
+- Built-in command output is separated from model answers. Help and tables are
+  wrapped for terminal width. Model selection, local candidates and missing files
+  are grouped, with filenames under `/models --verbose`. Model aliases and help
+  topics can be completed with Tab. Workspace and session identifiers are labeled
+  separately, and status flags are no longer listed as standalone commands.
+
+- Managed llama.cpp models can be selected within an open Talos session using
+  `/models use <alias>` or `/set model <alias>`. Local GGUF aliases can be registered
+  with `/models add <alias> "<absolute GGUF path>"`. Local availability is kept
+  separate from artifact verification and qualification. The owned backend is
+  restarted after local validation, without downloading models or changing saved
+  defaults, conversation history or global policy. Connect-only servers are not
+  restarted. Unavailable saved models produce a warning while session history is
+  restored.
 - Ordered workspace text and code comparisons are supported, with PDF and DOCX
   limited to extracted text. Source identities and incomplete outcomes are
   reported. General behavioral equivalence is not established.

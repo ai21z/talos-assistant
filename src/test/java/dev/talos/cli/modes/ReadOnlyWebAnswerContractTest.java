@@ -71,7 +71,7 @@ class ReadOnlyWebAnswerContractTest {
     }
 
     @Test
-    void realResolverNondiagnosisContractHasNoNativeSourceAssociation(@TempDir Path workspace) throws Exception {
+    void realResolverReadOnlyQaPreservesNativeBoundAnswerWithoutExecutionProof(@TempDir Path workspace) throws Exception {
         fixture(workspace);
         String request = "Read index.html and script.js and explain why Calculate fails. Do not edit.";
         assertEquals(dev.talos.runtime.task.TaskType.READ_ONLY_QA,
@@ -81,11 +81,37 @@ class ReadOnlyWebAnswerContractTest {
         ExecutionOutcome outcome = finish(workspace, request, answer,
                 List.of("index.html", "script.js"), false, List.of(), false);
 
+        assertEquals(answer, outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        assertEquals(dev.talos.runtime.verification.TaskVerificationStatus.NOT_RUN,
+                outcome.taskOutcome().verificationResult().status());
+        assertTrue(outcome.verificationReport().authoritativeProofKinds().isEmpty());
+        assertEquals(0, outcome.taskOutcome().mutationOutcome().successCount());
+    }
+
+    @Test
+    void realResolverReadOnlyQaStillRejectsAnswerWithoutNativeSourceAssociation(@TempDir Path workspace)
+            throws Exception {
+        fixture(workspace);
+        String request = "Read index.html and script.js and explain why Calculate fails. Do not edit.";
+        assertEquals(dev.talos.runtime.task.TaskType.READ_ONLY_QA,
+                TaskContractResolver.fromUserRequest(request).type());
+        String answer = "`#calc` does not exist in index.html. The correct selector is `#calculate`.";
+
+        ExecutionOutcome outcome = finish(workspace, request, answer,
+                List.of("index.html", "script.js"), false, List.of(), false, selected -> {
+                    assertEquals(dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment.Reason.SOURCE_EVIDENCE_UNAVAILABLE,
+                            selected.assessment().reason());
+                    assertFalse(selected.assessment().preserved());
+                }, false);
+
         assertNotEquals(answer, outcome.finalAnswer());
         assertTrue(outcome.finalAnswer().startsWith(
                 dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        assertTrue(outcome.verificationReport().authoritativeProofKinds().isEmpty());
     }
 
     @Test
@@ -1186,6 +1212,15 @@ class ReadOnlyWebAnswerContractTest {
             List<String> reads, boolean hitLimit, List<ToolCallLoop.ToolOutcome> additionalOutcomes,
             boolean supportedDiagnosisLane,
             java.util.function.Consumer<dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult> historicalCheck) throws Exception {
+        return finish(workspace, request, answer, reads, hitLimit, additionalOutcomes,
+                supportedDiagnosisLane, historicalCheck, true);
+    }
+
+    private static ExecutionOutcome finish(Path workspace, String request, String answer,
+            List<String> reads, boolean hitLimit, List<ToolCallLoop.ToolOutcome> additionalOutcomes,
+            boolean supportedDiagnosisLane,
+            java.util.function.Consumer<dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult> historicalCheck,
+            boolean bindNativeEvidence) throws Exception {
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
         var resolved = WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromUserRequest(request), workspace);
         var fixtureTargets = new java.util.LinkedHashSet<>(resolved.expectedTargets());
@@ -1216,7 +1251,7 @@ class ReadOnlyWebAnswerContractTest {
             boolean eligible = !answer.isBlank() && additionalOutcomes.stream().noneMatch(
                     outcome -> !outcome.success() || outcome.denied() || outcome.mutating()
                             || outcome.mutationEffects().hasEffects());
-            ReadOnlyFinalizationEvidence evidence = eligible
+            ReadOnlyFinalizationEvidence evidence = eligible && bindNativeEvidence
                     ? ReadOnlyFinalizationEvidenceTestSupport.evidence(workspace, contract, answer, sources)
                     : ReadOnlyFinalizationEvidence.empty();
             var loop = new ToolCallLoop.LoopResult(answer, outcomes.size(), outcomes.size(),

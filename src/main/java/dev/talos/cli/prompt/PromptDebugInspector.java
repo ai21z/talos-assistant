@@ -305,6 +305,18 @@ public final class PromptDebugInspector {
         out.append("- Privacy classes: ").append(ledger.summary().byPrivacyClass()).append('\n');
         out.append("- Decisions: ").append(ledger.summary().byDecision()).append('\n');
         out.append("- Reasons: ").append(ledger.summary().byReason()).append("\n\n");
+        for (dev.talos.core.context.ContextLedger.Entry entry : ledger.entries()) {
+            if (entry.requestId().isEmpty()) continue;
+            out.append("- ").append(entry.requestId()).append(": ")
+                    .append(entry.item().source()).append(' ').append(entry.item().textHash())
+                    .append(" path=").append(safeDiagnostic(entry.item().pathHint()))
+                    .append(" boundary=").append(entry.item().executionBoundary())
+                    .append(" -> ").append(entry.decision().action())
+                    .append(" (").append(entry.decision().reasonCode()).append(')')
+                    .append(" body=").append(entry.providerBodyHash().isEmpty() ? "unobserved" : entry.providerBodyHash())
+                    .append('\n');
+        }
+        out.append("\nTransport handoff records local serialized membership, not model attention or answer correctness.\n\n");
     }
 
     public static String redactedProviderBodyJson(PromptDebugSnapshot snapshot) {

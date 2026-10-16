@@ -27,7 +27,11 @@ final class DeniedMutationResponseOnlySynthesizer {
     record Result(
             String text,
             ProviderResponseCapture.Receipt receipt,
-            boolean capturedGeneration) {
+            boolean capturedGeneration,
+            boolean incompleteGeneration) {
+        Result(String text, ProviderResponseCapture.Receipt receipt, boolean capturedGeneration) {
+            this(text, receipt, capturedGeneration, false);
+        }
         Result {
             text = text == null ? "" : text;
             receipt = receipt == null ? ProviderResponseCapture.Receipt.none() : receipt;
@@ -75,6 +79,9 @@ final class DeniedMutationResponseOnlySynthesizer {
                 requestMessages,
                 responseOnlyPlan,
                 java.util.List.of());
+        dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.projectCapturedProviderTask(
+                requestMessages, TurnTaskContractCapture.providerTaskBoundaryIndex(requestMessages),
+                resolution.contract().originalUserRequest());
         ChatRequestControls controls =
                 ProviderRequestControlPolicy.forTurn(
                         responseOnlyPlan,
@@ -92,6 +99,13 @@ final class DeniedMutationResponseOnlySynthesizer {
                             java.util.List.of(),
                             controls);
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            if (terminal.aborted())
+                throw dev.talos.runtime.IncompleteGenerationPresentation.abortedFailure(terminal);
+            if (dev.talos.runtime.IncompleteGenerationPresentation.required(terminal)) {
+                String notice = stopMessage() + "\n\n" + dev.talos.runtime.IncompleteGenerationPresentation.NOTICE;
+                dev.talos.runtime.IncompleteGenerationPresentation.record(notice);
+                return new Result(notice, ProviderResponseCapture.Receipt.none(), false, true);
+            }
             String text = terminal.text() == null ? "" : terminal.text();
             if (terminal.hasToolCalls()) {
                 return Result.deterministicStop();
@@ -102,6 +116,9 @@ final class DeniedMutationResponseOnlySynthesizer {
             }
             return new Result(stripped, terminal.provenance(), true);
         } catch (Exception e) {
+            if (e instanceof RuntimeException runtime
+                    && (dev.talos.runtime.IncompleteGenerationPresentation.isAbortedFailure(runtime)
+                        || runtime instanceof dev.talos.runtime.GenerationWatchdogException)) throw runtime;
             if (TurnFailureClassifier.isCancellation(e)
                     || TurnFailureClassifier.isInterruption(e)) {
                 throw TurnFailureClassifier.propagateControlFlow(e);

@@ -2,6 +2,7 @@ package dev.talos.tools;
 
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
+import dev.talos.spi.WorkspaceObservationBoundary;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -20,11 +21,17 @@ import java.util.Objects;
  * Any path resolved from user input must pass {@link Sandbox#allowedPath(Path)}
  * before reading or writing.
  */
-public record ToolContext(Path workspace, Sandbox sandbox, Config config) {
+public record ToolContext(Path workspace, Sandbox sandbox, Config config,
+                          WorkspaceObservationBoundary observationBoundary) {
+    public ToolContext(Path workspace, Sandbox sandbox, Config config) {
+        this(workspace, sandbox, config, WorkspaceObservationBoundary.unrestricted());
+    }
+
     public ToolContext {
         Objects.requireNonNull(workspace, "workspace must not be null");
         Objects.requireNonNull(sandbox, "sandbox must not be null");
         Objects.requireNonNull(config, "config must not be null");
+        Objects.requireNonNull(observationBoundary, "observation boundary must not be null");
     }
 
     /**
@@ -33,6 +40,7 @@ public record ToolContext(Path workspace, Sandbox sandbox, Config config) {
      * {@code sandbox().allowedPath()} on the result before I/O.
      */
     public Path resolve(String relativePath) {
+        if (observationBoundary.controlled()) return workspace.resolve(relativePath).normalize();
         PathArgumentCanonicalizer.Resolution resolution =
                 PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(workspace, relativePath);
         if (resolution.resolvedPath() == null) {

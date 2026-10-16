@@ -19,6 +19,129 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractResolverTest {
 
+    private static final String REFERENCED_RENEWAL = "Those edits were not approved before. "
+            + "Please implement those same two changes now, then read both files back to check what was actually saved. "
+            + "Preserve everything else.";
+
+    @Test
+    void explicitCurrentReferenceBindsOnlyThePreviousUserScopeWithFreshRequestIdentity() {
+        for (String outcome : List.of("Approval was denied.", "Executable tool authority was invalid.",
+                "The edit was completed.", "A different file should be modified.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css. Do not touch secret.txt."),
+                    ChatMessage.assistant(outcome), ChatMessage.user(REFERENCED_RENEWAL)));
+            assertTrue(resolution.contract().mutationRequested());
+            assertTrue(resolution.contract().mutationAllowed(), resolution.contract() + " reference="
+                    + dev.talos.runtime.MutationIntent.currentMutationReference(REFERENCED_RENEWAL)
+                    + " prior=" + TaskContractResolver.resolveFromUserRequest(
+                            "Change index.html and style.css. Do not touch secret.txt."));
+            assertEquals(Set.of("index.html", "style.css"), resolution.contract().expectedTargets());
+            assertEquals(Set.of("secret.txt"), resolution.contract().forbiddenTargets());
+            assertEquals(REFERENCED_RENEWAL, resolution.contract().originalUserRequest());
+            assertEquals(REFERENCED_RENEWAL, resolution.intent().originalUserRequest());
+            assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+            assertTrue(resolution.intent().targets().targets().stream().allMatch(target ->
+                    target.derivation().source() == dev.talos.runtime.intent.TargetSource.MESSAGE_HISTORY));
+        }
+    }
+
+    @Test
+    void currentReferenceCannotInheritMixedContentAndAuthorizedWorkspaceOperationScope() {
+        String previous = "Edit index.html and app.js, then copy a.md to b.md.";
+        String current = "Please implement those changes now.";
+        var prior = TaskContractResolver.resolveFromUserRequest(previous);
+        assertTrue(prior.contract().mutationRequested());
+        assertTrue(prior.contract().mutationAllowed());
+        assertTrue(prior.hasIndependentAuthorizedContentMutation());
+        assertFalse(prior.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertFalse(prior.contract().expectedTargets().isEmpty());
+        assertTrue(prior.contract().expectedTargets().size() <= 8);
+
+        var reference = dev.talos.runtime.MutationIntent.currentMutationReference(current).orElseThrow();
+        assertFalse(reference.ambiguous());
+        assertEquals(0, reference.statedCount(), "No stated count may independently reject the prior scope.");
+        var currentOnly = TaskContractResolver.resolveFromUserRequest(current);
+        assertTrue(currentOnly.contract().mutationRequested());
+        assertTrue(currentOnly.contract().mutationAllowed());
+        assertTrue(currentOnly.contract().expectedTargets().isEmpty());
+        assertTrue(currentOnly.workspaceOperationPlan().authorizedOperations().isEmpty());
+
+        var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                ChatMessage.user(previous), ChatMessage.user(current)));
+        assertFalse(resolution.contract().mutationAllowed());
+        assertTrue(resolution.contract().expectedTargets().isEmpty());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertEquals("unresolved-user-mutation-reference", resolution.contract().classificationReason());
+        assertEquals(current, resolution.contract().originalUserRequest());
+        assertEquals(current, resolution.intent().originalUserRequest());
+    }
+
+    @Test
+    void unresolvedReferenceCannotUseAssistantPlansOrSkipAnUnrelatedUserRequest() {
+        for (List<ChatMessage> messages : List.of(
+                List.of(ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Explain index.html and style.css."),
+                        ChatMessage.assistant("Change index.html and style.css."), ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.assistant("Approval was denied."), ChatMessage.user("What is Java?"),
+                        ChatMessage.assistant("Java is a language."), ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("Please implement those changes. Please apply these edits.")),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("Please implement those changes only if I approve later.")),
+                List.of(ChatMessage.user("Change a.txt, b.txt and c.txt."),
+                        ChatMessage.user("Please implement those same two changes.")),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("The guide says. Please apply those same two changes.")))) {
+            var resolution = TaskContractResolver.resolveFromMessages(messages);
+            assertFalse(resolution.contract().mutationAllowed(), resolution.contract().toString());
+            assertTrue(resolution.contract().expectedTargets().isEmpty());
+            assertEquals("unresolved-user-mutation-reference", resolution.contract().classificationReason());
+        }
+    }
+
+    @Test
+    void unknownReportingFramesCannotCreateCurrentMutationAuthority() {
+        for (String current : List.of(
+                "Here is the previous request. Please implement those same two changes.",
+                "The old instruction follows. Please implement those same two changes.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css."), ChatMessage.user(current)));
+            assertFalse(resolution.contract().mutationRequested(), resolution.contract().toString());
+            assertFalse(resolution.contract().mutationAllowed());
+            assertTrue(resolution.contract().expectedTargets().isEmpty());
+            assertEquals("non-mutating", resolution.contract().classificationReason());
+        }
+    }
+
+    @Test
+    void restrictedPreviousUserScopeCannotBeCopiedIntoCurrentPromptsOrTaskMetadata() {
+        for (var restrictions : List.of(
+                new dev.talos.safety.ContentRestrictions(false, true, true, true),
+                new dev.talos.safety.ContentRestrictions(true, false, true, true),
+                new dev.talos.safety.ContentRestrictions(true, true, false, true),
+                new dev.talos.safety.ContentRestrictions(true, true, true, false))) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change private-canary.txt and hidden-canary.txt.")
+                            .withContentRestrictions(restrictions), ChatMessage.user(REFERENCED_RENEWAL)));
+            assertFalse(resolution.contract().mutationAllowed());
+            assertTrue(resolution.intent().targets().targets().isEmpty());
+            assertFalse(resolution.toString().contains("private-canary"));
+            assertFalse(resolution.toString().contains("hidden-canary"));
+        }
+    }
+
+    @Test
+    void currentProhibitionsCannotBeOverriddenByReferencedMutation() {
+        for (String current : List.of(REFERENCED_RENEWAL + " Do not change anything.",
+                REFERENCED_RENEWAL + " Do not edit index.html.",
+                "Why were those changes denied?", "Those changes were not approved before.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css."), ChatMessage.user(current)));
+            assertFalse(resolution.contract().mutationAllowed(), resolution.contract().toString());
+        }
+    }
+
     private static final String F10_SCOPED_WEB_PROMPT =
             "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
                     + "Do not touch CSS or JavaScript.";

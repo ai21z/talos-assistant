@@ -11,18 +11,29 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.context.ConversationManager;
+import dev.talos.core.context.ContextDecision;
+import dev.talos.core.context.ContextItem;
+import dev.talos.core.context.ContextItemSource;
+import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextPacker;
+import dev.talos.core.context.ContextPrivacyClass;
 import dev.talos.core.context.ContextResult;
+import dev.talos.core.context.ExecutionBoundary;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.core.privacy.PrivacyConfigFacts;
+import dev.talos.core.privacy.ContextSourcePolicy;
+import dev.talos.safety.ContentRestrictionScope;
 
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTraceCapture;
+import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +50,13 @@ import java.util.regex.Pattern;
 public final class RagMode implements Mode {
 
     private static final Logger LOG = LoggerFactory.getLogger(RagMode.class);
+
+    @FunctionalInterface
+    interface PinParser { String parse(Path path) throws java.io.IOException; }
+    private final PinParser pinParser;
+
+    public RagMode() { this(ParserUtil::smartParse); }
+    RagMode(PinParser pinParser) { this.pinParser = Objects.requireNonNull(pinParser); }
 
     /** Local record for pinned file snippets - replaces legacy PinnedSnippet. */
     record PinnedSnippet(String path, String text) {
@@ -66,8 +84,27 @@ public final class RagMode implements Mode {
         var limMap = CfgUtil.map(ctx.cfg().data.get("limits"));
         long llmTimeoutMs = CfgUtil.longAt(limMap, "llm_timeout_ms", 300_000L);
 
-        // Pin files mentioned in the question
-        var pinnedSnips = pinFiles(workspace, q, 3, 1600, lim.dirDepthMax());
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+        var statusMessages = new ArrayList<>(history);
+        statusMessages.add(ChatMessage.user(q));
+        boolean retainedStatus = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestForMessages(statusMessages).isPresent();
+
+        // Apply turn and configuration restrictions before any workspace preload.
+        boolean directAnswerOnly = ConversationBoundaryPolicy.isDirectAnswerOnly(q);
+        boolean configuredRagAllowed = PrivacyConfigFacts.ragEnabledInPrivateMode(ctx.cfg());
+        boolean workspaceContextAllowed = !dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent()
+                && !retainedStatus && !directAnswerOnly && configuredRagAllowed;
+        if (retainedStatus) recordWorkspaceContextExclusion("RETAINED_WORK_STATUS_SUPPRESSED");
+        if (!configuredRagAllowed) recordWorkspaceContextExclusion("PRIVATE_MODE_RAG_DISABLED");
+        if (directAnswerOnly) recordWorkspaceContextExclusion("TURN_WORKSPACE_PRELOAD_DISABLED");
+        var pinnedSnips = workspaceContextAllowed
+                ? pinFiles(workspace, q, 3, 1600, lim.dirDepthMax())
+                : List.<PinnedSnippet>of();
 
         // Extract unique base file paths (without #chunk suffix) from pinned snippets
         Set<String> pinnedBaseFiles = new LinkedHashSet<>();
@@ -79,9 +116,12 @@ public final class RagMode implements Mode {
         boolean isTwoFileComparison = pinnedBaseFiles.size() == 2;
 
         // Prepare RAG context once (BM25F + vectors if enabled)
-        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.RETRIEVAL_PREPARATION);
-        RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
-        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
+        RagService.Prepared prepared = new RagService.Prepared(List.of(), List.of());
+        if (workspaceContextAllowed) {
+            LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.RETRIEVAL_PREPARATION);
+            prepared = ctx.rag().prepare(workspace, q, topK);
+            LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
+        }
 
         // Capture trace for runtime visibility (TurnProcessor reads this after dispatch)
         TurnTraceCapture.capture(prepared.trace());
@@ -96,31 +136,25 @@ public final class RagMode implements Mode {
         for (var snip : pinnedSnips) {
             pinnedCtx.add(new ContextResult.Snippet(snip.path(), snip.text()));
         }
-        List<ContextResult.Snippet> regularCtx = prepared.snippets();
+        List<ContextResult.Snippet> regularCtx = prepared.snippets().stream()
+                .map(snippet -> ContextSourcePolicy.admit(ctx.cfg(), workspace, snippet)).toList();
 
         // Load system prompt - composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         LocalTurnTraceCapture.enterExecutionStage(
                 TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
-        boolean nativeTools = ctx.llm().prepareNativeTools();
+        boolean nativeTools = !retainedStatus && ctx.llm().prepareNativeTools();
         LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         String system = SystemPromptBuilder.forRag()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
-                .withWorkspace(workspace)
+                .withWorkspace(workspaceContextAllowed ? workspace : null)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .build();
 
         // Build conversation history BEFORE packing so we can account for its
         // token cost in the snippet budget (P0 budget coordination fix).
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistory();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
         TokenBudget tokenBudget = TokenBudget.fromConfig(ctx.cfg());
         int historyTokens = ConversationManager.estimateTokens(history, tokenBudget);
 
@@ -146,7 +180,13 @@ public final class RagMode implements Mode {
         }
 
         // Build structured conversation messages for /api/chat
-        List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, history);
+        List<ChatMessage> messages = buildMessages(
+                system, userMessage, ctxMaps, history, workspaceContextAllowed);
+        var restrictions = packed.contentRestrictions();
+        ContentRestrictionScope.restrictIfActive(restrictions);
+        messages.replaceAll(message -> message.withContentRestrictions(restrictions));
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "rag",
                 "rag",
@@ -154,10 +194,11 @@ public final class RagMode implements Mode {
                 ctx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(lim.responseMaxChars())
                 .answerSanitizer(a -> Sanitize.sanitizeForOutput(sanitizeAnswer(a)));
@@ -192,6 +233,13 @@ public final class RagMode implements Mode {
         return Optional.of(new Result.Ok(fullText));
     }
 
+    private static void recordWorkspaceContextExclusion(String reasonCode) {
+        ContextLedgerCapture.record(
+                ContextItem.fromText(ContextItemSource.RAG_SNIPPET, ExecutionBoundary.RAG_INDEX,
+                        ContextPrivacyClass.NORMAL, "", "", 0),
+                ContextDecision.excludedByPrivacyOrTrustPolicy(reasonCode));
+    }
+
     /**
      * Builds ChatMessages for /api/chat: system → history → RAG context → user message.
      * History must be built before packing so its token cost is accounted for.
@@ -199,6 +247,13 @@ public final class RagMode implements Mode {
     static List<ChatMessage> buildMessages(String system, String userMessage,
                                            List<Map<String,String>> ctxMaps,
                                            List<ChatMessage> history) {
+        return buildMessages(system, userMessage, ctxMaps, history, true);
+    }
+
+    private static List<ChatMessage> buildMessages(String system, String userMessage,
+                                                  List<Map<String,String>> ctxMaps,
+                                                  List<ChatMessage> history,
+                                                  boolean workspaceContextAllowed) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(system));
 
@@ -223,7 +278,7 @@ public final class RagMode implements Mode {
                 if (!text.isBlank()) contextBlock.append(text).append("\n\n");
             }
             messages.add(ChatMessage.user(contextBlock.toString().stripTrailing()));
-        } else {
+        } else if (workspaceContextAllowed) {
             // Empty retrieval: guide the model to use tools instead of saying "I can't see"
             messages.add(ChatMessage.user(
                 "No context snippets were retrieved for this query. " +
@@ -269,7 +324,7 @@ public final class RagMode implements Mode {
     );
 
     /** Pins files mentioned in the question, resolving against workspace with sandbox validation. */
-    private static List<PinnedSnippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
+    private List<PinnedSnippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
         List<PinnedSnippet> out = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         Sandbox sandbox = new Sandbox(ws, Map.of());
@@ -350,9 +405,16 @@ public final class RagMode implements Mode {
     /**
      * Adds a file snippet to the output list after parsing and truncating if necessary.
      */
-    private static void addSnippet(Path ws, List<PinnedSnippet> out, Path p, int maxChars, String relPath) {
+    private void addSnippet(Path ws, List<PinnedSnippet> out, Path p, int maxChars, String relPath) {
+        if (!ContextSourcePolicy.mayPreload(ws, p)) {
+            ContextLedgerCapture.record(
+                    ContextItem.fromText(ContextItemSource.RAG_SNIPPET, ExecutionBoundary.RAG_INDEX,
+                            ContextPrivacyClass.PROTECTED_PATH, "", "", 0),
+                    ContextDecision.excludedByPrivacyOrTrustPolicy("PROTECTED_PIN_REQUIRES_READ_APPROVAL"));
+            return;
+        }
         try {
-            String text = ParserUtil.smartParse(p);
+            String text = pinParser.parse(p);
             if (text.length() > maxChars) text = text.substring(0, maxChars);
             out.add(new PinnedSnippet(relPath + "#0", text));
         } catch (Exception e) {

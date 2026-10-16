@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.intent.MutationActionEvidence;
+import dev.talos.runtime.intent.CurrentRequestClauses;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -489,7 +490,94 @@ public final class MutationIntent {
     }
 
     public static String classificationReason(String userRequest) {
-        return classificationReason(userRequest, true);
+        String reason = classificationReason(userRequest, true);
+        return "non-mutating".equals(reason) && independentMutationClause(userRequest).isPresent()
+                ? "explicit-current-clause-request" : reason;
+    }
+
+    /** Existing imperative rules are applied to independently stated current sentences. */
+    public static Optional<CurrentRequestClauses.Clause> independentMutationClause(String userRequest) {
+        List<CurrentRequestClauses.Clause> clauses = CurrentRequestClauses.sentences(userRequest);
+        if (clauses.size() < 2) return Optional.empty();
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(userRequest);
+        for (CurrentRequestClauses.Clause clause : clauses) {
+            if (clause.start() == 0) continue;
+            if (!hasBoundedOutcomePrelude(clauses, clause)) continue;
+            String lower = clause.text().toLowerCase(Locale.ROOT);
+            boolean authorizedAction = false;
+            for (Pattern pattern : REQUEST_PATTERNS) {
+                Matcher action = pattern.matcher(lower);
+                if (action.lookingAt() && action.groupCount() >= 1
+                        && evidence.permits(clause.start() + action.start(1), clause.start() + action.end(1))) {
+                    authorizedAction = true;
+                    break;
+                }
+            }
+            if (!authorizedAction) continue;
+            if (isExplicitMutationClassificationReason(classificationReason(clause.text(), true))) {
+                return Optional.of(clause);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean hasBoundedOutcomePrelude(List<CurrentRequestClauses.Clause> clauses,
+            CurrentRequestClauses.Clause current) {
+        Pattern outcome = Pattern.compile("^(?:(?:those|these|the|our|my|your) "
+                + "(?:(?:previous|prior|last|requested|earlier) )?"
+                + "(?:changes?|edits?|updates?|fixes?|writes?|attempts?)|no (?:changes|edits)|nothing) "
+                + "(?:(?:were|was|are|is|remain|remained|have been|has been) )?"
+                + "(?:(?:not|never|still|already) )*"
+                + "(?:approved|denied|rejected|blocked|applied|saved|changed|completed|verified|"
+                + "failed|incomplete|unchanged|pending)"
+                + "(?: (?:before|earlier|previously|yet|now|in (?:this|the previous) (?:turn|session))){0,2}$");
+        for (CurrentRequestClauses.Clause prior : clauses) {
+            if (prior.start() >= current.start()) break;
+            String text = prior.text().toLowerCase(Locale.ROOT).strip()
+                    .replaceFirst("[.!?]+$", "").strip().replaceAll("\\s+", " ");
+            if (!outcome.matcher(text).matches()) return false;
+        }
+        return true;
+    }
+
+    public record UserMutationReference(CurrentRequestClauses.Clause clause, boolean ambiguous, int statedCount) {}
+
+    /** A reference supplies no targets or authority without a separately resolved user scope. */
+    public static Optional<UserMutationReference> currentMutationReference(String request) {
+        if (!looksExplicitMutationRequest(request)) return Optional.empty();
+        Pattern reference = Pattern.compile("^(?:(?:those|these|the)(?:\\s+same)?|the\\s+same)"
+                + "(?:\\s+(one|two|three|four|five|six|seven|eight|[1-8]))?"
+                + "\\s+(?:changes|edits|improvements|updates|fixes)\\b");
+        UserMutationReference found = null;
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(request);
+        List<CurrentRequestClauses.Clause> clauses = CurrentRequestClauses.sentences(request);
+        for (CurrentRequestClauses.Clause clause : clauses) {
+            String lower = clause.text().toLowerCase(Locale.ROOT);
+            for (Pattern pattern : REQUEST_PATTERNS) {
+                Matcher action = pattern.matcher(lower);
+                if (!action.lookingAt() || action.groupCount() < 1) continue;
+                Matcher object = reference.matcher(lower.substring(action.end()).stripLeading());
+                if (!object.find()) continue;
+                if (found != null && !found.clause().equals(clause)) {
+                    return Optional.of(new UserMutationReference(found.clause(), true, found.statedCount()));
+                }
+                int count = switch (object.group(1) == null ? "" : object.group(1)) {
+                    case "one", "1" -> 1;
+                    case "two", "2" -> 2;
+                    case "three", "3" -> 3;
+                    case "four", "4" -> 4;
+                    case "five", "5" -> 5;
+                    case "six", "6" -> 6;
+                    case "seven", "7" -> 7;
+                    case "eight", "8" -> 8;
+                    default -> 0;
+                };
+                boolean admitted = evidence.permits(clause.start() + action.start(1),
+                        clause.start() + action.end(1));
+                found = new UserMutationReference(clause, !admitted || !hasBoundedOutcomePrelude(clauses, clause), count);
+            }
+        }
+        return Optional.ofNullable(found);
     }
 
     private static String classificationReason(String userRequest, boolean honorGlobalNegation) {
@@ -641,6 +729,9 @@ public final class MutationIntent {
                         if (m.find()) return m.group().strip();
                     }
                 }
+                case "explicit-current-clause-request" -> {
+                    return independentMutationClause(original).map(CurrentRequestClauses.Clause::text).orElse("");
+                }
                 case "explicit-rename-request" -> {
                     Matcher m = MID_SENTENCE_RENAME_REQUEST.matcher(original);
                     if (m.find()) return m.group().strip();
@@ -745,7 +836,7 @@ public final class MutationIntent {
         String folded = evidence.foldedRequest();
         Matcher files = MUTATION_VERB_WITH_FILE_TARGET.matcher(folded);
         while (files.find()) {
-            if (evidence.permits(files.start(), files.end())) {
+            if (evidence.permitsLegacyFallback(files.start(), files.end())) {
                 return new FallbackEvidence("explicit-mutation-verb-with-file-target",
                         original.substring(files.start(), files.end()).strip());
             }
@@ -757,7 +848,7 @@ public final class MutationIntent {
             int start = folded.indexOf(completeMarker);
             while (start >= 0) {
                 int end = start + completeMarker.length();
-                if (start < selectedStart && evidence.permitsMarker(start, end)) {
+                if (start < selectedStart && evidence.permitsLegacyFallbackMarker(start, end)) {
                     selectedStart = start;
                     selectedSpan = original.substring(start, end).strip();
                 }

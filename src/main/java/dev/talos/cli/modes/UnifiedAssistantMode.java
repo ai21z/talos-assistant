@@ -22,6 +22,7 @@ import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,13 +101,14 @@ public final class UnifiedAssistantMode implements Mode {
 
         // System prompt - unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = !history.isEmpty();
-        LocalTurnTraceCapture.enterExecutionStage(
-                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
-        boolean nativeTools = ctx.llm().prepareNativeTools();
-        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         TaskResolution taskResolution = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.resolveFromMessages(contractMessages),
                 workspace);
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
+        boolean nativeTools = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(taskResolution.contract()).isEmpty()
+                && ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         TaskContract taskContract = taskResolution.contract();
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = taskResolution.blocksUnscopedMutation()
@@ -127,7 +129,7 @@ public final class UnifiedAssistantMode implements Mode {
             promptBuilder
                     .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                     .withVisibleToolNames(plannedNativeToolNames)
-                    .withWorkspace(workspace)
+                    .withWorkspace(dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent() ? null : workspace)
                     .withReadOnlyToolMode(!taskContract.mutationAllowed())
                     .withCommandToolMode(initialPhase == ExecutionPhase.VERIFY);
         }
@@ -160,6 +162,8 @@ public final class UnifiedAssistantMode implements Mode {
         // Prompt inspection returns a canonical provider-facing copy. Keep
         // this list raw for deterministic preparation, trace coordinates,
         // capture boundaries, and every pre-dispatch policy decision.
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "agent",
@@ -167,10 +171,11 @@ public final class UnifiedAssistantMode implements Mode {
                 turnCtx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(responseMaxChars);
 

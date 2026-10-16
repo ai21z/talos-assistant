@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -37,6 +38,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
     ) {
         ToolRepromptMessageOverlay overlay = new ToolRepromptMessageOverlay(state);
         overlay.applyReadOnlyEvidence();
+        overlay.applyMutationContinuationEvidence();
         overlay.applyStaleEditRepair();
         overlay.applyEmptyEditRepair();
         // An active static-repair obligation REPLACES the request messages
@@ -148,7 +150,15 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
     }
 
     private void applyReadOnlyEvidence() {
-        for (var carrier : ReadOnlyEvidenceContext.select(state).carriers()) {
+        applyEvidence(ReadOnlyEvidenceContext.delivery(state));
+    }
+
+    private void applyMutationContinuationEvidence() {
+        applyEvidence(ReadOnlyEvidenceContext.mutationContinuationDelivery(state));
+    }
+
+    private void applyEvidence(ReadOnlyEvidenceContext.Delivery delivery) {
+        for (var carrier : delivery.carriers()) {
             ChatMessage current = state.messages.get(carrier.index());
             if (current.equals(carrier.message())) continue;
             restoredToolResults.add(new RestoredToolResult(carrier.index(), current.content()));
@@ -196,6 +206,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
 
     private void applyCurrentTaskAnchor(String userTask) {
         if (userTask == null || userTask.isBlank()) return;
+        userTask = RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask);
         String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
         addUser("[Current task - stay focused on this] " + pinned, "[Current task");
     }

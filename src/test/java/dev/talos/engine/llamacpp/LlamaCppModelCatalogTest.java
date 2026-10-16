@@ -14,10 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LlamaCppModelCatalogTest {
 
     @Test
-    void onlyQwen35UsesTheEvidenceGatedSingleLeadingSystemLayout() {
+    void gptAndQwen35UseTheEvidenceGatedSingleLeadingSystemLayout() {
         for (String alias : List.of(
                 "qwen2.5-coder-14b",
-                "gpt-oss-20b",
                 "qwen36vf-q4km",
                 "qwen36vf-q6k",
                 "deepseek-v2lite-q4km",
@@ -33,6 +32,9 @@ class LlamaCppModelCatalogTest {
         var qwen35 = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
         assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
                 qwen35.runtime().requestLayout());
+        var gpt = LlamaCppModelCatalog.byAlias("gpt-oss-20b").orElseThrow();
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                gpt.runtime().requestLayout());
     }
 
     private record ExistingProfile(

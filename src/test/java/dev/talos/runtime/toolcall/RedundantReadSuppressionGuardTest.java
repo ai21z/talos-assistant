@@ -7,6 +7,9 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,6 +24,44 @@ import static org.junit.jupiter.api.Assertions.*;
 class RedundantReadSuppressionGuardTest {
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearCapture() { TurnTaskContractCapture.clear(); }
+
+    @Test
+    void duplicateReadDuringCapturedMutationDoesNotRequestAnImmediateAnswer() {
+        LoopState state = loopState();
+        var messages = List.of(ChatMessage.user("Change README.md from old title to new title."));
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, read, "README.md", ToolResult.ok("1 | old title"));
+
+        var decision = RedundantReadSuppressionGuard.decision(read, state, false);
+
+        assertNotNull(decision);
+        assertTrue(decision.diagnostic().contains("requested mutation remains outstanding"));
+        assertTrue(decision.diagnostic().contains("Approval and verification remain controlled by the runtime"));
+        assertFalse(decision.diagnostic().contains("Answer the user's question now"));
+        assertFalse(decision.diagnostic().contains("workspace has not changed"));
+    }
+
+    @Test
+    void verificationPhaseDoesNotAdvertiseAnOutstandingMutation() {
+        LoopState state = loopState();
+        var messages = List.of(ChatMessage.user("Change README.md from old title to new title."));
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
+        state.ctx.executionPhaseState().moveTo(dev.talos.runtime.phase.ExecutionPhase.VERIFY);
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, read, "README.md", ToolResult.ok("1 | new title"));
+
+        var decision = RedundantReadSuppressionGuard.decision(read, state, false);
+
+        assertNotNull(decision);
+        assertFalse(decision.diagnostic().contains("requested mutation remains outstanding"));
+        assertTrue(decision.diagnostic().contains("Answer the user's question now"));
+    }
 
     @Test
     void duplicateReadOnlyCallReturnsExactNudgeAndSignature() {

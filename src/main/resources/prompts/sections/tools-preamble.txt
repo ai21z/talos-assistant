@@ -43,8 +43,6 @@ WHEN NOT TO USE TOOLS:
 
 
 Invocation Rules:
-- Emit each tool call as a JSON code block (```json). The JSON must have "name" and "parameters" keys exactly as shown.
-- You may emit multiple tool call blocks in one response.
 - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
 - Do NOT fabricate tool results. Wait for the actual result.
 - Only call tools that are listed below. Do not invent tool names.

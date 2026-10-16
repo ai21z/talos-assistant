@@ -563,8 +563,11 @@ Run the approved Gradle test command profile.
 |---|---|
 | `/help` | show commands |
 | `/mode <mode>` | switch active mode |
-| `/models` | list available models |
-| `/set model <backend/model>` | switch active model |
+| `/models` | list managed aliases, local candidates and catalog dispositions |
+| `/models --verbose` | show model filenames, availability and switching details |
+| `/models add <alias> "<absolute GGUF path>"` | register a local GGUF for this session without starting it |
+| `/models use <alias>` | select a local managed model and restart the owned backend |
+| `/set model <alias>` | compatibility form of managed selection, or use `<backend/model>` for another configured backend |
 | `/reindex` | rebuild the current workspace index |
 | `/workspace` | show current workspace status |
 | `/status` | show runtime and indexing details |
@@ -586,6 +589,16 @@ Run the approved Gradle test command profile.
 | `/clear` | clear conversation memory |
 | `/<template>` | workspace template commands from `.talos/commands/*.md` (`$ARGS` substitution; restart to reload) |
 | `/q` | exit |
+
+In Unreleased current source, managed model selection keeps Talos open. Local
+files are checked before the owned backend is stopped, and the target is reported
+as active only after startup and served-identity checks succeed. No model is
+downloaded by `/models` or `/set model`. Connect-only servers are not restarted.
+Imports and selections apply to the current session. Saved defaults, conversation
+history, sampling and global tool/privacy policy are preserved. A local candidate
+or catalog disposition is not proof of current readiness or qualification. See
+[session model selection](docs/getting-started/model-setup.md#select-a-model-in-the-current-session)
+for discovery, registration and failure behavior.
 
 ## The Talos Work Cycle
 

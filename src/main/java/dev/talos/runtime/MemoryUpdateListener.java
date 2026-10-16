@@ -64,10 +64,19 @@ public final class MemoryUpdateListener implements SessionListener {
     }
 
     @Override
+    public TurnPublicationReceipt onTurnSettled(TurnSettlement settlement, String userInput) {
+        if (settlement != null && !settlement.ordinaryCompletion() && memory != null)
+            memory.recordTypedResults(settlement.result());
+        return SessionListener.super.onTurnSettled(settlement, userInput);
+    }
+
+    @Override
     public void onTurnComplete(TurnResult result, String userInput) {
         if (result == null || userInput == null || userInput.isBlank()) return;
         if (memory != null) {
+            memory.recordTypedResults(result);
             memory.recordToolEvidence(result.turnNumber(), result.audit().toolCalls());
+            memory.recordWorkStatus(result);
         }
 
         String answer = extractText(result.result());
@@ -92,7 +101,10 @@ public final class MemoryUpdateListener implements SessionListener {
             conversationManager.addTurn(userInput, forHistory);
 
             // Trigger compaction check (non-blocking - if LLM is null, this is a no-op)
-            if (llm != null) {
+            boolean retainedStatus = result.audit().workStatusReceipt().active()
+                    || dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(
+                            dev.talos.runtime.task.TaskContractResolver.fromUserRequest(userInput)).isPresent();
+            if (llm != null && !retainedStatus) {
                 try {
                     boolean compacted = assistMode
                             ? conversationManager.maybeCompactForAssist(llm)

@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
@@ -61,8 +62,15 @@ public final class ToolSurfacePlanner {
         }
         ToolCapabilityAvailability safeAvailability =
                 availability == null ? ToolCapabilityAvailability.allEnabled() : availability;
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) {
+            return new Plan(List.of(), "retained work status");
+        }
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
+        }
+        if (contract != null && ConversationEvidenceRequest.interpret(contract.originalUserRequest()).source()
+                != ConversationEvidenceRequest.Source.NORMAL) {
+            return new Plan(List.of(), "runtime conversation evidence");
         }
         if (contract != null && contract.type() == TaskType.CHECKPOINT_RESTORE) {
             return new Plan(List.of(), "checkpoint restore direct answer");

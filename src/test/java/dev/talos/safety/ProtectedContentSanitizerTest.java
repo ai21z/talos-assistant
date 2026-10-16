@@ -10,6 +10,72 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProtectedContentSanitizerTest {
 
     @Test
+    void boundedPrefixRedactsUnterminatedPrivateKeyAndPreservesEarlierPublicText() {
+        String input = "Public note\n-----BEGIN " + "PRIVATE KEY-----\nSYNTHETIC_BODY\nunread end";
+
+        assertEquals("Public note\n[redacted]", ProtectedContentSanitizer.sanitizeTextPrefix(input));
+    }
+
+    @Test
+    void boundedPrefixPreservesTextBetweenCompleteAndUnterminatedBlocks() {
+        String input = "Before\n" + fakePem() + "\nBetween\n"
+                + "-----BEGIN " + "RSA PRIVATE KEY-----\nSYNTHETIC_BODY";
+
+        assertEquals("Before\n[redacted]\nBetween\n[redacted]",
+                ProtectedContentSanitizer.sanitizeTextPrefix(input));
+    }
+
+    @Test
+    void boundedPrefixPreservesHarmlessAndPublicKeyText() {
+        String input = "Public note\n-----BEGIN PUBLIC KEY-----\nPUBLIC_BODY";
+
+        assertEquals(input, ProtectedContentSanitizer.sanitizeTextPrefix(input));
+        assertEquals(" ", ProtectedContentSanitizer.sanitizeTextPrefix(" "));
+        assertEquals(null, ProtectedContentSanitizer.sanitizeTextPrefix(null));
+    }
+
+    @Test
+    void boundedPrefixRetainsExistingAssignmentRedaction() {
+        String input = "Public note\npassword=synthetic-secret-value\nMore notes";
+
+        assertEquals(ProtectedContentSanitizer.sanitizeText(input),
+                ProtectedContentSanitizer.sanitizeTextPrefix(input));
+    }
+
+    @Test
+    void boundedPrefixRedactsEntireUnterminatedQuotedSecretForEachDelimiter() {
+        for (char quote : new char[] {'"', '\'', '`'}) {
+            String input = "Public note\nclient_secret=" + quote + "first word\nSYNTHETIC_BODY tail";
+            assertEquals("Public note\nclient_secret=[redacted]",
+                    ProtectedContentSanitizer.sanitizeTextPrefix(input));
+        }
+    }
+
+    @Test
+    void boundedPrefixDoesNotTreatEscapedQuotesAsClosingDelimiters() {
+        for (char quote : new char[] {'"', '\'', '`'}) {
+            String input = "Public note\npassword=" + quote + "first \\" + quote + " SYNTHETIC_BODY";
+            assertEquals("Public note\npassword=[redacted]",
+                    ProtectedContentSanitizer.sanitizeTextPrefix(input));
+        }
+    }
+
+    @Test
+    void boundedPrefixPreservesTextAfterCompleteQuotedAssignmentAndEvenBackslashes() {
+        for (char quote : new char[] {'"', '\'', '`'}) {
+            String input = "password=" + quote + "secret\\\\" + quote + "\nPublic ending";
+            assertEquals("password=[redacted]\nPublic ending",
+                    ProtectedContentSanitizer.sanitizeTextPrefix(input));
+        }
+    }
+
+    @Test
+    void boundedPrefixLeavesOrdinaryUnterminatedQuotationUnchanged() {
+        String input = "Public note\ntitle=\"unfinished ordinary text";
+        assertEquals(input, ProtectedContentSanitizer.sanitizeTextPrefix(input));
+    }
+
+    @Test
     void redactsBareSecretShapes() {
         String ghp = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890";
         String openAi = "sk-abcdefghijklmnopqrstuvwxyz1234567890";

@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.intent.ContentSaveRequest;
 import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Path;
@@ -33,6 +34,31 @@ public final class UnsupportedDocumentMutationPolicy {
 
         if (formats.isEmpty()) return Optional.empty();
         return Optional.of(answer(formats, true));
+    }
+
+    public static Optional<String> answerIfUnsupportedSaveClarification(ContentSaveRequest save) {
+        if (save == null) return Optional.empty();
+        LinkedHashMap<String, UnsupportedDocumentFormats.Format> formats = new LinkedHashMap<>();
+        for (var operation : save.operations()) {
+            if (operation.authority() != ContentSaveRequest.Authority.REQUIRED) continue;
+            if (operation.destination().resolved()) {
+                try {
+                    UnsupportedDocumentFormats.describe(Path.of(operation.destination().value()))
+                            .ifPresent(format -> formats.putIfAbsent(format.extension(), format));
+                } catch (RuntimeException ignored) {
+                    // Invalid paths remain subject to normal path validation.
+                }
+            } else if (operation.destination().binding() == ContentSaveRequest.Binding.MISSING) {
+                String object = save.originalRequest().substring(operation.action().end(), operation.source().end());
+                for (FormatMarkers entry : REQUEST_MARKERS) {
+                    if (entry.ownsDirectOutputObject(object)) {
+                        UnsupportedDocumentFormats.describeExtension(entry.extension())
+                                .ifPresent(format -> formats.putIfAbsent(format.extension(), format));
+                    }
+                }
+            }
+        }
+        return formats.isEmpty() ? Optional.empty() : Optional.of(answer(formats, true));
     }
 
     public static Optional<String> answerIfUnsupportedCapabilityQuestion(String userRequest) {
@@ -109,7 +135,20 @@ public final class UnsupportedDocumentMutationPolicy {
             new FormatMarkers("ppt", new String[]{".ppt", "ppt file"})
     );
 
-    private record FormatMarkers(String extension, String[] markers) {}
+    private record FormatMarkers(String extension, String[] markers) {
+        private boolean ownsDirectOutputObject(String object) {
+            String typedObject = Pattern.quote(extension)
+                    + "\\s+(?:file|document|guide|format|version|workbook|presentation)\\b";
+            String aliases = java.util.Arrays.stream(markers)
+                    .filter(marker -> !marker.startsWith(".") && !marker.startsWith("as ")
+                            && !marker.startsWith("to "))
+                    .map(marker -> Pattern.quote(marker) + "\\b")
+                    .collect(java.util.stream.Collectors.joining("|"));
+            return Pattern.compile("(?iu)^\\s*(?:(?:a|an|the|new)\\s+)*(?:"
+                    + typedObject + (aliases.isEmpty() ? "" : "|" + aliases) + ")")
+                    .matcher(object).lookingAt();
+        }
+    }
 
     private static boolean looksLikeCreationCapabilityQuestion(String lower) {
         if (lower == null || lower.isBlank()) return false;

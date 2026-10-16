@@ -19,9 +19,12 @@ import java.util.Objects;
 /** Prepared read inputs are associated with one locally admitted serialized request. */
 public final class ProviderReadInputBinding {
     public static final String REQUEST_TAG = "bounded-read-only-synthesis";
+    public static final String DELIVERY_TAG = "bounded-read-evidence-delivery";
     public static final String SANITIZER_VERSION = "sanitize-message-content-v1";
     public static final int MAX_TOOL_RESULTS = 8;
     public static final int MAX_TOOL_RESULT_CHARS = 16_000;
+    public static final int MAX_DELIVERY_TOOL_RESULTS = 32;
+    public static final int MAX_DELIVERY_TOOL_RESULT_CHARS = 32_000;
     public static final int MAX_SERIALIZED_BYTES = 256_000;
     // Schema depth 32 is enclosed by the body, response_format and json_schema objects.
     static final int MAX_SERIALIZED_NESTING_DEPTH = 35;
@@ -37,6 +40,7 @@ public final class ProviderReadInputBinding {
             .build());
 
     public enum Status { NOT_REQUESTED, UNAVAILABLE, BOUND }
+    public enum Purpose { NONE, RESPONSE_ONLY, DELIVERY }
 
     public record ToolResultInput(String toolCallId, String content) {
         public ToolResultInput {
@@ -54,13 +58,15 @@ public final class ProviderReadInputBinding {
     /** Only decoded membership is retained. Provider JSON is not retained here. */
     public static final class SerializedMembership {
         private final boolean requested;
+        private final Purpose purpose;
         private final String reasonCode;
         private final String providerBodyHash;
         private final List<ToolResultMembership> toolResults;
 
-        private SerializedMembership(boolean requested, String reasonCode, String providerBodyHash,
+        private SerializedMembership(Purpose purpose, String reasonCode, String providerBodyHash,
                                      List<ToolResultMembership> toolResults) {
-            this.requested = requested;
+            this.requested = purpose != Purpose.NONE || !"NOT_REQUESTED".equals(reasonCode);
+            this.purpose = purpose;
             this.reasonCode = reasonCode;
             this.providerBodyHash = providerBodyHash;
             this.toolResults = List.copyOf(toolResults);
@@ -73,24 +79,27 @@ public final class ProviderReadInputBinding {
 
         @Override public boolean equals(Object other) {
             return other instanceof SerializedMembership value && requested == value.requested
+                    && purpose == value.purpose
                     && reasonCode.equals(value.reasonCode) && providerBodyHash.equals(value.providerBodyHash)
                     && toolResults.equals(value.toolResults);
         }
 
         @Override public int hashCode() {
-            return Objects.hash(requested, reasonCode, providerBodyHash, toolResults);
+            return Objects.hash(purpose, reasonCode, providerBodyHash, toolResults);
         }
     }
 
     static final class PreparedInputs {
         private final boolean requested;
+        private final Purpose purpose;
         private final String reasonCode;
         private final String sanitizerVersion;
         private final List<ToolResultInput> toolResults;
 
-        private PreparedInputs(boolean requested, String reasonCode, String sanitizerVersion,
+        private PreparedInputs(Purpose purpose, String reasonCode, String sanitizerVersion,
                                List<ToolResultInput> toolResults) {
-            this.requested = requested;
+            this.requested = purpose != Purpose.NONE || !"NOT_REQUESTED".equals(reasonCode);
+            this.purpose = purpose;
             this.reasonCode = reasonCode;
             this.sanitizerVersion = sanitizerVersion;
             this.toolResults = List.copyOf(toolResults);
@@ -98,16 +107,18 @@ public final class ProviderReadInputBinding {
     }
 
     private static final ProviderReadInputBinding NOT_REQUESTED = new ProviderReadInputBinding(
-            Status.NOT_REQUESTED, "NOT_REQUESTED", "", "", List.of());
+            Status.NOT_REQUESTED, Purpose.NONE, "NOT_REQUESTED", "", "", List.of());
     private final Status status;
+    private final Purpose purpose;
     private final String reasonCode;
     private final String sanitizerVersion;
     private final String providerBodyHash;
     private final List<ToolResultInput> preparedToolResults;
 
-    private ProviderReadInputBinding(Status status, String reasonCode, String sanitizerVersion,
+    private ProviderReadInputBinding(Status status, Purpose purpose, String reasonCode, String sanitizerVersion,
                                      String providerBodyHash, List<ToolResultInput> preparedToolResults) {
         this.status = status;
+        this.purpose = purpose;
         this.reasonCode = reasonCode;
         this.sanitizerVersion = sanitizerVersion;
         this.providerBodyHash = providerBodyHash;
@@ -115,6 +126,7 @@ public final class ProviderReadInputBinding {
     }
 
     public Status status() { return status; }
+    public Purpose purpose() { return purpose; }
     public String reasonCode() { return reasonCode; }
     public String sanitizerVersion() { return sanitizerVersion; }
     public String providerBodyHash() { return providerBodyHash; }
@@ -124,25 +136,42 @@ public final class ProviderReadInputBinding {
     static ProviderReadInputBinding notRequested() { return NOT_REQUESTED; }
 
     static PreparedInputs noPreparedInputs() {
-        return new PreparedInputs(false, "NOT_REQUESTED", "", List.of());
+        return new PreparedInputs(Purpose.NONE, "NOT_REQUESTED", "", List.of());
     }
 
     static SerializedMembership noSerializedMembership() {
-        return new SerializedMembership(false, "NOT_REQUESTED", "", List.of());
+        return new SerializedMembership(Purpose.NONE, "NOT_REQUESTED", "", List.of());
     }
 
     private static ProviderReadInputBinding unavailable(String reason) {
-        return new ProviderReadInputBinding(Status.UNAVAILABLE, reason, "", "", List.of());
+        return new ProviderReadInputBinding(Status.UNAVAILABLE, Purpose.NONE, reason, "", "", List.of());
     }
 
-    ProviderReadInputBinding forSelectedResponse(boolean selected, boolean terminalEligible) {
+    ProviderReadInputBinding forSelectedResponse(boolean selected, boolean terminalEligible, boolean deliveryObserved) {
         if (status == Status.NOT_REQUESTED) return this;
         if (!selected) return unavailable("RESPONSE_NOT_SELECTED");
+        // A selected truncated response can prove input delivery, never answer completion.
+        if (purpose == Purpose.DELIVERY)
+            return deliveryObserved ? this : unavailable("DELIVERY_TRANSPORT_NOT_OBSERVED");
         return terminalEligible ? this : unavailable("RESPONSE_NOT_TERMINAL");
     }
 
     private static boolean requested(ChatRequest request) {
-        return request != null && request.controls.debugTags().contains(REQUEST_TAG);
+        return purpose(request) != Purpose.NONE;
+    }
+
+    private static Purpose purpose(ChatRequest request) {
+        if (request == null) return Purpose.NONE;
+        if (request.controls.debugTags().contains(REQUEST_TAG)) return Purpose.RESPONSE_ONLY;
+        return request.controls.debugTags().contains(DELIVERY_TAG) ? Purpose.DELIVERY : Purpose.NONE;
+    }
+
+    private static int resultLimit(ChatRequest request) {
+        return purpose(request) == Purpose.DELIVERY ? MAX_DELIVERY_TOOL_RESULTS : MAX_TOOL_RESULTS;
+    }
+
+    private static int characterLimit(ChatRequest request) {
+        return purpose(request) == Purpose.DELIVERY ? MAX_DELIVERY_TOOL_RESULT_CHARS : MAX_TOOL_RESULT_CHARS;
     }
 
     private static boolean responseOnly(ChatRequest request) {
@@ -152,7 +181,8 @@ public final class ProviderReadInputBinding {
 
     static PreparedInputs prepare(ChatRequest request, String sanitizerVersion) {
         if (!requested(request)) return noPreparedInputs();
-        if (!responseOnly(request)) return unavailablePrepared("REQUEST_NOT_RESPONSE_ONLY");
+        if (purpose(request) == Purpose.RESPONSE_ONLY && !responseOnly(request))
+            return unavailablePrepared("REQUEST_NOT_RESPONSE_ONLY");
         if (!SANITIZER_VERSION.equals(sanitizerVersion))
             return unavailablePrepared("UNKNOWN_SANITIZER");
         if (request.messages.size() > MAX_MESSAGES) return unavailablePrepared("PREPARED_INPUT_LIMIT");
@@ -167,23 +197,24 @@ public final class ProviderReadInputBinding {
                     || message.hasNativeToolCalls())
                 return unavailablePrepared("INVALID_PREPARED_TOOL_RESULT");
             if (!ids.add(id)) return unavailablePrepared("DUPLICATE_PREPARED_TOOL_ID");
-            if (inputs.size() >= MAX_TOOL_RESULTS
-                    || message.content().length() > MAX_TOOL_RESULT_CHARS - characters)
+            if (inputs.size() >= resultLimit(request)
+                    || message.content().length() > characterLimit(request) - characters)
                 return unavailablePrepared("PREPARED_INPUT_LIMIT");
             characters += message.content().length();
             inputs.add(new ToolResultInput(id, message.content()));
         }
         if (inputs.isEmpty()) return unavailablePrepared("NO_PREPARED_TOOL_RESULTS");
-        return new PreparedInputs(true, "", sanitizerVersion, inputs);
+        return new PreparedInputs(purpose(request), "", sanitizerVersion, inputs);
     }
 
     private static PreparedInputs unavailablePrepared(String reason) {
-        return new PreparedInputs(true, reason, "", List.of());
+        return new PreparedInputs(Purpose.NONE, reason, "", List.of());
     }
 
     static SerializedMembership decode(String body, ChatRequest request, String bodyHash) {
         if (!requested(request)) return noSerializedMembership();
-        if (!responseOnly(request)) return unavailableSerialized("REQUEST_NOT_RESPONSE_ONLY");
+        if (purpose(request) == Purpose.RESPONSE_ONLY && !responseOnly(request))
+            return unavailableSerialized("REQUEST_NOT_RESPONSE_ONLY");
         if (body == null || body.length() > MAX_SERIALIZED_BYTES
                 || body.getBytes(StandardCharsets.UTF_8).length > MAX_SERIALIZED_BYTES)
             return unavailableSerialized("SERIALIZED_INPUT_LIMIT");
@@ -210,21 +241,21 @@ public final class ProviderReadInputBinding {
                     return unavailableSerialized("INVALID_SERIALIZED_TOOL_RESULT");
                 String id = idNode.textValue();
                 if (!ids.add(id)) return unavailableSerialized("DUPLICATE_SERIALIZED_TOOL_ID");
-                if (results.size() >= MAX_TOOL_RESULTS
-                        || content.textValue().length() > MAX_TOOL_RESULT_CHARS - characters)
+                if (results.size() >= resultLimit(request)
+                        || content.textValue().length() > characterLimit(request) - characters)
                     return unavailableSerialized("SERIALIZED_INPUT_LIMIT");
                 characters += content.textValue().length();
                 results.add(new ToolResultMembership(id, hash(content.textValue())));
             }
             if (results.isEmpty()) return unavailableSerialized("NO_SERIALIZED_TOOL_RESULTS");
-            return new SerializedMembership(true, "", bodyHash, results);
+            return new SerializedMembership(purpose(request), "", bodyHash, results);
         } catch (Exception invalid) {
             return unavailableSerialized("INVALID_SERIALIZED_JSON");
         }
     }
 
     private static SerializedMembership unavailableSerialized(String reason) {
-        return new SerializedMembership(true, reason, "", List.of());
+        return new SerializedMembership(Purpose.NONE, reason, "", List.of());
     }
 
     static ProviderReadInputBinding bind(PreparedInputs prepared,
@@ -234,6 +265,7 @@ public final class ProviderReadInputBinding {
         SerializedMembership serialized = dispatch.readInputMembership();
         if (!serialized.requested) return unavailable("SERIALIZED_INPUT_NOT_CAPTURED");
         if (!serialized.reasonCode.isEmpty()) return unavailable(serialized.reasonCode);
+        if (prepared.purpose != serialized.purpose) return unavailable("INPUT_PURPOSE_MISMATCH");
         if (dispatch.providerBodyHash().isBlank()
                 || !dispatch.providerBodyHash().equals(serialized.providerBodyHash))
             return unavailable("SERIALIZED_BODY_MISMATCH");
@@ -241,7 +273,7 @@ public final class ProviderReadInputBinding {
                 .map(input -> new ToolResultMembership(input.toolCallId(), hash(input.content())))
                 .toList();
         if (!expected.equals(serialized.toolResults)) return unavailable("TOOL_RESULT_MEMBERSHIP_MISMATCH");
-        return new ProviderReadInputBinding(Status.BOUND, "", prepared.sanitizerVersion,
+        return new ProviderReadInputBinding(Status.BOUND, prepared.purpose, "", prepared.sanitizerVersion,
                 serialized.providerBodyHash, prepared.toolResults);
     }
 

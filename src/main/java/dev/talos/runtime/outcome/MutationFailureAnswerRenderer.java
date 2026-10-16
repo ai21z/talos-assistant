@@ -10,6 +10,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -17,51 +18,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 
 /** Renders final-answer truthfulness text for failed or blocked mutation turns. */
 public final class MutationFailureAnswerRenderer {
-    private static final Set<String> MUTATION_CLAIM_MARKERS = Set.of(
-            "i have updated", "i've updated", "i updated",
-            "i have edited", "i've edited", "i edited",
-            "i have changed", "i've changed", "i changed",
-            "i have applied", "i've applied", "i applied",
-            "i have written", "i've written", "i wrote",
-            "i have created", "i've created", "i created",
-            "i have modified", "i've modified", "i modified",
-            "i have saved", "i've saved", "i saved",
-            "i have replaced", "i've replaced", "i replaced",
-            "changes have been applied",
-            "changes were applied",
-            "the file has been updated",
-            "the file has been modified",
-            "the file has been edited",
-            "the file has been saved",
-            "the file has been written",
-            "the changes have been saved",
-            "has been updated to",
-            "has been modified to"
-    );
-    private static final String PAST_MUTATION_ACTION =
-            "(?:updated|edited|changed|applied|written|wrote|created|modified|saved|replaced)";
-    private static final String PAST_MUTATION_ACTION_SEQUENCE =
-            PAST_MUTATION_ACTION + "(?:\\s+(?:or|and)\\s+" + PAST_MUTATION_ACTION + ")*";
-    private static final Pattern FIRST_PERSON_ZERO_FILE_MUTATION = Pattern.compile(
-            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE
-                    + "\\s+(?:exactly\\s+)?(?:zero|0|no)\\s+files?\\b");
-    private static final Pattern FIRST_PERSON_NOTHING_MUTATION = Pattern.compile(
-            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE
-                    + "\\s+nothing\\b");
-    private static final Pattern PASSIVE_NO_CHANGE_MUTATION = Pattern.compile(
-            "\\b(?:no|zero|0)\\s+(?:file\\s+)?changes?\\s+"
-                    + "(?:have\\s+been\\s+|has\\s+been\\s+|were\\s+|was\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE + "\\b");
-
     public static final String FALSE_MUTATION_ANNOTATION =
-            "[Truth check: the response below claims a file was changed, "
-            + "but no file-mutating tool succeeded in this turn. "
-            + "No file on disk was actually modified.]\n\n";
+            "[Truth check: the response below claims a Talos file change, "
+            + "but supporting successful execution is not recorded for that claim in this turn. "
+            + "Other actors and unrecorded filesystem changes are not assessed.]\n\n";
+
+    public static final String UNVERIFIED_MUTATION_ANNOTATION =
+            "[Truth check: the actor or time of a claimed file change is unresolved. "
+            + "This turn's execution records do not establish that claim.]\n\n";
 
     public static final String PARTIAL_MUTATION_ANNOTATION =
             "[Truth check: some requested file changes succeeded and some failed. "
@@ -90,54 +59,20 @@ public final class MutationFailureAnswerRenderer {
             + "No file changes were applied. Ask explicitly to edit, update, or "
             + "create files if you want Talos to modify the workspace.";
 
+    public static final String READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT =
+            "[Truth check: no file was changed in this turn. Mutating tool calls "
+            + "were blocked because executable authority was not established "
+            + "for those proposals. This turn's task contract was read-only.]\n\n"
+            + "No file changes were applied. An explicit change request and "
+            + "valid executable authority are required before a mutation can proceed.";
+
     private MutationFailureAnswerRenderer() {
     }
 
     public static boolean containsMutationClaim(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        for (String marker : MUTATION_CLAIM_MARKERS) {
-            int start = lower.indexOf(marker);
-            while (start >= 0) {
-                if (!isNoChangeMarkerContext(lower, marker, start)) return true;
-                start = lower.indexOf(marker, start + marker.length());
-            }
-        }
-        return false;
-    }
-
-    private static boolean isNoChangeMarkerContext(String lower, String marker, int markerStart) {
-        if (lower == null || marker == null || markerStart < 0) return false;
-        int markerEnd = Math.min(lower.length(), markerStart + marker.length());
-        int sentenceEnd = sentenceEnd(lower, markerEnd);
-        if (marker.startsWith("i ")) {
-            String firstPersonWindow = lower.substring(
-                    markerStart,
-                    Math.min(sentenceEnd, markerStart + 140));
-            return FIRST_PERSON_ZERO_FILE_MUTATION.matcher(firstPersonWindow).find()
-                    || FIRST_PERSON_NOTHING_MUTATION.matcher(firstPersonWindow).find();
-        }
-        if (marker.startsWith("changes ") || marker.startsWith("the changes ")) {
-            String passiveWindow = lower.substring(
-                    Math.max(0, markerStart - 18),
-                    Math.min(sentenceEnd, markerEnd + 60));
-            return PASSIVE_NO_CHANGE_MUTATION.matcher(passiveWindow).find();
-        }
-        return false;
-    }
-
-    private static int sentenceEnd(String text, int from) {
-        if (text == null || text.isBlank()) return 0;
-        int start = Math.max(0, from);
-        int end = text.length();
-        for (int i = start; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '.' || c == '!' || c == '?' || c == '\n') {
-                end = i + 1;
-                break;
-            }
-        }
-        return end;
+        var assessment = MutationClaimAssessment.assess(answer);
+        return assessment.hasCurrentRuntimeClaim() || assessment.hasUnattributedClaim()
+                || assessment.hasCompletedFileNarrative();
     }
 
     public static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {
@@ -149,14 +84,82 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (loopResult == null) return answer;
-        int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
-        if (hasFailedMutationEffects(loopResult)) return answer;
-        if (totalMutations > 0) return answer;
-        if (hasDeniedMutation(loopResult)) return answer;
-        if (!containsMutationClaim(answer)) return answer;
-        return FALSE_MUTATION_ANNOTATION + answer;
+        return selectMutationClaimAnswer(answer, loopResult, extraMutationSuccesses, null).answer();
+    }
+
+    public record MutationClaimAnswer(String answer, boolean unsupportedCurrentClaim, boolean unresolvedClaim) {}
+
+    public static MutationClaimAnswer selectMutationClaimAnswer(
+            String answer, ToolCallLoop.LoopResult loopResult, int extraMutationSuccesses, Path workspace) {
+        if (answer == null || answer.isBlank() || loopResult == null
+                || hasFailedMutationEffects(loopResult) || hasDeniedMutation(loopResult)) {
+            return new MutationClaimAnswer(answer, false, false);
+        }
+        var assessment = MutationClaimAssessment.assess(answer);
+        Set<String> successfulPaths = new LinkedHashSet<>();
+        boolean recordedSuccess = false;
+        for (var outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.mutating() || !outcome.success() || outcome.denied()
+                    || !outcome.mutationEffects().uncertainPaths().isEmpty()) continue;
+            recordedSuccess = true;
+            List<String> paths = outcome.workspaceOperationPlan() != null
+                    ? outcome.workspaceOperationPlan().changedPaths() : List.of(outcome.pathHint());
+            for (String path : paths) {
+                String identity = claimPathIdentity(path, workspace);
+                if (!identity.isBlank()) successfulPaths.add(identity);
+            }
+        }
+        boolean existentialSuccess = recordedSuccess || loopResult.mutatingToolSuccesses() > 0
+                || extraMutationSuccesses > 0;
+        Set<String> unsupportedTargets = new LinkedHashSet<>();
+        boolean unsupported = false;
+        boolean unresolved = false;
+        for (var claim : assessment.claims()) {
+            if (claim.isCurrentRuntimeClaim() || claim.completedFileNarrative()) {
+                if (claim.targets().isEmpty()) {
+                    if (!existentialSuccess) {
+                        if (claim.isCurrentRuntimeClaim()) unsupported = true;
+                        else unresolved = true;
+                    }
+                    else if (Pattern.compile("\\b(?:all|every|each)\\b", Pattern.CASE_INSENSITIVE)
+                            .matcher(claim.text()).find()) unresolved = true;
+                } else {
+                    for (String target : claim.targets()) {
+                        String identity = claimPathIdentity(target, workspace);
+                        if (identity.isBlank() || !successfulPaths.contains(identity)) {
+                            if (claim.isCurrentRuntimeClaim()) unsupported = true;
+                            else unresolved = true;
+                            unsupportedTargets.add(target);
+                        }
+                    }
+                }
+            } else if (claim.isUnattributedClaim()
+                    && (claim.actor() == MutationClaimAssessment.Actor.SELF
+                    || claim.actor() == MutationClaimAssessment.Actor.TALOS
+                    || claim.assertion() == MutationClaimAssessment.Assertion.QUOTED
+                    || claim.temporalScope() == MutationClaimAssessment.TemporalScope.CURRENT
+                    || claim.completedFileNarrative())) {
+                unresolved = true;
+            }
+        }
+        if (unsupported) {
+            String targets = unsupportedTargets.isEmpty() ? ""
+                    : "Targets without matching execution: " + String.join(", ", unsupportedTargets) + ".\n\n";
+            return new MutationClaimAnswer(FALSE_MUTATION_ANNOTATION + targets + answer, true, unresolved);
+        }
+        return new MutationClaimAnswer(unresolved ? UNVERIFIED_MUTATION_ANNOTATION + answer : answer,
+                false, unresolved);
+    }
+
+    private static String claimPathIdentity(String raw, Path workspace) {
+        if (raw == null || raw.isBlank()) return "";
+        try {
+            Path path = Path.of(raw.replace('\\', '/'));
+            if (workspace != null && !path.isAbsolute()) path = workspace.resolve(path);
+            return path.normalize().toString().replace('\\', '/');
+        } catch (InvalidPathException invalid) {
+            return "";
+        }
     }
 
     public static String summarizePartialMutationOutcomesIfNeeded(
@@ -379,14 +382,22 @@ public final class MutationFailureAnswerRenderer {
         List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(outcome -> !outcome.success())
+                .filter(outcome -> outcome.denied()
+                        || !contract.mutationRequested()
+                        && ToolError.INVALID_AUTHORITY.equals(outcome.errorCode())
+                        && outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)
                 .toList();
         if (readOnlyBlockedMutations.isEmpty()) return answer;
 
+        String replacement = readOnlyBlockedMutations.stream().anyMatch(ToolCallLoop.ToolOutcome::denied)
+                ? READ_ONLY_DENIED_MUTATION_REPLACEMENT
+                : READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT;
+
         String cleanReadOnlyAnswer = readOnlyDeniedCleanAnswer(answer);
         if (cleanReadOnlyAnswer.isBlank()) {
-            return READ_ONLY_DENIED_MUTATION_REPLACEMENT;
+            return replacement;
         }
-        return READ_ONLY_DENIED_MUTATION_REPLACEMENT
+        return replacement
                 + "\n\nRead-only answer from inspected evidence:\n"
                 + cleanReadOnlyAnswer;
     }

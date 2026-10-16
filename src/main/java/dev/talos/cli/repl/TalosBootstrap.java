@@ -221,8 +221,8 @@ public final class TalosBootstrap {
             savedSessionSummary = inspectSavedSession(sessionArchive,
                     latestSessionId(sessionArchive, workspaceId));
         }
-        if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
-            llm.setModel(restoreSummary.model());
+        String modelRestoreNotice = restoreSavedModel(llm, restoreSummary.model());
+        if (modelRestoreNotice.isBlank() && restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
             syncActiveModelIntoConfig(cfg, llm.getModel());
         }
 
@@ -408,6 +408,7 @@ public final class TalosBootstrap {
                 .toolCallLoop(toolCallLoop)
                 .streamSink(streamSink)
                 .onStreamComplete(spinnerStopper)
+                .exactAnswerPresentation(render.exactAnswerPresentation())
                 .build();
 
         // ── Post-turn hooks ──────────────────────────────────────────────
@@ -445,15 +446,16 @@ public final class TalosBootstrap {
         // above - same spec, richer dependencies.
         WorkspaceCommandTemplates templates =
                 WorkspaceCommandTemplates.load(workspace, registry.names());
-        registry.register(new HelpCommand(registry, templates));
+        registry.register(new HelpCommand(registry, templates, terminalWidth));
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
-                ? buildRestoreNotice(restoreSummary)
+                ? buildRestoreNotice(restoreSummary, modelRestoreNotice.isBlank())
                 : buildSavedSessionNotice(savedSessionSummary);
         String startupNotice = joinStartupNotices(
                 buildConfigNotice(cfg.getReport()),
                 sessionNotice,
+                modelRestoreNotice,
                 buildSensitiveWorkspaceNotice(workspace),
                 buildWorkspaceProfilesNotice(workspaceProfilesLoaded));
         ReplRouter router = new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
@@ -519,7 +521,7 @@ public final class TalosBootstrap {
             @Override public void setDebugLevel(DebugLevel level) { session.setDebugLevel(level); }
         };
 
-        registry.register(new HelpCommand(registry));
+        registry.register(new HelpCommand(registry, null, terminalWidth));
         registry.register(new KCommand(rt));
         registry.register(new DebugCommand(rt));
         registry.register(new QuitCommand(quit));
@@ -845,7 +847,30 @@ public final class TalosBootstrap {
         return u != null && !u.isBlank() && a != null && !a.isBlank();
     }
 
+    /** Restores only the saved selection. A failed switch is neither retried nor relabelled. */
+    public static String restoreSavedModel(LlmClient llm, String savedModel) {
+        if (llm == null || savedModel == null || savedModel.isBlank()) return "";
+        if (savedModel.equals(llm.getModel()) && !llm.modelSelectionUnavailable()) return "";
+        try {
+            llm.setModel(savedModel);
+            return "";
+        } catch (RuntimeException failure) {
+            if (dev.talos.spi.types.ControlFlowFailure.classify(failure)
+                    != dev.talos.spi.types.ControlFlowFailure.Kind.NONE) {
+                throw dev.talos.spi.types.ControlFlowFailure.propagate(failure);
+            }
+            return "Saved model was not restored. " + (llm.modelSelectionUnavailable()
+                    ? "No model is available. After the cause is resolved, use "
+                        + dev.talos.cli.repl.slash.SetModelCommand.managedRecoveryCommand(llm.getModel()) + "."
+                    : "The previous model selection was preserved. Use /models to select an available model.");
+        }
+    }
+
     static String buildRestoreNotice(RestoreSummary summary) {
+        return buildRestoreNotice(summary, true);
+    }
+
+    private static String buildRestoreNotice(RestoreSummary summary, boolean modelRestored) {
         if (summary == null || !summary.hasSavedSession()) return "";
         String age = "";
         if (summary.createdAt() != null) {
@@ -859,7 +884,7 @@ public final class TalosBootstrap {
         sb.append("  restored ").append(summary.pairsReplayed()).append(" prior exchange")
                 .append(summary.pairsReplayed() == 1 ? "" : "s");
         if (!age.isBlank()) sb.append(" from ").append(age);
-        if (summary.model() != null && !summary.model().isBlank()) {
+        if (modelRestored && summary.model() != null && !summary.model().isBlank()) {
             sb.append(AnsiColor.isUnicodeSafe() ? " · model " : " - model ")
                     .append(summary.model());
         }

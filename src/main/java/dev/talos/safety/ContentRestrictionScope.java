@@ -20,6 +20,19 @@ public final class ContentRestrictionScope {
     public static void restrictIfActive(ContentRestrictions restrictions) {
         if (CURRENT.get() != null) restrict(restrictions);
     }
+    /** Admit content within the owning turn, or a temporary scope for a standalone call. */
+    public static <T> T callWithRestrictions(ContentRestrictions restrictions, java.util.function.Supplier<T> work) {
+        Objects.requireNonNull(restrictions);
+        Objects.requireNonNull(work);
+        boolean standalone = CURRENT.get() == null;
+        if (standalone) begin();
+        try {
+            restrict(restrictions);
+            return work.get();
+        } finally {
+            if (standalone) end();
+        }
+    }
     public static Runnable propagate(Runnable work) {
         Objects.requireNonNull(work);
         var captured = CURRENT.get();

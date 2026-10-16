@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.TokenChunk;
@@ -94,6 +95,25 @@ public final class ScriptedNativeLlmClient {
     }
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
+
+    /** The current identity is supplied independently of scripted provider responses. */
+    public static RecordedClient recordingTextToolFallbackWithIdentity(
+            String response,
+            java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier) {
+        return recordingTextToolFallbackWithIdentity(
+                List.of(new LlmClient.StreamResult(response, List.of())), identitySupplier);
+    }
+
+    public static RecordedClient recordingTextToolFallbackWithIdentity(
+            List<LlmClient.StreamResult> responses,
+            java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier) {
+        Config config = new Config(null);
+        config.data.put("llm", new java.util.LinkedHashMap<>(
+                Map.of("transport", "engine", "default_backend", "llama_cpp")));
+        RecordingResolver resolver = new RecordingResolver(responses, 16_384, true);
+        resolver.identitySupplier = java.util.Objects.requireNonNull(identitySupplier);
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
 
     /** Constructed responses can use the actual admitted request, including its frozen catalog. */
     public static RecordedClient recordingResponder(java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder,
@@ -377,6 +397,7 @@ public final class ScriptedNativeLlmClient {
 
     private static final class RecordingResolver implements LlmEngineResolver {
         private java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder;
+        private java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier = ModelIdentitySnapshot::empty;
         private final List<LlmClient.StreamResult> responses;
         private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
@@ -417,6 +438,11 @@ public final class ScriptedNativeLlmClient {
 
         private List<ChatRequest> requests() {
             return requests;
+        }
+
+        @Override
+        public ModelIdentitySnapshot modelIdentity() {
+            return identitySupplier.get();
         }
 
         @Override

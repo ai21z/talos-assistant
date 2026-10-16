@@ -5,12 +5,21 @@ import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
+import dev.talos.spi.EngineConfig;
 
 import java.util.stream.Stream;
 
 interface LlmEngineResolver extends AutoCloseable {
 
     void select(String backend, String model);
+
+    default boolean ownsManagedModelLifecycle() { return false; }
+
+    default Capabilities switchManagedModel(EngineConfig target, String alias) throws Exception {
+        throw new UnsupportedOperationException("Managed model replacement is unavailable.");
+    }
+
+    default boolean selectionUnavailable() { return false; }
 
     default Capabilities capabilities() {
         return Capabilities.of(false, false, false, 0);

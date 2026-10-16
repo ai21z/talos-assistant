@@ -13,6 +13,8 @@ import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,6 +119,49 @@ class CompactReadOnlyEvidenceContinuationTest {
 
         assertSame(wrapped, thrown,
                 "continuation cancellation must preserve the caller-owned runtime wrapper");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"length", "content_filter"})
+    void incompleteProviderStopCannotSelectPrivateCompactCandidateOrRetry(String finishReason) {
+        String partial = "PRIVATE_COMPACT_PARTIAL must not become the selected wording proposal.";
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(partial, List.of(), finishReason)), 2048);
+        try (var client = recorded.client()) {
+            LoopState state = readOnlyEvidenceState(client);
+            var originalMessages = List.copyOf(state.messages);
+            var originalOutcomes = List.copyOf(state.toolOutcomes);
+            beginTrace();
+
+            boolean answered = CompactReadOnlyEvidenceContinuation.tryAnswer(
+                    state, "tool-call loop continuation");
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(answered, "The neutral terminal selection must prevent a later fallback from replacing it");
+            assertEquals(dev.talos.runtime.IncompleteGenerationPresentation.NOTICE, state.currentText);
+            assertTrue(state.currentProviderAnswerIncomplete);
+            assertFalse(state.currentText.contains(partial));
+            assertEquals(originalMessages, state.messages);
+            assertEquals(originalOutcomes, state.toolOutcomes, "Rejection must preserve actual read evidence");
+            assertTrue(state.currentNativeCalls.isEmpty());
+            assertFalse(state.mutationSinceStart);
+            assertEquals(0, state.mutatingToolSuccesses);
+            assertEquals(1, recorded.requests().size(), "Incomplete synthesis must not request another candidate");
+            var request = recorded.requests().getFirst();
+            assertTrue(request.tools.isEmpty());
+            assertEquals(dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode.NONE,
+                    request.controls.toolAuthorityMode());
+            var responses = trace.events().stream()
+                    .filter(event -> "GENERATION_RESPONSE_CAPTURED".equals(event.type())).toList();
+            assertEquals(1, responses.size());
+            assertEquals("length".equals(finishReason) ? "PROVIDER_LENGTH" : "UNRECOGNIZED_PROVIDER_STOP",
+                    responses.getFirst().data().get("completion"));
+            assertFalse(trace.events().stream().anyMatch(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type())
+                    && "MODEL_PROVIDER".equals(event.data().get("origin"))));
+            assertTrue(trace.events().stream().anyMatch(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type())
+                    && "OPERATOR".equals(event.data().get("origin"))));
+            assertFalse(trace.toString().contains("PRIVATE_COMPACT_PARTIAL"));
+        }
     }
 
     @Test

@@ -211,11 +211,11 @@ class ReadOnlyEvidenceContextTest {
         assertTrue(ReadOnlyEvidenceContext.select(state).carriers().isEmpty());
     }
 
-    @Test void otherTaskTypesDoNotAcquireThisRecovery() throws Exception {
+    @Test void unrelatedTaskTypesDoNotAcquireThisRecovery() throws Exception {
         var state = state(workspace);
         populate(state);
         var old = TurnTaskContractCapture.get();
-        TurnTaskContractCapture.set(new TaskContract(TaskType.READ_ONLY_QA, false, false, false,
+        TurnTaskContractCapture.set(new TaskContract(TaskType.UNKNOWN, false, false, false,
                 old.expectedTargets(), Set.of(), old.originalUserRequest()));
         assertFalse(ReadOnlyEvidenceContext.select(state).available());
         assertTrue(ReadOnlyEvidenceContext.select(state).carriers().isEmpty());
@@ -231,5 +231,30 @@ class ReadOnlyEvidenceContextTest {
         assertFalse(ReadOnlyEvidenceContext.select(state).available());
         assertTrue(ReadOnlyEvidenceContext.select(state).carriers().isEmpty(),
                 "Two names resolving to one read must not repeat the same provider call ID");
+    }
+
+    @Test void modelRestrictionsOnOriginalOrCurrentCarriersPreventRestoration() throws Exception {
+        for (boolean originalRestricted : List.of(false, true)) {
+            var state = state(workspace);
+            read(state, "README.md", "1 | observed readme", Map.of("path", "README.md"));
+            int index = state.messages.size() - 1;
+            var original = state.messages.get(index);
+            var restricted = original.withContentRestrictions(new dev.talos.safety.ContentRestrictions(false, false, false, false));
+            state.messages.set(index, restricted);
+            if (originalRestricted) {
+                state.readEvidence.bindToolResult(new ToolCall("talos.read_file", Map.of("path", "README.md")), index, restricted);
+                state.messages.set(index, original);
+            }
+            assertFalse(ReadOnlyEvidenceContext.select(state).available(), "Neither carrier version may revoke model denial");
+        }
+    }
+
+    @Test void nonModelRestrictionsSurviveCarrierRestoration() throws Exception {
+        var state = state(workspace);
+        read(state, "README.md", "1 | observed readme", Map.of("path", "README.md"));
+        int index = state.messages.size() - 1;
+        var restrictions = new dev.talos.safety.ContentRestrictions(true, false, false, false);
+        state.messages.set(index, state.messages.get(index).withContentRestrictions(restrictions));
+        assertEquals(restrictions, ReadOnlyEvidenceContext.select(state).carriers().getFirst().message().contentRestrictions());
     }
 }

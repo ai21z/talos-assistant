@@ -55,6 +55,7 @@ final class LlamaCppServerManager implements AutoCloseable {
     private final LlamaCppEndpointOwnerProbe.ObserverIdentityReader endpointObserverIdentityReader;
 
     private LlamaCppProcess process;
+    private LlamaCppProcessLaunchObservation managedLaunch;
     private LlamaCppProcessTerminationOwner.Lease terminationLease;
     private String lastLaunchFailure = "";
     private String lastTerminationFailure = "";
@@ -195,7 +196,10 @@ final class LlamaCppServerManager implements AutoCloseable {
             }
             requireOutputCaptureHealthy();
             if (expectation != null) requireSameQualificationLaunch(expectation);
-            if (ready) return;
+            if (ready) {
+                if (expectation == null) requireActiveManagedProcess();
+                return;
+            }
             waitForReadiness(logPath());
             return;
         }
@@ -217,6 +221,17 @@ final class LlamaCppServerManager implements AutoCloseable {
         String validation = managedValidationFailure();
         if (!validation.isBlank()) {
             throw new EngineException.ConnectionFailed(validation, null);
+        }
+        if (expectation == null) {
+            requireManagedEndpointConsistency();
+            var listener = observeManagedEndpoint(0L, 0L);
+            if (listener.state() != LlamaCppEndpointOwnerProbe.State.ABSENT) {
+                String reason = listener.state() == LlamaCppEndpointOwnerProbe.State.INDETERMINATE
+                        ? "listener ownership could not be inspected"
+                        : "pre-existing listener occupies the endpoint";
+                throw managedEndpointFailure(reason + ". Another server is not restarted by Talos. "
+                        + "Stop that server explicitly or configure a different managed port");
+            }
         }
 
         List<String> command = buildCommand();
@@ -286,6 +301,12 @@ final class LlamaCppServerManager implements AutoCloseable {
             }
             requireOutputCaptureHealthy();
             if (outputRetentionDenied) requireOutputRetentionDenied();
+            if (expectation == null) {
+                managedLaunch = process.launchObservation();
+                if (managedLaunch == null || !managedLaunch.exactProcessIdentityAvailable()) {
+                    throw managedEndpointFailure("launched process identity could not be inspected");
+                }
+            }
             appendLifecycleLog(logPath, "Talos managed llama.cpp server process launched");
             if (expectation != null) {
                 LlamaCppProcessLaunchObservation observation = process.launchObservation();
@@ -471,6 +492,16 @@ final class LlamaCppServerManager implements AutoCloseable {
         String validation = managedValidationFailure();
         if (!validation.isBlank()) return Health.down(validation);
         if (!lastLaunchFailure.isBlank()) return Health.down(lastLaunchFailure);
+        if (config.managed() && qualificationLaunch == null) {
+            try {
+                requireActiveManagedProcess();
+            } catch (RuntimeException failure) {
+                if (ControlFlowFailure.classify(failure) != ControlFlowFailure.Kind.NONE) {
+                    throw ControlFlowFailure.propagate(failure);
+                }
+                return Health.down(failure.getMessage());
+            }
+        }
         return httpHealth();
     }
 
@@ -571,6 +602,79 @@ final class LlamaCppServerManager implements AutoCloseable {
         // Single source of truth shared with the doctor preflight (T784);
         // the failure strings are pinned by both test suites.
         return LlamaCppPreflight.validationFailure(config);
+    }
+
+    private void requireManagedEndpointConsistency() {
+        try {
+            URI endpoint = URI.create(config.baseUrl());
+            if (!"http".equalsIgnoreCase(endpoint.getScheme())
+                    || !"127.0.0.1".equals(config.listenHost())
+                    || !endpoint.getHost().equals(config.listenHost())
+                    || endpoint.getPort() != config.port()
+                    || endpoint.getUserInfo() != null
+                    || (endpoint.getPath() != null && !endpoint.getPath().isBlank() && !"/".equals(endpoint.getPath()))
+                    || endpoint.getQuery() != null || endpoint.getFragment() != null) {
+                throw managedEndpointFailure("managed ownership requires matching HTTP launch and request endpoints "
+                        + "on 127.0.0.1 (localhost is supported), with the same port and no URL path or credentials");
+            }
+        } catch (EngineException.ConnectionFailed failure) {
+            throw failure;
+        } catch (RuntimeException invalid) {
+            throw managedEndpointFailure("invalid managed endpoint. Configure http://127.0.0.1 and a matching port");
+        }
+    }
+
+    private EngineException.ConnectionFailed managedEndpointFailure(String reason) {
+        String host;
+        try { host = config.listenHost(); }
+        catch (RuntimeException invalid) { host = "invalid-host"; }
+        if (host.length() > 120) host = host.substring(0, 120);
+        return new EngineException.ConnectionFailed("Managed llama.cpp endpoint "
+                + host + ":" + config.port() + ": " + reason, null);
+    }
+
+    private LlamaCppEndpointOwnerProbe.Observation observeManagedEndpoint(long pid, long started) {
+        requireNotInterrupted();
+        var observed = endpointOwnerProbe.observe(config.listenHost(), config.port(), pid, started, Duration.ofSeconds(5));
+        requireNotInterrupted();
+        if (observed == null || observed.state() == LlamaCppEndpointOwnerProbe.State.INDETERMINATE) {
+            throw managedEndpointFailure("listener ownership could not be inspected. Check local process inspection access");
+        }
+        return observed;
+    }
+
+    private static void requireNotInterrupted() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw ControlFlowFailure.propagate(new InterruptedException("Managed listener inspection was interrupted"));
+        }
+    }
+
+    private void requireManagedLaunch() {
+        if (process == null || !process.isAlive() || managedLaunch == null
+                || !managedLaunch.sameProcess(process.launchObservation())) {
+            throw managedEndpointFailure("owned process is no longer active. Select the model again");
+        }
+        requireOutputCaptureHealthy();
+    }
+
+    private boolean managedListenerReady() {
+        requireManagedLaunch();
+        var owner = observeManagedEndpoint(managedLaunch.processId(), managedLaunch.processStartEpochMilli());
+        if (owner.state() == LlamaCppEndpointOwnerProbe.State.ABSENT) return false;
+        if (!owner.matches(managedLaunch.processId(), managedLaunch.processStartEpochMilli())) {
+            throw managedEndpointFailure("listener is not owned by the launched process. "
+                    + "Another server is not restarted by Talos. Inspect the port before selecting again");
+        }
+        requireManagedLaunch();
+        return true;
+    }
+
+    /** No launch, HTTP request or process termination. Used around ordinary props and cached readiness. */
+    synchronized void requireActiveManagedProcess() {
+        if (!config.managed() || qualificationLaunch != null) return;
+        if (!ready || !managedListenerReady()) {
+            throw managedEndpointFailure("owned listener is no longer ready. Select the model again");
+        }
     }
 
     private void verifyQualificationContent(
@@ -741,6 +845,8 @@ final class LlamaCppServerManager implements AutoCloseable {
         try {
             if (qualificationLaunch != null) {
                 requireQualificationEndpointOwner("health pre-send");
+            } else if (config.managed() && managedLaunch != null && !managedListenerReady()) {
+                return Health.down("managed listener is not ready");
             }
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(config.baseUrl() + "/health"))
@@ -755,6 +861,8 @@ final class LlamaCppServerManager implements AutoCloseable {
                     request, HttpResponse.BodyHandlers.discarding());
             if (qualificationLaunch != null) {
                 requireQualificationEndpointOwner("readiness completion");
+            } else if (config.managed() && managedLaunch != null && !managedListenerReady()) {
+                return Health.down("managed listener is no longer ready");
             }
             if (response.statusCode() / 100 == 2) {
                 return Health.ok("llama_cpp", true);
@@ -786,6 +894,11 @@ final class LlamaCppServerManager implements AutoCloseable {
 
             if (qualificationLaunch != null && !qualificationListenerReady()) {
                 lastHealth = "managed qualification listener is not ready";
+                sleepPollInterval();
+                continue;
+            }
+            if (qualificationLaunch == null && !managedListenerReady()) {
+                lastHealth = "managed listener is not ready";
                 sleepPollInterval();
                 continue;
             }
@@ -946,6 +1059,7 @@ final class LlamaCppServerManager implements AutoCloseable {
 
         appendLifecycleLog(logPath, "Talos managed llama.cpp server stopped");
         process = null;
+        managedLaunch = null;
         terminationLease = null;
         lastTerminationOutcome = null;
         lastTerminationFailure = "";

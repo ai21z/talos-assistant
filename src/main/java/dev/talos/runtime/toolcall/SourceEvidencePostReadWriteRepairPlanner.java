@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.spi.types.ChatMessage;
@@ -134,7 +135,7 @@ final class SourceEvidencePostReadWriteRepairPlanner {
         String targets = String.join(", ", remainingTargets);
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Create the requested source-derived output."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         // T1011: the system frame carries policy and bounded metadata only;
         // source readbacks are workspace bytes and travel as user-role data.
         StringBuilder frame = new StringBuilder();

@@ -60,7 +60,7 @@ class ProjectMemoryLoaderTest {
         assertEquals(4, ledger.summary().bySource().get("PROJECT_MEMORY"));
         assertEquals(1, ledger.summary().byBoundary().get("LOCAL_USER_CONFIGURATION"));
         assertEquals(3, ledger.summary().byBoundary().get("LOCAL_WORKSPACE"));
-        assertEquals(4, ledger.summary().byDecision().get("INCLUDED_IN_MODEL_PROMPT"));
+        assertEquals(4, ledger.summary().byDecision().get("ADMITTED_TO_CONTEXT"));
     }
 
     @Test

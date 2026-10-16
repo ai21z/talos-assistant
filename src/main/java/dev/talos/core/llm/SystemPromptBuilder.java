@@ -343,6 +343,9 @@ public final class SystemPromptBuilder {
             }
         }
 
+        if (!nativeTools) {
+            sb.append("\n\n").append(TextToolCallInstructions.formatContract());
+        }
         sb.append("\n\n");
 
         // Tool descriptions
@@ -603,8 +606,6 @@ public final class SystemPromptBuilder {
             Rules:
             - CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.
             - Only call a tool when you need to PERFORM an action (read a file, run a search, etc.) that the current context cannot satisfy.
-            - Emit each tool call as a JSON code block (```json). The JSON must have "name" and "parameters" keys exactly as shown.
-            - You may emit multiple tool call blocks in one response.
             - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
             - Do NOT fabricate tool results. Wait for the actual result.
             - Only call tools that are listed below. Do not invent tool names.

@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
@@ -131,7 +132,7 @@ final class SourceEvidenceExactRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Create the requested source-derived output."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         // T1011: the system frame carries policy and bounded metadata only
         // (target path, failure reason, scope). Evidence phrases and source
         // readbacks are workspace bytes and travel as user-role data.

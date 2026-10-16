@@ -41,7 +41,7 @@ class EvidenceContainmentAnswerGuardTest {
         assertEquals("""
                 [Evidence incomplete: required workspace evidence was not gathered in this turn.]
 
-                I did not inspect the required workspace target this turn, so I cannot answer from its contents or propose grounded changes yet. Required target(s): README.md.""",
+                Current evidence for the required workspace target was not established. An answer from its contents or grounded changes cannot be supported yet. Required target(s): README.md.""",
                 answer);
         assertFalse(answer.contains("Talos is complete"), answer);
         assertFalse(answer.contains("Proposed change"), answer);
@@ -79,7 +79,7 @@ class EvidenceContainmentAnswerGuardTest {
                 MARKERS);
 
         assertTrue(answer.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), answer);
-        assertTrue(answer.contains("I did not inspect the project summary anchor"), answer);
+        assertTrue(answer.contains("Current project evidence remains incomplete"), answer);
         assertTrue(answer.contains("README.md"), answer);
         assertFalse(answer.contains("one-file JavaScript utility"), answer);
     }

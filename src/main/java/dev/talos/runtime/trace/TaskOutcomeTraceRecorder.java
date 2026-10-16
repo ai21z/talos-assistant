@@ -43,6 +43,15 @@ public final class TaskOutcomeTraceRecorder {
             VerificationReport verificationReport,
             MutationRecoveryAssessment mutationRecoveryAssessment
     ) {
+        recordPresented(completionStatus, verificationStatus, taskOutcome, verification, verificationReport,
+                mutationRecoveryAssessment, completionStatus,
+                taskOutcome == null ? "" : taskOutcome.completionStatus().name());
+    }
+
+    public static void recordPresented(String completionStatus, String verificationStatus, TaskOutcome taskOutcome,
+                                       TaskVerificationResult verification, VerificationReport verificationReport,
+                                       MutationRecoveryAssessment mutationRecoveryAssessment,
+                                       String operationalStatus, String operationalClassification) {
         if (verification != null) {
             LocalTurnTraceCapture.recordVerification(
                     verification.status().name(),
@@ -55,12 +64,12 @@ public final class TaskOutcomeTraceRecorder {
                     mutationRecoveryAssessment);
             taskOutcome.warnings().forEach(warning ->
                     LocalTurnTraceCapture.warning(warning.type().name(), warning.message()));
-            LocalTurnTraceCapture.recordOutcome(
+            LocalTurnTraceCapture.recordPresentedOutcome(
                     safe(completionStatus),
                     safe(verificationStatus),
                     approvalStatus(taskOutcome),
                     taskOutcome.mutationOutcome().status().name(),
-                    taskOutcome.completionStatus().name());
+                    taskOutcome.completionStatus().name(), safe(operationalStatus), safe(operationalClassification));
         }
     }
 

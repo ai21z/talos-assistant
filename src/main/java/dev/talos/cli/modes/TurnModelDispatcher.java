@@ -5,6 +5,8 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
@@ -125,12 +127,12 @@ final class TurnModelDispatcher {
                         ctx, dispatchPlan, requestToolSpecs),
                 purpose.debugTag());
         TurnExecutionStage priorStage = enterGenerationStage();
-        return restoreStageAfterSuccess(
+        return requireCompletedRetry(restoreStageAfterSuccess(
                 ctx.llm().chatFull(
                         retryMessages,
                         requestToolSpecs,
                         controls),
-                priorStage);
+                priorStage));
     }
 
     static LlmClient.StreamResult dispatchEscalatedRetry(
@@ -186,12 +188,20 @@ final class TurnModelDispatcher {
         SamplingControls escalated = new SamplingControls(0.0, null, null, null)
                 .mergedWithFallback(controls.sampling());
         TurnExecutionStage priorStage = enterGenerationStage();
-        return restoreStageAfterSuccess(
+        return requireCompletedRetry(restoreStageAfterSuccess(
                 ctx.llm().chatFull(
                         retryMessages,
                         boundedToolSpecs,
                         controls.withSampling(escalated)),
-                priorStage);
+                priorStage));
+    }
+
+    private static LlmClient.StreamResult requireCompletedRetry(LlmClient.StreamResult result) {
+        if (result != null && result.aborted())
+            throw dev.talos.runtime.IncompleteGenerationPresentation.abortedFailure(result);
+        if (dev.talos.runtime.IncompleteGenerationPresentation.required(result))
+            throw new IllegalStateException("An uncommitted retry answer was withheld.");
+        return result;
     }
 
     static ChatRequestControls chatControlsForTurn(
@@ -364,7 +374,9 @@ final class TurnModelDispatcher {
                 plan.verifierProfile(),
                 plan.requestObligation(),
                 plan.workspaceOperationPlan(),
-                plan.contentMutationPredecessorPaths());
+                plan.contentMutationPredecessorPaths(),
+                plan.requestedResults(),
+                plan.contentSaveRequest());
     }
 
     private static ChatRequestControls withDebugTag(
@@ -465,6 +477,8 @@ final class TurnModelDispatcher {
                 retryMessages,
                 plan,
                 requestToolSpecs);
+        RuntimeModelIdentityAnswerPolicy.projectCapturedProviderTask(retryMessages,
+                TurnTaskContractCapture.providerTaskBoundaryIndex(retryMessages), plan.originalUserRequest());
         return ProviderPromptSurfaceReconciler
                 .canonicalizeNormalizedLf(retryMessages);
     }

@@ -115,6 +115,14 @@ final class RequestLexicalView {
         return request;
     }
 
+    boolean containsIncompleteQuotedEnvelope() {
+        for (int owner : quoteOwners) {
+            if (owner >= 0 && (quoteContentStarts[owner] < 0 || quoteContentEnds[owner] < 0
+                    || quoteEnvelopeEnds[owner] < 0)) return true;
+        }
+        return false;
+    }
+
     String maskedLower() {
         return maskedLower;
     }

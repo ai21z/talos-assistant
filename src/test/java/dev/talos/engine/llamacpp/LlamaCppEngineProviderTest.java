@@ -175,7 +175,7 @@ class LlamaCppEngineProviderTest {
                             fixture.modelPath, fixture.template, true, true, false, false,
                             16384, fixture.build, "props-hash")),
                     (config, declared, observed, verify) -> fixture.engineFacts());
-            try (LlamaCppServerManager manager = new LlamaCppServerManager(
+            try (LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     llamaCfg, (command, logPath) -> process, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), directory.resolve("logs"))) {
                 LlamaCppEngine engine = new LlamaCppEngine(llamaCfg, manager, HttpClient.newHttpClient(), service);
@@ -438,7 +438,7 @@ class LlamaCppEngineProviderTest {
                         LlamaCppProfileResolver.MatchState.MATCHED));
         LlamaCppEngine engine = new LlamaCppEngine(
                 llamaCfg,
-                new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                SyntheticManagedServer.manager(llamaCfg, (command, logPath) -> {
                     throw new AssertionError("connect-only must not launch");
                 }, HttpClient.newHttpClient()),
                 HttpClient.newHttpClient(),
@@ -478,7 +478,7 @@ class LlamaCppEngineProviderTest {
                 });
         LlamaCppEngine engine = new LlamaCppEngine(
                 llamaCfg,
-                new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                SyntheticManagedServer.manager(llamaCfg, (command, logPath) -> {
                     throw new AssertionError("connect-only must not launch");
                 }, HttpClient.newHttpClient()),
                 HttpClient.newHttpClient(),
@@ -523,7 +523,7 @@ class LlamaCppEngineProviderTest {
                     "model", "talos-agent"));
             LlamaCppEngine engine = new LlamaCppEngine(
                     LlamaCppConfig.from(cfg),
-                    new LlamaCppServerManager(LlamaCppConfig.from(cfg), (command, logPath) -> {
+                    SyntheticManagedServer.manager(LlamaCppConfig.from(cfg), (command, logPath) -> {
                         throw new AssertionError("connect-only must not launch");
                     }, HttpClient.newHttpClient()),
                     HttpClient.newHttpClient());
@@ -587,7 +587,7 @@ class LlamaCppEngineProviderTest {
                                     "f".repeat(64), 6)));
             LlamaCppEngine engine = new LlamaCppEngine(
                     llamaCfg,
-                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                    SyntheticManagedServer.manager(llamaCfg, (command, logPath) -> {
                         throw new AssertionError("connect-only must not launch");
                     }, HttpClient.newHttpClient()),
                     HttpClient.newHttpClient(),
@@ -670,7 +670,7 @@ class LlamaCppEngineProviderTest {
                             "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED));
             LlamaCppEngine engine = new LlamaCppEngine(
                     llamaCfg,
-                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                    SyntheticManagedServer.manager(llamaCfg, (command, logPath) -> {
                         throw new AssertionError("connect-only must not launch");
                     }, HttpClient.newHttpClient()),
                     HttpClient.newHttpClient(),
@@ -747,7 +747,7 @@ class LlamaCppEngineProviderTest {
                     "port", server.getAddress().getPort(),
                     "model", "talos-agent"));
             LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
-            try (LlamaCppServerManager manager = new LlamaCppServerManager(
+            try (LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     llamaCfg,
                     (command, logPath) -> process,
                     HttpClient.newHttpClient(),

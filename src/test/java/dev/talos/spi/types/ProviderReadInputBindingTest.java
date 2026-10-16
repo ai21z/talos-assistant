@@ -178,6 +178,67 @@ class ProviderReadInputBindingTest {
         assertEquals("SERIALIZED_INPUT_NOT_CAPTURED", receipt.readInputBinding().reasonCode());
     }
 
+    @Test void ordinaryDeliveryIsBoundWithoutGrantingToolAuthority() throws Exception {
+        var messages = List.of(ChatMessage.toolResult("source-1", "1 | current source\n"));
+        var request = deliveryRequest(messages);
+        var receipt = selected(request, body(messages));
+        assertTrue(receipt.readInputBinding().bound());
+        assertEquals(ProviderReadInputBinding.Purpose.DELIVERY, receipt.readInputBinding().purpose());
+        assertEquals(messages.getFirst().content(), receipt.readInputBinding().preparedToolResults().getFirst().content());
+        assertFalse(receipt.providerToolCallEligible(), "Data membership cannot manufacture executable authority");
+    }
+
+    @Test void ordinaryDeliveryCannotBindAChangedSerializedSource() throws Exception {
+        var request = deliveryRequest(List.of(ChatMessage.toolResult("source-1", "current source")));
+        var receipt = selected(request, body(List.of(ChatMessage.toolResult("source-1", "stale source"))));
+        assertFalse(receipt.readInputBinding().bound());
+        assertEquals("TOOL_RESULT_MEMBERSHIP_MISMATCH", receipt.readInputBinding().reasonCode());
+    }
+
+    @Test void legacyUnobservedTransportCannotClaimDeliveryFromSerializedMembership() throws Exception {
+        var request = deliveryRequest(List.of(ChatMessage.toolResult("source", "current source")));
+        var generation = generation();
+        var attempt = attempt(generation);
+        attempt.bindPreparedReadInputs(request, ProviderReadInputBinding.SANITIZER_VERSION);
+        assertTrue(attempt.tryRequestDispatched(ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
+                body(request.messages), request.tools, request)));
+        var receipt = attempt.respond(response("answer"));
+        generation.complete(receipt);
+        assertTrue(receipt.selected());
+        assertFalse(receipt.readInputBinding().bound());
+        assertEquals("DELIVERY_TRANSPORT_NOT_OBSERVED", receipt.readInputBinding().reasonCode());
+    }
+
+    @Test void deliveryTagCannotRelaxAnExplicitResponseOnlyRequest() throws Exception {
+        var base = deliveryRequest(List.of(ChatMessage.toolResult("source-1", "source")));
+        var controls = new ChatRequestControls(ToolChoiceMode.AUTO, "", ResponseFormatMode.TEXT, "",
+                List.of("bounded-read-evidence-delivery", ProviderReadInputBinding.REQUEST_TAG));
+        var request = new ChatRequest("local", "model", "", "", List.of(), null,
+                base.messages, base.tools, controls);
+        assertEquals("REQUEST_NOT_RESPONSE_ONLY", selected(request, body(request.messages)).readInputBinding().reasonCode());
+    }
+
+    private static ChatRequest deliveryRequest(List<ChatMessage> messages) {
+        return new ChatRequest("local", "model", "", "", List.of(), null, messages,
+                List.of(new ToolSpec("talos.read_file", "Read", "{}")),
+                new ChatRequestControls(ToolChoiceMode.AUTO, "", ResponseFormatMode.TEXT, "",
+                        List.of("bounded-read-evidence-delivery")));
+    }
+
+    @Test void deliveryBoundsAreSeparateFromSynthesisBounds() throws Exception {
+        var messages = new java.util.ArrayList<ChatMessage>();
+        for (int index = 0; index < ProviderReadInputBinding.MAX_DELIVERY_TOOL_RESULTS; index++)
+            messages.add(ChatMessage.toolResult("read-" + index, "current source"));
+        assertTrue(selected(deliveryRequest(messages), body(messages)).readInputBinding().bound());
+        assertEquals("PREPARED_INPUT_LIMIT", selected(request(messages), body(messages)).readInputBinding().reasonCode());
+        messages.add(ChatMessage.toolResult("overflow", "source"));
+        assertEquals("PREPARED_INPUT_LIMIT", selected(deliveryRequest(messages), body(messages)).readInputBinding().reasonCode());
+        var atLimit = List.of(ChatMessage.toolResult("read", "x".repeat(ProviderReadInputBinding.MAX_DELIVERY_TOOL_RESULT_CHARS)));
+        assertTrue(selected(deliveryRequest(atLimit), body(atLimit)).readInputBinding().bound());
+        var above = List.of(ChatMessage.toolResult("read", atLimit.getFirst().content() + "x"));
+        assertEquals("PREPARED_INPUT_LIMIT", selected(deliveryRequest(above), body(above)).readInputBinding().reasonCode());
+    }
+
     @Test void anUnknownSanitizerAndAReplacedBodyHashCannotBind() throws Exception {
         var request = request(List.of(ChatMessage.toolResult("one", "source")));
         var generation = generation();

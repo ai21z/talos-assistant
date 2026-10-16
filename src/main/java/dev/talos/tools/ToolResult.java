@@ -1,5 +1,8 @@
 package dev.talos.tools;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import dev.talos.tools.impl.ExecutedEditDetail;
+
 /**
  * Immutable result of a tool execution. Carries either a successful output
  * or an error. Created by tool implementations and returned to callers.
@@ -13,11 +16,19 @@ public record ToolResult(
         ToolError error,
         VerificationStatus verification,
         ToolContentMetadata contentMetadata,
-        ToolMutationEffects mutationEffects) {
+        ToolMutationEffects mutationEffects,
+        @JsonIgnore ExecutedEditDetail executedEditDetail) {
 
     public ToolResult {
         contentMetadata = contentMetadata == null ? ToolContentMetadata.normal() : contentMetadata;
         mutationEffects = mutationEffects == null ? ToolMutationEffects.none() : mutationEffects;
+        executedEditDetail = executedEditDetail != null && executedEditDetail.associatedWith(mutationEffects)
+                ? executedEditDetail : ExecutedEditDetail.none();
+    }
+
+    public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification,
+                      ToolContentMetadata contentMetadata, ToolMutationEffects mutationEffects) {
+        this(success, output, error, verification, contentMetadata, mutationEffects, ExecutedEditDetail.none());
     }
 
     public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification,
@@ -26,7 +37,11 @@ public record ToolResult(
     }
 
     public ToolResult withMutationEffects(ToolMutationEffects effects) {
-        return new ToolResult(success, output, error, verification, contentMetadata, effects);
+        return new ToolResult(success, output, error, verification, contentMetadata, effects, executedEditDetail);
+    }
+
+    public ToolResult withExecutedEditDetail(ExecutedEditDetail detail) {
+        return new ToolResult(success, output, error, verification, contentMetadata, mutationEffects, detail);
     }
 
     public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification) {

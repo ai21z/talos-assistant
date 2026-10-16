@@ -15,6 +15,8 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -92,6 +94,73 @@ class DeniedMutationResponseOnlySynthesizerTest {
         assertTrue(
                 answer.receipt().toolAuthorityContract()
                         .selectedToolNames().isEmpty());
+    }
+
+    @Test
+    void deniedResponseProjectsOnlyCurrentTaskAndPreservesOriginalEvidence() {
+        String original = "Who are you? Read README.md. Do not change files.";
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("The available read evidence was inspected.", List.of())), 16_384);
+        try (var client = recorded.client()) {
+            var current = ChatMessage.user(original);
+            var evidence = ChatMessage.toolResult("read", "Quoted source question: Who are you?");
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(original),
+                    ChatMessage.assistant("An earlier answer."), current, evidence));
+            var resolution = TaskContractResolver.resolveFromMessages(messages);
+            TurnTaskContractCapture.set(resolution, messages, dev.talos.spi.types.ModelIdentitySnapshot.empty(), true);
+            var before = List.copyOf(messages);
+            var state = new LoopState("", List.of(), messages, Path.of("."),
+                    Context.builder(new Config()).llm(client).build(), null, 5, 0);
+            assertTrue(DeniedMutationResponseOnlySynthesizer.synthesize(state).capturedGeneration());
+            var request = recorded.requests().getFirst();
+            assertTrue(request.messages.stream().anyMatch(message -> "user".equals(message.role())
+                    && "Read README.md. Do not change files.".equals(message.content().strip())));
+            assertEquals(1, request.messages.stream().filter(message -> original.equals(message.content())).count());
+            assertTrue(request.messages.contains(evidence));
+            assertEquals(before, messages);
+            assertSame(resolution, TurnTaskContractCapture.getResolution());
+            assertEquals(original, TurnTaskContractCapture.get().originalUserRequest());
+            assertTrue(request.tools.isEmpty());
+            assertEquals(ProviderResponseCapture.ToolAuthorityMode.NONE, request.controls.toolAuthorityMode());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"length", "content_filter"})
+    void incompleteProviderStopCannotSelectPrivateDeniedMutationCandidateOrRetry(String finishReason) {
+        String partial = "PRIVATE_DENIED_PARTIAL must not become a response after the denied write.";
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(partial, List.of(), finishReason)), 16_384);
+        try (var client = recorded.client()) {
+            LoopState state = state(client);
+            var originalMessages = List.copyOf(state.messages);
+            beginTrace();
+
+            var answer = DeniedMutationResponseOnlySynthesizer.synthesize(state);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(DeniedMutationResponseOnlySynthesizer.stopMessage() + "\n\n"
+                    + dev.talos.runtime.IncompleteGenerationPresentation.NOTICE, answer.text());
+            assertFalse(answer.text().contains(partial));
+            assertFalse(answer.capturedGeneration());
+            assertFalse(answer.receipt().providerTerminalEligible());
+            assertEquals(originalMessages, state.messages);
+            assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
+            assertTrue(state.currentNativeCalls.isEmpty());
+            assertFalse(state.mutationSinceStart);
+            assertEquals(0, state.mutatingToolSuccesses);
+            assertEquals(1, recorded.requests().size(), "Denied mutation synthesis must not retry incomplete prose");
+            var request = recorded.requests().getFirst();
+            assertTrue(request.tools.isEmpty());
+            assertEquals(dev.talos.spi.types.ToolChoiceMode.AUTO, request.controls.toolChoice());
+            assertEquals(ProviderResponseCapture.ToolAuthorityMode.NONE, request.controls.toolAuthorityMode());
+            var responses = trace.events().stream()
+                    .filter(event -> "GENERATION_RESPONSE_CAPTURED".equals(event.type())).toList();
+            assertEquals(1, responses.size());
+            assertEquals("length".equals(finishReason) ? "PROVIDER_LENGTH" : "UNRECOGNIZED_PROVIDER_STOP",
+                    responses.getFirst().data().get("completion"));
+            assertFalse(trace.toString().contains("PRIVATE_DENIED_PARTIAL"));
+        }
     }
 
     @Test
@@ -273,6 +342,34 @@ class DeniedMutationResponseOnlySynthesizerTest {
                 .orElseThrow();
         assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
         assertFalse(terminal.data().containsKey("sourceGenerationId"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"length", "content_filter"})
+    void repromptStagePreservesIncompleteCauseAfterSelectingItsPolicyStop(String finishReason) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("PRIVATE_DENIED_PARTIAL", List.of(), finishReason)), 16_384);
+        try (var client = recorded.client()) {
+            LoopState state = state(client);
+            beginTrace();
+            boolean continuing = new ToolCallRepromptStage().reprompt(state,
+                    new ToolCallExecutionStage.IterationOutcome(0, List.of(), 1, false, true, false, 0));
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(state.currentText);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var status = dev.talos.runtime.trace.FinalAnswerStatus.decode(trace);
+            assertFalse(continuing);
+            assertTrue(state.currentProviderAnswerIncomplete);
+            assertTrue(state.currentText.startsWith(DeniedMutationResponseOnlySynthesizer.stopMessage()));
+            assertTrue(state.currentText.contains(dev.talos.runtime.IncompleteGenerationPresentation.NOTICE));
+            assertFalse(state.currentText.contains("PRIVATE_DENIED_PARTIAL"));
+            assertEquals(dev.talos.runtime.trace.FinalAnswerStatus.Delivery.LIMITED, status.delivery());
+            assertTrue(status.causes().contains(
+                    dev.talos.runtime.trace.FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION));
+            assertEquals(1, recorded.requests().size());
+            assertTrue(recorded.requests().getFirst().tools.isEmpty());
+            assertTrue(state.currentNativeCalls.isEmpty());
+            assertEquals(0, state.mutatingToolSuccesses);
+        }
     }
 
     private static LoopState state(LlmClient llm) {

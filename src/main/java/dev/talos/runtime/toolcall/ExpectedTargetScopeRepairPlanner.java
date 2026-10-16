@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
@@ -358,7 +359,7 @@ final class ExpectedTargetScopeRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Apply the requested file change to the expected target."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.

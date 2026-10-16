@@ -2,6 +2,8 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.List;
 
@@ -36,10 +38,10 @@ class TaskOutcomeWarningBuilderTest {
         assertEquals(List.of(
                 new TruthWarning(
                         TruthWarningType.DENIED_MUTATION,
-                        "A mutating tool call was blocked by the read-only task contract."),
+                        "A mutating tool call was blocked on a read-only turn."),
                 new TruthWarning(
                         TruthWarningType.FAILED_ACTION_OBLIGATION,
-                        "A required tool action was not performed after retry."),
+                        "A required tool action was not performed."),
                 new TruthWarning(
                         TruthWarningType.COMMAND_FAILED,
                         "A requested verification command failed or timed out."),
@@ -61,7 +63,7 @@ class TaskOutcomeWarningBuilderTest {
                         "At least one mutating tool call succeeded and at least one failed."),
                 new TruthWarning(
                         TruthWarningType.FALSE_MUTATION_CLAIM,
-                        "The answer claimed a mutation without a successful mutating tool outcome."),
+                        "A current Talos mutation claim has no matching successful execution record."),
                 new TruthWarning(
                         TruthWarningType.INSPECT_UNDER_COMPLETION,
                         "The answer sounded complete after an inspection-only tool path."),
@@ -121,6 +123,22 @@ class TaskOutcomeWarningBuilderTest {
                         TruthWarningType.STATIC_VERIFICATION_UNAVAILABLE,
                         "Static post-apply verification could not complete.")
         ), warnings);
+    }
+
+    @ParameterizedTest
+    @EnumSource(TaskVerificationStatus.class)
+    void failedActionWarningDoesNotInferRetryFromVerificationStatus(TaskVerificationStatus status) {
+        List<TruthWarning> warnings = TaskOutcomeWarningBuilder.toolLoopWarnings(
+                new TaskOutcomeWarningBuilder.ToolLoopFacts(
+                        false, false, false, true, false, false, false, false,
+                        false, false, false, false, false, false, false, false,
+                        status, false, false));
+
+        assertEquals(new TruthWarning(
+                TruthWarningType.FAILED_ACTION_OBLIGATION,
+                "A required tool action was not performed."), warnings.getFirst());
+        assertEquals(status == TaskVerificationStatus.FAILED
+                || status == TaskVerificationStatus.UNAVAILABLE ? 2 : 1, warnings.size());
     }
 
     @Test

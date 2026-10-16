@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.llm.TextToolCallInstructions;
 import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -271,9 +272,12 @@ public final class ProviderPromptSurfaceReconciler {
                             + "this request. Call only a tool listed below.\n");
         } else {
             out.append("""
-                    To call a listed tool, emit exactly one JSON object in this form:
+                    To call a listed tool, use this form:
+                    ```json
                     {"name":"tool_name","parameters":{"key":"value"}}
+                    ```
                     """);
+            out.append(TextToolCallInstructions.formatContract()).append('\n');
         }
         for (ToolSpec tool : selected) {
             if (tool.name() == null || tool.name().isBlank()) continue;

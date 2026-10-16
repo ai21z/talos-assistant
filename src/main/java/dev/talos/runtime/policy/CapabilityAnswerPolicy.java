@@ -23,15 +23,6 @@ public final class CapabilityAnswerPolicy {
             "Talos cannot change workspace inside the current session. Use /workspace to see the current "
                     + "workspace, then start Talos from the folder you want to work in.";
 
-    private static final Set<String> IDENTITY_MARKERS = Set.of(
-            "who are you",
-            "what are you",
-            "what is talos",
-            "who is talos",
-            "tell me what you are",
-            "tell me about yourself"
-    );
-
     private static final Set<String> CAPABILITY_MARKERS = Set.of(
             "what can you do",
             "what can you do for me",
@@ -48,7 +39,7 @@ public final class CapabilityAnswerPolicy {
     private CapabilityAnswerPolicy() {}
 
     public static boolean looksLikeIdentityTurn(String userRequest) {
-        return containsAny(userRequest, IDENTITY_MARKERS);
+        return RuntimeModelIdentityAnswerPolicy.isIdentityOnlyRequest(userRequest);
     }
 
     public static boolean looksLikeCapabilityTurn(String userRequest) {

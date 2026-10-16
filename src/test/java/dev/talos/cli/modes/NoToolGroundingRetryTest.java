@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class NoToolGroundingRetryTest {
 
+    @ParameterizedTest
+    @CsvSource({
+            "Explain evidence policies. No project inspection is needed., NONE",
+            "Read the main files and verify the wiring., VERIFY_FROM_TRACE_OR_EVIDENCE"
+    })
+    void lateFileReadRetryDoesNotReclassifyExistingObligations(String request, String obligation) {
+        var resolved = plan(TaskContractResolver.fromUserRequest(request));
+        assertEquals(obligation, resolved.evidenceObligation());
+        var messages = messages(request);
+        var context = Context.builder(new Config(null)).llm(LlmClient.scripted("unused")).build();
+        String answer = longAnswer();
+        assertSame(answer, NoToolGroundingRetry.retryIfNeeded(answer, resolved, messages, context,
+                ignored -> { throw new AssertionError("No file-read retry was authorized by this obligation"); }));
+        assertEquals(2, messages.size());
+    }
+
     @AfterEach
     void clearTrace() {
         LocalTurnTraceCapture.clear();
@@ -41,13 +58,13 @@ class NoToolGroundingRetryTest {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("unused"))
                 .build();
-        List<ChatMessage> messages = messages("Read the main files and verify the wiring.");
+        List<ChatMessage> messages = messages("Read README.md and explain the actual file contents.");
         String answer = longAnswer();
         AtomicReference<List<ChatMessage>> sentMessages = new AtomicReference<>();
 
         String result = NoToolGroundingRetry.retryIfNeeded(
                 answer,
-                plan(TaskContractResolver.fromUserRequest("Read the main files and verify the wiring.")),
+                plan(TaskContractResolver.fromUserRequest("Read README.md and explain the actual file contents.")),
                 messages,
                 ctx,
                 retryMessages -> {
@@ -69,12 +86,12 @@ class NoToolGroundingRetryTest {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("unused"))
                 .build();
-        List<ChatMessage> messages = messages("Use evidence from the actual files.");
+        List<ChatMessage> messages = messages("Read README.md and explain the actual file contents.");
         String answer = longAnswer();
 
         String result = NoToolGroundingRetry.retryIfNeeded(
                 answer,
-                plan(TaskContractResolver.fromUserRequest("Use evidence from the actual files.")),
+                plan(TaskContractResolver.fromUserRequest("Read README.md and explain the actual file contents.")),
                 messages,
                 ctx,
                 ignored -> new LlmClient.StreamResult("   ", List.of()));
@@ -133,7 +150,7 @@ class NoToolGroundingRetryTest {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("unused"))
                 .build();
-        String request = "Use evidence from the actual files.";
+        String request = "Read README.md and explain the actual file contents.";
         String answer = longAnswer();
         LlmClient.StreamResult originalProviderResult = providerTextResult(answer);
 
@@ -160,7 +177,7 @@ class NoToolGroundingRetryTest {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("unused"))
                 .build();
-        String request = "Use evidence from the actual files.";
+        String request = "Read README.md and explain the actual file contents.";
         RuntimeException wrapped = new RuntimeException(
                 new CancellationException("cancel no-tool grounding retry"));
 
@@ -185,7 +202,7 @@ class NoToolGroundingRetryTest {
             Context ctx = Context.builder(new Config())
                     .llm(LlmClient.scripted("unused"))
                     .build();
-            String request = "Use evidence from the actual files.";
+            String request = "Read README.md and explain the actual file contents.";
             RuntimeException wrapped = new RuntimeException(
                     new InterruptedException("interrupt no-tool grounding retry"));
 
@@ -215,7 +232,7 @@ class NoToolGroundingRetryTest {
             Context ctx = Context.builder(new Config())
                     .llm(LlmClient.scripted("unused"))
                     .build();
-            String request = "Use evidence from the actual files.";
+            String request = "Read README.md and explain the actual file contents.";
             String answer = longAnswer();
             RuntimeException semanticallyTyped = new RuntimeException(
                     new IllegalArgumentException(
@@ -246,7 +263,7 @@ class NoToolGroundingRetryTest {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("unused"))
                 .build();
-        String request = "Use evidence from the actual files.";
+        String request = "Read README.md and explain the actual file contents.";
         String answer = longAnswer();
         providerTextResult(answer);
         String accepted = "Grounded retry answer.";
@@ -274,12 +291,15 @@ class NoToolGroundingRetryTest {
     }
 
     private static CurrentTurnPlan plan(TaskContract contract) {
-        return CurrentTurnPlan.compatibility(
+        CurrentTurnPlan plan = CurrentTurnPlan.compatibility(
                 contract,
                 ExecutionPhase.INSPECT,
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of());
+        if (contract.originalUserRequest().equals("Read README.md and explain the actual file contents."))
+            assertEquals("READ_TARGET_REQUIRED", plan.evidenceObligation());
+        return plan;
     }
 
     private static CurrentTurnPlan directAnswerPlan(String request) {
