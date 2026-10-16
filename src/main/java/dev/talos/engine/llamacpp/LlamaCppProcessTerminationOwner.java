@@ -42,6 +42,8 @@ final class LlamaCppProcessTerminationOwner {
         PROCESS_IDENTITY_AMBIGUOUS,
         SIGNAL_FAILED,
         FORCED_TIMEOUT,
+        /** The exit code is set, but the operating system has not yet signalled that the process exited. */
+        EXIT_SIGNAL_PENDING,
         EXIT_OBSERVATION_FAILED,
         RESOURCE_SETTLEMENT_FAILED
     }
@@ -254,6 +256,11 @@ final class LlamaCppProcessTerminationOwner {
         void destroyForcibly();
 
         boolean waitFor(Duration timeout) throws InterruptedException;
+
+        /** True once the operating system has signalled exit. Targets without that signal rely on isAlive. */
+        default boolean awaitExitProof(Duration timeout) throws InterruptedException {
+            return true;
+        }
 
         default boolean owns(
                 Process process,
@@ -543,6 +550,13 @@ final class LlamaCppProcessTerminationOwner {
 
             boolean live = anyTrackedAlive(lease, causes);
             if (live) causes.add(Cause.FORCED_TIMEOUT);
+            if (!live && !awaitRootExitProof(lease, policy, causes)) {
+                // The exit code is set but the operating system has not signalled exit yet.
+                // The lease stays retained and a later attempt can settle it.
+                causes.add(Cause.EXIT_SIGNAL_PENDING);
+                live = true;
+                restoreInterrupt |= Thread.interrupted();
+            }
             if (!live) {
                 restoreInterrupt |= closeTrackedResources(
                         lease,
@@ -819,6 +833,7 @@ final class LlamaCppProcessTerminationOwner {
 
     private static final class ProcessTarget implements Target {
         private final Process process;
+        private final java.util.concurrent.CompletableFuture<?> exit;
         private final ProcessIdentity identity;
         private final ResourceSettlement resources;
         private final ProcessResources processResources;
@@ -829,6 +844,11 @@ final class LlamaCppProcessTerminationOwner {
                 ResourceAttemptCompletion resourceAttemptCompletion,
                 ResourceAttemptJoinObserver resourceAttemptJoinObserver) {
             this.process = process;
+            // Created at adoption, while the process is running, so the JDK reaper waits on the
+            // operating system exit signal. A completion created after the exit code is set would
+            // complete at once and prove nothing. Process subclasses without a handle keep the
+            // exit-code observation.
+            this.exit = exitCompletion(() -> process.toHandle().onExit());
             this.identity = directProcessIdentity(process);
             this.resources = Objects.requireNonNull(
                     resources, "process resources");
@@ -852,6 +872,22 @@ final class LlamaCppProcessTerminationOwner {
         @Override
         public boolean isAlive() {
             return process.isAlive();
+        }
+
+        @Override
+        public boolean awaitExitProof(Duration timeout) throws InterruptedException {
+            if (exit == null || exit.isDone()) return true;
+            long millis = boundedMillis(timeout);
+            if (millis <= 0L) return false;
+            try {
+                exit.get(millis, TimeUnit.MILLISECONDS);
+                return true;
+            } catch (TimeoutException pending) {
+                return false;
+            } catch (ExecutionException unavailable) {
+                throw new IllegalStateException(
+                        "process exit observation failed", unavailable);
+            }
         }
 
         @Override
@@ -1243,6 +1279,42 @@ final class LlamaCppProcessTerminationOwner {
                 throw new IllegalStateException(
                         "process exit observation failed", unavailable);
             }
+        }
+    }
+
+    private static java.util.concurrent.CompletableFuture<?> exitCompletion(
+            java.util.function.Supplier<? extends java.util.concurrent.CompletableFuture<?>> source) {
+        try {
+            return source.get();
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
+    }
+
+    /**
+     * On Windows the exit code is set when termination starts, before the operating system has
+     * finished the process. The root exit proof is awaited once, at the final verdict only, so tree
+     * capture and signalling keep their exit-code observation. The minimum absorbs the asynchronous
+     * delivery of a completion for a process that has already exited.
+     */
+    private static final Duration MINIMUM_EXIT_PROOF_WAIT = Duration.ofSeconds(1);
+
+    private static boolean awaitRootExitProof(
+            Lease lease,
+            Policy policy,
+            EnumSet<Cause> causes) {
+        Duration wait = policy.forcedTimeout().compareTo(MINIMUM_EXIT_PROOF_WAIT) > 0
+                ? policy.forcedTimeout() : MINIMUM_EXIT_PROOF_WAIT;
+        try {
+            return lease.root.awaitExitProof(wait);
+        } catch (InterruptedException interrupted) {
+            // An interrupted proof is not a proof. The flag is set again for the caller to record.
+            Thread.currentThread().interrupt();
+            causes.add(Cause.INTERRUPTED);
+            return false;
+        } catch (RuntimeException unavailable) {
+            causes.add(Cause.EXIT_OBSERVATION_FAILED);
+            return false;
         }
     }
 

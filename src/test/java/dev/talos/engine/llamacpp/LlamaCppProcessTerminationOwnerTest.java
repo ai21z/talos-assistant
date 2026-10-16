@@ -8,6 +8,8 @@ import java.io.OutputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -532,6 +534,184 @@ class LlamaCppProcessTerminationOwnerTest {
             }
             return false;
         }
+    }
+
+    @Test
+    void exitCodeWithoutSignalledExitIsNotReportedAsTerminated() {
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner();
+        LingeringExitProcess process = new LingeringExitProcess();
+        LlamaCppProcessTerminationOwner.Lease lease = owner.adopt(process);
+
+        // Shaped like a CUDA server on Windows: the exit code is set when termination starts,
+        // while the operating system has not yet signalled that the process exited. The fake's
+        // completion models the root reaper created at adoption, which waits for that signal.
+        LlamaCppProcessTerminationOwner.Outcome lingering = lease.terminate(IMMEDIATE);
+        assertTrue(process.destroyed);
+        assertFalse(lingering.terminated(), lingering.safeSummary());
+        assertEquals(LlamaCppProcessTerminationOwner.State.RETAINED_LIVE, lingering.state());
+        assertTrue(lingering.causes().contains(
+                LlamaCppProcessTerminationOwner.Cause.EXIT_SIGNAL_PENDING), lingering.safeSummary());
+        assertFalse(lingering.causes().contains(
+                LlamaCppProcessTerminationOwner.Cause.FORCED_TIMEOUT), lingering.safeSummary());
+        assertEquals(1, owner.ownedLeaseCount());
+
+        // A lingering result stays retriable, it does not poison later launches.
+        process.signalExit();
+        LlamaCppProcessTerminationOwner.Outcome settled = lease.terminate(IMMEDIATE);
+        assertTrue(settled.terminated(), settled.safeSummary());
+        assertEquals(0, owner.ownedLeaseCount());
+    }
+
+    @Test
+    void exitSignalledDuringTheProofWaitSettlesWithoutAnUnstableTree() throws Exception {
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner();
+        LingeringExitProcess process = new LingeringExitProcess();
+        LlamaCppProcessTerminationOwner.Lease lease = owner.adopt(process);
+        Thread signaller = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException stop) {
+                return;
+            }
+            process.signalExit();
+        });
+        signaller.start();
+
+        LlamaCppProcessTerminationOwner.Outcome outcome = lease.terminate(IMMEDIATE);
+        signaller.join(5_000);
+
+        assertTrue(outcome.terminated(), outcome.safeSummary());
+        assertFalse(outcome.causes().contains(
+                LlamaCppProcessTerminationOwner.Cause.TREE_CAPTURE_UNSTABLE), outcome.safeSummary());
+        assertEquals(0, owner.ownedLeaseCount());
+    }
+
+    @Test
+    void interruptedProofWaitIsNotATerminationAndKeepsTheInterrupt() throws Exception {
+        LlamaCppProcessTerminationOwner owner =
+                new LlamaCppProcessTerminationOwner();
+        LingeringExitProcess process = new LingeringExitProcess();
+        LlamaCppProcessTerminationOwner.Lease lease = owner.adopt(process);
+        AtomicReference<LlamaCppProcessTerminationOwner.Outcome> outcome = new AtomicReference<>();
+        AtomicReference<Boolean> interruptKept = new AtomicReference<>();
+        CountDownLatch waiting = new CountDownLatch(1);
+        Thread terminator = new Thread(() -> {
+            waiting.countDown();
+            outcome.set(lease.terminate(IMMEDIATE));
+            interruptKept.set(Thread.currentThread().isInterrupted());
+        });
+        terminator.start();
+        assertTrue(waiting.await(5, TimeUnit.SECONDS));
+        Thread.sleep(200);
+        terminator.interrupt();
+        terminator.join(5_000);
+
+        assertFalse(outcome.get().terminated(), outcome.get().safeSummary());
+        assertTrue(outcome.get().causes().contains(
+                LlamaCppProcessTerminationOwner.Cause.INTERRUPTED), outcome.get().safeSummary());
+        assertEquals(Boolean.TRUE, interruptKept.get());
+        assertEquals(1, owner.ownedLeaseCount());
+    }
+
+    /** The exit code is set by destroy, while exit completion stays pending until signalled. */
+    private static final class LingeringExitProcess extends Process {
+        private final CompletableFuture<Process> exit = new CompletableFuture<>();
+        private final ProcessHandle handle = new LingeringHandle(exit);
+        private boolean exitCodeSet;
+        private boolean destroyed;
+
+        void signalExit() {
+            exit.complete(this);
+        }
+
+        @Override
+        public OutputStream getOutputStream() {
+            return OutputStream.nullOutputStream();
+        }
+
+        @Override
+        public InputStream getInputStream() {
+            return InputStream.nullInputStream();
+        }
+
+        @Override
+        public InputStream getErrorStream() {
+            return InputStream.nullInputStream();
+        }
+
+        @Override
+        public int waitFor() {
+            return 1;
+        }
+
+        @Override
+        public boolean waitFor(long timeout, TimeUnit unit) {
+            // The JDK Windows implementation returns at once when the exit code is set.
+            return exitCodeSet;
+        }
+
+        @Override
+        public int exitValue() {
+            if (!exitCodeSet) throw new IllegalThreadStateException();
+            return 1;
+        }
+
+        @Override
+        public void destroy() {
+            destroyed = true;
+            exitCodeSet = true;
+        }
+
+        @Override
+        public Process destroyForcibly() {
+            destroy();
+            return this;
+        }
+
+        @Override
+        public boolean isAlive() {
+            return !exitCodeSet;
+        }
+
+        @Override
+        public long pid() {
+            return 999_999_937L;
+        }
+
+        @Override
+        public CompletableFuture<Process> onExit() {
+            return exit;
+        }
+
+        @Override
+        public ProcessHandle toHandle() {
+            return handle;
+        }
+    }
+
+    private record LingeringHandle(CompletableFuture<Process> exit) implements ProcessHandle {
+        @Override public long pid() { return 999_999_937L; }
+        @Override public Optional<ProcessHandle> parent() { return Optional.empty(); }
+        @Override public java.util.stream.Stream<ProcessHandle> children() { return java.util.stream.Stream.empty(); }
+        @Override public java.util.stream.Stream<ProcessHandle> descendants() { return java.util.stream.Stream.empty(); }
+        @Override public Info info() {
+            return new Info() {
+                @Override public Optional<String> command() { return Optional.empty(); }
+                @Override public Optional<String> commandLine() { return Optional.empty(); }
+                @Override public Optional<String[]> arguments() { return Optional.empty(); }
+                @Override public Optional<java.time.Instant> startInstant() { return Optional.empty(); }
+                @Override public Optional<Duration> totalCpuDuration() { return Optional.empty(); }
+                @Override public Optional<String> user() { return Optional.empty(); }
+            };
+        }
+        @Override public CompletableFuture<ProcessHandle> onExit() { return exit.thenApply(done -> this); }
+        @Override public boolean supportsNormalTermination() { return false; }
+        @Override public boolean destroy() { return true; }
+        @Override public boolean destroyForcibly() { return true; }
+        @Override public boolean isAlive() { return !exit.isDone(); }
+        @Override public int compareTo(ProcessHandle other) { return Long.compare(pid(), other.pid()); }
     }
 
     private static final class ThrowingPidProcess extends Process {
