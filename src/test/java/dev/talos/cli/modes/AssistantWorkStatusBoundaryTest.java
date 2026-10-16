@@ -144,6 +144,48 @@ class AssistantWorkStatusBoundaryTest {
         assertEquals(0, handoff.fixture().generations().get());
     }
 
+    @Test void partialHandoffNamesRejectedOperationsAndListsOnlyRecordedVerification() throws Exception {
+        var memory = new SessionMemory();
+        var listener = new dev.talos.runtime.MemoryUpdateListener(new dev.talos.core.context.ConversationManager(
+                memory, new dev.talos.core.context.TokenBudget()), null, memory);
+        // Shaped like the b8f585ea Qwen run: a rejected edit without a typed reason, a write and unverified turns.
+        for (int turn = 1; turn <= 4; turn++) {
+            var calls = new ArrayList<dev.talos.runtime.TurnRecord.ToolCallSummary>();
+            if (turn == 2) calls.add(new dev.talos.runtime.TurnRecord.ToolCallSummary("talos.edit_file",
+                    "harbor-story.txt", List.of(), false, "Invalid talos.edit_file call: target file not found",
+                    dev.talos.tools.ToolMutationEffects.none(), dev.talos.runtime.TurnRecord.ToolCallDisposition.BLOCKED,
+                    dev.talos.tools.ToolFailureReason.NONE));
+            if (turn == 3) calls.add(new dev.talos.runtime.TurnRecord.ToolCallSummary("talos.write_file",
+                    "harbor-story.txt", List.of(), true, "", dev.talos.tools.ToolMutationEffects.applied("harbor-story.txt"),
+                    dev.talos.runtime.TurnRecord.ToolCallDisposition.EXECUTED, dev.talos.tools.ToolFailureReason.NONE));
+            var trace = dev.talos.runtime.trace.LocalTurnTrace.builder("rejected-" + turn, "fixture", turn,
+                            "2026-10-16T00:00:00Z")
+                    .workspaceHash(dev.talos.runtime.JsonSessionStore.sessionIdFor(workspace))
+                    .verification(turn == 3 ? "READBACK_ONLY" : "NOT_RUN", "", List.of()).build();
+            var audit = new dev.talos.runtime.TurnAudit(calls, 0, 0, 0,
+                    dev.talos.runtime.TurnPolicyTrace.empty(), trace, dev.talos.safety.ContentRestrictions.UNRESTRICTED,
+                    List.of(), dev.talos.runtime.WorkStatusReceipt.none());
+            listener.onTurnComplete(new dev.talos.runtime.TurnResult(new dev.talos.runtime.Result.Ok("Earlier answer"),
+                    null, turn, java.time.Duration.ZERO, audit), "Earlier request");
+        }
+        var fixture = dev.talos.core.llm.WorkStatusColdProviderFixture.create();
+        var cfg = new Config(null);
+        var processor = new dev.talos.runtime.TurnProcessor((raw, ws, context) ->
+                new UnifiedAssistantMode().handle(raw, ws, (Context) context));
+        var settled = processor.process(new dev.talos.runtime.Session(workspace, cfg),
+                "Give me a short handoff. What is saved and verified, and what hasn't been checked? Don't change any files.",
+                Context.builder(cfg).memory(memory).llm(fixture.client()).build());
+        String answer = text(settled.result());
+        assertTrue(answer.contains("Turn 2: talos.edit_file was rejected before it ran."), answer);
+        assertFalse(answer.contains("NONE"), answer);
+        assertFalse(answer.contains("Invalid talos.edit_file call"), answer);
+        assertTrue(answer.contains("Turn 3 READBACK_ONLY"), answer);
+        assertFalse(answer.contains("NOT_RUN"), answer);
+        assertTrue(answer.contains("Other retained turns recorded no verification."), answer);
+        assertTrue(answer.contains("turn-level, not per-file proof"), answer);
+        assertEquals(0, fixture.generations().get());
+    }
+
     private record SettledHandoff(dev.talos.runtime.TurnResult settled,
                                   dev.talos.core.llm.WorkStatusColdProviderFixture fixture) {}
 

@@ -120,12 +120,7 @@ public final class WorkStatusAnswerPolicy {
             } else {
                 part = switch (requested.kind()) {
                     case RETAINED_SAVES -> capturedEffects(turns, publication, fields);
-                    case RETAINED_VERIFICATION -> "Recorded verification: " + (turns.isEmpty() ? "unavailable"
-                            : turns.stream().sorted(java.util.Comparator.comparingInt(WorkStatusAnswerPolicy::verificationPriority)
-                                    .thenComparingInt(WorkStatusEvidence.Turn::turnNumber)).limit(MAX_OPERATION_DETAIL_ROWS)
-                                .map(turn -> "Turn " + turn.turnNumber() + " " + turn.verification())
-                                .collect(java.util.stream.Collectors.joining(", ")))
-                            + ". These labels are turn-level, not per-file proof.";
+                    case RETAINED_VERIFICATION -> recordedVerification(turns);
                     case RETAINED_UNCHECKED -> "Current contents, file-specific correctness, complete tests and release acceptance "
                             + "are not established by retained status records. Missing records prevent an exhaustive unchecked-work inventory.";
                     default -> "A requested result remains unresolved.";
@@ -138,6 +133,26 @@ public final class WorkStatusAnswerPolicy {
         if (omitted) answer.append(omission);
         answer.append(tail);
         return answer.toString();
+    }
+
+    /**
+     * Only turns that recorded a verification label are listed, failures and uncertainty first.
+     * Turns without verification are summarized once, without a count.
+     */
+    private static String recordedVerification(List<WorkStatusEvidence.Turn> turns) {
+        String scope = " These labels are turn-level, not per-file proof.";
+        if (turns.isEmpty()) return "Recorded verification: unavailable." + scope;
+        var recorded = turns.stream().filter(turn -> turn.verification() != WorkStatusEvidence.Verification.NOT_RUN)
+                .sorted(java.util.Comparator.comparingInt(WorkStatusAnswerPolicy::verificationPriority)
+                        .thenComparingInt(WorkStatusEvidence.Turn::turnNumber)).toList();
+        boolean unverified = recorded.size() < turns.size();
+        if (recorded.isEmpty()) return "Recorded verification: no retained turn recorded verification." + scope;
+        String listed = recorded.stream().limit(MAX_OPERATION_DETAIL_ROWS)
+                .map(turn -> "Turn " + turn.turnNumber() + " " + turn.verification())
+                .collect(java.util.stream.Collectors.joining(", "));
+        return "Recorded verification: " + listed
+                + (recorded.size() > MAX_OPERATION_DETAIL_ROWS ? ", with further labels omitted" : "") + "."
+                + (unverified ? " Other retained turns recorded no verification." : "") + scope;
     }
 
     private static int verificationPriority(WorkStatusEvidence.Turn turn) {
@@ -167,7 +182,11 @@ public final class WorkStatusAnswerPolicy {
                 if (call.failureReason() == dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED)
                     row += "approval was denied";
                 else if (call.disposition() == dev.talos.runtime.TurnRecord.ToolCallDisposition.BLOCKED)
-                    row += "the operation was blocked, " + call.failureReason();
+                    // Recorded diagnostic text is not printed. A typed reason is rendered as readable words.
+                    row += call.canonicalToolName() + " was rejected before it ran"
+                            + (call.failureReason() == dev.talos.tools.ToolFailureReason.NONE ? ""
+                                : ", recorded reason " + call.failureReason().name()
+                                    .toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
                 else row += call.canonicalToolName() + ", " + (fields.countPublic() ? call.appliedEntries() + " " : "")
                         + "applied effect entries for " + target;
                 if (call.uncertainEntries() > 0) row += ", effects remain uncertain";
