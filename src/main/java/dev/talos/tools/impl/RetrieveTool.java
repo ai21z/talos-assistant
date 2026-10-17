@@ -77,12 +77,18 @@ public final class RetrieveTool implements TalosTool {
 
         try {
             RagService.Prepared prepared = ragService.prepare(ws, query, topK);
-
-            if (prepared.snippets().isEmpty() && prepared.symbolHits().isEmpty()) {
-                return ToolResult.ok("No results found for: " + query);
+            boolean empty = prepared.snippets().isEmpty() && prepared.symbolHits().isEmpty();
+            // A failure is reported as a failure. Only a completed search with no match is "no results".
+            if (prepared.hasError() && empty) {
+                return ToolResult.fail(ToolError.internal("Retrieval failed: " + prepared.errorReason()));
+            }
+            String indexNote = prepared.indexAction() == RagService.IndexAction.BUILT
+                    || prepared.indexAction() == RagService.IndexAction.REBUILT ? prepared.indexNote() + "\n\n" : "";
+            if (empty) {
+                return ToolResult.ok(indexNote + "No results found for: " + query);
             }
 
-            var sb = new StringBuilder();
+            var sb = new StringBuilder(indexNote);
             LinkedHashSet<String> sourcePaths = new LinkedHashSet<>();
             prepared.symbolHits().stream()
                     .map(SymbolHit::path)
@@ -131,6 +137,9 @@ public final class RetrieveTool implements TalosTool {
             }
             if (redactedSnippets > 0) {
                 sb.append("Some retrieval snippets contained protected markers or secret-like values and were redacted.\n");
+            }
+            if (prepared.hasError()) {
+                sb.append("Retrieval was partial: ").append(prepared.errorReason()).append('\n');
             }
 
             ToolContentMetadata metadata = ToolContentMetadata.workspaceEvidence(

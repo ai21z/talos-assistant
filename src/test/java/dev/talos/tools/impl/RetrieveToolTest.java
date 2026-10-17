@@ -335,7 +335,58 @@ class RetrieveToolTest {
         for (int i = 0; i < 64; i++) current = new RuntimeException(current);
         return (RuntimeException) current;
     }
+
+    // Index actions and failures are stated rather than reported as empty results.
+    private static final ToolCall CALL = new ToolCall("talos.retrieve", Map.of("query", "loom"));
+
+    @Test
+    void aFailureWithNoResultsIsAFailedToolResult() {
+        ToolResult result = tool(new RagService.Prepared(List.of(), List.of(), null, "Index corrupted")).execute(CALL, null);
+        assertFalse(result.success(), result.toString());
+        assertTrue(result.errorMessage().contains("Retrieval failed: Index corrupted"), result.errorMessage());
+        assertFalse(result.toString().contains("No results found"), result.toString());
+    }
+
+    @Test
+    void aFailureWithResultsIsReportedAsPartial() {
+        var snippet = new ContextResult.Snippet("README.md#0", "The loom catalog.");
+        ToolResult result = tool(new RagService.Prepared(List.of(snippet), List.of(), null, "vector stage failed"))
+                .execute(CALL, null);
+        assertTrue(result.success(), result.toString());
+        assertTrue(result.output().contains("README.md"), result.output());
+        assertTrue(result.output().contains("Retrieval was partial: vector stage failed"), result.output());
+    }
+
+    @Test
+    void anIndexBuiltInThisCallIsStated() {
+        var snippet = new ContextResult.Snippet("README.md#0", "The loom catalog.");
+        var prepared = new RagService.Prepared(List.of(snippet), List.of(), null, null, List.of(),
+                RagService.IndexAction.BUILT, "The workspace index was built in this call, 1 file scanned.");
+        ToolResult result = tool(prepared).execute(CALL, null);
+        assertTrue(result.success());
+        assertTrue(result.output().startsWith("The workspace index was built in this call, 1 file scanned."), result.output());
+    }
+
+    @Test
+    void aFailedIndexBuildIsAFailedToolResult() {
+        var prepared = new RagService.Prepared(List.of(), List.of(), null,
+                "The workspace index could not be built: disk full", List.of(),
+                RagService.IndexAction.FAILED, "The workspace index could not be built: disk full");
+        ToolResult result = tool(prepared).execute(CALL, null);
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("could not be built: disk full"), result.errorMessage());
+    }
+
+    @Test
+    void aGenuinelyEmptyResultKeepsItsWording() {
+        ToolResult result = tool(new RagService.Prepared(List.of(), List.of())).execute(CALL, null);
+        assertTrue(result.success());
+        assertEquals("No results found for: loom", result.output());
+    }
+
+    private static RetrieveTool tool(RagService.Prepared prepared) {
+        return new RetrieveTool(new RagService(new Config(null)) {
+            @Override public Prepared prepare(Path ws, String query, Integer topK) { return prepared; }
+        });
+    }
 }
-
-
-

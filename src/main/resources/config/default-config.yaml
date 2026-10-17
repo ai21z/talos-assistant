@@ -1,6 +1,8 @@
 # src/main/resources/config/default-config.yaml
 
 rag:
+  # In a Git repository only files Git keeps are indexed, so ignored folders stay out of retrieval.
+  git_exclusions: true
   includes:
     - "**/*.md"
     - "**/*.markdown"

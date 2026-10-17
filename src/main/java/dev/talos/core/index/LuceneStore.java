@@ -406,6 +406,24 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         }
     }
 
+    /** Every indexed chunk path, read from the terms dictionary. Paths of deleted chunks may linger until a merge. */
+    public java.util.Set<String> indexedChunkPaths() {
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+            var paths = new java.util.HashSet<String>();
+            Terms terms = MultiTerms.getTerms(s.getIndexReader(), F_PATH);
+            if (terms == null) return paths;
+            TermsEnum iterator = terms.iterator();
+            for (var term = iterator.next(); term != null; term = iterator.next()) paths.add(term.utf8ToString());
+            return paths;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
+        }
+    }
+
     /**
      * Number of live docs in the index for diagnostics.
      */

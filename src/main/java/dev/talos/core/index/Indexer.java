@@ -58,6 +58,7 @@ public class Indexer {
     private final Config cfg;
     private final Supplier<Embeddings> documentEmbeddingsFactory;
     private final Supplier<CacheDb> cacheFactory;
+    private final java.util.function.Function<Path, GitExclusions.Scope> gitScope;
     private volatile IndexingStats lastRunStats;
 
     private static final class PrivacyIndexingSkip extends IOException {
@@ -75,10 +76,35 @@ public class Indexer {
             Supplier<Embeddings> documentEmbeddingsFactory,
             Supplier<CacheDb> cacheFactory
     ) {
+        this(cfg, documentEmbeddingsFactory, cacheFactory, GitExclusions::resolve);
+    }
+
+    Indexer(
+            Config cfg,
+            Supplier<Embeddings> documentEmbeddingsFactory,
+            Supplier<CacheDb> cacheFactory,
+            java.util.function.Function<Path, GitExclusions.Scope> gitScope
+    ) {
         this.cfg = Objects.requireNonNull(cfg, "cfg");
         this.documentEmbeddingsFactory = Objects.requireNonNull(
                 documentEmbeddingsFactory, "documentEmbeddingsFactory");
         this.cacheFactory = Objects.requireNonNull(cacheFactory, "cacheFactory");
+        this.gitScope = Objects.requireNonNull(gitScope, "gitScope");
+    }
+
+    /** In a Git repository only the files Git keeps stay in the corpus. Without an answer from Git the walk stands. */
+    private List<Path> applyGitExclusions(Path rootPath, Map<String, Object> rag, List<Path> walked) {
+        if (!CfgUtil.boolAt(rag, "git_exclusions", true)) return walked;
+        GitExclusions.Scope scope = gitScope.apply(rootPath);
+        if (!scope.applies()) {
+            LOG.info("Git exclusions not applied under {}: {}", SafeLogFormatter.value(rootPath), scope.note());
+            return walked;
+        }
+        List<Path> kept = walked.stream()
+                .filter(file -> scope.keeps(rootPath.relativize(file).toString()))
+                .toList();
+        LOG.info("Git exclusions kept {} of {} walked files.", kept.size(), walked.size());
+        return kept;
     }
 
     public Path indexDirFor(Path root) {
@@ -142,6 +168,8 @@ public class Indexer {
     public void index(Path root, boolean forceFullReindex, IndexProgressListener listener) {
         final IndexingStats stats = new IndexingStats();
         final long startTime = System.currentTimeMillis();
+        // A run that ends early still leaves its own statistics, not the previous run's.
+        this.lastRunStats = stats;
 
         final Path rootPath = root.toAbsolutePath().normalize();
         LOG.info("Indexing root: {} (force_full={})", SafeLogFormatter.value(rootPath), forceFullReindex);
@@ -170,15 +198,16 @@ public class Indexer {
         final Predicate<Path> pred = createFileFilter(rootPath, includeGlobs, excludeGlobs);
 
         // Walk files with timing
-        final List<Path> files;
+        final List<Path> walked;
         long walkStart = System.currentTimeMillis();
         try {
-            files = FileWalker.listFiles(rootPath, pred);
+            walked = FileWalker.listFiles(rootPath, pred);
         } catch (IOException ioe) {
             LOG.warn("Failed to walk files under {}: {}",
                     SafeLogFormatter.value(rootPath), SafeLogFormatter.throwableMessage(ioe));
             return;
         }
+        final List<Path> files = applyGitExclusions(rootPath, rag, walked);
         stats.addWalkTime(System.currentTimeMillis() - walkStart);
 
         if (files.isEmpty()) {
@@ -384,6 +413,22 @@ public class Indexer {
                 } catch (InterruptedException ie) {
                     throw ControlFlowFailure.propagate(ie);
                 }
+
+                // Chunks of files that left the corpus, by deletion or by Git exclusion, leave with this run.
+                // The terms dictionary is read without scoring or stored fields. The chunk marker is the last '#',
+                // so a file name that contains '#' keeps its own chunks.
+                java.util.Set<String> indexedPaths = new java.util.HashSet<>();
+                for (String chunk : store.indexedChunkPaths()) {
+                    int marker = chunk.lastIndexOf('#');
+                    indexedPaths.add(marker < 0 ? chunk : chunk.substring(0, marker));
+                }
+                int removed = 0;
+                for (String stale : indexedPaths) {
+                    if (currentRelPaths.contains(stale)) continue;
+                    store.removeFileChunks(stale);
+                    removed++;
+                }
+                if (removed > 0) LOG.info("Removed chunks of {} files that are no longer in the corpus.", removed);
 
                 long commitStart = System.currentTimeMillis();
                 store.commit();
