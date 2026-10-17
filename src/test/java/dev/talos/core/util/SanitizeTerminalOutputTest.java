@@ -44,4 +44,17 @@ final class SanitizeTerminalOutputTest {
         assertEquals("I'm unable to view the text of the `medical-notes.docx` file.", output);
         assertFalse(output.contains("?"), output);
     }
+
+    @Test
+    void plainPunctuationUsesTheFallbackTableOnlyForSelectedCharacters() {
+        String punctuation = "  ‘’‛′“”‟″"
+                + "‐‑‒–—―−…";
+        assertEquals(Sanitize.toAsciiFallback(punctuation), Sanitize.plainPunctuation(punctuation, cp -> true));
+
+        String text = "Nera’s well‑kept lamp → café 海";
+        assertEquals("Nera's well-kept lamp → café 海", Sanitize.plainPunctuation(text, cp -> true));
+        assertEquals("Nera’s well-kept lamp → café 海",
+                Sanitize.plainPunctuation(text, cp -> cp == 0x2011));
+        assertEquals(text, Sanitize.plainPunctuation(text, cp -> false));
+    }
 }

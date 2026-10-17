@@ -844,6 +844,9 @@ public final class AssistantTurnExecutor {
         String answer = "A complete draft could not be prepared. No write was attempted. Please restate the full content request.";
         ProviderResponseCapture.Receipt receipt = null;
         dev.talos.runtime.context.PendingContentDraft accepted = null;
+        String draftText = null;
+        String questionText = null;
+        boolean plainPunctuation = false;
         var priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try {
             if (ctx.memory() != null && ctx.llm() != null) {
@@ -865,19 +868,26 @@ public final class AssistantTurnExecutor {
                     var proposal = dev.talos.runtime.context.ContentDraftProposal.decode(result.text());
                     if (proposal.isPresent()) {
                         var value = proposal.get();
+                        String text = "draft".equals(value.kind())
+                                ? showableText(value.text(), t -> dev.talos.runtime.context.ContentDraftContinuation.render(
+                                        t, pending.destination(), pending.id()), ctx, opts)
+                                : showableText(value.text(), AssistantTurnExecutor::clarificationAnswer, ctx, opts);
                         String redacted = ctx.redactor() == null
-                                ? new dev.talos.core.security.Redactor().redactBlock(value.text())
-                                : ctx.redactor().redactBlock(value.text());
-                        if (value.text().equals(redacted) && value.text().equals(opts.answerSanitizer.apply(value.text()))) {
+                                ? new dev.talos.core.security.Redactor().redactBlock(text)
+                                : ctx.redactor().redactBlock(text);
+                        if (text.equals(redacted) && text.equals(opts.answerSanitizer.apply(text))) {
                             receipt = result.provenance();
                             if ("draft".equals(value.kind())) {
+                                draftText = text;
+                                plainPunctuation = !text.equals(value.text());
                                 accepted = new dev.talos.runtime.context.PendingContentDraft(pending.origin(),
                                         pending.operationIndex(), pending.workspace(), pending.originTurn(),
-                                        pending.expiresAfterTurn(), pending.id(), pending.destination(), value.text());
-                                answer = dev.talos.runtime.context.ContentDraftContinuation.render(accepted);
+                                        pending.expiresAfterTurn(), pending.id(), pending.destination(), text);
+                                answer = (plainPunctuation ? PLAIN_PUNCTUATION_NOTE + "\n" : "")
+                                        + dev.talos.runtime.context.ContentDraftContinuation.render(accepted);
                             } else {
-                                answer = "No draft was selected and no file was written.\n\n" + value.text()
-                                        + "\n\nPlease provide the clarification together with the complete original request.";
+                                questionText = text;
+                                answer = clarificationAnswer(text);
                             }
                         }
                     }
@@ -896,7 +906,14 @@ public final class AssistantTurnExecutor {
         if (!draftPresentationIntact(answer, ctx, opts)) {
             accepted = null;
             receipt = null;
-            answer = "The complete draft could not be presented safely. No draft was retained and no write was attempted.";
+            answer = questionText != null
+                    ? "The clarification question could not be shown exactly on this display. "
+                        + "No draft was retained and no write was attempted." + unshowableCharacter(questionText, ctx)
+                    : "The complete draft could not be presented safely. No draft was retained and no write was attempted."
+                        + unshowableCharacter(draftText, ctx);
+        } else if (accepted != null && plainPunctuation) {
+            LocalTurnTraceCapture.warning("CONTENT_DRAFT_PLAIN_PUNCTUATION",
+                    "Typographic punctuation the display cannot show was replaced before the draft was shown and kept.");
         }
         var verification = TaskVerificationResult.notRun("Draft generation does not execute or verify a file save.");
         TaskOutcomeTraceRecorder.record("PARTIAL", "NOT_RUN", new TaskOutcome(pending.origin().contract(),
@@ -907,6 +924,36 @@ public final class AssistantTurnExecutor {
         if (ctx.memory() != null) ctx.memory().setPendingContentDraft(accepted);
         completeStream(ctx);
         return completeTurnOutput(answer, false);
+    }
+
+    private static final String PLAIN_PUNCTUATION_NOTE = "Typographic quotes, dashes, special spaces or ellipses that this "
+            + "display cannot show were replaced with plain characters, so the draft below is exactly what would be saved.";
+
+    private static String clarificationAnswer(String question) {
+        return "No draft was selected and no file was written.\n\n" + question
+                + "\n\nPlease provide the clarification together with the complete original request.";
+    }
+
+    /** Only typographic punctuation the display cannot show is made plain, so what is shown is what is kept. */
+    private static String showableText(String text, java.util.function.UnaryOperator<String> render,
+                                       Context ctx, Options opts) {
+        if (ctx.exactAnswerPresentation() == null || draftPresentationIntact(render.apply(text), ctx, opts)) return text;
+        var preserves = ctx.exactAnswerPresentation().preserves();
+        String plain = dev.talos.core.util.Sanitize.plainPunctuation(text, cp -> !preserves.test(Character.toString(cp)));
+        return !plain.equals(text) && dev.talos.runtime.context.ContentDraftProposal.validText(plain)
+                && draftPresentationIntact(render.apply(plain), ctx, opts) ? plain : text;
+    }
+
+    /** Names the first character outside the plain punctuation table that the display cannot show. */
+    private static String unshowableCharacter(String text, Context ctx) {
+        if (text == null || ctx.exactAnswerPresentation() == null) return "";
+        var preserves = ctx.exactAnswerPresentation().preserves();
+        String plain = dev.talos.core.util.Sanitize.plainPunctuation(text, cp -> !preserves.test(Character.toString(cp)));
+        return plain.codePoints().filter(cp -> cp > 0x7E && !preserves.test(Character.toString(cp))).findFirst()
+                .stream().mapToObj(cp -> " This display cannot show the character U+"
+                        + String.format(java.util.Locale.ROOT, "%04X", cp)
+                        + (Character.getName(cp) == null ? "" : " " + Character.getName(cp)) + ".")
+                .findFirst().orElse("");
     }
 
     private static boolean draftPresentationIntact(String answer, Context ctx, Options opts) {

@@ -103,7 +103,9 @@ final class AssistantTurnPreparation {
         }
         ContentDraftContinuation.Decision draft = ContentDraftContinuation.evaluate(
                 initialResolution, ctx == null || ctx.memory() == null ? null : ctx.memory().pendingContentDraft(),
-                workspace, currentUserTurnNumber(ctx), capabilityPosture, currentUserRestrictions(messages));
+                workspace, currentUserTurnNumber(ctx), capabilityPosture, currentUserRestrictions(messages),
+                path -> ctx == null || ctx.exactAnswerPresentation() == null
+                        || ctx.exactAnswerPresentation().preserves().test(path));
         initialResolution = draft.resolution();
         ContentSaveContinuation.Decision saveContinuation = draft.handled()
                 ? new ContentSaveContinuation.Decision(initialResolution, null, draft.directAnswer(), "", true,

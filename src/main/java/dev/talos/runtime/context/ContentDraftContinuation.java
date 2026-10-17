@@ -23,6 +23,13 @@ public final class ContentDraftContinuation {
 
     public static Decision evaluate(TaskResolution current, PendingContentDraft pending, Path workspace,
                                     int turn, CapabilityPosture posture, ContentRestrictions restrictions) {
+        return evaluate(current, pending, workspace, turn, posture, restrictions, path -> true);
+    }
+
+    /** The display check decides only whether a supplied filename can be shown, never whether it may be written. */
+    public static Decision evaluate(TaskResolution current, PendingContentDraft pending, Path workspace,
+                                    int turn, CapabilityPosture posture, ContentRestrictions restrictions,
+                                    java.util.function.Predicate<String> showable) {
         String request = current.intent().originalUserRequest();
         String identity = workspace == null ? "" : workspace.toAbsolutePath().normalize().toString();
         boolean permitted = posture == CapabilityPosture.AGENT && ContentRestrictions.UNRESTRICTED.equals(restrictions)
@@ -38,15 +45,7 @@ public final class ContentDraftContinuation {
             if (!destinationAllowed(live, workspace, live.destination())) {
                 return direct(current, null, "The draft destination is no longer permitted. No write was attempted.");
             }
-            var origin = live.origin();
-            var selected = origin.intent().contentSaveRequest().selectDraft(new ContentSaveRequest.DraftSelection(
-                    live.operationIndex(), live.id(), live.destination(), live.content(), live.originTurn(), turn));
-            var targets = origin.intent().targets().with(new TargetRef(live.destination(), TargetRole.MUST_MUTATE,
-                    new IntentDerivation(TargetSource.REPAIR_CONTEXT, "explicit-content-draft-selection",
-                            IntentDerivation.UNKNOWN_OFFSET, IntentDerivation.UNKNOWN_OFFSET, "", 1.0)));
-            var intent = new TaskIntent(origin.intent().type(), true, true, true, targets,
-                    origin.intent().originalUserRequest(), "content-draft-selection", selected);
-            return new Decision(origin.projectOnto(TaskContractCompiler.compile(intent), intent), null, null, null, true);
+            return select(live, turn, "explicit-content-draft-selection");
         }
         if (live != null && (CANCEL.matcher(request.strip()).matches() || ContentSaveContinuation.cancellation(request))) {
             return direct(current, null, "The draft was discarded. No write was attempted.");
@@ -55,15 +54,21 @@ public final class ContentDraftContinuation {
                 CANCEL.matcher(clause.text()).matches() || ContentSaveContinuation.cancellation(clause.text()))) {
             live = null;
         }
-        if (live != null && live.destination().isBlank()) {
+        if (live != null && live.destination().isBlank() && !live.content().isBlank()) {
             String path = filename(request);
             if (path != null) {
                 if (!destinationAllowed(live, workspace, path)) {
                     return direct(current, live, "That destination is not permitted by the original request. No write was attempted.");
                 }
+                if (!showable.test(path)) {
+                    return direct(current, live, "That filename cannot be shown exactly on this display, so it was not used. "
+                            + "The draft is kept and no write was attempted. Please reply with a filename this display can show.");
+                }
                 var bound = new PendingContentDraft(live.origin(), live.operationIndex(), live.workspace(),
-                        live.originTurn(), live.expiresAfterTurn(), id(), path, live.content());
-                return direct(current, bound, render(bound));
+                        live.originTurn(), live.expiresAfterTurn(), live.id(), path, live.content());
+                // The filename completes the original save request for a draft already shown in full,
+                // so it selects that draft. Normal file approval still decides the write.
+                return select(bound, turn, "filename-content-draft-selection");
             }
         }
         int index = unresolvedOperation(current);
@@ -120,9 +125,22 @@ public final class ContentDraftContinuation {
         String body = content.replace("\n", "\n> ");
         return "This draft has not been written. Existing files are unchanged. Meaning and complete request coverage remain unverified.\n"
                 + "Destination: " + destination + "\n\n> " + body + "\n\n"
-                + (path.isBlank() ? "A filename is still required. Supplying it does not select the draft."
+                + (path.isBlank() ? "To save these exact contents, reply with the filename only. "
+                    + "Normal file permission and approval will still be required."
                 : "To select these exact contents and this destination, enter: Save draft " + id
                     + "\nNormal file permission and approval will still be required.");
+    }
+
+    private static Decision select(PendingContentDraft live, int turn, String reason) {
+        var origin = live.origin();
+        var selected = origin.intent().contentSaveRequest().selectDraft(new ContentSaveRequest.DraftSelection(
+                live.operationIndex(), live.id(), live.destination(), live.content(), live.originTurn(), turn));
+        var targets = origin.intent().targets().with(new TargetRef(live.destination(), TargetRole.MUST_MUTATE,
+                new IntentDerivation(TargetSource.REPAIR_CONTEXT, reason,
+                        IntentDerivation.UNKNOWN_OFFSET, IntentDerivation.UNKNOWN_OFFSET, "", 1.0)));
+        var intent = new TaskIntent(origin.intent().type(), true, true, true, targets,
+                origin.intent().originalUserRequest(), "content-draft-selection", selected);
+        return new Decision(origin.projectOnto(TaskContractCompiler.compile(intent), intent), null, null, null, true);
     }
 
     private static Decision direct(TaskResolution current, PendingContentDraft next, String answer) {
@@ -133,9 +151,13 @@ public final class ContentDraftContinuation {
 
     private static String filename(String request) {
         String value = request.strip();
-        if (value.length() > 2 && "`\"'".indexOf(value.charAt(0)) >= 0
-                && value.charAt(value.length() - 1) == value.charAt(0)) value = value.substring(1, value.length() - 1);
-        return value.matches("[\\p{L}\\p{N}_ ./\\\\-]+\\.[\\p{L}\\p{N}_-]+") ? TargetRef.normalizePath(value) : null;
+        boolean quoted = value.length() > 2 && "`\"'".indexOf(value.charAt(0)) >= 0
+                && value.charAt(value.length() - 1) == value.charAt(0);
+        if (quoted) value = value.substring(1, value.length() - 1);
+        // Unquoted, only a single token is a filename, so a sentence that ends in one is not.
+        // The extension starts with a letter, so a version or a number such as v2.0 is not one either.
+        String name = quoted ? "[\\p{L}\\p{N}_ ./\\\\-]+" : "[\\p{L}\\p{N}_./\\\\-]+";
+        return value.matches(name + "\\.\\p{L}[\\p{L}\\p{N}_-]*") ? TargetRef.normalizePath(value) : null;
     }
 
     private static boolean destinationAllowed(PendingContentDraft draft, Path workspace, String path) {

@@ -109,12 +109,12 @@ public final class Sanitize {
                 continue;
             }
 
+            String plain = plainPunctuation(cp);
+            if (plain != null) {
+                out.append(plain);
+                continue;
+            }
             switch (cp) {
-                case 0x00A0, 0x202F -> out.append(' '); // non-breaking / narrow non-breaking space
-                case 0x2018, 0x2019, 0x201B, 0x2032 -> out.append('\'');
-                case 0x201C, 0x201D, 0x201F, 0x2033 -> out.append('"');
-                case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> out.append('-');
-                case 0x2026 -> out.append("...");
                 case 0x2022, 0x25E6, 0x2043 -> out.append('*');
                 case 0x2190 -> out.append("<-");
                 case 0x2192, 0x21D2 -> out.append("->");
@@ -133,6 +133,34 @@ public final class Sanitize {
             }
         }
         return out.toString();
+    }
+
+    /**
+     * Replaces selected typographic quotes, dashes, non-breaking spaces and the ellipsis with the plain
+     * characters the ASCII fallback uses. Every other character is kept.
+     */
+    public static String plainPunctuation(String s, java.util.function.IntPredicate selected) {
+        if (s == null || s.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            i += Character.charCount(cp);
+            String plain = plainPunctuation(cp);
+            if (plain != null && selected.test(cp)) out.append(plain);
+            else out.appendCodePoint(cp);
+        }
+        return out.toString();
+    }
+
+    private static String plainPunctuation(int cp) {
+        return switch (cp) {
+            case 0x00A0, 0x202F -> " "; // non-breaking / narrow non-breaking space
+            case 0x2018, 0x2019, 0x201B, 0x2032 -> "'";
+            case 0x201C, 0x201D, 0x201F, 0x2033 -> "\"";
+            case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> "-";
+            case 0x2026 -> "...";
+            default -> null;
+        };
     }
 
     /**

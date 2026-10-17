@@ -87,7 +87,7 @@ class MicaContentDraftBoundaryTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    void draftReminderFilenameAndExplicitSelectionPreserveExactBytesWithoutAnotherProviderCall(boolean schemaSupported) throws Exception {
+    void draftReminderAndFilenameSaveTheShownBytesWithoutAnotherProviderCall(boolean schemaSupported) throws Exception {
         try (var conversation = new Conversation(schemaSupported, ApprovalResponse.APPROVED)) {
             Run proposed = conversation.run(REQUEST, proposal("draft", STORY));
             assertGeneration(proposed, REQUEST, schemaSupported);
@@ -96,6 +96,7 @@ class MicaContentDraftBoundaryTest {
             assertEquals("", original.destination());
             assertEquals(original.originTurn() + 5, original.expiresAfterTurn());
             assertTrue(proposed.answer().contains("> # Lina's clock\n> \n> ```text\n> Seven minutes slow.\n> ```"), proposed.answer());
+            assertTrue(proposed.answer().contains("reply with the filename only"), proposed.answer());
             assertEquals(MemoryUpdateListener.assistantTextForPersistence(proposed.answer(), REQUEST),
                     conversation.memory.getTurns().getLast().content());
             assertNoWrite(conversation);
@@ -106,17 +107,8 @@ class MicaContentDraftBoundaryTest {
             assertSame(original, conversation.memory.pendingContentDraft());
             assertEquals(original.expiresAfterTurn(), requireDraft(conversation).expiresAfterTurn());
 
-            Run bound = conversation.run("story.txt");
-            assertTrue(bound.requests().isEmpty());
-            PendingContentDraft current = requireDraft(conversation);
-            assertEquals("story.txt", current.destination());
-            assertEquals(STORY, current.content());
-            assertEquals(original.originTurn(), current.originTurn());
-            assertEquals(original.expiresAfterTurn(), current.expiresAfterTurn());
-            assertTrue(bound.answer().contains("Save draft " + current.id()), bound.answer());
-            assertNoWrite(conversation);
-
-            Run saved = conversation.run("Save draft " + current.id());
+            // The filename completes the original save request for the draft already shown in full.
+            Run saved = conversation.run("story.txt");
             assertTrue(saved.requests().isEmpty(), "Selected content must be written without provider regeneration");
             assertEquals(1, conversation.approvals.get());
             assertEquals(1, saved.turn().audit().approvalsGranted());
@@ -327,19 +319,149 @@ class MicaContentDraftBoundaryTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void lossyAsciiDisplayCannotPublishASelectableDraft(boolean streaming) throws Exception {
+    void lossyAsciiDisplayCannotPublishADraftWithAnUnshowableCharacter(boolean streaming) throws Exception {
         try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
             conversation.streaming = streaming;
             conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
                     conversation.display, false, false, 96, new Redactor());
-            Run rejected = conversation.run(NAMED_REQUEST, proposal("draft", "Lina\u2019s clock stayed seven minutes slow."));
+            Run rejected = conversation.run(NAMED_REQUEST, proposal("draft", "Lina\u2019s clock stood by the \u6d77."));
             assertGeneration(rejected, NAMED_REQUEST);
             assertNull(conversation.memory.pendingContentDraft());
             assertFalse(rejected.answer().contains("Save draft "), rejected.answer());
+            assertTrue(rejected.answer().contains("U+6D77"), rejected.answer());
             assertFalse(conversation.display.toString(StandardCharsets.UTF_8).contains("Save draft "));
             Run stale = conversation.run("Save draft 0123456789ab");
             assertTrue(stale.requests().isEmpty());
             assertNoWrite(conversation);
+        }
+    }
+
+    static Stream<Arguments> typographicDisplays() {
+        // A plain display cannot show any typographic punctuation, a windows-1252 display lacks U+2011.
+        return Stream.of(false, true).flatMap(streaming -> Stream.of(
+                Arguments.of(streaming, false, StandardCharsets.UTF_8, "Lina's well-kept clock - seven minutes slow..."),
+                Arguments.of(streaming, true, java.nio.charset.Charset.forName("windows-1252"),
+                        "Lina\u2019s well-kept clock \u2014 seven minutes slow\u2026")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("typographicDisplays")
+    void unshowableTypographicPunctuationIsShownPlainAndSavedAsShown(boolean streaming, boolean unicodeSafe,
+            java.nio.charset.Charset charset, String shownText) throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.streaming = streaming;
+            conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    conversation.display, unicodeSafe, false, 96, new Redactor(), charset);
+            Run proposed = conversation.run(REQUEST, proposal("draft",
+                    "Lina\u2019s well\u2011kept clock \u2014 seven minutes slow\u2026"));
+            assertGeneration(proposed, REQUEST);
+            assertEquals(shownText, requireDraft(conversation).content());
+            assertTrue(proposed.answer().contains("> " + shownText), proposed.answer());
+            assertTrue(proposed.answer().contains("Typographic quotes, dashes, special spaces or ellipses"), proposed.answer());
+            assertNoWrite(conversation);
+
+            Run saved = conversation.run("story.txt");
+            assertTrue(saved.requests().isEmpty());
+            assertEquals(1, conversation.approvals.get());
+            assertNull(conversation.memory.pendingContentDraft());
+            assertArrayEquals(shownText.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve("story.txt")));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"show me notes.md", "call it story.txt", "What is in notes.txt", "make it shorter for version 2.0",
+            "v2.0", "3.14"})
+    void repliesThatAreNotFilenamesDoNotSelectTheShownDraft(String reply) throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            requireDraft(conversation);
+            Run other = conversation.run(reply, "No file was written.");
+            assertEquals(0, conversation.approvals.get(), other.answer());
+            try (var entries = Files.list(workspace)) {
+                assertEquals(List.of(), entries.toList(), other.answer());
+            }
+        }
+    }
+
+    @Test
+    void quotedFilenameWithSpacesSelectsTheShownDraft() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            Run saved = conversation.run("\"lina story.txt\"");
+            assertTrue(saved.requests().isEmpty());
+            assertEquals(1, conversation.approvals.get());
+            assertArrayEquals(STORY.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve("lina story.txt")));
+        }
+    }
+
+    @Test
+    void filenameTheDisplayCannotShowKeepsTheDraft() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    conversation.display, false, false, 96, new Redactor());
+            conversation.run(REQUEST, proposal("draft", STORY));
+            PendingContentDraft draft = requireDraft(conversation);
+            Run unshowable = conversation.run("café.txt");
+            assertTrue(unshowable.requests().isEmpty());
+            assertEquals(0, conversation.approvals.get());
+            assertTrue(unshowable.answer().contains("filename cannot be shown"), unshowable.answer());
+            assertSame(draft, conversation.memory.pendingContentDraft());
+            Run saved = conversation.run("story.txt");
+            assertEquals(1, conversation.approvals.get(), saved.answer());
+            assertArrayEquals(STORY.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve("story.txt")));
+        }
+    }
+
+    @Test
+    void filenameSelectionKeepsTheShownDraftIdentity() throws Exception {
+        var resolution = dev.talos.runtime.task.TaskContractResolver.resolveFromUserRequest(REQUEST);
+        var draft = new PendingContentDraft(resolution,
+                dev.talos.runtime.context.ContentDraftContinuation.unresolvedOperation(resolution),
+                workspace.toAbsolutePath().normalize().toString(), 1, 6, "abcdef123456", "", STORY);
+        var decision = dev.talos.runtime.context.ContentDraftContinuation.evaluate(
+                dev.talos.runtime.task.TaskContractResolver.resolveFromUserRequest("story.txt"), draft, workspace, 2,
+                CapabilityPosture.AGENT, ContentRestrictions.UNRESTRICTED);
+        var selected = decision.resolution().intent().contentSaveRequest().draftSelection();
+        assertNotNull(selected);
+        assertEquals("abcdef123456", selected.id());
+        assertEquals("story.txt", selected.destination());
+    }
+
+    @Test
+    void clarificationQuestionWithTypographicPunctuationIsShownOnAPlainDisplay() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    conversation.display, false, false, 96, new Redactor());
+            Run asked = conversation.run(REQUEST, proposal("question", "Which season should Lina’s story use?"));
+            assertTrue(asked.answer().contains("Which season should Lina's story use?"), asked.answer());
+            assertFalse(asked.answer().contains("could not be presented"), asked.answer());
+            assertNull(conversation.memory.pendingContentDraft());
+            assertNoWrite(conversation);
+        }
+    }
+
+    @Test
+    void unshowableClarificationQuestionIsRefusedAsAQuestion() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    conversation.display, false, false, 96, new Redactor());
+            Run asked = conversation.run(REQUEST, proposal("question", "Should the story mention the 海?"));
+            assertTrue(asked.answer().contains("clarification question could not be shown"), asked.answer());
+            assertTrue(asked.answer().contains("U+6D77"), asked.answer());
+            assertFalse(asked.answer().contains("complete draft"), asked.answer());
+            assertNoWrite(conversation);
+        }
+    }
+
+    @Test
+    void namedDestinationDraftStillNeedsAnExplicitSelection() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            Run proposed = conversation.run(NAMED_REQUEST, proposal("draft", STORY));
+            PendingContentDraft draft = requireDraft(conversation);
+            assertTrue(proposed.answer().contains("Save draft " + draft.id()), proposed.answer());
+            Run filename = conversation.run("story.txt", "No file was written.");
+            assertEquals(0, conversation.approvals.get(), filename.answer());
+            assertFalse(Files.exists(workspace.resolve("story.txt")));
         }
     }
 
@@ -353,6 +475,7 @@ class MicaContentDraftBoundaryTest {
             PendingContentDraft draft = requireDraft(conversation);
             String shown = conversation.display.toString(StandardCharsets.UTF_8);
             for (String line : content.split("\n")) assertTrue(shown.contains(line), shown);
+            assertFalse(shown.contains("Typographic quotes"), shown);
             Run saved = conversation.run("Save draft " + draft.id());
             assertTrue(saved.requests().isEmpty());
             assertEquals(1, conversation.approvals.get());
@@ -391,15 +514,12 @@ class MicaContentDraftBoundaryTest {
             assertNotNull(promptAudit);
             assertTrue(promptAudit.contains("Prompt Audit"), promptAudit);
             assertEquals(STORY, requireDraft(conversation).content());
-            Run bound = conversation.run("story.txt");
-            String id = requireDraft(conversation).id();
+            Run saved = conversation.run("story.txt");
             String shown = conversation.display.toString(StandardCharsets.UTF_8).replaceAll("\\u001B\\[[;\\d]*m", "");
             assertFalse(shown.contains("Prompt Audit"), "Prompt diagnostics must remain outside the answer pane: " + shown);
-            assertTrue(shown.contains("Save draft " + id), shown);
+            assertTrue(shown.contains("reply with the filename only"), shown);
             assertTrue(shown.contains("Seven minutes slow."), shown);
             assertFalse(shown.contains("display omitted"), shown);
-            assertTrue(bound.requests().isEmpty());
-            Run saved = conversation.run("Save draft " + id);
             assertTrue(saved.requests().isEmpty());
             assertEquals(1, conversation.approvals.get());
             assertArrayEquals(STORY.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve("story.txt")));
@@ -433,16 +553,17 @@ class MicaContentDraftBoundaryTest {
     }
 
     @Test
-    void filenameRedisplayCannotRetainContentAfterDisplayBecomesLossy() throws Exception {
+    void filenameSaveIsBlockedAfterDisplayBecomesLossy() throws Exception {
         try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
             conversation.run(REQUEST, proposal("draft", "Lina\u2019s clock stayed slow."));
-            assertNotNull(conversation.memory.pendingContentDraft());
+            assertEquals("Lina\u2019s clock stayed slow.", requireDraft(conversation).content());
             conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
                     conversation.display, false, false, 96, new Redactor());
             Run bound = conversation.run("story.txt");
             assertTrue(bound.requests().isEmpty());
             assertNull(conversation.memory.pendingContentDraft());
             assertFalse(bound.answer().contains("Save draft "), bound.answer());
+            assertTrue(bound.answer().contains("No write was attempted"), bound.answer());
             assertNoWrite(conversation);
         }
     }
