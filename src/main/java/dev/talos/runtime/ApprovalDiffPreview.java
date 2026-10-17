@@ -32,12 +32,13 @@ public final class ApprovalDiffPreview {
     /** Maximum diff body lines shown; the remainder collapses to a marker. */
     public static final int MAX_DIFF_LINES = 60;
     /**
-     * Maximum rendered line length including the truncation marker. The
-     * approval renderer wraps detail lines longer than 74 columns with
-     * whitespace-collapsing word wrap (width 80 prompt); the diff block is
-     * indented four spaces, so 70 keeps every diff line wrap-exempt.
+     * Maximum diff body characters shown. Lines are kept whole so a reviewer
+     * reads what will be written, and the approval renderer wraps them. The
+     * budget keeps a few very long lines from flooding the box.
      */
-    public static final int MAX_LINE_LENGTH = 70;
+    public static final int MAX_DIFF_CHARS = 6_000;
+    /** The least part of a long line worth showing before the budget stops the body. */
+    public static final int MIN_CUT_CHARS = 200;
     /** Matches FileEditTool's file-size cap. */
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L;
     private static final int CONTEXT_LINES = 3;
@@ -45,11 +46,11 @@ public final class ApprovalDiffPreview {
     private ApprovalDiffPreview() {}
 
     /**
-     * A diff preview. {@code text} holds newline-joined, redacted, truncated
-     * diff body lines without indentation (empty when skipped or when only
-     * {@code note} applies); {@code note} is a short annotation such as
-     * "new file" or "no changes"; a non-empty {@code skippedReason} means no
-     * diff block should be rendered at all.
+     * A diff preview. {@code text} holds newline-joined, redacted, bounded
+     * diff body lines without indentation (empty when skipped, when nothing
+     * changed, or when a new file is empty); {@code note} is a short annotation
+     * such as "new file" or "no changes"; a non-empty {@code skippedReason}
+     * means no diff block should be rendered at all.
      */
     public record Preview(
             String text,
@@ -75,7 +76,12 @@ public final class ApprovalDiffPreview {
             Path target = guardedTarget(workspace, relPath);
             if (target == null) return guardSkip(workspace, relPath);
             if (!Files.exists(target)) {
-                return new Preview("", lineCount(newContent), 0, 0, false, "", "new file");
+                // A new file has no hunk, every line is an addition and all of it is reviewable.
+                if (newContent != null && newContent.length() > MAX_FILE_SIZE) throw new SkipException("file-too-large");
+                List<String> body = new ArrayList<>();
+                for (String line : splitLines(newContent)) body.add("+" + line);
+                Bounded bounded = bound(body);
+                return new Preview(bounded.text(), body.size(), 0, body.size(), bounded.truncated(), "", "new file");
             }
             String existing = readDiffableContent(target);
             String proposed = newContent == null ? "" : newContent;
@@ -206,22 +212,44 @@ public final class ApprovalDiffPreview {
             else if (line.startsWith("-")) removed++;
         }
 
-        List<String> rendered = new ArrayList<>();
-        boolean truncated = body.size() > MAX_DIFF_LINES;
-        int limit = Math.min(body.size(), MAX_DIFF_LINES);
-        for (int i = 0; i < limit; i++) {
-            rendered.add(cap(ProtectedContentPolicy.sanitizeText(body.get(i))));
-        }
-        if (truncated) {
-            rendered.add("... (" + (body.size() - MAX_DIFF_LINES) + " more diff lines)");
-        }
-        return new Preview(String.join("\n", rendered), added, removed, body.size(), truncated, "", "");
+        Bounded bounded = bound(body);
+        return new Preview(bounded.text(), added, removed, body.size(), bounded.truncated(), "", "");
     }
 
-    private static String cap(String line) {
-        String safe = line == null ? "" : line;
-        if (safe.length() <= MAX_LINE_LENGTH) return safe;
-        return safe.substring(0, MAX_LINE_LENGTH - 3) + "...";
+    private record Bounded(String text, boolean truncated) {}
+
+    /** Whole redacted lines up to the line and character budgets, then a marker naming the rest. */
+    private static Bounded bound(List<String> body) {
+        List<String> rendered = new ArrayList<>();
+        int characters = 0;
+        int shown = 0;
+        int cutAt = -1;
+        for (String raw : body) {
+            if (shown >= MAX_DIFF_LINES) break;
+            String line = ProtectedContentPolicy.sanitizeText(raw == null ? "" : raw);
+            int remaining = MAX_DIFF_CHARS - characters;
+            if (line.length() > remaining) {
+                // A line that does not fit is shown as far as the budget allows, when that is worth reading.
+                if (remaining < MIN_CUT_CHARS) break;
+                int end = remaining;
+                if (Character.isLowSurrogate(line.charAt(end))) end--;
+                rendered.add(line.substring(0, end));
+                cutAt = end;
+                shown++;
+                break;
+            }
+            rendered.add(line);
+            characters += line.length() + 1;
+            shown++;
+        }
+        boolean truncated = cutAt >= 0 || shown < body.size();
+        int more = body.size() - shown;
+        if (cutAt >= 0) {
+            rendered.add("... (line cut at " + cutAt + " characters" + (more > 0 ? ", " + more + " more diff lines" : "") + ")");
+        } else if (truncated) {
+            rendered.add("... (" + more + " more diff lines)");
+        }
+        return new Bounded(String.join("\n", rendered), truncated);
     }
 
     private static List<String> splitLines(String content) {
@@ -237,11 +265,6 @@ public final class ApprovalDiffPreview {
             lines.removeLast();
         }
         return lines;
-    }
-
-    private static int lineCount(String content) {
-        if (content == null || content.isEmpty()) return 0;
-        return splitLines(content).size();
     }
 
     private static final class SkipException extends Exception {

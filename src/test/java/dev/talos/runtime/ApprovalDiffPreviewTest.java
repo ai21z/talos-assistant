@@ -45,14 +45,28 @@ class ApprovalDiffPreviewTest {
     }
 
     @Test
-    void newFileYieldsCountsOnlyNote() {
+    void newFileShowsItsWholeContentAsAddedLines() {
         var p = ApprovalDiffPreview.forWrite(workspace, "fresh.txt", "l1\nl2\nl3\n");
 
         assertFalse(p.skipped());
         assertEquals("new file", p.note());
         assertEquals(3, p.added());
         assertEquals(0, p.removed());
-        assertEquals("", p.text());
+        assertEquals("+l1\n+l2\n+l3", p.text());
+        assertFalse(p.text().contains("@@"), p.text());
+    }
+
+    @Test
+    void newFileBodyIsCappedLikeAnyDiff() {
+        StringBuilder content = new StringBuilder();
+        for (int i = 1; i <= ApprovalDiffPreview.MAX_DIFF_LINES + 7; i++) content.append("line ").append(i).append('\n');
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "long.txt", content.toString());
+
+        String[] lines = p.text().split("\n", -1);
+        assertEquals(ApprovalDiffPreview.MAX_DIFF_LINES + 1, lines.length);
+        assertTrue(p.truncated());
+        assertEquals("... (7 more diff lines)", lines[lines.length - 1]);
     }
 
     @Test
@@ -164,17 +178,80 @@ class ApprovalDiffPreviewTest {
     }
 
     @Test
-    void longLinesAreTruncatedBelowTheRendererWrapThreshold() throws Exception {
+    void longLinesAreKeptWholeForTheRendererToWrap() throws Exception {
         Files.writeString(workspace.resolve("wide.txt"), "short\n");
-        String longLine = "x".repeat(300);
+        String longLine = "word ".repeat(60).strip();
 
         var p = ApprovalDiffPreview.forWrite(workspace, "wide.txt", "short\n" + longLine + "\n");
 
-        for (String line : p.text().split("\n", -1)) {
-            assertTrue(line.length() <= ApprovalDiffPreview.MAX_LINE_LENGTH,
-                    "line exceeds cap (" + line.length() + "): " + line);
-        }
-        assertTrue(p.text().contains("..."), p.text());
+        assertTrue(p.text().contains("+" + longLine), p.text());
+        assertFalse(p.text().contains("..."), p.text());
+    }
+
+    @Test
+    void aSingleOversizedLineIsCutAtTheBudgetAndTheRestIsNamed() {
+        String line = "z".repeat(ApprovalDiffPreview.MAX_DIFF_CHARS + 1_000);
+        String content = line + "\n" + "postinstall\n".repeat(30);
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "bundle.min.js", content);
+
+        assertFalse(p.skipped());
+        assertTrue(p.truncated());
+        assertTrue(p.text().length() <= ApprovalDiffPreview.MAX_DIFF_CHARS + 80, String.valueOf(p.text().length()));
+        assertTrue(p.text().endsWith("... (line cut at " + ApprovalDiffPreview.MAX_DIFF_CHARS
+                + " characters, 30 more diff lines)"), p.text());
+    }
+
+    @Test
+    void anExistingLongLineFileStillShowsThePartOfTheChangeThatFits() throws Exception {
+        String old = "x".repeat(10_000);
+        Files.writeString(workspace.resolve("app.min.js"), old + "\n");
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "app.min.js", old + "y\n");
+
+        assertTrue(p.text().startsWith("@@"), p.text());
+        assertTrue(p.text().contains("\n-xxxx"), p.text());
+        assertTrue(p.truncated());
+        assertTrue(p.text().contains("... (line cut at"), p.text());
+        assertTrue(p.text().length() <= ApprovalDiffPreview.MAX_DIFF_CHARS + 80, String.valueOf(p.text().length()));
+    }
+
+    @Test
+    void aBudgetCutNeverSplitsASurrogatePair() {
+        String line = "w".repeat(ApprovalDiffPreview.MAX_DIFF_CHARS - 1) + "😀" + "tail";
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "emoji.txt", line + "\n");
+
+        String shown = p.text().split("\n", -1)[0];
+        assertFalse(Character.isHighSurrogate(shown.charAt(shown.length() - 1)), shown.substring(shown.length() - 4));
+        assertTrue(p.text().contains("... (line cut at"), p.text());
+    }
+
+    @Test
+    void anOversizedNewFileIsSkippedLikeAnOversizedTarget() {
+        String content = "a".repeat(2 * 1024 * 1024 + 1);
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "huge.txt", content);
+
+        assertTrue(p.skipped());
+        assertEquals("file-too-large", p.skippedReason());
+    }
+
+    @Test
+    void diffBodyIsBoundedByACharacterBudget() throws Exception {
+        Files.writeString(workspace.resolve("dense.txt"), "short\n");
+        String wide = "y".repeat(1000);
+        StringBuilder content = new StringBuilder("short\n");
+        for (int i = 0; i < 12; i++) content.append(wide).append(i).append('\n');
+
+        var p = ApprovalDiffPreview.forWrite(workspace, "dense.txt", content.toString());
+
+        String[] lines = p.text().split("\n", -1);
+        assertTrue(p.text().length() <= ApprovalDiffPreview.MAX_DIFF_CHARS + 80, String.valueOf(p.text().length()));
+        assertTrue(p.truncated());
+        assertTrue(lines[lines.length - 1].matches("\\.\\.\\. \\((line cut at \\d+ characters, )?\\d+ more diff lines\\)"),
+                lines[lines.length - 1]);
+        assertTrue(lines.length < 14, String.valueOf(lines.length));
     }
 
     // ── redaction and fail-closed skips ─────────────────────────────

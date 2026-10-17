@@ -1014,7 +1014,7 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
     }
 
     @Test
-    void newFileWriteApprovalShowsCountsOnlyDiffNote(@TempDir Path workspace) {
+    void newFileWriteApprovalShowsTheWholeFileAsAddedLines(@TempDir Path workspace) {
         AtomicInteger approvals = new AtomicInteger();
         List<String> approvalDetails = new ArrayList<>();
         var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
@@ -1030,6 +1030,8 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
         String detail = approvalDetails.getFirst();
         assertTrue(detail.contains("\n    diff (+2 -0): new file"), detail);
         assertFalse(detail.contains("@@"), detail);
+        // The whole new file is readable before approval, as added lines.
+        assertTrue(detail.contains("\n    +a { x: 1; }\n    +b { x: 2; }"), detail);
     }
 
     @Test
