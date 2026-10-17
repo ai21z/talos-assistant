@@ -846,6 +846,7 @@ public final class AssistantTurnExecutor {
         dev.talos.runtime.context.PendingContentDraft accepted = null;
         String draftText = null;
         String questionText = null;
+        String rawProposal = null;
         boolean plainPunctuation = false;
         var priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try {
@@ -868,6 +869,7 @@ public final class AssistantTurnExecutor {
                     var proposal = dev.talos.runtime.context.ContentDraftProposal.decode(result.text());
                     if (proposal.isPresent()) {
                         var value = proposal.get();
+                        rawProposal = value.text();
                         String text = "draft".equals(value.kind())
                                 ? showableText(value.text(), t -> dev.talos.runtime.context.ContentDraftContinuation.render(
                                         t, pending.destination(), pending.id()), ctx, opts)
@@ -875,7 +877,9 @@ public final class AssistantTurnExecutor {
                         String redacted = ctx.redactor() == null
                                 ? new dev.talos.core.security.Redactor().redactBlock(text)
                                 : ctx.redactor().redactBlock(text);
-                        if (text.equals(redacted) && text.equals(opts.answerSanitizer.apply(text))) {
+                        if (!text.equals(redacted) || !text.equals(opts.answerSanitizer.apply(text))) {
+                            recordRejectedProposal(value.text(), "would be changed by redaction or answer sanitizing", ctx);
+                        } else {
                             receipt = result.provenance();
                             if ("draft".equals(value.kind())) {
                                 draftText = text;
@@ -906,6 +910,8 @@ public final class AssistantTurnExecutor {
         if (!draftPresentationIntact(answer, ctx, opts)) {
             accepted = null;
             receipt = null;
+            if (questionText != null || draftText != null)
+                recordRejectedProposal(rawProposal, "could not be shown exactly or within the answer limit", ctx);
             answer = questionText != null
                     ? "The clarification question could not be shown exactly on this display. "
                         + "No draft was retained and no write was attempted." + unshowableCharacter(questionText, ctx)
@@ -942,6 +948,19 @@ public final class AssistantTurnExecutor {
         String plain = dev.talos.core.util.Sanitize.plainPunctuation(text, cp -> !preserves.test(Character.toString(cp)));
         return !plain.equals(text) && dev.talos.runtime.context.ContentDraftProposal.validText(plain)
                 && draftPresentationIntact(render.apply(plain), ctx, opts) ? plain : text;
+    }
+
+    /** The refused text is kept in the trace, redacted and bounded, so a refusal can be diagnosed later. */
+    private static void recordRejectedProposal(String text, String reason, Context ctx) {
+        if (text == null) return;
+        String redacted = (ctx.redactor() == null ? new dev.talos.core.security.Redactor() : ctx.redactor()).redactBlock(text);
+        int excerptEnd = redacted.codePointCount(0, redacted.length()) > 300 ? redacted.offsetByCodePoints(0, 300) : redacted.length();
+        String excerpt = excerptEnd < redacted.length() ? redacted.substring(0, excerptEnd) + "..." : redacted;
+        LocalTurnTraceCapture.warning("CONTENT_DRAFT_REJECTED", "A proposal of "
+                + text.codePointCount(0, text.length()) + " characters, sha256:"
+                + dev.talos.core.util.Hash.sha256Hex(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                + ", " + reason + "." + unshowableCharacter(text, ctx) + " Redacted excerpt: "
+                + excerpt.replace("\r", "\\r").replace("\n", "\\n"));
     }
 
     /** Names the first character outside the plain punctuation table that the display cannot show. */

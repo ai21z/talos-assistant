@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.safety.ContentRestrictions;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -15,6 +16,8 @@ import java.util.regex.Pattern;
 /** A content choice is separated from filename clarification and execution approval. */
 public final class ContentDraftContinuation {
     private static final Pattern SELECT = Pattern.compile("(?i)^save draft ([a-f0-9]{12})[.]?$");
+    private static final Pattern HOSTNAME = Pattern.compile(
+            "(?i)^(?:www\\.[^/\\\\]+|[^/\\\\]+\\.(?:com|org|net|io|dev|edu|gov|info|eu|gr|uk|de))$");
     private static final Pattern CANCEL = Pattern.compile("(?i)^(?:cancel|discard|forget)(?: the)? draft[.!]?$|^no[.!]?$");
     private ContentDraftContinuation() {}
 
@@ -54,18 +57,35 @@ public final class ContentDraftContinuation {
                 CANCEL.matcher(clause.text()).matches() || ContentSaveContinuation.cancellation(clause.text()))) {
             live = null;
         }
-        if (live != null && live.destination().isBlank() && !live.content().isBlank()) {
-            String path = filename(request);
+        // A filename may be supplied, or supplied again, while the original request named no destination.
+        if (live != null && !originalDestinationResolved(live) && !live.content().isBlank()) {
+            String reply = request.strip();
+            String path = filename(reply);
+            if (path == null && hostnameShaped(reply)) {
+                return direct(current, unbound(live), reply + " reads as a web address, so it was not used as a filename. "
+                        + "The draft is kept and no write was attempted. To use it as a filename, reply with it in quotes.");
+            }
             if (path != null) {
+                // A refused name leaves the draft kept without any destination, so nothing earlier stays selected.
                 if (!destinationAllowed(live, workspace, path)) {
-                    return direct(current, live, "That destination is not permitted by the original request. No write was attempted.");
+                    return direct(current, unbound(live), "That destination is not permitted by the original request. No write was attempted.");
                 }
                 if (!showable.test(path)) {
-                    return direct(current, live, "That filename cannot be shown exactly on this display, so it was not used. "
+                    return direct(current, unbound(live), "That filename cannot be shown exactly on this display, so it was not used. "
                             + "The draft is kept and no write was attempted. Please reply with a filename this display can show.");
+                }
+                if (Files.isDirectory(workspace.resolve(path))) {
+                    return direct(current, unbound(live), "The name " + path + " is an existing directory, so it cannot be used. "
+                            + "The draft is kept and no write was attempted.");
                 }
                 var bound = new PendingContentDraft(live.origin(), live.operationIndex(), live.workspace(),
                         live.originTurn(), live.expiresAfterTurn(), live.id(), path, live.content());
+                // An existing file is not replaced on a filename alone. The explicit command stays for that.
+                if (Files.exists(workspace.resolve(path))) {
+                    return direct(current, bound, "The file " + path + " already exists, so it is not replaced on a "
+                            + "filename alone. No write was attempted. Reply with a different filename to save it elsewhere.\n"
+                            + render(bound));
+                }
                 // The filename completes the original save request for a draft already shown in full,
                 // so it selects that draft. Normal file approval still decides the write.
                 return select(bound, turn, "filename-content-draft-selection");
@@ -149,15 +169,38 @@ public final class ContentDraftContinuation {
 
     private static String id() { return UUID.randomUUID().toString().replace("-", "").substring(0, 12); }
 
+    private static PendingContentDraft unbound(PendingContentDraft draft) {
+        return draft.destination().isBlank() ? draft : new PendingContentDraft(draft.origin(), draft.operationIndex(),
+                draft.workspace(), draft.originTurn(), draft.expiresAfterTurn(), draft.id(), "", draft.content());
+    }
+
+    private static boolean originalDestinationResolved(PendingContentDraft draft) {
+        return draft.origin().intent().contentSaveRequest().operations().get(draft.operationIndex())
+                .destination().resolved();
+    }
+
+    private static boolean quoted(String value) {
+        return value.length() > 2 && "`\"'".indexOf(value.charAt(0)) >= 0
+                && value.charAt(value.length() - 1) == value.charAt(0);
+    }
+
+    // Unquoted, only a single token is a filename, so a sentence that ends in one is not.
+    // The extension starts with a letter, so a version or a number such as v2.0 is not one either.
+    private static final String UNQUOTED_NAME = "[\\p{L}\\p{N}_./\\\\-]+\\.\\p{L}[\\p{L}\\p{N}_-]*";
+    private static final String QUOTED_NAME = "[\\p{L}\\p{N}_ .'()\\[\\]+@/\\\\-]+\\.\\p{L}[\\p{L}\\p{N}_-]*";
+
+    /** A hostname such as www.example.com is not a filename unless it is quoted. */
+    private static boolean hostnameShaped(String reply) {
+        return !quoted(reply) && reply.matches(UNQUOTED_NAME) && HOSTNAME.matcher(reply).matches();
+    }
+
     private static String filename(String request) {
         String value = request.strip();
-        boolean quoted = value.length() > 2 && "`\"'".indexOf(value.charAt(0)) >= 0
-                && value.charAt(value.length() - 1) == value.charAt(0);
+        boolean quoted = quoted(value);
         if (quoted) value = value.substring(1, value.length() - 1);
-        // Unquoted, only a single token is a filename, so a sentence that ends in one is not.
-        // The extension starts with a letter, so a version or a number such as v2.0 is not one either.
-        String name = quoted ? "[\\p{L}\\p{N}_ ./\\\\-]+" : "[\\p{L}\\p{N}_./\\\\-]+";
-        return value.matches(name + "\\.\\p{L}[\\p{L}\\p{N}_-]*") ? TargetRef.normalizePath(value) : null;
+        if (!value.matches(quoted ? QUOTED_NAME : UNQUOTED_NAME)) return null;
+        if (!quoted && HOSTNAME.matcher(value).matches()) return null;
+        return TargetRef.normalizePath(value);
     }
 
     private static boolean destinationAllowed(PendingContentDraft draft, Path workspace, String path) {

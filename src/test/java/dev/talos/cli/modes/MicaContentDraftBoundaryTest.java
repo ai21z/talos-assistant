@@ -370,7 +370,7 @@ class MicaContentDraftBoundaryTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"show me notes.md", "call it story.txt", "What is in notes.txt", "make it shorter for version 2.0",
-            "v2.0", "3.14"})
+            "v2.0", "3.14", "www.example.com", "example.org"})
     void repliesThatAreNotFilenamesDoNotSelectTheShownDraft(String reply) throws Exception {
         try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
             conversation.run(REQUEST, proposal("draft", STORY));
@@ -383,14 +383,111 @@ class MicaContentDraftBoundaryTest {
         }
     }
 
-    @Test
-    void quotedFilenameWithSpacesSelectsTheShownDraft() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"lina story.txt", "Lina's story (1).txt", "notes@2026+draft.txt"})
+    void quotedFilenameSelectsTheShownDraft(String name) throws Exception {
         try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
             conversation.run(REQUEST, proposal("draft", STORY));
-            Run saved = conversation.run("\"lina story.txt\"");
+            Run saved = conversation.run("\"" + name + "\"");
             assertTrue(saved.requests().isEmpty());
-            assertEquals(1, conversation.approvals.get());
-            assertArrayEquals(STORY.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve("lina story.txt")));
+            assertEquals(1, conversation.approvals.get(), saved.answer());
+            assertArrayEquals(STORY.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(workspace.resolve(name)));
+        }
+    }
+
+    @Test
+    void hostnameShapedReplyKeepsTheDraftAndQuotingUsesItAsAFilename() throws Exception {
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            PendingContentDraft draft = requireDraft(conversation);
+            Run address = conversation.run("notes.org");
+            assertTrue(address.requests().isEmpty());
+            assertTrue(address.answer().contains("web address"), address.answer());
+            assertSame(draft, conversation.memory.pendingContentDraft());
+            Run saved = conversation.run("\"notes.org\"");
+            assertEquals(1, conversation.approvals.get(), saved.answer());
+            assertEquals(STORY, Files.readString(workspace.resolve("notes.org")));
+        }
+    }
+
+    @Test
+    void aDifferentFilenameAfterAnExistingOneSavesElsewhere() throws Exception {
+        Files.writeString(workspace.resolve("story.txt"), "Previous story.\n");
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            Run exists = conversation.run("story.txt");
+            assertTrue(exists.answer().contains("different filename"), exists.answer());
+            Run saved = conversation.run("story2.txt");
+            assertEquals(1, conversation.approvals.get(), saved.answer());
+            assertEquals(STORY, Files.readString(workspace.resolve("story2.txt")));
+            assertEquals("Previous story.\n", Files.readString(workspace.resolve("story.txt")));
+        }
+    }
+
+    @Test
+    void aRefusedLaterNameClearsTheEarlierExistingDestination() throws Exception {
+        Files.writeString(workspace.resolve("story.txt"), "Previous story.\n");
+        Files.createDirectory(workspace.resolve("archive.old"));
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            conversation.run("story.txt");
+            String id = requireDraft(conversation).id();
+            Run refused = conversation.run("archive.old");
+            assertEquals("", requireDraft(conversation).destination(), refused.answer());
+            Run stale = conversation.run("Save draft " + id);
+            assertTrue(stale.answer().contains("No matching live draft"), stale.answer());
+            assertEquals(0, conversation.approvals.get());
+            assertEquals("Previous story.\n", Files.readString(workspace.resolve("story.txt")));
+        }
+    }
+
+    @Test
+    void aDirectoryNameKeepsTheDraftUnbound() throws Exception {
+        Files.createDirectory(workspace.resolve("archive.old"));
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            Run directory = conversation.run("archive.old");
+            assertTrue(directory.answer().contains("existing directory"), directory.answer());
+            assertEquals("", requireDraft(conversation).destination());
+            assertFalse(directory.answer().contains("Save draft"), directory.answer());
+            assertEquals(0, conversation.approvals.get());
+        }
+    }
+
+    @Test
+    void filenameOfAnExistingFileRequiresTheExplicitSelection() throws Exception {
+        Files.writeString(workspace.resolve("story.txt"), "Previous story.\n");
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.run(REQUEST, proposal("draft", STORY));
+            Run bound = conversation.run("story.txt");
+            assertTrue(bound.requests().isEmpty());
+            assertEquals(0, conversation.approvals.get(), bound.answer());
+            assertEquals("Previous story.\n", Files.readString(workspace.resolve("story.txt")));
+            PendingContentDraft draft = requireDraft(conversation);
+            assertEquals("story.txt", draft.destination());
+            assertTrue(bound.answer().contains("already exists"), bound.answer());
+            assertTrue(bound.answer().contains("Save draft " + draft.id()), bound.answer());
+            Run saved = conversation.run("Save draft " + draft.id());
+            assertEquals(1, conversation.approvals.get(), saved.answer());
+            assertEquals(STORY, Files.readString(workspace.resolve("story.txt")));
+        }
+    }
+
+    @Test
+    void refusedDraftIsRecordedInTheTraceForDiagnosis() throws Exception {
+        String content = "Lina’s clock stood by the 海 with api_key=abcdef1234567890abcdef1234567890.";
+        try (var conversation = new Conversation(ApprovalResponse.APPROVED)) {
+            conversation.renderer = dev.talos.cli.repl.ExactAnswerRenderFixture.create(
+                    conversation.display, false, false, 96, new Redactor());
+            Run rejected = conversation.run(NAMED_REQUEST, proposal("draft", content));
+            assertNull(conversation.memory.pendingContentDraft());
+            var warning = rejected.turn().audit().localTrace().warnings().stream()
+                    .filter(w -> w.code().equals("CONTENT_DRAFT_REJECTED")).findFirst().orElseThrow();
+            assertTrue(warning.message().contains("U+6D77"), warning.message());
+            assertTrue(warning.message().contains("Lina"), warning.message());
+            assertTrue(warning.message().contains("sha256:"), warning.message());
+            assertFalse(warning.message().contains("abcdef1234567890"), warning.message());
+            assertFalse(rejected.answer().contains("sha256:"), rejected.answer());
         }
     }
 
