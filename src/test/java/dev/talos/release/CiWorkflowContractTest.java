@@ -68,6 +68,8 @@ class CiWorkflowContractTest {
                 "CI push triggers must not retain dead feature branch patterns");
         assertTrue(!workflow.contains("improvement/**"),
                 "CI push triggers must not add old release-branch patterns as product policy");
+        assertTrue(workflow.contains("workflow_dispatch:"),
+                "CI must be startable by hand for any pushed branch");
     }
 
     @Test

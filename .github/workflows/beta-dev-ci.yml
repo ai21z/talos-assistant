@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - v0.9.0-beta-dev
+  workflow_dispatch:
 
 permissions:
   contents: read
