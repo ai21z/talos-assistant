@@ -11,11 +11,16 @@ import dev.talos.runtime.SessionSummary;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ResourceDecision;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -51,6 +56,8 @@ public final class SessionCommand implements Command {
     private static final String USAGE = "/session [info|list|resume|save|load|clear|export]";
     private static final DateTimeFormatter EXPORT_FILE_TS =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final String EXPORT_FOLDER_HINT =
+            "Run /session export without a path to save it in the Talos exports folder.";
 
     private final Path workspace;
     private final SessionStore store;
@@ -223,7 +230,10 @@ public final class SessionCommand implements Command {
      * transcript of a stored session. No approval - the default target
      * lives under the user's own {@code ~/.talos/exports/}, never the
      * workspace unless an explicit path says so (PromptCommand
-     * precedent). Content was redacted at write time; the assembled
+     * precedent). An explicit path must stay inside the workspace and
+     * outside protected locations, is written through the no-follow
+     * guard bound to the workspace's real path, and never replaces an
+     * existing entry. Content was redacted at write time; the assembled
      * document gets one more idempotent
      * {@link ProtectedContentPolicy#sanitizeText} pass.
      */
@@ -283,10 +293,41 @@ public final class SessionCommand implements Command {
             return new Result.Info("Session '" + displayId(targetId) + "' has no exportable turns.");
         }
 
+        String workspaceRelativeTarget = null;
+        if (explicitPath != null) {
+            try {
+                Path.of(explicitPath);
+            } catch (InvalidPathException invalid) {
+                return new Result.Error("Export path is not a valid file path. Nothing was written.", 200);
+            }
+            ResourceDecision decision = ProtectedPathPolicy.classify(workspace, explicitPath);
+            String refusal = explicitExportRefusal(explicitPath, decision);
+            if (refusal == null && decision.relativePath().isBlank()) {
+                refusal = exportPathRefusal(explicitPath, NoFollowPathPolicy.Reason.UNSAFE_CREATE_TARGET);
+            }
+            if (refusal == null) {
+                // The classified relative path is normalized again by this
+                // platform before the write, so the written path is classified too.
+                String planned;
+                try {
+                    planned = Path.of(decision.relativePath()).normalize().toString();
+                } catch (InvalidPathException invalid) {
+                    return new Result.Error("Export path is not a valid file path. Nothing was written.", 200);
+                }
+                ResourceDecision plannedDecision = ProtectedPathPolicy.classify(workspace, planned);
+                refusal = explicitExportRefusal(explicitPath, plannedDecision);
+                workspaceRelativeTarget = plannedDecision.relativePath();
+            }
+            if (refusal != null) return new Result.Error(refusal, 200);
+        }
+
         try {
             Path target;
-            if (explicitPath != null) {
-                target = workspace.resolve(explicitPath).toAbsolutePath().normalize();
+            NoFollowPathPolicy.GuardedRoot guardedWorkspace = null;
+            if (workspaceRelativeTarget != null) {
+                guardedWorkspace = NoFollowPathPolicy.bindExistingDirectory(workspace.toRealPath());
+                target = guardedWorkspace.requireRegularFileTarget(
+                        guardedWorkspace.path().resolve(workspaceRelativeTarget));
             } else {
                 Files.createDirectories(exportsDir);
                 target = exportsDir.resolve("talos-session-" + fileSafeId(targetId) + "-"
@@ -296,17 +337,46 @@ public final class SessionCommand implements Command {
             if (Files.exists(target)) {
                 return new Result.Error("Refusing to overwrite existing file: " + target, 200);
             }
-            if (target.getParent() != null) Files.createDirectories(target.getParent());
-            Files.writeString(target, document, StandardCharsets.UTF_8);
+            if (target.getParent() != null) {
+                if (guardedWorkspace != null) guardedWorkspace.createDirectories(target.getParent());
+                else Files.createDirectories(target.getParent());
+            }
+            Files.writeString(target, document, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 
             StringBuilder message = new StringBuilder("Session exported to: ").append(target);
             if (raw) {
                 message.append('\n').append(copyRawTurnLog(targetId, target));
             }
             return new Result.TrustedInfo(message.toString());
+        } catch (NoFollowPathPolicy.Violation violation) {
+            return new Result.Error(exportPathRefusal(explicitPath, violation.reason()), 200);
         } catch (Exception e) {
             return new Result.Error("Export failed: " + e.getMessage(), 200);
         }
+    }
+
+    /** Null when the classified explicit path may be written, otherwise the refusal. */
+    private static String explicitExportRefusal(String shown, ResourceDecision decision) {
+        if (!decision.insideWorkspace() || decision.workspaceEscape()) {
+            return "Export path is outside the workspace: " + shown + ". " + EXPORT_FOLDER_HINT;
+        }
+        if (decision.protectedPath()) {
+            return "Export path names a protected location: " + shown + ". " + EXPORT_FOLDER_HINT;
+        }
+        return null;
+    }
+
+    private static String exportPathRefusal(String path, NoFollowPathPolicy.Reason reason) {
+        String shown = path == null ? "the export folder" : path;
+        return switch (reason) {
+            case OUTSIDE_ROOT -> "Export path is outside the workspace: " + shown + ". " + EXPORT_FOLDER_HINT;
+            case LINKED_COMPONENT, NON_ORDINARY_COMPONENT ->
+                    "Export path passes through a link or a special entry: " + shown + ". Nothing was written.";
+            case UNSAFE_CREATE_TARGET, NOT_DIRECTORY, NOT_REGULAR_FILE ->
+                    "Export path does not name a file that can be created: " + shown + ". Nothing was written.";
+            default -> "Export failed: " + reason.name();
+        };
     }
 
     /** Markdown transcript: snapshot turns, else ok-status turn-log rows. Null when empty. */

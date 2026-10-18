@@ -189,12 +189,19 @@ public final class ToolResultModelContextHandoff {
         return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
     }
 
+    /** Opening sentence of the model-facing body when approved protected content is withheld. */
+    public static final String PROTECTED_READ_WITHHELD_NOTICE =
+            "Protected file content was read after approval but withheld from model context by privacy policy.";
+    /** Opening sentence of the model-facing body when private document content is withheld. */
+    public static final String PRIVATE_CONTENT_WITHHELD_NOTICE =
+            "Private document content was read locally but withheld from model context by privacy policy.";
+
     private static ToolResult approvedProtectedReadWithheldResult(LoopState state) {
         String scopeNote = ProtectedReadScopePolicy.approvedProtectedReadModelHandoffNote(
                 state == null || state.ctx == null ? null : state.ctx.cfg());
         return new ToolResult(
                 true,
-                "Protected file content was read after approval but withheld from model context by privacy policy. "
+                PROTECTED_READ_WITHHELD_NOTICE + " "
                         + "Target: " + ProtectedContentPolicy.REDACTED_PATH + ". "
                         + scopeNote,
                 null,
@@ -209,7 +216,7 @@ public final class ToolResultModelContextHandoff {
                 state == null || state.ctx == null ? null : state.ctx.cfg());
         return new ToolResult(
                 true,
-                "Private document content was read locally but withheld from model context by privacy policy. "
+                PRIVATE_CONTENT_WITHHELD_NOTICE + " "
                         + "Target: <private-document>. "
                         + "Reason: " + ProtectedContentPolicy.sanitizeText(reason) + ". "
                         + scopeNote,
