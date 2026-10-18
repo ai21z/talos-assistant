@@ -178,14 +178,12 @@ public record EngineRuntimeConfig(
     }
 
     private static boolean networkEnabled(Config cfg) {
-        Map<String, Object> net = CfgUtil.map(cfg.data.get("net"));
-        return !(net.get("enabled") instanceof Boolean b) || b;
+        return cfg.view().net().enabled();
     }
 
     private static String ollamaPolicy(Config cfg) {
-        Map<String, Object> ollama = CfgUtil.map(cfg.data.get("ollama"));
-        boolean remoteAllowed = ollama.get("allow_remote") instanceof Boolean b && b;
-        return remoteAllowed ? "remote Ollama allowed" : "local Ollama only";
+        // Same parser as OllamaEngineProvider, so the label never says local while remote is allowed.
+        return cfg.view().ollama().allowRemote() ? "remote Ollama allowed" : "local Ollama only";
     }
 
     private static String stringAt(Map<String, Object> map, String key, String fallback) {

@@ -406,8 +406,8 @@ public class RagService {
             // packedContext is null because no packing is performed - no model will consume it.
             // Citations come from the pre-packed retrieval set (Prepared).
             // See Javadoc above for full semantics.
-            Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
-            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+            // Same parser as every other reader: absent or unrecognized means off.
+            boolean netEnabled = cfg.view().net().enabled();
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;

@@ -76,30 +76,31 @@ public class Config implements EngineConfig {
      * Test and setup seam for loading a specific user config path.
      */
     public Config(Path explicitUserConfigPath) {
+        this(loadBundledDefaults(), explicitUserConfigPath);
+    }
+
+    /**
+     * Test seam: builds the configuration from the given bundled defaults
+     * instead of the classpath file, then applies the user config and the
+     * environment overrides as usual.
+     */
+    Config(Map<String, Object> bundledDefaults, Path explicitUserConfigPath) {
+        this(new BundledDefaults(bundledDefaults == null ? Map.of() : bundledDefaults, "(given defaults)"),
+                explicitUserConfigPath);
+    }
+
+    private Config(BundledDefaults bundled, Path explicitUserConfigPath) {
         boolean strict = envTrue(STRICT_ENV);
 
-        String loadedFrom = "(none)";
+        String loadedFrom = bundled.loadedFrom();
         String userConfigPath = "(none)";
         boolean userConfigPresent = false;
         boolean userConfigLoaded = false;
         String userConfigError = "";
         int envOverridesCount = 0;
 
-        // 1) Load classpath default config
-        Map<String, Object> loaded = new LinkedHashMap<>();
-        try (InputStream in = Config.class.getClassLoader().getResourceAsStream("config/default-config.yaml")) {
-            if (in != null) {
-                ObjectMapper om = new ObjectMapper(new YAMLFactory());
-                @SuppressWarnings("unchecked")
-                Map<String,Object> m = om.readValue(in, Map.class);
-                if (m != null) loaded.putAll(m);
-                loadedFrom = "classpath:config/default-config.yaml";
-            }
-        } catch (Exception ignored) {
-            // Keep going with empty map - we'll backfill defaults next
-        }
-
-        data.putAll(loaded);
+        // 1) Start from the bundled default config
+        data.putAll(bundled.data());
         ensureDefaults();
 
         // 2) Load user config overlay from ~/.talos/config.yaml
@@ -156,6 +157,26 @@ public class Config implements EngineConfig {
         return snapshot;
     }
 
+    private record BundledDefaults(Map<String, Object> data, String loadedFrom) {
+    }
+
+    private static BundledDefaults loadBundledDefaults() {
+        Map<String, Object> loaded = new LinkedHashMap<>();
+        String loadedFrom = "(none)";
+        try (InputStream in = Config.class.getClassLoader().getResourceAsStream("config/default-config.yaml")) {
+            if (in != null) {
+                ObjectMapper om = new ObjectMapper(new YAMLFactory());
+                @SuppressWarnings("unchecked")
+                Map<String,Object> m = om.readValue(in, Map.class);
+                if (m != null) loaded.putAll(m);
+                loadedFrom = "classpath:config/default-config.yaml";
+            }
+        } catch (Exception ignored) {
+            // Keep going with empty map - we'll backfill defaults next
+        }
+        return new BundledDefaults(loaded, loadedFrom);
+    }
+
     /** Typed read-only view over this config's data. */
     public ConfigView view() {
         return ConfigView.of(this);
@@ -204,8 +225,7 @@ public class Config implements EngineConfig {
     @SuppressWarnings("unchecked")
     private void ensureDefaults() {
         // ----- rag -----
-        Map<String,Object> rag = map(data.get("rag"));
-        if (rag == null) { rag = new LinkedHashMap<>(); data.put("rag", rag); defaulted("rag"); }
+        Map<String,Object> rag = section(data, "rag", "rag");
 
         // includes
         Object incObj = rag.get("includes");
@@ -252,21 +272,11 @@ public class Config implements EngineConfig {
         if (!rag.containsKey("top_k")) { rag.put("top_k", 6); defaulted("rag.top_k"); }
 
         // vectors
-        Map<String,Object> vectors = map(rag.get("vectors"));
-        if (vectors == null) {
-            vectors = new LinkedHashMap<>();
-            rag.put("vectors", vectors);
-            defaulted("rag.vectors");
-        }
+        Map<String,Object> vectors = section(rag, "vectors", "rag.vectors");
         if (!vectors.containsKey("enabled")) { vectors.put("enabled", Boolean.FALSE); defaulted("rag.vectors.enabled"); }
 
         // ----- document extraction -----
-        Map<String,Object> documentExtraction = map(data.get("document_extraction"));
-        if (documentExtraction == null) {
-            documentExtraction = new LinkedHashMap<>();
-            data.put("document_extraction", documentExtraction);
-            defaulted("document_extraction");
-        }
+        Map<String,Object> documentExtraction = section(data, "document_extraction", "document_extraction");
         putIfAbsent(documentExtraction, "enabled", Boolean.TRUE, "document_extraction.enabled");
         ensureExtractionFamily(documentExtraction, "pdf", Boolean.TRUE);
         ensureExtractionFamily(documentExtraction, "word", Boolean.TRUE);
@@ -277,67 +287,46 @@ public class Config implements EngineConfig {
         putIfAbsent(imageOcr, "timeout_ms", 10_000L, "document_extraction.image_ocr.timeout_ms");
 
         // ----- ollama -----
-        Map<String,Object> ollama = map(data.get("ollama"));
-        if (ollama == null) { ollama = new LinkedHashMap<>(); data.put("ollama", ollama); defaulted("ollama"); }
+        Map<String,Object> ollama = section(data, "ollama", "ollama");
         if (!ollama.containsKey("host"))  { ollama.put("host", "http://localhost:11434"); defaulted("ollama.host"); }
         if (!ollama.containsKey("model")) { ollama.put("model", "qwen2.5-coder:14b");   defaulted("ollama.model"); }
 
         // ----- llm -----
-        Map<String,Object> llm = map(data.get("llm"));
-        if (llm == null) { llm = new LinkedHashMap<>(); data.put("llm", llm); defaulted("llm"); }
+        Map<String,Object> llm = section(data, "llm", "llm");
         putIfAbsent(llm, "transport", "engine", "llm.transport");
         putIfAbsent(llm, "default_backend", "llama_cpp", "llm.default_backend");
         putIfAbsent(llm, "model", "talos-agent", "llm.model");
 
         // ----- embed -----
-        Map<String,Object> embed = map(data.get("embed"));
-        if (embed == null) { embed = new LinkedHashMap<>(); data.put("embed", embed); defaulted("embed"); }
+        Map<String,Object> embed = section(data, "embed", "embed");
         putIfAbsent(embed, "provider", "disabled", "embed.provider");
         putIfAbsent(embed, "model", "none", "embed.model");
         putIfAbsent(embed, "host", "", "embed.host");
         putIfAbsent(embed, "allow_remote", Boolean.FALSE, "embed.allow_remote");
 
         // ----- net -----
-        Map<String,Object> net = map(data.get("net"));
-        if (net == null) { net = new LinkedHashMap<>(); data.put("net", net); defaulted("net"); }
+        Map<String,Object> net = section(data, "net", "net");
         if (!net.containsKey("enabled")) { net.put("enabled", Boolean.FALSE); defaulted("net.enabled"); }
 
         // ----- privacy -----
-        Map<String,Object> privacy = map(data.get("privacy"));
-        if (privacy == null) { privacy = new LinkedHashMap<>(); data.put("privacy", privacy); defaulted("privacy"); }
+        Map<String,Object> privacy = section(data, "privacy", "privacy");
         putIfAbsent(privacy, "mode", "developer", "privacy.mode");
-        Map<String,Object> protectedRead = map(privacy.get("protected_read"));
-        if (protectedRead == null) {
-            protectedRead = new LinkedHashMap<>();
-            privacy.put("protected_read", protectedRead);
-            defaulted("privacy.protected_read");
-        }
+        Map<String,Object> protectedRead = section(privacy, "protected_read", "privacy.protected_read");
         putIfAbsent(protectedRead, "default_scope", "SEND_TO_MODEL_CONTEXT", "privacy.protected_read.default_scope");
         putIfAbsent(protectedRead, "allow_send_to_model", Boolean.FALSE, "privacy.protected_read.allow_send_to_model");
         putIfAbsent(protectedRead, "persist_raw_artifacts", Boolean.FALSE, "privacy.protected_read.persist_raw_artifacts");
-        Map<String,Object> documentExtractionPrivacy = map(privacy.get("document_extraction"));
-        if (documentExtractionPrivacy == null) {
-            documentExtractionPrivacy = new LinkedHashMap<>();
-            privacy.put("document_extraction", documentExtractionPrivacy);
-            defaulted("privacy.document_extraction");
-        }
+        Map<String,Object> documentExtractionPrivacy = section(privacy, "document_extraction", "privacy.document_extraction");
         putIfAbsent(documentExtractionPrivacy, "allow_send_to_model", Boolean.FALSE,
                 "privacy.document_extraction.allow_send_to_model");
         putIfAbsent(documentExtractionPrivacy, "persist_raw_artifacts", Boolean.FALSE,
                 "privacy.document_extraction.persist_raw_artifacts");
         putIfAbsent(documentExtractionPrivacy, "allow_rag_indexing", Boolean.FALSE,
                 "privacy.document_extraction.allow_rag_indexing");
-        Map<String,Object> privacyRag = map(privacy.get("rag"));
-        if (privacyRag == null) {
-            privacyRag = new LinkedHashMap<>();
-            privacy.put("rag", privacyRag);
-            defaulted("privacy.rag");
-        }
+        Map<String,Object> privacyRag = section(privacy, "rag", "privacy.rag");
         putIfAbsent(privacyRag, "enabled_in_private_mode", Boolean.FALSE, "privacy.rag.enabled_in_private_mode");
 
         // ----- limits -----
-        Map<String,Object> limits = map(data.get("limits"));
-        if (limits == null) { limits = new LinkedHashMap<>(); data.put("limits", limits); defaulted("limits"); }
+        Map<String,Object> limits = section(data, "limits", "limits");
 
         putIfAbsent(limits, "top_k_max",          100, "limits.top_k_max");
         putIfAbsent(limits, "response_max_chars", 10 * 1024 * 1024L, "limits.response_max_chars");
@@ -351,8 +340,7 @@ public class Config implements EngineConfig {
         putIfAbsent(limits, "llm_context_max_tokens", 8192, "limits.llm_context_max_tokens");
 
         // ----- ui -----
-        Map<String,Object> ui = map(data.get("ui"));
-        if (ui == null) { ui = new LinkedHashMap<>(); data.put("ui", ui); defaulted("ui"); }
+        Map<String,Object> ui = section(data, "ui", "ui");
 
         putIfAbsent(ui, "show_status_during_answer", true, "ui.show_status_during_answer");
         putIfAbsent(ui, "show_timing_after_answer", true, "ui.show_timing_after_answer");
@@ -361,23 +349,30 @@ public class Config implements EngineConfig {
         putIfAbsent(ui, "markdown", true, "ui.markdown");
 
         // ----- tools -----
-        Map<String,Object> tools = map(data.get("tools"));
-        if (tools == null) { tools = new LinkedHashMap<>(); data.put("tools", tools); defaulted("tools"); }
+        Map<String,Object> tools = section(data, "tools", "tools");
         putIfAbsent(tools, "native_calling", Boolean.TRUE, "tools.native_calling");
 
         // ----- session -----
-        Map<String,Object> session = map(data.get("session"));
-        if (session == null) { session = new LinkedHashMap<>(); data.put("session", session); defaulted("session"); }
+        Map<String,Object> session = section(data, "session", "session");
         putIfAbsent(session, "persistence", Boolean.TRUE, "session.persistence");
         putIfAbsent(session, "auto_load", Boolean.FALSE, "session.auto_load");
     }
 
+    /**
+     * Returns the section stored under the key as a live, mutable map in its
+     * parent. An existing section is copied into a LinkedHashMap and stored
+     * back, so every default written into it is kept. A missing or non-map
+     * value is replaced by a new section and reported as defaulted.
+     */
     @SuppressWarnings("unchecked")
-    private static Map<String,Object> map(Object o) {
-        if (o instanceof Map<?,?> m) {
-            return new LinkedHashMap<>((Map<String,Object>) m);
-        }
-        return null;
+    private Map<String,Object> section(Map<String,Object> parent, String key, String dotted) {
+        Object existing = parent.get(key);
+        Map<String,Object> live = existing instanceof Map<?,?> m
+                ? new LinkedHashMap<>((Map<String,Object>) m)
+                : new LinkedHashMap<>();
+        parent.put(key, live);
+        if (!(existing instanceof Map<?,?>)) defaulted(dotted);
+        return live;
     }
 
     private void putIfAbsent(Map<String,Object> m, String key, Object def, String dotted) {
@@ -385,12 +380,7 @@ public class Config implements EngineConfig {
     }
 
     private Map<String,Object> ensureExtractionFamily(Map<String,Object> documentExtraction, String family, Boolean enabled) {
-        Map<String,Object> familyConfig = map(documentExtraction.get(family));
-        if (familyConfig == null) {
-            familyConfig = new LinkedHashMap<>();
-            documentExtraction.put(family, familyConfig);
-            defaulted("document_extraction." + family);
-        }
+        Map<String,Object> familyConfig = section(documentExtraction, family, "document_extraction." + family);
         putIfAbsent(familyConfig, "enabled", enabled, "document_extraction." + family + ".enabled");
         return familyConfig;
     }
