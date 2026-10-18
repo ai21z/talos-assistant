@@ -40,11 +40,11 @@ class EngineRegistryManagedSwitchTest {
     }
 
     @Test
-    void genericBackendChangeCannotDiscardUnsettledOwnedEngine() throws Exception {
+    void genericModelChangeCannotDiscardUnsettledOwnedEngine() throws Exception {
         Fixture fixture = new Fixture();
         FakeEngine old = (FakeEngine) fixture.registry.engine();
         old.failClose = true;
-        assertThrows(IllegalStateException.class, () -> fixture.registry.select("ollama", "other"));
+        assertThrows(IllegalStateException.class, () -> fixture.registry.select("llama_cpp", "other"));
         assertTrue(fixture.registry.selectionUnavailable());
         assertThrows(IllegalStateException.class, fixture.registry::engine);
         old.failClose = false;
@@ -53,10 +53,19 @@ class EngineRegistryManagedSwitchTest {
     }
 
     @Test
-    void explicitManagedReturnFromAnotherBackendUsesTargetConfiguration() throws Exception {
+    void unsupportedBackendIsRefusedWithoutTouchingTheOwnedEngine() throws Exception {
+        Fixture fixture = new Fixture();
+        FakeEngine old = (FakeEngine) fixture.registry.engine();
+        assertThrows(IllegalArgumentException.class, () -> fixture.registry.select("unsupported", "other"));
+        assertFalse(fixture.registry.selectionUnavailable());
+        assertSame(old, fixture.registry.engine());
+        assertEquals(0, Collections.frequency(fixture.events, "close:first"));
+    }
+
+    @Test
+    void explicitManagedSwitchUsesTargetConfiguration() throws Exception {
         Fixture fixture = new Fixture();
         fixture.registry.engine();
-        fixture.registry.select("ollama", "other");
         fixture.registry.switchManagedModel(target("second"), "second");
         assertEquals("second", fixture.registry.engine().modelIdentity().configuredModel());
         assertEquals(1, Collections.frequency(fixture.events, "close:first"));

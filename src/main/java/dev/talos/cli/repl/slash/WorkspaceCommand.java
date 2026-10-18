@@ -74,11 +74,7 @@ public final class WorkspaceCommand implements Command {
                 }
             }
 
-            var ollama = CfgUtil.map(cfg.data.get("ollama"));
-            if (ollama != null) {
-                Object modelObj = ollama.get("embed");
-                if (modelObj != null) embedModel = Objects.toString(modelObj);
-            }
+            embedModel = dev.talos.core.embed.EmbeddingsFactory.profileFrom(cfg).model();
 
             sb.append("Vectors   : ").append(vectors ? "ON" : "OFF");
             if (vectors) {

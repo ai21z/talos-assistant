@@ -100,7 +100,7 @@ class TalosBootstrapTest {
     }
 
     private static void saveSession(Path home, Path workspace, String user, String assistant) {
-        saveSession(home, workspace, user, assistant, "ollama/qwen2.5-coder:14b");
+        saveSession(home, workspace, user, assistant, "llama_cpp/qwen2.5-coder-14b");
     }
 
     private static void saveSession(Path home, Path workspace, String user, String assistant, String model) {
@@ -373,11 +373,9 @@ class TalosBootstrapTest {
     }
 
     @Test
-    void syncActiveManagedModelUpdatesLlmWithoutMutatingLegacyOllamaBlock() throws Exception {
+    void syncActiveManagedModelUpdatesOnlyTheLlmBlock() throws Exception {
         Config cfg = new Config(null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
-        String originalOllamaModel = String.valueOf(ollama.get("model"));
+        java.util.Set<String> sectionsBefore = new java.util.LinkedHashSet<>(cfg.data.keySet());
 
         invokeSyncActiveModelIntoConfig(cfg, "llama_cpp/qwen2.5-coder-14b");
 
@@ -385,23 +383,7 @@ class TalosBootstrapTest {
         Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
         assertEquals("llama_cpp", llm.get("default_backend"));
         assertEquals("qwen2.5-coder-14b", llm.get("model"));
-        assertEquals(originalOllamaModel, ollama.get("model"),
-                "selecting a managed model must not rewrite the legacy Ollama model block");
-    }
-
-    @Test
-    void syncActiveOllamaModelUpdatesLlmAndLegacyOllamaCompatibilityBlock() throws Exception {
-        Config cfg = new Config(null);
-
-        invokeSyncActiveModelIntoConfig(cfg, "ollama/gpt-oss:20b");
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
-        assertEquals("ollama", llm.get("default_backend"));
-        assertEquals("gpt-oss:20b", llm.get("model"));
-        assertEquals("gpt-oss:20b", ollama.get("model"));
+        assertEquals(sectionsBefore, cfg.data.keySet(), "selecting a model must not add config sections");
     }
 
     @Test

@@ -123,8 +123,8 @@ class LlmClientReadInputBindingTest {
 
     private static Config config(int contextTokens) {
         var cfg = new Config();
-        cfg.data.put("llm", new LinkedHashMap<>(Map.of("transport", "engine", "default_backend", "ollama")));
-        cfg.data.put("ollama", new LinkedHashMap<>(Map.of("model", "fixture")));
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "transport", "engine", "default_backend", "llama_cpp", "model", "fixture")));
         cfg.data.put("limits", new LinkedHashMap<>(Map.of("llm_context_max_tokens", contextTokens)));
         return cfg;
     }

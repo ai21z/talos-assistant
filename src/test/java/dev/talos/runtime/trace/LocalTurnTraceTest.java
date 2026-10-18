@@ -60,7 +60,7 @@ class LocalTurnTraceTest {
                         "2026-04-28T12:00:00Z")
                 .workspaceHash("workspace-hash")
                 .mode("auto")
-                .model("ollama", "qwen2.5-coder:14b")
+                .model("llama_cpp", "qwen2.5-coder:14b")
                 .promptSummary("please write SECRET=abc into index.html")
                 .assistantSummary("I wrote SECRET=abc into index.html")
                 .taskContract(new TaskContract(

@@ -33,16 +33,13 @@ public final class EngineProfileProbe implements DoctorProbe {
         } catch (Exception e) {
             return ProbeResult.fail(id(),
                     "backend '" + backend + "' does not resolve: " + e.getMessage(),
-                    "check llm.default_backend in ~/.talos/config.yaml");
+                    "check llm.default_backend, llm.model, TALOS_BACKEND and TALOS_LLM_BACKEND, "
+                            + "or run talos setup models");
         }
         if (model == null || model.isBlank()) {
             return ProbeResult.warn(id(),
                     "backend '" + backend + "' resolves but no model is configured");
         }
-        if (!"llama_cpp".equals(backend)) {
-            return ProbeResult.pass(id(), "backend " + backend + ", model " + model);
-        }
-
         ModelIdentitySnapshot identity = LlamaCppProfileIdentity.inspectLocal(ctx.cfg(), ctx.talosHome());
         ModelIdentityDoctorAssessment assessment = ModelIdentityDoctorAssessment.assess(identity);
         String detail = "backend " + backend + ", model " + model + "; " + assessment.detail();

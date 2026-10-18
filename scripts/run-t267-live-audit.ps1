@@ -17,42 +17,6 @@ function Add-Line {
     [void]$Lines.Add($Text)
 }
 
-function Test-OllamaList {
-    $ollama = Get-Command "ollama" -ErrorAction SilentlyContinue
-    if (-not $ollama) {
-        return "missing: ollama executable not found"
-    }
-
-    $job = $null
-    try {
-        $exe = $ollama.Source
-        $job = Start-Job -ScriptBlock {
-            param($OllamaExe)
-            & $OllamaExe list 2>&1
-            "__EXIT_CODE__:$LASTEXITCODE"
-        } -ArgumentList $exe
-        if (-not (Wait-Job -Job $job -Timeout 15)) {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            return "blocked: ollama list timed out after 15s"
-        }
-        $received = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
-        $exitLine = $received | Where-Object { $_ -is [string] -and $_.StartsWith("__EXIT_CODE__:") } | Select-Object -Last 1
-        $exitCode = if ($exitLine) { [int]($exitLine -replace "__EXIT_CODE__:", "") } else { 1 }
-        $detail = ($received | Where-Object { -not ($_ -is [string] -and $_.StartsWith("__EXIT_CODE__:")) }) -join " "
-        if ($exitCode -ne 0) {
-            if ($detail.Length -gt 300) { $detail = $detail.Substring(0, 300) + "..." }
-            return "blocked: ollama list exited ${exitCode}: $detail"
-        }
-        return "available"
-    } catch {
-        return "blocked: ollama list failed: $($_.Exception.Message)"
-    } finally {
-        if ($null -ne $job) {
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
 function Get-QuotedYamlValue {
     param([string]$Text, [string]$Key)
     if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
@@ -269,7 +233,6 @@ if ($StopStaleServers -and $repoLlamaServers.Count -gt 0) {
     $repoLlamaServers = @(Get-RepoLlamaServers $ServerPath)
 }
 $repoLlamaServerCount = $repoLlamaServers.Count
-$ollamaStatus = Test-OllamaList
 
 Add-Line $lines ""
 Add-Line $lines "## Model/backend checks"
@@ -284,7 +247,6 @@ Add-Line $lines "| Qwen GGUF exists | $hasQwen |"
 Add-Line $lines "| Qwen GGUF path | $QwenModelPath |"
 Add-Line $lines "| Existing repo-owned llama-server processes | $repoLlamaServerCount |"
 Add-Line $lines "| Repo-owned llama-server processes stopped by preflight | $stoppedRepoServers |"
-Add-Line $lines "| Ollama legacy backend probe | $ollamaStatus |"
 Add-Line $lines "| Audit config model strategy | sequential isolated user homes; Talos managed llama.cpp supports one active model_path per config |"
 
 $blockedReasons = [System.Collections.Generic.List[string]]::new()

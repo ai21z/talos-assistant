@@ -105,7 +105,7 @@ public final class HelpCommand implements Command {
                             "If another server occupies the managed port, no replacement is launched. That server must be stopped explicitly or a different port configured.",
                             "Imports and selections apply to this session. Saved defaults, conversation history, sampling and global tool/privacy policy are preserved.",
                             "Local availability and catalog disposition do not establish artifact verification, current readiness or qualification.",
-                            "Connect-only servers are not restarted. Other configured backends use /set model <backend/model>.",
+                            "Connect-only servers are not restarted.",
                             "Use `talos setup models` outside the REPL to write persistent configuration.",
                             "Accepted beta profiles: qwen2.5-coder-14b and gpt-oss-20b. Other listed profiles retain their own disposition.")));
             default -> findSpec(q)

@@ -179,7 +179,7 @@ public final class RagMode implements Mode {
                         + q;
         }
 
-        // Build structured conversation messages for /api/chat
+        // Build structured conversation messages for the chat request
         List<ChatMessage> messages = buildMessages(
                 system, userMessage, ctxMaps, history, workspaceContextAllowed);
         var restrictions = packed.contentRestrictions();
@@ -241,7 +241,7 @@ public final class RagMode implements Mode {
     }
 
     /**
-     * Builds ChatMessages for /api/chat: system → history → RAG context → user message.
+     * Builds ChatMessages for the chat request: system → history → RAG context → user message.
      * History must be built before packing so its token cost is accounted for.
      */
     static List<ChatMessage> buildMessages(String system, String userMessage,

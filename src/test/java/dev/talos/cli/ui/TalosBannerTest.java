@@ -124,7 +124,6 @@ class TalosBannerTest {
         Config empty = new Config();
         empty.data.remove("llm");
         empty.data.remove("engines");
-        empty.data.remove("ollama");
         String model = TalosBanner.resolveModel(empty);
         String envModel = System.getenv("TALOS_MODEL");
         if (envModel != null && !envModel.isBlank()) {
@@ -152,5 +151,16 @@ class TalosBannerTest {
         assertTrue(model.startsWith("qwen2.5-coder-14b"), model);
         assertTrue(model.contains("refused") || model.contains("unverified"), model);
         assertNotEquals("qwen2.5-coder-14b", model);
+    }
+
+    @Test
+    void startupHintNamesAnUnsupportedBackendInsteadOfReady() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new java.util.LinkedHashMap<>(Map.of(
+                "default_backend", "ollama", "model", "qwen2.5-coder:14b")));
+
+        String hint = TalosBanner.startupHint(cfg);
+
+        assertEquals("backend ollama is not supported · run talos setup models", hint);
     }
 }

@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link EmbeddingsClient#isValidVector(float[])} and
- * {@link EmbeddingsClient#normalizeEmbedInput(String)}.
+ * Tests for {@link EmbeddingVectors#isValidVector(float[])} and
+ * {@link EmbeddingVectors#normalizeEmbedInput(String)}.
  */
 class EmbeddingsVectorValidationTest {
 
@@ -15,42 +15,42 @@ class EmbeddingsVectorValidationTest {
 
     @Test
     void validVector_passes() {
-        assertTrue(EmbeddingsClient.isValidVector(new float[]{0.1f, 0.2f, 0.3f}));
+        assertTrue(EmbeddingVectors.isValidVector(new float[]{0.1f, 0.2f, 0.3f}));
     }
 
     @Test
     void nanVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(new float[]{0.1f, Float.NaN, 0.3f}));
+        assertFalse(EmbeddingVectors.isValidVector(new float[]{0.1f, Float.NaN, 0.3f}));
     }
 
     @Test
     void infinityVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(new float[]{0.1f, Float.POSITIVE_INFINITY, 0.3f}));
+        assertFalse(EmbeddingVectors.isValidVector(new float[]{0.1f, Float.POSITIVE_INFINITY, 0.3f}));
     }
 
     @Test
     void negativeInfinityVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(new float[]{Float.NEGATIVE_INFINITY, 0.2f}));
+        assertFalse(EmbeddingVectors.isValidVector(new float[]{Float.NEGATIVE_INFINITY, 0.2f}));
     }
 
     @Test
     void allZeroVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(new float[]{0.0f, 0.0f, 0.0f}));
+        assertFalse(EmbeddingVectors.isValidVector(new float[]{0.0f, 0.0f, 0.0f}));
     }
 
     @Test
     void singleNonZero_passes() {
-        assertTrue(EmbeddingsClient.isValidVector(new float[]{0.0f, 0.0f, 0.001f}));
+        assertTrue(EmbeddingVectors.isValidVector(new float[]{0.0f, 0.0f, 0.001f}));
     }
 
     @Test
     void emptyVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(new float[]{}));
+        assertFalse(EmbeddingVectors.isValidVector(new float[]{}));
     }
 
     @Test
     void nullVector_rejected() {
-        assertFalse(EmbeddingsClient.isValidVector(null));
+        assertFalse(EmbeddingVectors.isValidVector(null));
     }
 
     // ─── normalizeEmbedInput (P0 fix) ───
@@ -60,22 +60,22 @@ class EmbeddingsVectorValidationTest {
 
         @Test
         void normalText_unchanged() {
-            assertEquals("hello world", EmbeddingsClient.normalizeEmbedInput("hello world"));
+            assertEquals("hello world", EmbeddingVectors.normalizeEmbedInput("hello world"));
         }
 
         @Test
         void collapsesMultipleSpaces() {
-            assertEquals("a b c", EmbeddingsClient.normalizeEmbedInput("a   b    c"));
+            assertEquals("a b c", EmbeddingVectors.normalizeEmbedInput("a   b    c"));
         }
 
         @Test
         void collapsesTabs() {
-            assertEquals("a b", EmbeddingsClient.normalizeEmbedInput("a\t\tb"));
+            assertEquals("a b", EmbeddingVectors.normalizeEmbedInput("a\t\tb"));
         }
 
         @Test
         void preservesNewlines() {
-            String result = EmbeddingsClient.normalizeEmbedInput("line1\nline2\nline3");
+            String result = EmbeddingVectors.normalizeEmbedInput("line1\nline2\nline3");
             assertTrue(result.contains("\n"), "Newlines must be preserved");
             assertTrue(result.contains("line1"));
             assertTrue(result.contains("line3"));
@@ -84,7 +84,7 @@ class EmbeddingsVectorValidationTest {
         @Test
         void stripsControlChars() {
             // \x01 (SOH), \x02 (STX), \x7F (DEL) - should be stripped
-            String result = EmbeddingsClient.normalizeEmbedInput("hello\u0001world\u0002test\u007F");
+            String result = EmbeddingVectors.normalizeEmbedInput("hello\u0001world\u0002test\u007F");
             assertEquals("helloworldtest", result);
             assertFalse(result.contains("\u0001"));
             assertFalse(result.contains("\u0002"));
@@ -93,28 +93,28 @@ class EmbeddingsVectorValidationTest {
 
         @Test
         void nullInput_returnsSingleSpace() {
-            assertEquals(" ", EmbeddingsClient.normalizeEmbedInput(null));
+            assertEquals(" ", EmbeddingVectors.normalizeEmbedInput(null));
         }
 
         @Test
         void emptyInput_returnsSingleSpace() {
-            assertEquals(" ", EmbeddingsClient.normalizeEmbedInput(""));
+            assertEquals(" ", EmbeddingVectors.normalizeEmbedInput(""));
         }
 
         @Test
         void blankInput_returnsSingleSpace() {
-            assertEquals(" ", EmbeddingsClient.normalizeEmbedInput("   "));
+            assertEquals(" ", EmbeddingVectors.normalizeEmbedInput("   "));
         }
 
         @Test
         void trims_leadingAndTrailing() {
-            assertEquals("hello", EmbeddingsClient.normalizeEmbedInput("  hello  "));
+            assertEquals("hello", EmbeddingVectors.normalizeEmbedInput("  hello  "));
         }
 
         @Test
         void realWorldQuery_preserved() {
             String query = "Review test-website/index.html for accessibility issues";
-            assertEquals(query, EmbeddingsClient.normalizeEmbedInput(query));
+            assertEquals(query, EmbeddingVectors.normalizeEmbedInput(query));
         }
     }
 }

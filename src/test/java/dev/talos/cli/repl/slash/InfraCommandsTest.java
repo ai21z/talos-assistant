@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * BenchCommand, ModelsCommand, SetModelCommand, SecretCommand.
  *
  * <p>Tests cover: spec metadata, argument parsing, error paths,
- * and file-fallback paths. Commands that need Ollama/CacheDb are
+ * and file-fallback paths. Commands that need a model engine or CacheDb are
  * tested for their error handling (graceful failure, not crashes).
  */
 @DisplayName("REPL commands - infrastructure-dependent")
@@ -200,6 +200,16 @@ class InfraCommandsTest {
             assertFalse(text.contains("two-model-large-scale-live-audit"), text);
         }
 
+        @Test void verboseStatusNamesAnUnsupportedBackend() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama", "model", "qwen2.5-coder:14b")));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Engine    ollama (not supported)"), text);
+        }
+
         @Test void verboseShowsManagedEmbeddingHostAndRetrievalMode() {
             Config cfg = new Config(null);
             cfg.data.put("llm", new LinkedHashMap<>(Map.of(
@@ -232,56 +242,6 @@ class InfraCommandsTest {
             assertFalse(text.contains("EmbedHost http://127.0.0.1:11434"), text);
         }
 
-        @Test void nonVerboseStatusUsesActiveBackendAfterSetModel() {
-            Config cfg = statusSwitchConfig();
-            LlmClient active = ScriptedNativeLlmClient
-                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
-                    .client();
-            active.setModel("ollama/gpt-oss:20b");
-            Context switched = Context.builder(cfg).llm(active).build();
-            var cmd = new StatusCommand(ModeController.defaultController(), ws);
-
-            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("", switched)).text;
-
-            assertTrue(text.contains("ollama/gpt-oss:20b"), text);
-            assertTrue(text.contains("Engine      ollama"), text);
-            assertFalse(text.contains("Engine      llama.cpp (managed)"), text);
-        }
-
-        @Test void verboseStatusUsesActiveBackendHostAfterSetModel() {
-            Config cfg = statusSwitchConfig();
-            LlmClient active = ScriptedNativeLlmClient
-                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
-                    .client();
-            active.setModel("ollama/gpt-oss:20b");
-            Context switched = Context.builder(cfg).llm(active).build();
-            var cmd = new StatusCommand(ModeController.defaultController(), ws);
-
-            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("--verbose", switched)).text;
-
-            assertTrue(text.contains("Model     ollama/gpt-oss:20b"), text);
-            assertTrue(text.contains("Host      http://127.0.0.1:11434"), text);
-            assertFalse(text.contains("Host      http://127.0.0.1:18116"), text);
-        }
-
-        private Config statusSwitchConfig() {
-            Config cfg = new Config(null);
-            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
-                    "transport", "engine",
-                    "default_backend", "llama_cpp",
-                    "model", "qwen3.6-35b-a3b-q4km")));
-            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
-                    "llama_cpp", new LinkedHashMap<>(Map.of(
-                            "mode", "managed",
-                            "host", "http://127.0.0.1",
-                            "port", 18116,
-                            "model", "qwen3.6-35b-a3b-q4km")))));
-            cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
-                    "host", "http://127.0.0.1:11434",
-                    "model", "qwen2.5-coder:14b",
-                    "embed", "bge-m3")));
-            return cfg;
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -547,7 +507,7 @@ class InfraCommandsTest {
         @Test void reindex_graceful_failure() {
             var cmd = new ReindexCommand(ws);
             Result r = cmd.execute("", ctx);
-            // Without Ollama, reindex will fail - should return error, not crash
+            // Without a model engine, reindex may fail - it should return, not crash
             assertNotNull(r);
         }
 
@@ -684,7 +644,7 @@ class InfraCommandsTest {
 
         @Test void execute_graceful_failure() {
             var cmd = new BenchCommand(ws);
-            // Without Ollama, bench will fail
+            // Without a model engine, bench may fail
             Result r = cmd.execute("", ctx);
             assertNotNull(r);
             // Should return error or ok (empty workspace = no files = fast finish)
@@ -705,12 +665,12 @@ class InfraCommandsTest {
     @DisplayName("ModelsCommand")
     class Models {
 
-        @Test void execute_lists_managed_candidates_without_running_ollama() throws Exception {
+        @Test void execute_lists_managed_candidates_without_a_running_engine() throws Exception {
             var cmd = new ModelsCommand();
             Result r = cmd.execute("", ctx);
             assertNotNull(r);
             assertTrue(r instanceof Result.Error || r instanceof Result.Info || r instanceof Result.Ok,
-                    "Should handle missing Ollama gracefully");
+                    "Should handle a missing engine gracefully");
             if (r instanceof Result.Ok ok) {
                 assertTrue(ok.text.contains("/models use <alias>"), ok.text);
                 assertTrue(ok.text.contains("/models --verbose"), ok.text);
@@ -721,15 +681,6 @@ class InfraCommandsTest {
                 String detailText = assertInstanceOf(Result.Ok.class, details).text;
                 assertTrue(detailText.contains("/set model <alias>"), detailText);
                 assertTrue(detailText.contains("/models add <alias>"), detailText);
-            }
-        }
-
-        @Test void error_message_mentions_ollama() throws Exception {
-            var cmd = new ModelsCommand();
-            Result r = cmd.execute("", ctx);
-            if (r instanceof Result.Error err) {
-                assertTrue(err.message.toLowerCase().contains("ollama"),
-                        "Error should mention Ollama");
             }
         }
 
@@ -766,11 +717,11 @@ class InfraCommandsTest {
 
         @Test void plural_models_subcommand_returns_usage_without_prefix_model_lookup() throws Exception {
             var cmd = new SetModelCommand();
-            Result r = cmd.execute("models ollama/qwen2.5-coder:14b", ctx);
+            Result r = cmd.execute("models llama_cpp/qwen2.5-coder-14b", ctx);
 
             assertInstanceOf(Result.Error.class, r);
             assertTrue(r.toString().contains("Usage"), r.toString());
-            assertFalse(r.toString().contains("sollama"), r.toString());
+            assertFalse(r.toString().contains("sllama_cpp"), r.toString());
         }
 
         @Test void empty_model_name_returns_error() throws Exception {
@@ -800,7 +751,7 @@ class InfraCommandsTest {
 
         @Test void valid_model_attempts_engine_lookup() throws Exception {
             var cmd = new SetModelCommand();
-            // With no running Ollama, this should error on engine lookup
+            // With no running engine, this should error on engine lookup
             Result r = cmd.execute("model qwen3:8b", ctx);
             assertNotNull(r);
             // Either Error (model not found / engine not reachable) or Info

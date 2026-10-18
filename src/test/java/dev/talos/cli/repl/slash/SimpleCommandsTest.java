@@ -521,7 +521,7 @@ class SimpleCommandsTest {
             assertTrue(text.contains("Model Help"), text);
             assertTrue(text.contains("/models"), text);
             assertTrue(text.contains("/model"), text);
-            assertTrue(text.contains("/set model <backend/model>"), text);
+            assertFalse(text.contains("Other configured backends"), text);
             assertTrue(text.contains("/models use <alias>"), text);
             assertTrue(text.contains("/set model <alias>"), text);
             assertTrue(text.contains("/models add <alias> \"<absolute GGUF path>\""), text);
@@ -607,60 +607,6 @@ class SimpleCommandsTest {
             assertEquals("help", cmd.spec().name());
             assertTrue(cmd.spec().aliases().contains("h"));
             assertTrue(cmd.spec().aliases().contains("?"));
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  SetCommand
-    // ═══════════════════════════════════════════════════════════════════════
-
-    @Nested
-    @DisplayName("SetCommand")
-    class Set {
-
-        private final SetCommand cmd = new SetCommand();
-        private final Context ctx = Context.builder(placeholderConfig()).build();
-
-        private Config placeholderConfig() {
-            Config cfg = new Config();
-            cfg.data.put("llm", Map.of("transport", "placeholder"));
-            return cfg;
-        }
-
-        @Test void set_model_updates_llm() throws Exception {
-            Result r = cmd.execute("model qwen3:8b", ctx);
-            assertInstanceOf(Result.Info.class, r);
-            assertTrue(r.toString().contains("qwen3:8b"));
-        }
-
-        @Test void set_no_model_name_returns_error() throws Exception {
-            Result r = cmd.execute("model", ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_without_model_returns_usage() throws Exception {
-            Result r = cmd.execute("", ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_null_returns_usage() throws Exception {
-            Result r = cmd.execute(null, ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_model_sanitizes_name() throws Exception {
-            Result r = cmd.execute("model <my-model>", ctx);
-            assertInstanceOf(Result.Info.class, r);
-        }
-
-        @Test void set_model_invalid_chars_rejected() throws Exception {
-            Result r = cmd.execute("model ../../../../etc/passwd", ctx);
-            // Path traversal should be rejected (contains ..)
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void spec_name() {
-            assertEquals("set", cmd.spec().name());
         }
     }
 

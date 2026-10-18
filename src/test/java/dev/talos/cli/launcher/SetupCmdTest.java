@@ -29,7 +29,7 @@ class SetupCmdTest {
     void setupCommandDescriptionIsBackendNeutral() {
         CommandLine.Command command = SetupCmd.class.getAnnotation(CommandLine.Command.class);
 
-        assertTrue(command.description()[0].contains("local model"));
+        assertTrue(command.description()[0].contains("llama.cpp"));
         assertFalse(command.description()[0].contains("Install Ollama"));
     }
 

@@ -140,11 +140,7 @@ public class TopLevelStatusCmd implements Runnable {
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
         StringBuilder out = new StringBuilder();
         out.append("  Backend     : ").append(runtime.backend()).append("\n");
-        if ("ollama".equals(runtime.backend())) {
-            out.append("  Ollama host : ").append(runtime.hostLabel()).append("\n");
-        } else {
-            out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
-        }
+        out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
         out.append("  Chat model  : ").append(runtime.model()).append("\n");
         if (!runtime.modelSourceLabel().isBlank()) {
             out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");

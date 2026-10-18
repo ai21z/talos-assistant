@@ -286,11 +286,6 @@ public class Config implements EngineConfig {
         putIfAbsent(imageOcr, "args", new ArrayList<>(), "document_extraction.image_ocr.args");
         putIfAbsent(imageOcr, "timeout_ms", 10_000L, "document_extraction.image_ocr.timeout_ms");
 
-        // ----- ollama -----
-        Map<String,Object> ollama = section(data, "ollama", "ollama");
-        if (!ollama.containsKey("host"))  { ollama.put("host", "http://localhost:11434"); defaulted("ollama.host"); }
-        if (!ollama.containsKey("model")) { ollama.put("model", "qwen2.5-coder:14b");   defaulted("ollama.model"); }
-
         // ----- llm -----
         Map<String,Object> llm = section(data, "llm", "llm");
         putIfAbsent(llm, "transport", "engine", "llm.transport");

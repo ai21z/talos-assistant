@@ -138,9 +138,6 @@ public final class ContextCommand implements Command {
         }
 
         String backend = EngineRuntimeConfig.from(ctx.cfg()).backend();
-        if ("ollama".equals(backend)) {
-            return Optional.of("context managed by Ollama");
-        }
         if (!"llama_cpp".equals(backend)) {
             return Optional.empty();
         }
@@ -158,9 +155,6 @@ public final class ContextCommand implements Command {
             return Optional.empty();
         }
         String backend = activeModel.substring(0, slash);
-        if ("ollama".equals(backend)) {
-            return Optional.of(renderActiveOllamaRow(activeModel, diagnostics));
-        }
         if ("llama_cpp".equals(backend)) {
             return Optional.of(renderActiveLlamaCppRow(ctx, diagnostics, activeModel));
         }
@@ -168,28 +162,6 @@ public final class ContextCommand implements Command {
                 + num(diagnostics.effectiveWindowTokens())
                 + " tokens (active model; limits.llm_context_max_tokens="
                 + num(diagnostics.configuredWindowTokens()) + ")");
-    }
-
-    private static String renderActiveOllamaRow(
-            String activeModel,
-            dev.talos.core.llm.LlmClient.ContextWindowDiagnostics diagnostics) {
-        StringBuilder row = new StringBuilder(activeModel)
-                .append(" effective context ")
-                .append(num(diagnostics.effectiveWindowTokens()))
-                .append(" tokens (active model; limits.llm_context_max_tokens=")
-                .append(num(diagnostics.configuredWindowTokens()));
-        if (diagnostics.engineWindowTokens() > 0) {
-            row.append("; engine-reported context=")
-                    .append(num(diagnostics.engineWindowTokens()));
-        } else {
-            row.append("; engine context unavailable");
-        }
-        row.append(')');
-        if (diagnostics.engineWindowTokens() > 0
-                && diagnostics.effectiveWindowTokens() < diagnostics.configuredWindowTokens()) {
-            row.append("\n               WARNING: runtime enforces the smaller active model window");
-        }
-        return row.toString();
     }
 
     private String renderActiveLlamaCppRow(

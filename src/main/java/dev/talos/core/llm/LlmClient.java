@@ -66,7 +66,7 @@ public final class LlmClient implements AutoCloseable {
     private final ManagedModelLibrary managedModels;
     private final ReentrantReadWriteLock modelLifecycle = new ReentrantReadWriteLock();
     private final AtomicBoolean closed = new AtomicBoolean(false);
-    private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
+    private volatile String backend;          // ENGINE mode: current backend id ("llama_cpp")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
 
@@ -236,7 +236,7 @@ public final class LlmClient implements AutoCloseable {
      * exhausted the last response is repeated (so a scripted run cannot
      * accidentally fall through to a real backend).
      *
-     * <p>Ignores engine / Ollama configuration entirely - no backend
+     * <p>Ignores engine configuration entirely - no backend
      * connection is attempted.
      *
      * @param responses ordered list of model outputs, one per turn
@@ -434,7 +434,6 @@ public final class LlmClient implements AutoCloseable {
 
     public boolean supportsRequiredToolChoice() {
         if (mode != TransportMode.ENGINE || engineResolver == null) return false;
-        if ("ollama".equalsIgnoreCase(backend)) return false;
         try {
             Capabilities current = effectiveCapabilities();
             return current != null && current.requiredToolChoice();
@@ -446,7 +445,6 @@ public final class LlmClient implements AutoCloseable {
 
     public boolean supportsNamedToolChoice() {
         if (mode != TransportMode.ENGINE || engineResolver == null) return false;
-        if ("ollama".equalsIgnoreCase(backend)) return false;
         try {
             Capabilities current = effectiveCapabilities();
             return current != null && current.namedToolChoice();
@@ -557,7 +555,7 @@ public final class LlmClient implements AutoCloseable {
 
     /**
      * Chat using structured conversation messages (system/user/assistant turns).
-     * <p>In ENGINE mode, this triggers the /api/chat endpoint with proper role tags.
+     * <p>In ENGINE mode, this sends a structured chat request with proper role tags.
      * In PLACEHOLDER mode, falls back to extracting system/user for deterministic output.
      */
     public String chat(List<ChatMessage> messages) {
@@ -784,7 +782,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * ENGINE mode: assemble from token stream using structured messages via /api/chat.
+     * ENGINE mode: assemble from token stream using structured messages.
      * Sanitization, hard cap, and retry logic are applied identically to the legacy path.
      */
     private TextGeneration engineAssembledWithMessages(List<ChatMessage> messages,
@@ -1764,7 +1762,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * ENGINE mode: assemble from token stream using structured messages via /api/chat.
+     * ENGINE mode: assemble from token stream using structured messages.
      * Returns a {@link StreamResult} carrying both the assembled text and any
      * native tool calls.
      */
@@ -1780,8 +1778,8 @@ public final class LlmClient implements AutoCloseable {
                                                          ProviderResponseCapture.Generation generation,
                                                          ContextDeliveryCapture contextDelivery) {
         // Sanitize message content while preserving tool-call structure
-        // (toolCalls, toolCallId) - these carry native tool-call context that
-        // OllamaEngine.serializeChatMessage needs for proper /api/chat formatting.
+        // (toolCalls, toolCallId) - these carry the native tool-call context
+        // the engine needs to format the chat request.
         List<ChatMessage> sanitized = messages.stream()
                 .map(m -> new ChatMessage(
                         m.role(),
@@ -2598,10 +2596,10 @@ public final class LlmClient implements AutoCloseable {
                                                       abortBeforeStreamClose) {
         // Try-with-resources: closes the engine's token stream on every exit
         // path (cancel break, cap-reached break, exception, normal return).
-        // For the Ollama transport this propagates to the HTTP body/socket
-        // close via Stream.onClose - preventing the "Ollama keeps generating
-        // into a dead consumer" leak that kept a hung repetition-loop stream
-        // alive after the tool-call loop had moved on.
+        // For an HTTP transport this propagates to the body/socket close via
+        // Stream.onClose - preventing a server from generating into a dead
+        // consumer, which kept a hung repetition-loop stream alive after the
+        // tool-call loop had moved on.
         try (stream) {
             ProviderTextAssembly assembly = new ProviderTextAssembly(safeCap());
             ProviderResponseCapture.Completion completion =

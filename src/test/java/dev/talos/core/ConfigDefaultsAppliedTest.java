@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** A default the config reports as applied is present in the effective configuration. */
 class ConfigDefaultsAppliedTest {
     private static final List<String> SECTIONS = List.of(
-            "rag", "document_extraction", "ollama", "llm", "embed", "net",
+            "rag", "document_extraction", "llm", "embed", "net",
             "privacy", "limits", "ui", "tools", "session");
 
     @TempDir

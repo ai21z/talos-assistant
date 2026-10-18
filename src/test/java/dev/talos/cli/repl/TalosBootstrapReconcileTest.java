@@ -171,7 +171,7 @@ class TalosBootstrapReconcileTest {
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         try (var writer = store.acquireSessionWriter(sid)) {
-            writer.save(new SessionData(sid, "/ws", "", 0, created, List.of(), "ollama/qwen2.5-coder:14b",
+            writer.save(new SessionData(sid, "/ws", "", 0, created, List.of(), "llama_cpp/qwen2.5-coder-14b",
                     context, goal));
         }
 
@@ -180,7 +180,7 @@ class TalosBootstrapReconcileTest {
         assertTrue(summary.hasSavedSession(), "context-only snapshot should count as available");
         assertEquals(0, summary.pairsReplayed());
         assertEquals(created, summary.createdAt());
-        assertEquals("ollama/qwen2.5-coder:14b", summary.model());
+        assertEquals("llama_cpp/qwen2.5-coder-14b", summary.model());
     }
 
     @Test
@@ -450,13 +450,13 @@ class TalosBootstrapReconcileTest {
                             new SessionData.Turn("user", "u2", ""),
                             new SessionData.Turn("assistant", "clean", "ok")
                     ),
-                    "ollama/qwen2.5-coder:14b"));
+                    "llama_cpp/qwen2.5-coder-14b"));
         }
 
         SessionMemory mem = new SessionMemory();
         var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
         assertEquals(1, snap.pairsReplayed());
-        assertEquals("ollama/qwen2.5-coder:14b", snap.model());
+        assertEquals("llama_cpp/qwen2.5-coder-14b", snap.model());
         assertTrue(mem.get().contains("u2"));
         assertFalse(mem.get().contains("poison"));
     }

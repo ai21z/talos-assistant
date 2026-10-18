@@ -50,17 +50,13 @@ public final class ModelsCommand implements Command {
             if (!request.isBlank() && !request.equals("--verbose")) return new Result.Error("Local GGUF registration requires managed llama.cpp. External servers are not restarted.", 400);
             // Safe model listing that won't spawn interactive processes on Windows
             try (var reg = new EngineRegistry(ctx.cfg())) {
-                if (ctx.llm() != null && ctx.llm().getModel().contains("/")) {
-                    String[] active = ctx.llm().getModel().split("/", 2);
-                    reg.select(active[0], active[1]);
-                }
                 var cat = reg.compositeCatalog();
                 var list = cat.installed(); // Use installed(), not all() to avoid subprocess calls
                 // T877: surface downloaded-but-not-configured GGUFs via a safe, no-subprocess
                 // scan of the HF cache so a user can SEE what they have on disk.
                 var downloaded = GgufCacheScanner.downloadedNotConfigured(ctx.cfg());
                 if (list.isEmpty() && downloaded.isEmpty()) {
-                    return new Result.Info("No configured or downloaded models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
+                    return new Result.Info("No configured or downloaded models found. Run `talos setup models` to configure managed llama.cpp.");
                 }
                 ModelIdentitySnapshot identity = ctx.llm() == null
                         ? ModelIdentitySnapshot.empty()
@@ -162,22 +158,14 @@ public final class ModelsCommand implements Command {
             List<ModelRef> downloaded,
             ModelIdentitySnapshot identity) {
         List<ModelRef> managed = new ArrayList<>();
-        List<ModelRef> ollama = new ArrayList<>();
-        List<ModelRef> other = new ArrayList<>();
         for (ModelRef model : models == null ? List.<ModelRef>of() : models) {
             if ("llama_cpp".equals(model.backend())) {
                 managed.add(model);
-            } else if ("ollama".equals(model.backend())) {
-                ollama.add(model);
-            } else {
-                other.add(model);
             }
         }
 
         StringBuilder sb = new StringBuilder("\nConfigured/selectable models:\n\n");
         appendGroup(sb, "Recommended managed llama.cpp", managed, identity);
-        appendGroup(sb, "Legacy/optional Ollama", ollama, identity);
-        appendGroup(sb, "Other configured backends", other, identity);
         appendDownloadedGroup(sb, downloaded);
         sb.append("""
 

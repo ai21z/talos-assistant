@@ -17,12 +17,12 @@ public final class ChatRequest {
 
     /**
      * Structured conversation history (system + user/assistant turns).
-     * When non-empty, engines should prefer the /api/chat path over /api/generate.
+     * When non-empty, engines should send these structured messages.
      */
     public final List<ChatMessage> messages;
 
     /**
-     * Tool definitions to include in the API request (Ollama native tool calling).
+     * Tool definitions to include in the API request (native tool calling).
      * When non-empty, the engine advertises these tools to the model so it can
      * return structured {@code tool_calls} instead of free-text answers.
      */

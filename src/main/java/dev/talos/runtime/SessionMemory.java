@@ -20,7 +20,7 @@ import java.util.List;
  * from the front when the window overflows.
  *
  * <p>Also maintains a parallel structured list of {@link ChatMessage}
- * turns for use with the {@code /api/chat} conversation endpoint.
+ * turns for use in structured chat requests.
  * When the flat buffer overflows, the oldest structured turns are
  * also pruned to stay in sync.
  *

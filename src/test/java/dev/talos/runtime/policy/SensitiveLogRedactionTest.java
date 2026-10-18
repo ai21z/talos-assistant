@@ -119,10 +119,8 @@ class SensitiveLogRedactionTest {
     @Test
     void log_callsite_provider_exception_redacts_canary() throws Exception {
         String compat = source("src/main/java/dev/talos/engine/compat/CompatChatClient.java");
-        String ollama = source("src/main/java/dev/talos/engine/ollama/OllamaChatClient.java");
 
         assertTrue(compat.contains("SafeLogFormatter.throwableMessage(e)"), compat);
-        assertTrue(ollama.contains("SafeLogFormatter.throwableMessage(e)"), ollama);
     }
 
     @Test
@@ -176,7 +174,6 @@ class SensitiveLogRedactionTest {
     @Test
     void broader_runtime_diagnostics_safe_format_paths_models_and_endpoint_values() throws Exception {
         String firstRun = source("src/main/java/dev/talos/app/ui/TerminalFirstRun.java");
-        String embeddings = source("src/main/java/dev/talos/core/embed/EmbeddingsClient.java");
         String lucene = source("src/main/java/dev/talos/core/index/LuceneStore.java");
         String executor = source("src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java");
         String reprompt = source("src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java");
@@ -189,14 +186,6 @@ class SensitiveLogRedactionTest {
         assertTrue(firstRun.contains("SafeLogFormatter.value(sentinel)"), firstRun);
         assertFalse(firstRun.contains("SENTINEL, ex"), firstRun);
         assertFalse(firstRun.contains("sentinel, ex"), firstRun);
-
-        assertTrue(embeddings.contains("SafeLogFormatter.value(this.host)"), embeddings);
-        assertFalse(embeddings.contains("services.\", this.host"), embeddings);
-        assertFalse(embeddings.contains("from {} {} - skipping\", ep.path, ep.param"), embeddings);
-        assertFalse(embeddings.contains("Empty embedding from {} {} (continuing to next attempt)\", ep.path, ep.param"),
-                embeddings);
-        assertFalse(embeddings.contains("Batch embedding size mismatch from {} {} (expected {}, got {})\",\n                            ep.path, ep.param"),
-                embeddings);
 
         assertTrue(lucene.contains("SafeLogFormatter.value(path)"), lucene);
         assertFalse(lucene.contains("Skip vector for {} (have={}, expected={})\", path"), lucene);

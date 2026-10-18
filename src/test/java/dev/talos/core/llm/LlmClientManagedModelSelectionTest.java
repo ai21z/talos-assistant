@@ -86,14 +86,14 @@ class LlmClientManagedModelSelectionTest {
         Resolver resolver = new Resolver();
         try (LlmClient client = new LlmClient(cfg, resolver)) {
             client.managedModelLibrary().register("second", gguf("second.gguf"));
-            client.setModel("ollama/other");
+            client.setModel("unsupported/other");
             resolver.failSwitch = true;
             Context ctx = Context.builder(cfg).llm(client).build();
             Result.Error failure = assertInstanceOf(Result.Error.class,
                     new SetModelCommand().execute("model llama_cpp/second", ctx));
             assertTrue(failure.message.contains("use /set model llama_cpp/<alias>"), failure.message);
             assertFalse(failure.message.contains("use /models use"), failure.message);
-            assertEquals("ollama/other", client.getModel());
+            assertEquals("unsupported/other", client.getModel());
             assertTrue(client.modelSelectionUnavailable());
             resolver.failSwitch = false;
             assertInstanceOf(Result.Info.class,
@@ -187,7 +187,7 @@ class LlmClientManagedModelSelectionTest {
         Resolver resolver = new Resolver();
         try (LlmClient client = new LlmClient(config(true), resolver)) {
             client.managedModelLibrary().register("second", gguf("second.gguf"));
-            client.setModel("ollama/other");
+            client.setModel("unsupported/other");
             client.setModel("llama_cpp/second");
             assertEquals(1, resolver.switches.get());
             assertEquals("llama_cpp/second", client.getModel());
@@ -205,37 +205,6 @@ class LlmClientManagedModelSelectionTest {
             assertThrows(CancellationException.class, () -> new ModelsCommand().execute("use second", ctx));
             assertThrows(CancellationException.class, () -> new SetModelCommand().execute("model second", ctx));
             assertEquals("llama_cpp/first", client.getModel());
-        }
-    }
-
-    @Test
-    void ollamaCommandsKeepTheirOwnCatalogAndBareModelRouting() throws Exception {
-        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/tags", exchange -> {
-            byte[] body = "{\"models\":[{\"name\":\"second:tag\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-        server.start();
-        Config cfg = config(true);
-        cfg.data.put("ollama", Map.of("host", "http://127.0.0.1:" + server.getAddress().getPort()));
-        Resolver resolver = new Resolver();
-        try (LlmClient client = new LlmClient(cfg, resolver)) {
-            client.setModel("ollama/first:tag");
-            Context ctx = Context.builder(cfg).llm(client).build();
-            String listing = new ModelsCommand().execute("", ctx).toString();
-            assertTrue(listing.contains("ollama/second:tag"), listing);
-            assertFalse(listing.contains("Local model selection"), listing);
-            Result selected = new SetModelCommand().execute("model second:tag", ctx);
-            assertInstanceOf(Result.Info.class, selected);
-            assertEquals("ollama/second:tag", client.getModel());
-            assertEquals(0, resolver.switches.get());
-            client.managedModelLibrary().register("second", gguf("second.gguf"));
-            assertInstanceOf(Result.Info.class, new SetModelCommand().execute("model llama_cpp/second", ctx));
-            assertEquals(1, resolver.switches.get());
-        } finally {
-            server.stop(0);
         }
     }
 

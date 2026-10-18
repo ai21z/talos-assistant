@@ -97,7 +97,7 @@ class JsonSessionStoreTraceTest {
                         "2026-07-30T00:00:00Z")
                 .workspaceHash("workspace-hash")
                 .mode("auto")
-                .model("ollama", "gpt-oss:20b")
+                .model("llama_cpp", "gpt-oss:20b")
                 .taskContract(new LocalTurnTrace.TaskContractSummary(
                         "FILE_EDIT",
                         true,
@@ -541,7 +541,7 @@ class JsonSessionStoreTraceTest {
         return LocalTurnTrace.builder(traceId, sessionId, turnNumber, "2026-04-28T12:00:00Z")
                 .workspaceHash("workspace-hash")
                 .mode("auto")
-                .model("ollama", "qwen2.5-coder:14b")
+                .model("llama_cpp", "qwen2.5-coder:14b")
                 .toolSurface(List.of("talos.read_file"), List.of("talos.read_file"), "read-only turn")
                 .verification("PASSED", "No task-specific verifier was applicable.", List.of())
                 .outcome("OK", "PASSED", "NONE", "NONE", "NO_TOOL_RESPONSE")

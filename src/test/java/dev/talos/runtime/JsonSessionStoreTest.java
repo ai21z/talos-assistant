@@ -35,7 +35,7 @@ class JsonSessionStoreTest {
                 new SessionData.Turn("assistant", "hi there", "ok")
         );
         return new SessionData(id, "/tmp/ws", "goal sketch", turns,
-                Instant.parse("2026-01-15T10:30:00Z"), turnList, "ollama/qwen2.5-coder:14b");
+                Instant.parse("2026-01-15T10:30:00Z"), turnList, "llama_cpp/qwen2.5-coder-14b");
     }
     // -- Basic CRUD --
     @Nested class SaveAndLoad {
@@ -51,7 +51,7 @@ class JsonSessionStoreTest {
             assertEquals("goal sketch", d.sketch());
             assertEquals(5, d.turnCount());
             assertEquals(Instant.parse("2026-01-15T10:30:00Z"), d.createdAt());
-            assertEquals("ollama/qwen2.5-coder:14b", d.model());
+            assertEquals("llama_cpp/qwen2.5-coder-14b", d.model());
             assertEquals(2, d.turns().size());
             assertEquals("user", d.turns().get(0).role());
             assertEquals("hello", d.turns().get(0).content());
@@ -65,7 +65,7 @@ class JsonSessionStoreTest {
                     3, "trace-save", List.of("README.md"), "Improve README.");
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             SessionData original = new SessionData("ctx1", "/tmp/ws", "goal sketch", 1,
-                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "llama_cpp/qwen2.5-coder-14b",
                     context, goal);
 
             withWriter(store, original.sessionId(), writer -> writer.save(original));
@@ -157,7 +157,7 @@ class JsonSessionStoreTest {
                             "click")));
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             SessionData original = new SessionData("ctx-claim", "/tmp/ws", "goal sketch", 1,
-                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "llama_cpp/qwen2.5-coder-14b",
                     context, goal);
 
             withWriter(store, original.sessionId(), writer -> writer.save(original));
@@ -185,7 +185,7 @@ class JsonSessionStoreTest {
                             java.util.Set.of("tailwind.min.css")));
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             SessionData original = new SessionData("ctx-static-req", "/tmp/ws", "goal sketch", 1,
-                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "llama_cpp/qwen2.5-coder-14b",
                     context, goal);
 
             withWriter(store, original.sessionId(), writer -> writer.save(original));

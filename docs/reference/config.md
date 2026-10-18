@@ -16,7 +16,7 @@ Configuration covers:
 
 RAG in Talos means the local Lucene index and retrieval pipeline. BM25 retrieval can operate without vectors.
 
-Vector retrieval requires an enabled embedding endpoint, which is localhost-gated by default. Embeddings are disabled by default. Remote embeddings require explicit opt-in through `embed.allow_remote` for the compat backend or `ollama.allow_remote` for legacy Ollama. Eligible indexed text and retrieval queries may then leave this machine, even when chat remains local. The index remains local. No hosted vector service is needed.
+Vector retrieval requires an enabled embedding endpoint, which is localhost-gated by default. Embeddings are disabled by default. Remote embeddings require explicit opt-in through `embed.allow_remote`. Eligible indexed text and retrieval queries may then leave this machine, even when chat remains local. The index remains local. No hosted vector service is needed.
 
 Use:
 

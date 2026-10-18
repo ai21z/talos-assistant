@@ -106,7 +106,7 @@ class LlamaCppEngineProviderTest {
         assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
                 LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), null));
         ChatRequest crossBackend = new ChatRequest(
-                "ollama", fixture.alias, "", "", List.of(), Duration.ofSeconds(5));
+                "unsupported", fixture.alias, "", "", List.of(), Duration.ofSeconds(5));
         assertEquals(dev.talos.engine.compat.CompatChatClient.NativeToolPrefill.NONE,
                 LlamaCppEngine.nativeToolPrefill(fixture.config(), fixture.snapshot(), crossBackend));
     }
@@ -140,7 +140,7 @@ class LlamaCppEngineProviderTest {
                 Map.entry("runtime lane", f -> f.lane = "win-x64-cuda-13.2:b9918"),
                 Map.entry("launcher hash", f -> f.executableHash = "a".repeat(64)),
                 Map.entry("observations unavailable", f -> f.observation = LlamaCppProfileResolver.ObservationState.UNAVAILABLE),
-                Map.entry("observed backend", f -> f.backend = "ollama"),
+                Map.entry("observed backend", f -> f.backend = "unsupported"),
                 Map.entry("template match state", f -> f.templateMatch = LlamaCppProfileResolver.MatchState.UNVERIFIED),
                 Map.entry("observed text tools", f -> f.observedToolMode = LlamaCppProfileResolver.ToolMode.TEXT_TOOL_PROMPT),
                 Map.entry("template missing", f -> f.template = ""),

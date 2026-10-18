@@ -258,7 +258,7 @@ class TrustClaimsHonestyTest {
             String page = read(path);
             assertContainsNormalized(page, "Embeddings are disabled by default");
             assertContains(page, "`embed.allow_remote`");
-            assertContains(page, "`ollama.allow_remote`");
+            assertFalse(page.contains("Ollama"), path + " must not describe a removed backend");
             assertContainsNormalized(page, "Eligible indexed text and retrieval queries may then leave this machine");
             assertContainsNormalized(page, "even when chat remains local");
             assertFalse(page.contains("Vector retrieval requires a local embedding endpoint"));

@@ -95,7 +95,7 @@ public class DiagnoseCmd implements Runnable {
                 Embeddings embedClient = EmbeddingsFactory.forQuery(cfg);
                 try {
                     float[] probe = embedClient.embed("hello world");
-                    if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingsClient.isValidVector(probe)) {
+                    if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingVectors.isValidVector(probe)) {
                         System.out.println("  Status:    OK");
                         System.out.println("  Dimension: " + probe.length);
                     } else {

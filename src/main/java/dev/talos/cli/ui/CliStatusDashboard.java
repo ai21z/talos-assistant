@@ -152,8 +152,7 @@ public final class CliStatusDashboard {
     private static String engineState(EngineRuntimeConfig runtime) {
         String backend = runtime == null ? "unknown" : runtime.backend();
         if ("llama_cpp".equals(backend)) return "llama.cpp (managed)";
-        if ("ollama".equals(backend)) return "ollama";
-        return blankDefault(backend, "unknown");
+        return blankDefault(backend, "unknown") + " (not supported)";
     }
 
     private static String trustPolicy(String mode) {

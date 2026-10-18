@@ -12,18 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ModelsCommandTest {
 
     @Test
-    void renderInstalledModelsGroupsManagedLlamaCppBeforeLegacyOllama() {
+    void renderInstalledModelsGroupsManagedLlamaCppFirst() {
         String text = ModelsCommand.renderInstalledModels(List.of(
-                ModelRef.of("ollama", "gpt-oss:20b"),
                 ModelRef.of("llama_cpp", "qwen2.5-coder-14b"),
                 ModelRef.of("compat", "custom-chat")), List.of());
 
         int recommended = text.indexOf("Recommended managed llama.cpp");
         int llama = text.indexOf("llama_cpp/qwen2.5-coder-14b");
-        int legacy = text.indexOf("Legacy/optional Ollama");
-        int ollama = text.indexOf("ollama/gpt-oss:20b");
-        int other = text.indexOf("Other configured backends");
-        int compat = text.indexOf("compat/custom-chat");
 
         assertTrue(text.contains("Configured/selectable models"), text);
         assertTrue(text.contains("catalog accepted beta stability"), text);
@@ -32,10 +27,8 @@ class ModelsCommandTest {
         assertTrue(text.contains("verify with talos doctor --start"), text);
         assertTrue(recommended >= 0, text);
         assertTrue(llama > recommended, text);
-        assertTrue(legacy > llama, text);
-        assertTrue(ollama > legacy, text);
-        assertTrue(other > ollama, text);
-        assertTrue(compat > other, text);
+        assertFalse(text.contains("Ollama"), text);
+        assertFalse(text.contains("Other configured backends"), text);
         assertTrue(text.contains("/set model <backend/model>"), text);      // how to switch them
         assertTrue(text.contains("not selectable yet"), text);              // tier 2: downloaded-not-configured
         assertTrue(text.contains("talos setup models --profile <name> --write --force"), text);

@@ -8,8 +8,7 @@ import dev.talos.safety.ContentRestrictionScope;
 /**
  * A single message in a multi-turn conversation.
  *
- * <p>Used by the {@code /api/chat} endpoint (Ollama) and equivalent
- * chat APIs in other backends.
+ * <p>Used to build the chat request sent to the model engine.
  *
  * <p>Extended to support native tool calling:
  * <ul>
@@ -44,11 +43,11 @@ public record ChatMessage(
     }
 
     /**
-     * A native tool call as returned by Ollama's /api/chat endpoint.
+     * A native tool call as returned by the model engine.
      *
      * @param id        call id (e.g. "call_zvkvu00u")
      * @param name      function name (e.g. "talos.list_dir")
-     * @param arguments parsed argument map (Ollama returns object, not string)
+     * @param arguments parsed argument map
      */
     public record NativeToolCall(String id, String name, Map<String, Object> arguments) {}
 
@@ -77,7 +76,7 @@ public record ChatMessage(
     }
 
     /**
-     * Create a tool-result message (role="tool") for sending back to Ollama.
+     * Create a tool-result message (role="tool") for sending back to the model engine.
      *
      * @param toolCallId  the id from the original tool_call
      * @param resultContent  the tool execution output

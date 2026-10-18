@@ -466,7 +466,7 @@ class SessionCommandTest {
                 writer.save(new SessionData(id, ws.toString(), "", 1, createdAt,
                         List.of(new SessionData.Turn("user", user, ""),
                                 new SessionData.Turn("assistant", assistant, "ok")),
-                        "ollama/qwen2.5-coder:14b"));
+                        "llama_cpp/qwen2.5-coder-14b"));
             }
         }
 
@@ -494,7 +494,7 @@ class SessionCommandTest {
             String doc = java.nio.file.Files.readString(exported);
             assertTrue(doc.startsWith("# Talos session 20260611090000\n"), "newest session wins");
             assertTrue(doc.contains("- Session ID: " + wsId + "-20260611090000"));
-            assertTrue(doc.contains("- Model: ollama/qwen2.5-coder:14b"));
+            assertTrue(doc.contains("- Model: llama_cpp/qwen2.5-coder-14b"));
             assertTrue(doc.contains("- Exchanges: 1"));
             assertTrue(doc.contains("## Turn 1"));
             assertTrue(doc.contains("**User:**\n\nnewer question"));

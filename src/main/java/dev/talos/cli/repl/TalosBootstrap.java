@@ -943,12 +943,6 @@ public final class TalosBootstrap {
         }
         llm.put("model", modelName);
         cfg.data.put("llm", llm);
-
-        if ("ollama".equals(backend)) {
-            Map<String, Object> ollama = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("ollama")));
-            ollama.put("model", modelName);
-            cfg.data.put("ollama", ollama);
-        }
     }
 }
 

@@ -31,12 +31,12 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
     public float[] embed(String text) throws Exception {
         String key = Hash.sha1Hex(modelName + "\n" + text);
         float[] cached = db.getEmbedding(key);
-        if (EmbeddingsClient.isValidVector(cached)) {
+        if (EmbeddingVectors.isValidVector(cached)) {
             hits.incrementAndGet();
             return cached;
         }
         float[] vec = delegate.embed(text);
-        if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
+        if (vec != null && vec.length > 0 && EmbeddingVectors.isValidVector(vec)) {
             db.putEmbedding(key, vec.length, vec);
             misses.incrementAndGet();
         }
@@ -57,7 +57,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
             String key = Hash.sha1Hex(modelName + "\n" + text);
             float[] cached = db.getEmbedding(key);
 
-            if (EmbeddingsClient.isValidVector(cached)) {
+            if (EmbeddingVectors.isValidVector(cached)) {
                 results.add(cached);
                 hits.incrementAndGet();
             } else {
@@ -103,7 +103,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
                 .findFirst().map(vector -> vector.length).orElseGet(() ->
                         batchResults.get(0) == null ? 0 : batchResults.get(0).length);
         for (float[] vector : batchResults) {
-            if (!EmbeddingsClient.isValidVector(vector) || vector.length != expectedDimension) {
+            if (!EmbeddingVectors.isValidVector(vector) || vector.length != expectedDimension) {
                 throw new IllegalStateException("Invalid embedding batch vector or dimension");
             }
         }
@@ -116,7 +116,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
 
             results.set(originalIndex, vec);
 
-            if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
+            if (vec != null && vec.length > 0 && EmbeddingVectors.isValidVector(vec)) {
                 // Cache the new embedding
                 String key = Hash.sha1Hex(modelName + "\n" + text);
                 db.putEmbedding(key, vec.length, vec);

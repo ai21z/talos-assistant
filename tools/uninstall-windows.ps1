@@ -17,7 +17,7 @@
   Shortcut for -RemoveUserData.
 
 .PARAMETER RemoveUserData
-  Remove "$HOME\.talos" (indices, caches, config). Does not touch Ollama models.
+  Remove "$HOME\.talos" (indices, caches, config).
 
 .PARAMETER Quiet
   Suppress confirmation prompt.

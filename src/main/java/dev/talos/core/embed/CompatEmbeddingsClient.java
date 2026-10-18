@@ -123,7 +123,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
 
     @Override
     public float[] embed(String text) throws Exception {
-        List<float[]> vectors = embedInputs(List.of(EmbeddingsClient.normalizeEmbedInput(text)));
+        List<float[]> vectors = embedInputs(List.of(EmbeddingVectors.normalizeEmbedInput(text)));
         if (vectors.isEmpty()) throw new IllegalStateException("No embedding returned from compat provider");
         return vectors.get(0);
     }
@@ -131,7 +131,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
     @Override
     public List<float[]> embedBatch(List<String> texts) throws Exception {
         if (texts == null || texts.isEmpty()) return List.of();
-        return embedInputs(texts.stream().map(EmbeddingsClient::normalizeEmbedInput).toList());
+        return embedInputs(texts.stream().map(EmbeddingVectors::normalizeEmbedInput).toList());
     }
 
     @Override public int preferredBatchSize() { return 16; }
@@ -162,7 +162,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
         }
         int expectedDimension = dim == null ? vectors.get(0).length : dim;
         for (float[] vector : vectors) {
-            if (!EmbeddingsClient.isValidVector(vector) || vector.length != expectedDimension) {
+            if (!EmbeddingVectors.isValidVector(vector) || vector.length != expectedDimension) {
                 throw new IllegalStateException("Compat embedding provider returned an invalid vector");
             }
         }

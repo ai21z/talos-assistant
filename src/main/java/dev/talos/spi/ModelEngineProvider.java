@@ -3,7 +3,7 @@ package dev.talos.spi;
 import java.lang.reflect.InvocationTargetException;
 
 public interface ModelEngineProvider {
-    String id();                         // e.g., "ollama"
+    String id();                         // e.g., "llama_cpp"
 
     default ModelEngine create(EngineConfig cfg) {
         return invokeLegacyConfigMethod("create", cfg, ModelEngine.class);

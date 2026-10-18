@@ -231,12 +231,9 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         return cfg;
     }
 

@@ -241,9 +241,20 @@ public class Indexer {
             if (en instanceof Boolean b) vecEnabled = b;
         }
 
-        // Resolve embedding profile and build a document embedder (cached)
+        // Resolve embedding profile and build a document embedder (cached) only when
+        // vectors are on. A provider this build cannot construct, such as one left in
+        // an old config, falls back to BM25-only so keyword retrieval keeps working.
+        // A supported provider that fails to build still fails the index as before.
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        Embeddings rawEmb = documentEmbeddingsFactory.get();
+        Embeddings rawEmb = EmbeddingsFactory.disabled(profile);
+        if (vecEnabled && !EmbeddingsFactory.isSupportedProvider(profile.provider())) {
+            LOG.warn("Embedding provider {} is not supported; falling back to BM25-only.",
+                    SafeLogFormatter.value(profile.provider()));
+            vecEnabled = false;
+        }
+        if (vecEnabled) {
+            rawEmb = documentEmbeddingsFactory.get();
+        }
 
         try (CacheDb cache = cacheFactory.get();
              CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, profile.cacheNamespace())) {

@@ -20,7 +20,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugShowsRolefulTargets() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -47,7 +47,7 @@ class PromptDebugInspectorTargetRolesTest {
         int endOffset = startOffset + sourceText.length();
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -73,7 +73,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugPreservesAnAuthoritativeUnknownThreePartSpan() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -97,7 +97,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugPrefersAuthoritativeEffectiveContractRolesOverMessageReparse() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -130,7 +130,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugPreservesAuthoritativeEmptyRoleSetWithoutMessageReparse() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -152,7 +152,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugCannotReplaceCapturedContractWithSyntheticRetryText() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -225,7 +225,7 @@ class PromptDebugInspectorTargetRolesTest {
         for (java.util.Map<String, String> diagnostics : incomplete) {
             PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                     "CHAT_REQUEST",
-                    "ollama",
+                    "llama_cpp",
                     "gpt-oss:20b",
                     false,
                     Instant.parse("2026-05-31T00:00:00Z"),
@@ -269,7 +269,7 @@ class PromptDebugInspectorTargetRolesTest {
         assertTrue(authoritative.length() > 240);
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -299,7 +299,7 @@ class PromptDebugInspectorTargetRolesTest {
         assertTrue(oversized.length() > 4_096);
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -325,7 +325,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugDoesNotShowReadOnlyTargetHintsAsMustMutate() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),
@@ -348,7 +348,7 @@ class PromptDebugInspectorTargetRolesTest {
     void promptDebugShowsPreserveReasonForForbiddenTargets() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
                 "CHAT_REQUEST",
-                "ollama",
+                "llama_cpp",
                 "gpt-oss:20b",
                 false,
                 Instant.parse("2026-05-31T00:00:00Z"),

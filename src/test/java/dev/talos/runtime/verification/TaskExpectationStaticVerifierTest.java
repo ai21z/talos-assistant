@@ -111,7 +111,7 @@ class TaskExpectationStaticVerifierTest {
                 "2026-05-23T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
 

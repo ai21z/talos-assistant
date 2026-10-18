@@ -107,7 +107,7 @@ public record PromptDebugSnapshot(
             boolean stream,
             String providerBodyJson
     ) {
-        return from(request, stream, "OLLAMA_HTTP_BODY", providerBodyJson);
+        return from(request, stream, "COMPAT_CHAT_HTTP_BODY", providerBodyJson);
     }
 
     public static PromptDebugSnapshot fromProviderBody(

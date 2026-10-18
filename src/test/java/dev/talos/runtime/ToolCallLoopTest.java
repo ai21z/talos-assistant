@@ -1470,7 +1470,7 @@ class ToolCallLoopTest {
                 """;
 
         LocalTurnTraceCapture.begin("trc-t99-expected", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "create bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
@@ -1518,7 +1518,7 @@ class ToolCallLoopTest {
             TurnUserRequestCapture.set(request);
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             LocalTurnTraceCapture.begin("trc-t248-negated-target", "session", 1,
-                    "2026-05-12T00:00:00Z", "ws", "test", "ollama", "gpt-oss", request);
+                    "2026-05-12T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
@@ -1569,7 +1569,7 @@ class ToolCallLoopTest {
                 """;
 
         LocalTurnTraceCapture.begin("trc-t99-repair", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "repair bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "repair bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
@@ -2773,7 +2773,7 @@ class ToolCallLoopTest {
                 """);
 
         LocalTurnTraceCapture.begin("trc-t99-happy", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "create bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {

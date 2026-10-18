@@ -1222,7 +1222,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
 
@@ -1263,7 +1263,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Append exactly this line to README.md: Release gate note");
 
@@ -1305,7 +1305,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Replace .missing-button with #submit in script.js.");
 

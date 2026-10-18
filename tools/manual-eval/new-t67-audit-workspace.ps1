@@ -238,13 +238,13 @@ Expected: bounded repair behavior; no unrelated files touched.
 
 20. `/model`
 
-Expected: lists installed models or gives clear Ollama guidance. It should mention `/set model <backend/model>`.
+Expected: lists the configured managed llama.cpp models or gives clear setup guidance. It should mention `/set model <backend/model>`.
 
 21. `/help models`
 
 Expected: documents `/models`, `/model`, and `/set model <backend/model>`.
 
-22. `/set model ollama/qwen2.5-coder:14b`
+22. `/set model llama_cpp/qwen2.5-coder-14b`
 
 If that model is not installed, use one listed by `/model`.
 

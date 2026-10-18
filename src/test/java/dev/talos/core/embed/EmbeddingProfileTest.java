@@ -14,7 +14,7 @@ class EmbeddingProfileTest {
     @Test
     void bgeM3ProfileHasExpectedValues() {
         EmbeddingProfile p = EmbeddingProfile.BGE_M3;
-        assertEquals("ollama", p.provider());
+        assertEquals("llama_cpp", p.provider());
         assertEquals("bge-m3", p.model());
         assertEquals(1024, p.dimensions());
         assertFalse(p.instructionAware());
@@ -27,7 +27,7 @@ class EmbeddingProfileTest {
     @Test
     void qwen3ProfileHasExpectedValues() {
         EmbeddingProfile p = EmbeddingProfile.QWEN3_EMBED_8B;
-        assertEquals("ollama", p.provider());
+        assertEquals("llama_cpp", p.provider());
         assertEquals("Qwen/Qwen3-Embedding-8B", p.model());
         assertEquals(1024, p.dimensions());
         assertTrue(p.instructionAware());
@@ -51,36 +51,36 @@ class EmbeddingProfileTest {
 
     @Test
     void fingerprintDiffersWhenProviderDiffers() {
-        var a = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
+        var a = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, true);
         var b = new EmbeddingProfile("vllm", "model", 1024, false, null, null, 8192, true);
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
 
     @Test
     void fingerprintDiffersWhenModelDiffers() {
-        var a = new EmbeddingProfile("ollama", "bge-m3", 1024, false, null, null, 8192, true);
-        var b = new EmbeddingProfile("ollama", "other-model", 1024, false, null, null, 8192, true);
+        var a = new EmbeddingProfile("llama_cpp", "bge-m3", 1024, false, null, null, 8192, true);
+        var b = new EmbeddingProfile("llama_cpp", "other-model", 1024, false, null, null, 8192, true);
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
 
     @Test
     void fingerprintDiffersWhenDimensionsDiffer() {
-        var a = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
-        var b = new EmbeddingProfile("ollama", "model", 4096, false, null, null, 8192, true);
+        var a = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, true);
+        var b = new EmbeddingProfile("llama_cpp", "model", 4096, false, null, null, 8192, true);
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
 
     @Test
     void fingerprintDiffersWhenInstructionAwarenessDiffers() {
-        var a = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
-        var b = new EmbeddingProfile("ollama", "model", 1024, true, "instr", null, 8192, true);
+        var a = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, true);
+        var b = new EmbeddingProfile("llama_cpp", "model", 1024, true, "instr", null, 8192, true);
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
 
     @Test
     void fingerprintDiffersWhenNormalizationDiffers() {
-        var a = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
-        var b = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, false);
+        var a = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, true);
+        var b = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, false);
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
 
@@ -102,8 +102,8 @@ class EmbeddingProfileTest {
 
     @Test
     void fingerprintIncludesInstructionHashForInstructionAwareProfiles() {
-        var plain = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
-        var instr = new EmbeddingProfile("ollama", "model", 1024, true, "q: ", null, 8192, true);
+        var plain = new EmbeddingProfile("llama_cpp", "model", 1024, false, null, null, 8192, true);
+        var instr = new EmbeddingProfile("llama_cpp", "model", 1024, true, "q: ", null, 8192, true);
         // Instruction-aware fingerprint should have an extra segment (the hash)
         assertTrue(instr.fingerprint().split(":").length > plain.fingerprint().split(":").length,
                 "Instruction-aware fingerprint should include instruction hash segment");
@@ -112,7 +112,7 @@ class EmbeddingProfileTest {
     @Test
     void fingerprintEncodesAllKeyFields() {
         String f = EmbeddingProfile.BGE_M3.fingerprint();
-        assertTrue(f.contains("ollama"), "should contain provider");
+        assertTrue(f.contains("llama_cpp"), "should contain provider");
         assertTrue(f.contains("bge-m3"), "should contain model");
         assertTrue(f.contains("1024"), "should contain dimensions");
         assertTrue(f.contains("plain"), "should contain instruction mode");
@@ -174,7 +174,7 @@ class EmbeddingProfileTest {
     @Test
     void nullModelThrows() {
         assertThrows(NullPointerException.class, () ->
-                new EmbeddingProfile("ollama", null, 1024, false, null, null, 8192, true));
+                new EmbeddingProfile("llama_cpp", null, 1024, false, null, null, 8192, true));
     }
 }
 

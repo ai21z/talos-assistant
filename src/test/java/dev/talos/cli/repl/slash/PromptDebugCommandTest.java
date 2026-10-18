@@ -126,7 +126,7 @@ class PromptDebugCommandTest {
     void lastRendersPromptDiagnosticsAndExpectedTargetCoverage() throws Exception {
         PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
                 new ChatRequest(
-                        "ollama",
+                        "llama_cpp",
                         "qwen2.5-coder:14b",
                         "",
                         "",
@@ -151,8 +151,7 @@ class PromptDebugCommandTest {
 
         Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
         assertTrue(info.text.contains("# Talos Prompt Debug"), info.text);
-        assertTrue(info.text.contains("Stage: OLLAMA_HTTP_BODY"), info.text);
-        assertTrue(info.text.contains("Ollama merges system messages"), info.text);
+        assertTrue(info.text.contains("Stage: COMPAT_CHAT_HTTP_BODY"), info.text);
         assertTrue(info.text.contains("Tool choice: REQUIRED"), info.text);
         assertTrue(info.text.contains("Response format: JSON_OBJECT"), info.text);
         assertTrue(info.text.contains("Max output tokens: 512"), info.text);
@@ -628,8 +627,8 @@ class PromptDebugCommandTest {
                 ]}
                 """;
         return new PromptDebugSnapshot(
-                "OLLAMA_HTTP_BODY",
-                "ollama",
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 false,
                 null,

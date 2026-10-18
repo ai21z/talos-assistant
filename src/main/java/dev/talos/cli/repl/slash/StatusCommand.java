@@ -112,6 +112,9 @@ public final class StatusCommand implements Command {
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
         sb.append(AnsiColor.grey("  Model     ")).append(displayedModel).append("\n");
+        if (!EngineRuntimeConfig.MANAGED_BACKEND.equals(activeRuntime.backend())) {
+            sb.append(AnsiColor.grey("  Engine    ")).append(activeRuntime.backend()).append(" (not supported)\n");
+        }
         ModelIdentitySnapshot identity = "llama_cpp".equals(activeRuntime.backend()) && !unavailable
                 ? resolvedIdentity(ctx, cfg) : ModelIdentitySnapshot.empty();
         String modelFile = identity.available() ? identity.configuredModelFile() : activeRuntime.modelSourceLabel();
@@ -233,10 +236,6 @@ public final class StatusCommand implements Command {
         if (!configured.isBlank()) return configured;
         ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
         if (managed.enabled()) return managed.baseUrl();
-        if ("ollama".equals(runtime.embeddingProvider())) {
-            return Objects.toString(CfgUtil.map(cfg.data.get("ollama"))
-                    .getOrDefault("host", "http://127.0.0.1:11434"));
-        }
         return runtime.hostLabel();
     }
 

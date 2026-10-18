@@ -16,11 +16,11 @@ public class CacheDbSqlInjectionTest {
     void sqlInjectionProofKeys() {
         // Test various SQL injection attempts in keys
         String[] maliciousKeys = {
-            "ollama/bge-m3/abc';--",
-            "ollama/bge-m3/abc\";DROP TABLE embedding_cache;--",
-            "ollama/bge-m3/abc' OR '1'='1",
-            "ollama/bge-m3/abc\\\"; DELETE FROM embedding_cache; --",
-            "ollama/bge-m3/abc'; INSERT INTO embedding_cache VALUES ('evil', 1, 'data', 123); --"
+            "llama_cpp/bge-m3/abc';--",
+            "llama_cpp/bge-m3/abc\";DROP TABLE embedding_cache;--",
+            "llama_cpp/bge-m3/abc' OR '1'='1",
+            "llama_cpp/bge-m3/abc\\\"; DELETE FROM embedding_cache; --",
+            "llama_cpp/bge-m3/abc'; INSERT INTO embedding_cache VALUES ('evil', 1, 'data', 123); --"
         };
 
         Path dbPath = tempDir.resolve("test-cache.db");

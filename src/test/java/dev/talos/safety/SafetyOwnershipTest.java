@@ -15,12 +15,10 @@ class SafetyOwnershipTest {
     // sites were the in-tool sanitization debug lines, which moved (as
     // redacted trace events) to the runtime's pre-approval normalization.
     private static final List<String> SAFE_LOG_CALL_SITES = List.of(
-            "src/main/java/dev/talos/core/embed/EmbeddingsClient.java",
             "src/main/java/dev/talos/core/index/Indexer.java",
             "src/main/java/dev/talos/core/index/LuceneStore.java",
             "src/main/java/dev/talos/core/rag/RagService.java",
             "src/main/java/dev/talos/engine/compat/CompatChatClient.java",
-            "src/main/java/dev/talos/engine/ollama/OllamaChatClient.java",
             "src/main/java/dev/talos/tools/impl/ContentVerifier.java");
 
     @Test

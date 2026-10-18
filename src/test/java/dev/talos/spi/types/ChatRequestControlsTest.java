@@ -195,7 +195,7 @@ class ChatRequestControlsTest {
     @Test
     void chatRequestDefaultsControlsForExistingConstructorShape() {
         ChatRequest request = new ChatRequest(
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "sys",
                 "usr",

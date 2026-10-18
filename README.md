@@ -18,8 +18,7 @@ Talos is under active beta hardening. The current beta path focuses on bounded
 local workspace tasks, explicit user control, local model execution, and
 auditable outcomes.
 
-The preferred model backend for the current product path is managed
-`llama.cpp`. Ollama remains available as a legacy backend option.
+Talos runs one model backend, managed `llama.cpp`.
 
 ## User Documentation
 
@@ -117,7 +116,7 @@ Secret redaction is best-effort. It covers common key=value secret shapes, known
 
 Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
-Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
+Chat model endpoints are localhost-gated by default. A non-localhost `engines.llama_cpp.host` is rejected unless `engines.llama_cpp.allow_remote=true` is configured. When remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
 
 On Windows, the local secret-store master key is protected at rest with DPAPI CurrentUser and is tied to the Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect it. On non-Windows platforms, master-key custody remains unchanged and is not yet OS-backed. Treat the `~/.talos/secrets/` directory and your OS account as part of the trust boundary; use OS-level disk encryption.
 
@@ -284,8 +283,7 @@ search or a vector database. BM25 retrieval works without embeddings and is
 best for exact names, paths, identifiers, config keys, and obvious text
 matches. Vector retrieval requires an enabled embedding endpoint, which is
 localhost-gated by default. Embeddings are disabled by default. Remote embeddings
-require explicit opt-in through `embed.allow_remote` for the compat backend or
-`ollama.allow_remote` for legacy Ollama. Eligible indexed text and retrieval
+require explicit opt-in through `embed.allow_remote`. Eligible indexed text and retrieval
 queries may then leave this machine, even when chat remains local. The index
 remains local. When embeddings are disabled or fail, Talos falls back to
 BM25-only retrieval. Use direct file
@@ -489,7 +487,6 @@ talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe 
 ```
 
 Existing configs can be replaced with `--force`; Talos writes a backup first.
-Ollama can still be selected explicitly as a legacy backend when needed.
 On Linux, use the real path to the local `llama-server` binary instead of the
 Windows `.exe` example path.
 
@@ -662,7 +659,6 @@ Current practical setup:
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles
 - `talos setup wizard` for the Ubuntu/WSL guided setup lane
-- Ollama as an optional legacy backend
 
 Public install targets:
 

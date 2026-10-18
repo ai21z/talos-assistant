@@ -151,11 +151,6 @@ public final class PromptDebugInspector {
         appendModelIdentity(out, snapshot.diagnostics());
         appendContextLedger(out);
 
-        if ("OLLAMA_HTTP_BODY".equals(snapshot.stage())) {
-            out.append("> Provider shape: Ollama merges system messages into one top-level `system` field. ")
-                    .append("Internal message placement and provider HTTP shape are not identical.\n\n");
-        }
-
         out.append("## Structured Messages\n\n");
         Set<String> nativeToolCallIds = new HashSet<>();
         Set<String> protectedToolCallIds = new HashSet<>();

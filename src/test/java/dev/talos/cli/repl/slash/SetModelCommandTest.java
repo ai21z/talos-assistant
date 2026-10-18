@@ -28,9 +28,9 @@ class SetModelCommandTest {
 
     @Test
     void nonLlamaCppMissingModelKeepsGenericModelsHint() {
-        String text = SetModelCommand.modelNotFoundMessage("ollama/gpt-oss:20b");
+        String text = SetModelCommand.modelNotFoundMessage("unsupported/gpt-oss:20b");
 
-        assertTrue(text.contains("Model not found: ollama/gpt-oss:20b"), text);
+        assertTrue(text.contains("Model not found: unsupported/gpt-oss:20b"), text);
         assertTrue(text.contains("Tip: /models"), text);
         assertFalse(text.contains("configured/running GGUF"), text);
     }

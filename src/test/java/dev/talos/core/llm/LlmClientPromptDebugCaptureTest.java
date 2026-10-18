@@ -65,7 +65,7 @@ class LlmClientPromptDebugCaptureTest {
 
         var snapshot = PromptDebugCapture.latest().orElseThrow();
         assertEquals("CHAT_REQUEST", snapshot.stage());
-        assertEquals("ollama", snapshot.backend());
+        assertEquals("llama_cpp", snapshot.backend());
         assertEquals("qwen2.5-coder:14b", snapshot.model());
         assertEquals(false, snapshot.stream());
         assertEquals(List.of("talos.write_file"), snapshot.tools().stream().map(ToolSpec::name).toList());
@@ -220,7 +220,7 @@ class LlmClientPromptDebugCaptureTest {
         try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
             PromptDebugCapture.putTurnDiagnostic("first", "one");
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
-                    new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+                    new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
             assertEquals("one", PromptDebugCapture.latest().orElseThrow()
                     .diagnostics().get("first"));
         }
@@ -230,7 +230,7 @@ class LlmClientPromptDebugCaptureTest {
             assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
             PromptDebugCapture.putTurnDiagnostic("second", "two");
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
-                    new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+                    new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
             assertFalse(PromptDebugCapture.latest().orElseThrow().diagnostics()
                     .containsKey("first"));
             assertEquals("two", PromptDebugCapture.latest().orElseThrow()
@@ -242,7 +242,7 @@ class LlmClientPromptDebugCaptureTest {
             PromptDebugCapture.putTurnDiagnostic("outer", "retained");
         }
         PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
-                new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+                new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
         assertEquals("retained", PromptDebugCapture.latest().orElseThrow()
                 .diagnostics().get("outer"));
         PromptDebugCapture.endTurn();
@@ -273,12 +273,9 @@ class LlmClientPromptDebugCaptureTest {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         return cfg;
     }
 

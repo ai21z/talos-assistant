@@ -617,7 +617,7 @@ class AssistantTurnExecutorTest {
     void directTurnClearsStalePromptDebugCapture() {
         PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
                 new ChatRequest(
-                        "ollama",
+                        "llama_cpp",
                         "stale-model",
                         "",
                         "",

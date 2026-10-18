@@ -32,17 +32,6 @@ class ConfigViewTest {
             assertFalse(view.rag().vectors().enabled());
         }
     }
-    @Nested class OllamaAccessors {
-        @Test void host_returnsDefault() {
-            assertEquals("http://127.0.0.1:11434", view.ollama().host());
-        }
-        @Test void model_returnsNonBlank() {
-            assertFalse(view.ollama().model().isBlank());
-        }
-        @Test void embed_returnsDefault() {
-            assertEquals("bge-m3", view.ollama().embed());
-        }
-    }
     @Nested class LimitsAccessors {
         @Test void topKMax_returnsDefault() {
             assertEquals(100, view.limits().topKMax());

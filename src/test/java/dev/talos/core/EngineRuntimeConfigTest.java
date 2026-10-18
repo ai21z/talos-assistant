@@ -1,8 +1,6 @@
 package dev.talos.core;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,7 +19,7 @@ class EngineRuntimeConfigTest {
         assertEquals("llama_cpp", runtime.backend());
         assertEquals("talos-agent", runtime.model());
         assertEquals("llama_cpp/talos-agent", runtime.displayModel());
-        assertFalse(runtime.policyLabel().contains("Ollama"));
+        assertEquals("network on; local engine only (llama_cpp)", runtime.policyLabel());
     }
 
     @Test
@@ -52,24 +50,6 @@ class EngineRuntimeConfigTest {
     }
 
     @Test
-    void explicitOllamaSelectionStillUsesLegacyOllamaConfig() {
-        Config cfg = new Config(null);
-        cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));
-        cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
-                "host", "http://127.0.0.1:11434",
-                "model", "qwen2.5-coder:14b",
-                "allow_remote", false)));
-
-        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
-
-        assertEquals("ollama", runtime.backend());
-        assertEquals("qwen2.5-coder:14b", runtime.model());
-        assertEquals("ollama/qwen2.5-coder:14b", runtime.displayModel());
-        assertEquals("http://127.0.0.1:11434", runtime.hostLabel());
-        assertEquals("network on; local Ollama only", runtime.policyLabel());
-    }
-
-    @Test
     void embeddingSummaryReadsProviderAndModelFromEmbedBlock() {
         Config cfg = new Config(null);
         cfg.data.put("embed", new LinkedHashMap<>(Map.of(
@@ -90,26 +70,5 @@ class EngineRuntimeConfigTest {
         assertEquals("disabled", runtime.embeddingProvider());
         assertEquals("none", runtime.embeddingModel());
         assertEquals("disabled/none", runtime.embeddingLabel());
-    }
-
-    /**
-     * The status label states the remote Ollama decision with the same parser
-     * the Ollama provider uses, so it never says "local" while remote is allowed.
-     */
-    @ParameterizedTest(name = "allow_remote = {0}")
-    @ValueSource(strings = {"true", "yes", "on", "1", "false", "off", "maybe"})
-    void remoteOllamaLabelFollowsTheProviderParser(String allowRemote) {
-        Config cfg = new Config(null);
-        cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));
-        cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
-                "host", "http://10.0.0.5:11434",
-                "model", "qwen2.5-coder:14b",
-                "allow_remote", allowRemote)));
-
-        String label = EngineRuntimeConfig.from(cfg).policyLabel();
-
-        boolean providerAllowsRemote = cfg.view().ollama().allowRemote();
-        assertEquals(providerAllowsRemote ? "network on; remote Ollama allowed" : "network on; local Ollama only",
-                label);
     }
 }

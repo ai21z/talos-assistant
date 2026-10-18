@@ -100,11 +100,12 @@ public final class TalosBanner {
     static String startupHint(Config cfg) {
         try {
             EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
-            if ("llama_cpp".equals(runtime.backend())) {
-                LlamaCppPreflight.Report report = LlamaCppPreflight.check(cfg);
-                if (report.managed() && !report.filesOk()) {
-                    return "setup incomplete · run talos setup models or /help";
-                }
+            if (!EngineRuntimeConfig.MANAGED_BACKEND.equals(runtime.backend())) {
+                return "backend " + runtime.backend() + " is not supported · run talos setup models";
+            }
+            LlamaCppPreflight.Report report = LlamaCppPreflight.check(cfg);
+            if (report.managed() && !report.filesOk()) {
+                return "setup incomplete · run talos setup models or /help";
             }
         } catch (RuntimeException ignored) {
             return "setup incomplete · run talos status --verbose";

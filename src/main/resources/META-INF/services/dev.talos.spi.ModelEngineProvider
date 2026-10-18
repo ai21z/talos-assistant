@@ -1,3 +1,2 @@
 
-dev.talos.engine.ollama.OllamaEngineProvider
 dev.talos.engine.llamacpp.LlamaCppEngineProvider

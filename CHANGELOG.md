@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Talos runs one model backend, managed llama.cpp. The Ollama backend, its
+  embedding provider, its config section and environment variables, and the
+  `talos setup --install-ollama` and `--models` options are removed. A config or
+  model name that selects Ollama fails with a message that names the llama.cpp fix.
+
 - System instructions are combined into one leading message for the qualified
   GPT-OSS profile before its embedded Harmony template is applied. Conversation
   references, workspace content and native tool bindings retain their roles.

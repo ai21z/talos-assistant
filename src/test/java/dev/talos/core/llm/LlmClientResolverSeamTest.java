@@ -42,7 +42,7 @@ final class LlmClientResolverSeamTest {
         RecordingResolver resolver = new RecordingResolver();
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
-        assertEquals("ollama", resolver.selectedBackend);
+        assertEquals("llama_cpp", resolver.selectedBackend);
         assertEquals("qwen2.5-coder:14b", resolver.selectedModel);
 
         client.setModel("mock/custom-model");
@@ -993,12 +993,9 @@ final class LlmClientResolverSeamTest {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         if (timeoutMs != null) {
             LinkedHashMap<String, Object> limits = new LinkedHashMap<>();
             limits.put("llm_timeout_ms", timeoutMs);

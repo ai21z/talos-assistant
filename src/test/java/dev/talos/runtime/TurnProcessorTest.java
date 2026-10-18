@@ -1699,7 +1699,7 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
                 "2026-04-28T12:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 request);
 
@@ -1749,7 +1749,7 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
                 "2026-07-16T12:00:00Z",
                 "workspace-hash",
                 "agent",
-                "ollama",
+                "llama_cpp",
                 "test-model",
                 request);
 
@@ -1826,7 +1826,7 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
                 "2026-07-16T12:00:00Z",
                 "workspace-hash",
                 "agent",
-                "ollama",
+                "llama_cpp",
                 "test-model",
                 "write substituted.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit permit =

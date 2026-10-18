@@ -128,7 +128,7 @@ public final class AskMode implements Mode {
         // Build conversation history - AskMode uses a larger budget (55% vs 25%)
         // because there are no RAG snippets competing for context space.
         // This is critical for multi-turn creative tasks.
-        // Build structured conversation messages for /api/chat
+        // Build structured conversation messages for the chat request
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
                 ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
@@ -163,7 +163,7 @@ public final class AskMode implements Mode {
     }
 
     /**
-     * Builds a structured list of ChatMessages for the /api/chat endpoint.
+     * Builds a structured list of ChatMessages for the chat request.
      *
      * <p>Includes: system prompt → pre-built conversation history → current user message.
      * The caller is responsible for building history (and measuring its token cost)
