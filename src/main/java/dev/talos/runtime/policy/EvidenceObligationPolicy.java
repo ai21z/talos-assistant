@@ -50,6 +50,8 @@ public final class EvidenceObligationPolicy {
         var frame = dev.talos.runtime.observation.TurnRequestFrame.current();
         var admitted = frame == null ? null : frame.inventoryFor(contract);
         if (admitted != null) return forRequestedResults(admitted, EvidenceObligation.NONE);
+        // The session workspace is the only base. Without one, targets are judged by their protected names only.
+        Path base = workspace != null ? workspace : frame == null ? null : frame.workspace();
         var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
         if (comparison.comparisonOnly() || !comparison.unresolved().isEmpty())
             return EvidenceObligation.DOCUMENT_COMPARISON_REQUIRED;
@@ -66,10 +68,10 @@ public final class EvidenceObligationPolicy {
         if (hasUnsupportedDocumentTarget(contract, cfg)) {
             return EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
         }
-        if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, workspace)) {
+        if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, base)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
-        if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
+        if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, base)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
         if (hasReadOnlyPathExistenceObligation(contract)) {
@@ -146,7 +148,9 @@ public final class EvidenceObligationPolicy {
 
     private static boolean hasProtectedExpectedTarget(TaskContract contract, Path workspace) {
         for (String target : evidenceTargets(contract)) {
-            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
+            if (workspace == null
+                    ? ProtectedContentPolicy.looksProtectedPathString(target)
+                    : ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
                 return true;
             }
         }

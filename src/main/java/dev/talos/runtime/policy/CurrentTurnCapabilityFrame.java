@@ -55,7 +55,7 @@ public final class CurrentTurnCapabilityFrame {
                 EvidenceObligationPolicy.derive(
                         contract,
                         phase,
-                        java.nio.file.Path.of("").toAbsolutePath()),
+                        null),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 List.of(),

@@ -26,7 +26,8 @@ public final class SensitiveWorkspaceDetector {
     public record Assessment(boolean sensitive, List<String> signals, String warning) {}
 
     public static Assessment assess(Path workspace) {
-        Path root = workspace == null ? Path.of(".") : workspace.toAbsolutePath().normalize();
+        if (workspace == null) return new Assessment(false, List.of(), "");
+        Path root = workspace.toAbsolutePath().normalize();
         List<String> signals = new ArrayList<>();
 
         String folderName = root.getFileName() == null

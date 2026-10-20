@@ -154,7 +154,8 @@ public final class UnifiedAssistantMode implements Mode {
                         ActionObligationPolicy.derive(
                                 taskResolution,
                                 initialPhase),
-                        ctx.cfg());
+                        ctx.cfg(),
+                        workspace);
         CurrentTurnPromptInstructions.injectTaskContractInstruction(
                 messages,
                 promptPlan);

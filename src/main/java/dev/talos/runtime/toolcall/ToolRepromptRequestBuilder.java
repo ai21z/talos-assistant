@@ -124,7 +124,8 @@ final class ToolRepromptRequestBuilder {
                             ActionObligationPolicy.derive(
                                     resolution,
                                     phase),
-                            state.ctx == null ? null : state.ctx.cfg());
+                            state.ctx == null ? null : state.ctx.cfg(),
+                            state.workspace);
             List<ChatMessage> out =
                     new ArrayList<>(state.messages);
             ProviderPromptSurfaceReconciler.reconcile(

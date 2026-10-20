@@ -324,6 +324,24 @@ public record CurrentTurnPlan(
             ActionObligation actionObligation,
             Config cfg
     ) {
+        return createWithActionObligation(contract, phase, nativeTools, promptTools, blockedTools,
+                activeTaskContext, artifactGoal, verifierProfile, actionObligation, cfg, null);
+    }
+
+    /** The workspace is the session workspace, the base for workspace-sensitive evidence obligations. */
+    public static CurrentTurnPlan createWithActionObligation(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            ActionObligation actionObligation,
+            Config cfg,
+            Path workspace
+    ) {
         TaskContract safeContract =
                 contract == null ? TaskContract.unknown("") : contract;
         List<TaskExpectation> expectations =
@@ -341,7 +359,7 @@ public record CurrentTurnPlan(
                 EvidenceObligationPolicy.derive(
                         safeContract,
                         phase,
-                        Path.of("").toAbsolutePath(),
+                        workspace,
                         cfg).name(),
                 NOT_DERIVED,
                 activeTaskContext,
@@ -386,6 +404,24 @@ public record CurrentTurnPlan(
             ActionObligation actionObligation,
             Config cfg
     ) {
+        return createWithActionObligation(resolution, phase, nativeTools, promptTools, blockedTools,
+                activeTaskContext, artifactGoal, verifierProfile, actionObligation, cfg, null);
+    }
+
+    /** The workspace is the session workspace, the base for workspace-sensitive evidence obligations. */
+    public static CurrentTurnPlan createWithActionObligation(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            ActionObligation actionObligation,
+            Config cfg,
+            Path workspace
+    ) {
         TaskResolution safeResolution = resolution == null
                 ? TaskResolution.contractOnly(TaskContract.unknown(""))
                 : resolution;
@@ -403,7 +439,7 @@ public record CurrentTurnPlan(
                 EvidenceObligationPolicy.derive(
                         contract,
                         phase,
-                        Path.of("").toAbsolutePath(),
+                        workspace,
                         cfg).name(),
                 NOT_DERIVED,
                 activeTaskContext,
@@ -439,7 +475,7 @@ public record CurrentTurnPlan(
                 nativeTools,
                 promptTools,
                 blockedTools,
-                EvidenceObligationPolicy.derive(safeContract, phase, Path.of("").toAbsolutePath(), cfg).name(),
+                EvidenceObligationPolicy.derive(safeContract, phase, null, cfg).name(),
                 NOT_DERIVED,
                 activeTaskContext,
                 artifactGoal,

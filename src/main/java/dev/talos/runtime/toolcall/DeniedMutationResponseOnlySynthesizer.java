@@ -67,7 +67,8 @@ final class DeniedMutationResponseOnlySynthesizer {
                         CurrentTurnPlan.derivedVerifierProfile(
                                 resolution.contract()),
                         ActionObligation.NONE,
-                        state.ctx.cfg());
+                        state.ctx.cfg(),
+                        state.workspace);
         java.util.List<ChatMessage> requestMessages =
                 new java.util.ArrayList<>(state.messages);
         requestMessages.add(ChatMessage.system(

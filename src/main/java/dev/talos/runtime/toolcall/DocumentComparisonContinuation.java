@@ -145,7 +145,8 @@ final class DocumentComparisonContinuation {
                 CurrentTurnPlan.defaultPhaseFor(resolution.contract()),
                 authority == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE ? names : List.of(),
                 names, List.of(), CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NONE_OR_NOT_DERIVED,
-                CurrentTurnPlan.derivedVerifierProfile(resolution.contract()), ActionObligation.INSPECT_REQUIRED, state.ctx.cfg());
+                CurrentTurnPlan.derivedVerifierProfile(resolution.contract()), ActionObligation.INSPECT_REQUIRED, state.ctx.cfg(),
+                state.workspace);
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("You are Talos, a local-first workspace assistant. "
                 + "Finish the explicitly required ordered comparison using the available comparison tool. "

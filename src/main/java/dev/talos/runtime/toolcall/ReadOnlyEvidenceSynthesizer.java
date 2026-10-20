@@ -142,7 +142,7 @@ final class ReadOnlyEvidenceSynthesizer {
                 CurrentTurnPlan.defaultPhaseFor(resolution.contract()),
                 List.of(), List.of(), List.of(), CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.derivedVerifierProfile(resolution.contract()),
-                ActionObligation.NONE, state.ctx.cfg());
+                ActionObligation.NONE, state.ctx.cfg(), state.workspace);
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(finalization.proposalSelected()
                 ? "A bounded internal interpretation is being requested. The user-facing answer is produced by the runtime. "

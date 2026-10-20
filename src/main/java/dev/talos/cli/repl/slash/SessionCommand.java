@@ -116,7 +116,7 @@ public final class SessionCommand implements Command {
         boolean hasSaved = store.load(activeSessionId).isPresent();
         String info = "Workspace ID: " + workspaceId.substring(0, Math.min(8, workspaceId.length())) + "…\n"
                 + "Session ID:  " + displayId(activeSessionId) + '\n'
-                + "Workspace:   " + workspace.getFileName() + '\n'
+                + "Workspace:   " + dev.talos.cli.CliUtil.folderName(workspace) + '\n'
                 + "Turns:       " + turns + '\n'
                 + "Has sketch:  " + (sketch != null && !sketch.isBlank() ? "yes" : "no") + '\n'
                 + "Saved file:  " + (hasSaved ? "yes" : "no");

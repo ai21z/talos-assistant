@@ -165,7 +165,8 @@ final class ReadOnlyEvidenceContinuation {
                 authority == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE ? names : List.of(),
                 names, List.of(), CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.derivedVerifierProfile(resolution.contract()),
-                evidence.complete() ? ActionObligation.NONE : ActionObligation.INSPECT_REQUIRED, state.ctx.cfg());
+                evidence.complete() ? ActionObligation.NONE : ActionObligation.INSPECT_REQUIRED, state.ctx.cfg(),
+                state.workspace);
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(
                 "You are Talos, a local-first workspace assistant. This is bounded read-only source inspection. "

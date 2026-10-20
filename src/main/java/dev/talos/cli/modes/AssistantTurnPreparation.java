@@ -184,7 +184,8 @@ final class AssistantTurnPreparation {
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(
                 effectiveResolution,
                 turnContext,
-                activeDecision);
+                activeDecision,
+                workspace);
         recordPolicyTrace(
                 currentTurnPlan,
                 effectiveResolution,
@@ -258,7 +259,8 @@ final class AssistantTurnPreparation {
     private static CurrentTurnPlan buildCurrentTurnPlan(
             TaskResolution resolution,
             Context ctx,
-            ActiveTaskContextPolicy.Decision activeDecision
+            ActiveTaskContextPolicy.Decision activeDecision,
+            Path workspace
     ) {
         TaskContract taskContract = resolution == null
                 ? TaskContract.unknown("")
@@ -283,7 +285,8 @@ final class AssistantTurnPreparation {
                 artifactGoal,
                 CurrentTurnPlan.derivedVerifierProfile(taskContract),
                 ActionObligationPolicy.derive(resolution, phase),
-                ctx == null ? null : ctx.cfg());
+                ctx == null ? null : ctx.cfg(),
+                workspace);
     }
 
     private static List<String> defaultVisibleToolNames(

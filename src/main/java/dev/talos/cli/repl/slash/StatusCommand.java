@@ -129,7 +129,7 @@ public final class StatusCommand implements Command {
                         .append(row.value()).append("\n");
             }
         }
-        sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
+        sb.append(AnsiColor.grey("  Scope     ")).append(dev.talos.cli.CliUtil.folderName(workspace)).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
 
         sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");

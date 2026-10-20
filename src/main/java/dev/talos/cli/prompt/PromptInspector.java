@@ -473,7 +473,8 @@ public final class PromptInspector {
                         ActionObligationPolicy.derive(
                                 finalResolution,
                                 authoritativePhase),
-                        ctx == null ? null : ctx.cfg());
+                        ctx == null ? null : ctx.cfg(),
+                        workspace);
         return new PreviewTurn(
                 finalResolution,
                 authoritativePhase,
