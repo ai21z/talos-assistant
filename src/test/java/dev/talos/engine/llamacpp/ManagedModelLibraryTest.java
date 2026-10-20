@@ -64,7 +64,12 @@ class ManagedModelLibraryTest {
         assertEquals("127.0.0.1", block(selected).get("host"));
         assertEquals(8087, block(selected).get("port"));
         assertEquals("configured-server", block(selected).get("server_path"));
-        assertEquals(base.data(), library.configuration("PERSONAL").data());
+        EngineConfig restored = library.configuration("PERSONAL");
+        // The library binds the model by its real path, which differs from the configured one under an 8.3 alias.
+        Path personal = Path.of((String) block(base).get("model_path"));
+        assertEquals(personal.toRealPath().toString(), block(restored).get("model_path"));
+        block(base).put("model_path", block(restored).get("model_path"));
+        assertEquals(base.data(), restored.data());
     }
 
     @Test

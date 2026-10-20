@@ -22,6 +22,7 @@ import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,12 +37,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Failed answer generation is finalized independently of successful source inspection. */
 class RejectedProposalSynthesisIntegrationTest {
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
     private final List<LlmClient> clients = new ArrayList<>();
     private static final String REQUEST = "Please read README.md, index.html, script.js, scripts.js and notes.md. "
             + "Explain exactly why the Calculate button is broken. Identify the selector that should be used, "
             + "calculate the BMI for 72 kg and 1.8 m, and explain how script.js differs from scripts.js. "
             + "Do not edit files or claim tests were run.";
+
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
 
     @AfterEach void clear() {
         clients.forEach(LlmClient::close);

@@ -16,6 +16,7 @@ import dev.talos.spi.types.*;
 import dev.talos.tools.*;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -32,7 +33,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DocumentDerivedPrivacyTest {
     private static final String PROSE = "The ceramics workshop meets beside the old observatory on Thursday.";
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
+
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
 
     @AfterEach void clear() {
         TurnAuditCapture.end();

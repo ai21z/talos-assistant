@@ -342,10 +342,25 @@ class MicaOrdinaryWorkflowBoundaryTest {
     }
 
     @Test void relativeHomeSettingDoesNotMakeTheWorkspaceHome() throws Exception {
-        System.setProperty("user.home", Path.of("").toAbsolutePath().relativize(workspace).toString());
-        Run run = run("Which folder are we in?", new Gate(), "We are in the user folder.");
-        assertTrue(run.answer().contains("The current workspace folder is " + workspace.getFileName() + "."),
-                run.answer());
+        // A relative path exists only on the working directory's drive, and CI keeps temporary folders on another one.
+        Path local = Files.createDirectories(Path.of("build", "tmp").toAbsolutePath());
+        workspace = Files.createTempDirectory(local, "relative-home-workspace");
+        try {
+            System.setProperty("user.home", Path.of("").toAbsolutePath().relativize(workspace).toString());
+            Run run = run("Which folder are we in?", new Gate(), "We are in the user folder.");
+            assertTrue(run.answer().contains("The current workspace folder is " + workspace.getFileName() + "."),
+                    run.answer());
+        } finally {
+            deleteQuietly(workspace);
+        }
+    }
+
+    // Cleanup must not replace an assertion failure. A folder left in build/tmp is ignored by Git.
+    private static void deleteQuietly(Path root) {
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+        } catch (java.io.IOException | java.io.UncheckedIOException ignored) {
+        }
     }
 
     @Test void homeWorkspaceIsCalledTheHomeFolderInsteadOfTheUserName() throws Exception {

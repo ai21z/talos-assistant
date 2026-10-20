@@ -11,6 +11,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -23,9 +24,14 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DocumentComparisonToolTest {
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
     private final Config config = new Config(null);
     private final DocumentComparisonTool tool = new DocumentComparisonTool();
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
     @AfterEach void clear() {
         TurnAuditCapture.end();
         TurnTaskContractCapture.clear();

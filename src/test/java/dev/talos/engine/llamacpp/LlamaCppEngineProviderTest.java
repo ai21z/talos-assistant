@@ -294,7 +294,8 @@ class LlamaCppEngineProviderTest {
 
         private LlamaCppProfileResolver.ArtifactIdentity artifact() {
             return new LlamaCppProfileResolver.ArtifactIdentity(
-                    identityState, modelPath, expectedSize, actualSize, expectedHash, actualHash, "verified-record");
+                    identityState, RecordedArtifactPath.of(modelPath), expectedSize, actualSize,
+                    expectedHash, actualHash, "verified-record");
         }
 
         private LlamaCppProfileResolver.EngineFacts engineFacts() {
@@ -423,7 +424,7 @@ class LlamaCppEngineProviderTest {
                 java.nio.file.Files.createTempDirectory("talos-profile-service"),
                 (path, alias, expected, home, verify) -> new LlamaCppProfileResolver.ArtifactIdentity(
                         LlamaCppProfileResolver.ArtifactState.EXACT,
-                        path.toAbsolutePath().normalize().toString(),
+                        RecordedArtifactPath.of(path),
                         profile.artifactSizeBytes(),
                         profile.artifactSizeBytes(),
                         profile.artifactSha256(),
@@ -565,7 +566,7 @@ class LlamaCppEngineProviderTest {
             var profile = qualificationCandidate(alias, RequestMessageLayout.SINGLE_LEADING_SYSTEM);
             var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
                     LlamaCppProfileResolver.ArtifactState.EXACT,
-                    java.nio.file.Path.of(modelPath).toAbsolutePath().normalize().toString(),
+                    RecordedArtifactPath.of(modelPath),
                     profile.artifactSizeBytes(), profile.artifactSizeBytes(),
                     profile.artifactSha256(), profile.artifactSha256(), "candidate-record");
             var service = new LlamaCppResolvedProfileService(
@@ -656,7 +657,7 @@ class LlamaCppEngineProviderTest {
             LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
             var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
                     LlamaCppProfileResolver.ArtifactState.EXACT,
-                    model.toString(), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                    RecordedArtifactPath.of(model), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
                     profile.artifactSha256(), profile.artifactSha256(), "verified-record");
             var service = new LlamaCppResolvedProfileService(
                     llamaCfg,

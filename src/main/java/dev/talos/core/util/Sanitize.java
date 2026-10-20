@@ -11,6 +11,8 @@ public final class Sanitize {
     private Sanitize() {}
 
     private static final int MAX_PROJECTION_STABILIZATION_PASSES = 8;
+    // Counts projection regions examined on this thread, only while a test asks for it.
+    private static final ThreadLocal<long[]> PROJECTION_REGIONS_EXAMINED = new ThreadLocal<>();
 
     // ANSI escape sequences
     private static final Pattern ANSI = Pattern.compile("\u001B\\[[;\\d]*m");
@@ -1452,9 +1454,11 @@ public final class Sanitize {
         StringBuilder projected = new StringBuilder(
                 Math.max(0, endExclusive - startInclusive));
         int cursor = startInclusive;
+        long[] examined = PROJECTION_REGIONS_EXAMINED.get();
         for (int regionIndex = regionStartIndex;
                 regionIndex < regions.size();
                 regionIndex++) {
+            if (examined != null) examined[0]++;
             JsonOutputRegion region = regions.get(regionIndex);
             if (region.endExclusive() <= cursor) continue;
             if (region.startInclusive() >= endExclusive) break;
@@ -1473,6 +1477,23 @@ public final class Sanitize {
         projected.append(sanitizeLegacyOutputSegment(
                 source.substring(cursor, endExclusive)));
         return projected.toString();
+    }
+
+    /**
+     * Returns how many projection regions were examined while {@code action}
+     * ran on this thread. Complexity tests use the count instead of elapsed
+     * time, so they do not depend on machine speed. Counting does not change
+     * any result, and calls are not nested.
+     */
+    static long projectionRegionsExamined(Runnable action) {
+        long[] examined = new long[1];
+        PROJECTION_REGIONS_EXAMINED.set(examined);
+        try {
+            action.run();
+        } finally {
+            PROJECTION_REGIONS_EXAMINED.remove();
+        }
+        return examined[0];
     }
 
     private static java.util.List<String> recognizedXmlBlocks(String source) {

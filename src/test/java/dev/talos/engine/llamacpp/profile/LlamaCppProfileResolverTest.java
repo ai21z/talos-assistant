@@ -168,6 +168,23 @@ class LlamaCppProfileResolverTest {
     }
 
     @Test
+    void exactArtifactAtAnotherPathRefusesTheDeclaredProfile() {
+        var profile = qwen3();
+        var request = replaceArtifact(
+                exactRequest(profile),
+                new LlamaCppProfileResolver.ArtifactIdentity(
+                        ArtifactState.EXACT, "C:/models/other/Qwen3-8B-Q4_K_M.gguf",
+                        profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                        profile.artifactSha256(), profile.artifactSha256(), "verified-elsewhere"));
+
+        var resolved = LlamaCppProfileResolver.resolve(request);
+
+        assertEquals(ResolutionState.REFUSED, resolved.resolution());
+        assertEquals(ToolMode.CHAT_ONLY, resolved.effectiveToolMode());
+        assertTrue(resolved.reasons().contains(ReasonCode.ARTIFACT_PATH_MISMATCH), resolved.reasons().toString());
+    }
+
+    @Test
     void exactArtifactWithoutAVerificationIdentityIsNotQualified() {
         var profile = qwen3();
         var request = replaceArtifact(

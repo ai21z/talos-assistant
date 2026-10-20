@@ -16,6 +16,7 @@ import dev.talos.spi.types.*;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -33,8 +34,14 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Dispatch binding is exercised with real provider receipts and synthetic prior-read state. */
 class DocumentComparisonContinuationTest {
     private static final String REQUEST = "Compare a.txt and b.txt.";
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
     private final List<LlmClient> clients = new ArrayList<>();
+
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
 
     @AfterEach void clear() {
         clients.forEach(LlmClient::close);

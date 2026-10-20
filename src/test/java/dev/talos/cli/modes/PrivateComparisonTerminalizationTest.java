@@ -23,6 +23,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,9 +45,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real comparison production, finalization and persistence use a synthetic completed loop envelope. */
 class PrivateComparisonTerminalizationTest {
     private static final String PRIVATE_TEXT = "The ceramics workshop meets beside the old observatory on Thursday.";
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
 
     private enum Delivery { INTACT, TRUNCATED, REPLACED, BLANK }
+
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
 
     @AfterEach void clearCaptures() {
         TurnAuditCapture.end();

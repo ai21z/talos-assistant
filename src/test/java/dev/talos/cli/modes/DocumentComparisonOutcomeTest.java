@@ -15,6 +15,7 @@ import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.tools.*;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -29,9 +30,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real producer and final consumer are joined with a synthetic completed loop envelope. */
 class DocumentComparisonOutcomeTest {
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
     private Config config = new Config(null);
     private String request;
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
     @AfterEach void clear() {
         TurnAuditCapture.end();
         TurnTaskContractCapture.clear();

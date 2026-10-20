@@ -10,6 +10,7 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -40,8 +41,14 @@ import static dev.talos.core.diff.DocumentPairAdmission.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DocumentPairAdmissionTest {
-    @TempDir Path workspace;
+    @TempDir Path temporary;
+    Path workspace;
     private static final String PRIVATE_PROSE = "The blue orchard meeting was moved to Tuesday.";
+
+    @BeforeEach void useTheResolvedWorkspace() throws Exception {
+        // The launcher resolves the workspace before use, and a temporary folder can be an 8.3 alias.
+        workspace = temporary.toRealPath();
+    }
 
     @Test
     void defaultServiceReadsRealFilesWithoutAnInjectedAccess() throws Exception {
@@ -163,6 +170,7 @@ class DocumentPairAdmissionTest {
         var result = capture(access, config(false), denyLeft
                 ? pair("alias.txt", "ordinary.txt") : pair("ordinary.txt", "alias.txt"));
         assertEquals(Status.PATH_REJECTED, result.status());
+        assertEquals(denyLeft ? Operand.LEFT : Operand.RIGHT, result.operand());
         assertNull(result.pair());
         assertTrue(access.opened.isEmpty());
     }
@@ -178,6 +186,7 @@ class DocumentPairAdmissionTest {
         var result = capture(access, config(false), linkedLeft
                 ? pair("linked/inside.txt", "ordinary.txt") : pair("ordinary.txt", "linked/inside.txt"));
         assertEquals(Status.PATH_REJECTED, result.status());
+        assertEquals(linkedLeft ? Operand.LEFT : Operand.RIGHT, result.operand());
         assertTrue(access.opened.isEmpty());
     }
 
@@ -209,6 +218,7 @@ class DocumentPairAdmissionTest {
             var access = new TrackedAccess();
             var result = capture(access, cfg, aliasLeft ? pair(alias, "ordinary.txt") : pair("ordinary.txt", alias));
             assertEquals(Status.PATH_REJECTED, result.status());
+            assertEquals(aliasLeft ? Operand.LEFT : Operand.RIGHT, result.operand());
             assertNull(result.pair());
             assertTrue(access.opened.isEmpty());
         }
@@ -224,6 +234,7 @@ class DocumentPairAdmissionTest {
         var access = new TrackedAccess();
         var result = capture(access, config(false), pair("ordinary.txt", "reports./record.txt"));
         assertEquals(Status.PATH_REJECTED, result.status());
+        assertEquals(Operand.RIGHT, result.operand());
         assertEquals("NON_CANONICAL_SOURCE", result.detail());
         assertTrue(access.opened.isEmpty());
     }

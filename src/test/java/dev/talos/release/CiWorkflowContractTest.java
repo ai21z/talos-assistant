@@ -40,8 +40,9 @@ class CiWorkflowContractTest {
         assertEquals(1, timeoutMatches.size(),
                 "gradle-check must declare exactly one whole-job timeout");
         int timeoutMinutes = Integer.parseInt(timeoutMatches.get(0).group(1));
-        assertTrue(timeoutMinutes >= 90,
-                "gradle-check must reserve at least 90 minutes for its Windows validation sequence");
+        assertTrue(timeoutMinutes >= 180,
+                "gradle-check must reserve at least 180 minutes for its Windows validation sequence,"
+                        + " which includes the qualification E2E suites");
 
         int e2eStep = gradleJob.indexOf("run: .\\gradlew.bat e2eTest --no-daemon");
         int finalCheckStep = gradleJob.indexOf("run: .\\gradlew.bat check --no-daemon");

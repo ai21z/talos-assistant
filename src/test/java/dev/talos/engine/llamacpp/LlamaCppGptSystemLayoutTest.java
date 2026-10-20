@@ -112,7 +112,7 @@ class LlamaCppGptSystemLayoutTest {
             config.data.put("tools", Map.of("native_calling", true));
             LlamaCppConfig configured = LlamaCppConfig.from(config);
             var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
-                    LlamaCppProfileResolver.ArtifactState.EXACT, model.toString(),
+                    LlamaCppProfileResolver.ArtifactState.EXACT, RecordedArtifactPath.of(model),
                     profile.artifactSizeBytes(), profile.artifactSizeBytes(),
                     profile.artifactSha256(), profile.artifactSha256(), "synthetic-verification");
             var service = new LlamaCppResolvedProfileService(configured, home,

@@ -209,12 +209,18 @@ final class SanitizeExecutableToolFrameIdentityTest {
                     .append("\"}}\n```</tool_call>\n");
         }
         String input = source.toString();
+        String[] output = new String[1];
 
-        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
-                java.time.Duration.ofSeconds(3),
-                () -> assertEquals(
-                        input,
-                        Sanitize.sanitizeForOutputPreservingToolCalls(input)));
+        // The work count is machine independent. The generous limit only guards against a hang.
+        long examined = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(30),
+                () -> Sanitize.projectionRegionsExamined(
+                        () -> output[0] = Sanitize.sanitizeForOutputPreservingToolCalls(input)));
+
+        assertEquals(input, output[0]);
+        assertTrue(examined >= blockCount, "every block is projected, examined " + examined);
+        assertTrue(examined <= 8L * blockCount,
+                "projection must stay linear in the block count, examined " + examined);
     }
 
     @Test
