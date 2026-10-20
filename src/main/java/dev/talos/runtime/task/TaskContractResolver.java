@@ -29,13 +29,16 @@ import java.util.regex.Pattern;
 /** Deterministic resolver for Talos's minimal current-turn task contract. */
 public final class TaskContractResolver {
 
+    // An optional Windows drive is kept only when a path separator follows it.
+    private static final String DRIVE_PREFIX = "(?:[A-Za-z]:(?=[\\\\/]))?";
+
     private static final Pattern TARGET_FILE = Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:[A-Za-z0-9_.\\\\/-]+\\."
+            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
                     + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx|"
                     + "png|jpg|jpeg|gif|bmp|webp|tif|tiff|zip|tar|gz|tgz|7z|rar|"
                     + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
-                    + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
+                    + ")|(?:(?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
                     + "(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]]|"
                     + "\\.(?:$|\\s|\\u2028|\\u2029))");
     private static final Pattern INLINE_EXAMPLE_ARTIFACT_BEFORE = Pattern.compile(
@@ -110,7 +113,7 @@ public final class TaskContractResolver {
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
-                    + "((?:[A-Za-z0-9_.\\\\/-]+/)?"
+                    + "((?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+/)?"
                     + "(?:README|LICENSE|NOTICE|CHANGELOG|CONTRIBUTING|AUTHORS|Makefile|Dockerfile))"
                     + "`?(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]])");
 
@@ -128,7 +131,7 @@ public final class TaskContractResolver {
                     + "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
                     + "(?:directories|directory|dirs|dir|folders|folder))\\s+"
                     + "(?:(?:called|named|as)\\s+)?"
-                    + "`?([A-Za-z0-9_.\\\\/-]+(?:[\\\\/][A-Za-z0-9_.-]+)?)`?"
+                    + "`?(" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+(?:[\\\\/][A-Za-z0-9_.-]+)?)`?"
                     + "(?=$|\\s|[`'\"),;:!?\\]])");
 
     private static final Pattern BATCH_DESTINATION_OPERATION = Pattern.compile(
@@ -1168,7 +1171,7 @@ public final class TaskContractResolver {
         if (value == null || value.isBlank()) return false;
         if (isBarePathStopWord(value)) return false;
         if (value.contains(" ")) return false;
-        return value.matches("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
+        return value.matches("(?:[A-Za-z]:/)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
     }
 
     private static boolean isBarePathStopWord(String value) {
