@@ -685,4 +685,61 @@ class ProtectedReadAnswerGuardTest {
                 List.of(outcome),
                 Map.of(path, body));
     }
+
+    @Test
+    void deniedReadAfterAnApprovedReadOfTheSameFileIsNotReportedAsUnread(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.writeString(root.resolve(".env"), "MODE=local\n");
+        for (String deniedSpelling : List.of(".env", root.resolve(".env").toString())) {
+            String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                    "The file sets MODE.",
+                    loopResult(readOutcome("talos.read_file", ".env", "MODE=local"), deniedReadOutcome(deniedSpelling)),
+                    root);
+
+            assertFalse(answer.contains("Protected content was not read"), answer);
+            assertFalse(answer.contains("[Approval blocked: protected content was not read]"), answer);
+            assertTrue(answer.contains("approval was denied for one read of .env"), answer);
+            assertTrue(answer.contains("approved read"), answer);
+        }
+    }
+
+    @Test
+    void deniedReadOfAnotherProtectedFileIsStillReportedAsUnread(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                "The files set MODE.",
+                loopResult(deniedReadOutcome(".env.local")),
+                root);
+
+        assertTrue(answer.startsWith("[Approval blocked: protected content was not read]"), answer);
+        assertTrue(answer.contains("- .env.local: approval denied"), answer);
+    }
+
+    @Test
+    void aDenialOfOneProtectedFileDoesNotSayNothingWasReadAfterAnotherWasRead(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                "The files set MODE.",
+                loopResult(readOutcome("talos.read_file", ".env", "MODE=local"), deniedReadOutcome(".env.local")),
+                root);
+
+        assertFalse(answer.startsWith("[Approval blocked: protected content was not read]"), answer);
+        assertTrue(answer.contains("- .env.local: approval denied"), answer);
+        assertTrue(answer.contains("approved read"), answer);
+        assertFalse(answer.contains("The files set MODE."), answer);
+    }
+
+    @Test
+    void aDenialBeforeAnApprovedReadOfTheSameFileMakesNoOrderClaim(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                "The file sets MODE.",
+                loopResult(deniedReadOutcome(".env"), readOutcome("talos.read_file", ".env", "MODE=local")),
+                root);
+
+        assertFalse(answer.contains("later read"), answer);
+        assertFalse(answer.contains("earlier approved read"), answer);
+        assertTrue(answer.contains("approved read"), answer);
+    }
 }

@@ -23,8 +23,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import dev.talos.testsupport.CaseSensitiveFolders;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class TurnProcessorPermissionPolicyTest {
 
@@ -576,5 +582,64 @@ class TurnProcessorPermissionPolicyTest {
             executions.incrementAndGet();
             return ToolResult.ok("wrote");
         }
+    }
+
+    // Uses existing helpers: processor(Config, ApprovalGate, TalosTool) (:513),
+    // gateApproves(AtomicInteger) (:519), context(Path, Config) (:531),
+    // checkpointDisabledConfig() (:543), capture cleanup (:31-37).
+    // Modeled on T1196WorkspaceTailFailClosedTest:875-907.
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @Timeout(60)
+    void caseVariantInACaseSensitiveFolderIsOutsideTheExpectedTargetBeforeApproval(@TempDir Path temporary)
+            throws Exception {
+        Path workspace = temporary.toRealPath();
+        Path docs = Files.createDirectories(workspace.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.enable(docs), "case-sensitive folders cannot be made here");
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "the folder is not case-sensitive");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        TurnProcessor processor = processor(config, gateApproves(gateCalls), new FileWriteTool());
+        String request = "Update docs/notes.md.";
+        assertEquals(Set.of("docs/notes.md"), TaskContractResolver.fromUserRequest(request).expectedTargets());
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromUserRequest(request));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "docs/Notes.md", "content", "changed\n")),
+                context(workspace, config));
+
+        assertFalse(result.success(), "docs/Notes.md is another file in this folder");
+        assertEquals(ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED, result.error().reason());
+        assertEquals(0, gateCalls.get(), "no approval is requested for another file");
+        assertEquals("upper\n", Files.readString(docs.resolve("Notes.md")));
+        assertEquals("lower\n", Files.readString(docs.resolve("notes.md")));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void caseVariantOfAnExistingFileInAnOrdinaryFolderStillReachesApproval(@TempDir Path temporary)
+            throws Exception {
+        Path workspace = temporary.toRealPath();
+        Path docs = Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(docs.resolve("notes.md"), "lower\n");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        TurnProcessor processor = processor(config, gateApproves(gateCalls), new FileWriteTool());
+        String request = "Update docs/notes.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromUserRequest(request));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "docs/NOTES.md", "content", "changed\n")),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, gateCalls.get());
+        assertEquals("changed\n", Files.readString(docs.resolve("notes.md")));
     }
 }

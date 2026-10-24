@@ -280,7 +280,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
-                current, loopResult);
+                current, loopResult, workspace);
         boolean deniedProtectedRead = !Objects.equals(current, shaped);
         current = shaped;
 
@@ -297,7 +297,8 @@ record ExecutionOutcome(
                         contract,
                         safePlan.requestObligation(),
                         loopResult,
-                        extraMutationSuccesses);
+                        extraMutationSuccesses,
+                        workspace);
         boolean provisionalPartialMutation = provisionalMutationAssessment.partial();
 
         current = MutationFailureAnswerRenderer.discloseActionObligationBlockedAfterMutationIfNeeded(
@@ -336,7 +337,7 @@ record ExecutionOutcome(
         }
         CommandOutputTruthfulnessGuard.Result commandOutputTruthfulness =
                 CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
-                        current, safePlan, loopResult);
+                        current, safePlan, loopResult, workspace);
         boolean unsupportedCommandOutputClaim = commandOutputTruthfulness.unsupportedCommandOutputClaim();
         if (unsupportedCommandOutputClaim) {
             outputLimitRelevant = false;
@@ -497,7 +498,7 @@ record ExecutionOutcome(
         boolean usingEmbeddedVerification = embeddedEvidence.compatibilityResult().status()
                 != TaskVerificationStatus.NOT_RUN;
         TaskVerificationEvidence documentExtractionEvidence =
-                DocumentExtractionOutcomeVerifier.verifyWithEvidence(contract, loopResult);
+                DocumentExtractionOutcomeVerifier.verifyWithEvidence(contract, loopResult, workspace);
         boolean usingDocumentExtractionVerification = documentExtractionEvidence.compatibilityResult().status()
                 != TaskVerificationStatus.NOT_RUN;
         TaskVerificationEvidence taskVerificationEvidence = workspace != null && shouldVerifyPostApply(
@@ -547,7 +548,8 @@ record ExecutionOutcome(
                 safePlan.requestObligation(),
                 loopResult,
                 extraMutationSuccesses,
-                taskVerificationEvidence);
+                taskVerificationEvidence,
+                workspace);
         boolean partialMutation = mutationAssessment.partial();
         OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
                 contract,

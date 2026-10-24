@@ -5258,4 +5258,44 @@ class StaticTaskVerifierTest {
                     + unavailable.getClass().getSimpleName());
         }
     }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aWriteToAFileWhoseNameHoldsABackslashDoesNotSatisfyTheNestedTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "unchanged\n");
+        Path literal = Files.writeString(root.resolve("docs\\a.md"), "changed\n");
+        assumeTrue(root.equals(literal.getParent()), "this file system reads the backslash as a separator");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                root,
+                new TaskContract(TaskType.FILE_EDIT, true, true, true,
+                        Set.of("docs/a.md"), Set.of(), "Update docs/a.md."),
+                loopResult(List.of(successfulWrite(literal.toString(), VerificationStatus.PASS))),
+                0);
+
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("docs/a.md: expected target was not successfully mutated")),
+                result.problems().toString());
+    }
+
+    @Test
+    void aWriteThroughTheAbsolutePathSatisfiesTheNestedTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "changed\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                root,
+                new TaskContract(TaskType.FILE_EDIT, true, true, true,
+                        Set.of("docs/a.md"), Set.of(), "Update docs/a.md."),
+                loopResult(List.of(successfulWrite(
+                        root.resolve("docs").resolve("a.md").toString(), VerificationStatus.PASS))),
+                0);
+
+        assertTrue(result.problems().stream()
+                        .noneMatch(problem -> problem.contains("expected target was not successfully mutated")),
+                result.problems().toString());
+    }
 }

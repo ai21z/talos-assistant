@@ -126,17 +126,30 @@ public final class TerminalReadOnlyStopAnswer {
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return null;
         String target = contract.expectedTargets().iterator().next();
         String normalizedTarget = ToolCallSupport.normalizePath(target);
-        boolean targetRead = state.toolOutcomes.stream()
-                .anyMatch(toolOutcome -> "talos.read_file".equals(canonicalToolName(toolOutcome.toolName()))
-                        && toolOutcome.success()
-                        && normalizedTarget.equals(ToolCallSupport.normalizePath(toolOutcome.pathHint())));
+        boolean targetRead = TargetReadEvidence.successfullyRead(
+                target, null, state.toolOutcomes, state.workspace);
         if (!targetRead) {
             return missingReadTargetAnswer(state, target, normalizedTarget);
         }
         if (outcome.successesThisIteration() > 0 && outcome.failuresThisIteration() == 0) return null;
+        if (!latestSuccessfulReadNames(target, state.toolOutcomes, state.workspace)) return null;
         String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.read_file");
         if (body == null || body.isBlank()) return null;
         return "Read " + target + ":\n" + body;
+    }
+
+    /** The latest read body is only the target's body when the latest successful read named the target. */
+    static boolean latestSuccessfulReadNames(
+            String target,
+            List<dev.talos.runtime.ToolCallLoop.ToolOutcome> outcomes,
+            java.nio.file.Path workspace
+    ) {
+        for (int i = outcomes.size() - 1; i >= 0; i--) {
+            dev.talos.runtime.ToolCallLoop.ToolOutcome outcome = outcomes.get(i);
+            if (outcome == null || !outcome.success() || outcome.denied() || !TargetReadEvidence.isRead(outcome)) continue;
+            return TargetReadEvidence.names(target, outcome.pathHint(), workspace);
+        }
+        return false;
     }
 
     private static String missingReadTargetAnswer(
@@ -144,12 +157,13 @@ public final class TerminalReadOnlyStopAnswer {
             String target,
             String normalizedTarget
     ) {
+        if (state == null) return null;
         if (state == null || normalizedTarget == null || normalizedTarget.isBlank()) return null;
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             var outcome = state.toolOutcomes.get(i);
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (outcome.success()) continue;
-            if (!normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) continue;
+            if (!TargetReadEvidence.names(target, outcome.pathHint(), state.workspace)) continue;
             String message = outcome.errorMessage() == null ? "" : outcome.errorMessage().strip();
             if (message.isBlank()) {
                 message = "read_file failed for " + target + ".";
@@ -201,7 +215,8 @@ public final class TerminalReadOnlyStopAnswer {
                 .sorted()
                 .toList();
         if (targets.size() < 2) return null;
-        if (!state.pathsReadThisTurn.containsAll(targets)) {
+        if (!targets.stream().allMatch(target -> TargetReadEvidence.successfullyRead(
+                target, state.pathsReadThisTurn, state.toolOutcomes, state.workspace))) {
             return null;
         }
 

@@ -34,6 +34,14 @@ public final class DocumentExtractionOutcomeVerifier {
             TaskContract contract,
             ToolCallLoop.LoopResult loopResult
     ) {
+        return verifyWithEvidence(contract, loopResult, null);
+    }
+
+    public static TaskVerificationEvidence verifyWithEvidence(
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
+    ) {
         CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
         if (profile.verifierProfile() != VerifierProfile.DOCUMENT_EXTRACTION) {
             return TaskVerificationEvidence.notRun("Document extraction verification was not applicable.");
@@ -48,7 +56,7 @@ public final class DocumentExtractionOutcomeVerifier {
         List<String> problems = new ArrayList<>();
         List<String> limitations = new ArrayList<>();
         for (String target : targets) {
-            ToolCallLoop.ToolOutcome outcome = latestReadOutcome(loopResult, target).orElse(null);
+            ToolCallLoop.ToolOutcome outcome = latestReadOutcome(loopResult, target, workspace).orElse(null);
             if (outcome == null) continue;
             VerifierResult result = verifierResult(target, outcome);
             verifierResults.add(result);
@@ -203,7 +211,8 @@ public final class DocumentExtractionOutcomeVerifier {
 
     private static Optional<ToolCallLoop.ToolOutcome> latestReadOutcome(
             ToolCallLoop.LoopResult loopResult,
-            String target
+            String target,
+            Path workspace
     ) {
         String normalizedTarget = normalizePath(target);
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -211,7 +220,8 @@ public final class DocumentExtractionOutcomeVerifier {
             ToolCallLoop.ToolOutcome outcome = outcomes.get(i);
             if (outcome == null) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (normalizePath(outcome.pathHint()).equals(normalizedTarget)) {
+            if (normalizePath(outcome.pathHint()).equals(normalizedTarget)
+                    || dev.talos.tools.WorkspacePathIdentity.matches(workspace, target, outcome.pathHint())) {
                 return Optional.of(outcome);
             }
         }

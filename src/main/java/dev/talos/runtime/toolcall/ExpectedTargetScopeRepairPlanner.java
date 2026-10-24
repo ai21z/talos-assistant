@@ -179,15 +179,19 @@ final class ExpectedTargetScopeRepairPlanner {
                 : contract.expectedTargets();
         if (expectedTargets == null || expectedTargets.isEmpty()) return List.of();
         Set<String> successfullyMutated = new java.util.HashSet<>();
+        List<String> mutatedPaths = new java.util.ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            addSatisfiedExpectedTargetKeys(successfullyMutated, outcome);
+            ExpectedTargetProgressAccounting.addExactMutationKeys(successfullyMutated, outcome);
+            mutatedPaths.addAll(ExpectedTargetProgressAccounting.mutatedPaths(outcome));
         }
         return expectedTargets.stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())
                 .distinct()
-                .filter(path -> !successfullyMutated.contains(normalizeExpectedTargetKey(path)))
+                .filter(path -> !successfullyMutated.contains(path))
+                .filter(path -> !ExpectedTargetProgressAccounting.mutatedUnderAnotherSpelling(
+                        state.workspace, path, mutatedPaths))
                 .sorted()
                 .toList();
     }
@@ -413,35 +417,6 @@ final class ExpectedTargetScopeRepairPlanner {
         }
         return readback.substring(0, COMPACT_READBACK_REPAIR_MAX_CHARS)
                 + "\n... [readback truncated for compact old-string repair]";
-    }
-
-    private static void addSatisfiedExpectedTargetKeys(
-            Set<String> satisfiedTargets,
-            ToolCallLoop.ToolOutcome outcome
-    ) {
-        if (satisfiedTargets == null || outcome == null) return;
-        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
-        if (plan != null && !plan.pathEffects().isEmpty()) {
-            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
-                addExpectedTargetPathKeys(satisfiedTargets, effect.path());
-            }
-            return;
-        }
-        addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
-    }
-
-    private static void addExpectedTargetPathKeys(Set<String> satisfiedTargets, String path) {
-        String normalized = normalizeExpectedTargetKey(path);
-        if (normalized.isBlank()) return;
-        satisfiedTargets.add(normalized);
-        int slash = normalized.lastIndexOf('/');
-        if (slash >= 0 && slash + 1 < normalized.length()) {
-            satisfiedTargets.add(normalized.substring(slash + 1));
-        }
-    }
-
-    private static String normalizeExpectedTargetKey(String path) {
-        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static List<ToolSpec> filterTools(List<ToolSpec> specs, List<String> allowedNames) {

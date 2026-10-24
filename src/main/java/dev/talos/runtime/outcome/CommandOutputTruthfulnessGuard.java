@@ -67,6 +67,16 @@ public final class CommandOutputTruthfulnessGuard {
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult
     ) {
+        return withholdUnsupportedCommandOutputIfNeeded(answer, plan, loopResult, null);
+    }
+
+    /** The workspace lets a claimed file match a read of the same file under another spelling. */
+    public static Result withholdUnsupportedCommandOutputIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            java.nio.file.Path workspace
+    ) {
         if (shouldWithholdUnsupportedCommandApprovalDenial(answer, plan, loopResult)) {
             return new Result(
                     UNSUPPORTED_COMMAND_APPROVAL_DENIAL_REPLACEMENT,
@@ -74,7 +84,7 @@ public final class CommandOutputTruthfulnessGuard {
                     "command-approval-denial",
                     "talos.run_command denial");
         }
-        UnsupportedOutputClaim unsupported = unsupportedOutputClaim(answer, plan, loopResult);
+        UnsupportedOutputClaim unsupported = unsupportedOutputClaim(answer, plan, loopResult, workspace);
         if (unsupported == null) {
             return new Result(answer, false);
         }
@@ -86,13 +96,14 @@ public final class CommandOutputTruthfulnessGuard {
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult
     ) {
-        return unsupportedOutputClaim(answer, plan, loopResult) != null;
+        return unsupportedOutputClaim(answer, plan, loopResult, null) != null;
     }
 
     private static UnsupportedOutputClaim unsupportedOutputClaim(
             String answer,
             CurrentTurnPlan plan,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            java.nio.file.Path workspace
     ) {
         if (answer == null || answer.isBlank()) return null;
         boolean honestCommandUnavailable = honestlyReportsCommandUnavailable(answer);
@@ -105,7 +116,7 @@ public final class CommandOutputTruthfulnessGuard {
                         UNSUPPORTED_COMMAND_OUTPUT_REPLACEMENT);
             }
         }
-        if (!hasSuccessfulReadForClaimedFile(answer, loopResult)
+        if (!hasSuccessfulReadForClaimedFile(answer, loopResult, workspace)
                 && looksLikeFileContentClaim(answer)) {
             return new UnsupportedOutputClaim(
                     "file-content",
@@ -238,15 +249,33 @@ public final class CommandOutputTruthfulnessGuard {
 
     private static boolean hasSuccessfulReadForClaimedFile(
             String answer,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            java.nio.file.Path workspace
     ) {
         Set<String> claimedPaths = fileContentClaimPaths(answer);
         if (claimedPaths.isEmpty()) return false;
         Set<String> readPaths = successfulReadFilePaths(loopResult);
         for (String claimed : claimedPaths) {
-            if (!readPaths.contains(canonicalPath(claimed))) return false;
+            if (!readPaths.contains(canonicalPath(claimed))
+                    && !readUnderAnotherSpelling(claimed, loopResult, workspace)) {
+                return false;
+            }
         }
         return true;
+    }
+
+    private static boolean readUnderAnotherSpelling(
+            String claimed,
+            ToolCallLoop.LoopResult loopResult,
+            java.nio.file.Path workspace
+    ) {
+        if (workspace == null || loopResult == null || loopResult.toolOutcomes() == null) return false;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.success()) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, claimed, outcome.pathHint())) return true;
+        }
+        return false;
     }
 
     private static Set<String> fileContentClaimPaths(String answer) {

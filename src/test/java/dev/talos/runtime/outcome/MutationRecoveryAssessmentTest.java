@@ -1704,4 +1704,143 @@ class MutationRecoveryAssessmentTest {
                         == MutationRecoveryAssessment.Decision
                                 .RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN));
     }
+
+    // Uses existing helpers: F17_REQUEST (:35), @TempDir workspace (:42),
+    // verifiedPostApply(Path, TaskContract, RequestObligation, LoopResult, String, String) (:1426),
+    // failedEdit(String, ToolFailureReason) (:1450, id call-1-1),
+    // successfulEdit(String, String, String, String) (:1573), loopResult(List) (:1673).
+    // No new imports are needed.
+
+    private static final String F17_AFTER = "Status: final\nKeep this line unchanged.\n";
+
+    @Test
+    void failedEditUnderTheAbsoluteSpellingIsRecoveredByAVerifiedRelativeRepairWithTheWorkspace()
+            throws Exception {
+        Path root = workspace.toRealPath();
+        TaskContract contract = TaskContractResolver.fromUserRequest(F17_REQUEST);
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        assertEquals(RequestObligation.DerivationStatus.COMPLETE, obligation.derivationStatus());
+        assertEquals(RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST, obligation.actionKind());
+        ToolCallLoop.ToolOutcome failure = failedEdit(
+                root.resolve("notes.md").toString(),
+                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
+        ToolCallLoop.ToolOutcome repair = successfulEdit("notes.md", "draft", "final", "call-1-2");
+        ToolCallLoop.LoopResult loop = loopResult(List.of(failure, repair));
+        TaskVerificationEvidence evidence =
+                verifiedPostApply(root, contract, obligation, loop, "notes.md", F17_AFTER);
+
+        MutationRecoveryAssessment withWorkspace =
+                MutationRecoveryAssessment.assess(contract, obligation, loop, 0, evidence, root);
+        MutationRecoveryAssessment textOnly =
+                MutationRecoveryAssessment.assess(contract, obligation, loop, 0, evidence);
+
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, withWorkspace.mutationOutcome().status());
+        assertTrue(withWorkspace.mutationOutcome().failed().isEmpty());
+        MutationRecoveryAssessment.FailureAssessment recovery =
+                withWorkspace.failureAssessments().getFirst();
+        assertEquals(MutationRecoveryAssessment.Decision.RECOVERED_MATCHED_OBLIGATION, recovery.decision());
+        assertEquals("call-1-1", recovery.failureToolCallId());
+        assertEquals("call-1-2", recovery.repairToolCallId());
+        assertEquals(List.of("call-1-2"), recovery.coveredToolCallIds());
+
+        assertEquals(MutationOutcomeStatus.PARTIAL, textOnly.mutationOutcome().status());
+        assertEquals(
+                MutationRecoveryAssessment.Decision.TARGET_MISMATCH,
+                textOnly.failureAssessments().getFirst().decision());
+    }
+
+    @Test
+    void verifiedRepairUnderTheAbsoluteSpellingRecoversTheFailedEditWithTheWorkspace() throws Exception {
+        Path root = workspace.toRealPath();
+        TaskContract contract = TaskContractResolver.fromUserRequest(F17_REQUEST);
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        String absolute = root.resolve("notes.md").toString();
+
+        for (String failurePath : List.of(absolute, "notes.md")) {
+            ToolCallLoop.ToolOutcome failure =
+                    failedEdit(failurePath, ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
+            ToolCallLoop.ToolOutcome repair = successfulEdit(absolute, "draft", "final", "call-1-2");
+            ToolCallLoop.LoopResult loop = loopResult(List.of(failure, repair));
+            TaskVerificationEvidence evidence =
+                    verifiedPostApply(root, contract, obligation, loop, "notes.md", F17_AFTER);
+
+            MutationRecoveryAssessment withWorkspace =
+                    MutationRecoveryAssessment.assess(contract, obligation, loop, 0, evidence, root);
+            MutationRecoveryAssessment textOnly =
+                    MutationRecoveryAssessment.assess(contract, obligation, loop, 0, evidence);
+
+            assertEquals(MutationOutcomeStatus.SUCCEEDED, withWorkspace.mutationOutcome().status(), failurePath);
+            assertEquals(
+                    MutationRecoveryAssessment.Decision.RECOVERED_MATCHED_OBLIGATION,
+                    withWorkspace.failureAssessments().getFirst().decision(),
+                    failurePath);
+            assertEquals(List.of("call-1-2"),
+                    withWorkspace.failureAssessments().getFirst().coveredToolCallIds(), failurePath);
+            assertEquals(MutationOutcomeStatus.PARTIAL, textOnly.mutationOutcome().status(), failurePath);
+            assertFalse(textOnly.failureAssessments().getFirst().recovered(), failurePath);
+        }
+    }
+
+    @Test
+    void verifiedReceiptCannotRecoverTheTargetThroughASiblingWrittenUnderAnAbsolutePath()
+            throws Exception {
+        Path root = workspace.toRealPath();
+        TaskContract contract = TaskContractResolver.fromUserRequest(F17_REQUEST);
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        ToolCallLoop.ToolOutcome failure = failedEdit(
+                root.resolve("notes.md").toString(),
+                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
+        TaskVerificationEvidence evidence = verifiedPostApply(
+                root, contract, obligation,
+                loopResult(List.of(failure, successfulEdit("notes.md", "draft", "final", "call-1-2"))),
+                "notes.md", F17_AFTER);
+        Files.createDirectories(root.resolve("other"));
+
+        for (Path sibling : List.of(root.resolve("other").resolve("notes.md"), root.resolve("notes.md.bak"))) {
+            Files.writeString(sibling, F17_AFTER);
+            MutationRecoveryAssessment assessment = MutationRecoveryAssessment.assess(
+                    contract, obligation,
+                    loopResult(List.of(failure, successfulEdit(sibling.toString(), "draft", "final", "call-1-2"))),
+                    0, evidence, root);
+
+            assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status(), sibling.toString());
+            assertFalse(assessment.failureAssessments().getFirst().recovered(), sibling.toString());
+            assertEquals(
+                    MutationRecoveryAssessment.Decision.NO_LATER_STRUCTURED_REPAIR,
+                    assessment.failureAssessments().getFirst().decision(),
+                    sibling.toString());
+        }
+    }
+
+    @Test
+    void provisionalAssessmentIsTheSameForBothSpellingsWithTheWorkspace() throws Exception {
+        Path root = workspace.toRealPath();
+        TaskContract contract = TaskContractResolver.fromUserRequest(F17_REQUEST);
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        String absolute = root.resolve("notes.md").toString();
+        ToolCallLoop.LoopResult relativeLoop = loopResult(List.of(
+                failedEdit("notes.md", ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND),
+                successfulEdit("notes.md", "draft", "final", "call-1-2")));
+        ToolCallLoop.LoopResult absoluteLoop = loopResult(List.of(
+                failedEdit(absolute, ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND),
+                successfulEdit(absolute, "draft", "final", "call-1-2")));
+
+        MutationRecoveryAssessment relative =
+                MutationRecoveryAssessment.provisional(contract, obligation, relativeLoop, 0, root);
+        MutationRecoveryAssessment absoluteSpelling =
+                MutationRecoveryAssessment.provisional(contract, obligation, absoluteLoop, 0, root);
+        MutationRecoveryAssessment textOnly =
+                MutationRecoveryAssessment.provisional(contract, obligation, absoluteLoop, 0);
+
+        assertEquals(
+                MutationRecoveryAssessment.Decision.VERIFICATION_NOT_AUTHORITATIVE,
+                relative.failureAssessments().getFirst().decision());
+        assertEquals(
+                relative.failureAssessments().getFirst().decision(),
+                absoluteSpelling.failureAssessments().getFirst().decision());
+        assertEquals(relative.mutationOutcome().status(), absoluteSpelling.mutationOutcome().status());
+        assertEquals(
+                MutationRecoveryAssessment.Decision.TARGET_MISMATCH,
+                textOnly.failureAssessments().getFirst().decision());
+    }
 }

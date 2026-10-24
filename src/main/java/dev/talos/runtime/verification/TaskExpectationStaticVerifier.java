@@ -13,6 +13,7 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.obligation.RequestObligation;
 import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -137,7 +138,7 @@ final class TaskExpectationStaticVerifier {
                 appendSectionRequired,
                 appendStatementRequired,
                 bulletCountRequired,
-                coversAllSuccessfulMutations(verifiedTargets, successfulMutations),
+                coversAllSuccessfulMutations(root, verifiedTargets, successfulMutations),
                 facts,
                 problems);
     }
@@ -165,6 +166,7 @@ final class TaskExpectationStaticVerifier {
                     false,
                     recordExpectationTrace);
             return completeObligationResult(
+                    root,
                     obligation,
                     false,
                     null,
@@ -180,6 +182,7 @@ final class TaskExpectationStaticVerifier {
             case APPEND_STATEMENT -> {
                 TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence evidence =
                         TaskExpectationMutationEvidenceVerifier.collectAppendStatementMutationEvidence(
+                                root,
                                 target.pathHint(),
                                 output.label(),
                                 output.statement(),
@@ -193,6 +196,7 @@ final class TaskExpectationStaticVerifier {
             case APPEND_SECTION -> {
                 TaskExpectationMutationEvidenceVerifier.FinalStateEvidence evidence =
                         TaskExpectationMutationEvidenceVerifier.collectAppendSectionFinalStateEvidence(
+                                root,
                                 target.pathHint(),
                                 output.label(),
                                 output.statement(),
@@ -212,6 +216,7 @@ final class TaskExpectationStaticVerifier {
                         true);
                 TaskExpectationMutationEvidenceVerifier.FinalStateEvidence evidence =
                         TaskExpectationMutationEvidenceVerifier.collectReplacementFinalStateEvidence(
+                                root,
                                 replacement,
                                 target.pathHint(),
                                 target.content(),
@@ -268,6 +273,7 @@ final class TaskExpectationStaticVerifier {
                     problems);
         }
         return completeObligationResult(
+                root,
                 obligation,
                 passed,
                 finalState,
@@ -278,6 +284,7 @@ final class TaskExpectationStaticVerifier {
     }
 
     private static Result completeObligationResult(
+            Path root,
             RequestObligation obligation,
             boolean passed,
             RequestObligationFinalStateVerifier.Result finalState,
@@ -287,6 +294,7 @@ final class TaskExpectationStaticVerifier {
             List<String> problems
     ) {
         boolean coversAllMutations = coversAllSuccessfulMutations(
+                root,
                 verifiedTargets,
                 successfulMutations);
         if (passed && !coversAllMutations) {
@@ -298,7 +306,8 @@ final class TaskExpectationStaticVerifier {
                         obligation,
                         finalState,
                         verifiedTargets,
-                        successfulMutations);
+                        successfulMutations,
+                        root);
         RequestObligation.ActionKind actionKind = obligation.actionKind();
         return new Result(
                 true,
@@ -452,6 +461,7 @@ final class TaskExpectationStaticVerifier {
     }
 
     private static boolean coversAllSuccessfulMutations(
+            Path root,
             Set<String> verifiedTargets,
             List<ToolCallLoop.ToolOutcome> successfulMutations
     ) {
@@ -459,12 +469,17 @@ final class TaskExpectationStaticVerifier {
                 || successfulMutations == null || successfulMutations.isEmpty()) {
             return false;
         }
-        Set<String> mutationTargets = new LinkedHashSet<>();
+        boolean mutatedAny = false;
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             String target = normalizePath(outcome.pathHint());
-            if (!target.isBlank()) mutationTargets.add(target);
+            if (target.isBlank()) continue;
+            mutatedAny = true;
+            if (verifiedTargets.contains(target)) continue;
+            boolean sameFile = verifiedTargets.stream()
+                    .anyMatch(verified -> WorkspacePathIdentity.matches(root, verified, outcome.pathHint()));
+            if (!sameFile) return false;
         }
-        return !mutationTargets.isEmpty() && verifiedTargets.containsAll(mutationTargets);
+        return mutatedAny;
     }
 
     private static String normalizePath(String path) {
@@ -553,6 +568,7 @@ final class TaskExpectationStaticVerifier {
         boolean matched = !oldPresent && newPresent;
         if (matched && expectation.preserveRest()) {
             matched = TaskExpectationMutationEvidenceVerifier.verifyReplacementPreservation(
+                    root,
                     expectation,
                     pathHint,
                     successfulMutations,
@@ -610,6 +626,7 @@ final class TaskExpectationStaticVerifier {
         boolean postStateMatched = matchingLines == 1 && expectedLine.equals(finalLine);
         boolean appendOnlyEvidenceSatisfied = postStateMatched
                 && TaskExpectationMutationEvidenceVerifier.verifyAppendLineMutationEvidence(
+                        root,
                         pathHint,
                         expectedLine,
                         successfulMutations,
@@ -659,6 +676,7 @@ final class TaskExpectationStaticVerifier {
         AppendSectionObservation observation = observeAppendedSection(
                 target.content(), expectation.sectionName(), expectation.expectedSentence());
         boolean evidencePassed = TaskExpectationMutationEvidenceVerifier.verifyAppendSectionMutationEvidence(
+                root,
                 pathHint,
                 expectation.sectionName(),
                 expectation.expectedSentence(),
@@ -763,6 +781,7 @@ final class TaskExpectationStaticVerifier {
                 && AppendStatementMatcher.matches(finalLine, expectation.label(), expectation.statement());
         boolean evidencePassed = postStateMatched
                 && TaskExpectationMutationEvidenceVerifier.verifyAppendStatementMutationEvidence(
+                        root,
                         pathHint,
                         expectation.label(),
                         expectation.statement(),

@@ -2205,17 +2205,17 @@ public final class TurnProcessor {
                     ? forbiddenLexical.normalize()
                     : root.resolve(forbiddenLexical).normalize();
             if (candidatePath == null
-                    || !lexicallyWithin(root, candidatePath)
-                    || !lexicallyWithin(root, forbiddenPath)) {
+                    || !WorkspacePathIdentity.lexicallyWithin(root, candidatePath)
+                    || !WorkspacePathIdentity.lexicallyWithin(root, forbiddenPath)) {
                 return false;
             }
-            PathIdentity identity = guardedPathIdentity(
+            WorkspacePathIdentity.Identity identity = WorkspacePathIdentity.guardedIdentity(
                     root,
                     candidatePath,
                     forbiddenPath);
-            return identity == PathIdentity.SAME
-                    || identity == PathIdentity.UNPROVEN
-                    || identity == PathIdentity.REJECTED;
+            return identity == WorkspacePathIdentity.Identity.SAME
+                    || identity == WorkspacePathIdentity.Identity.UNPROVEN
+                    || identity == WorkspacePathIdentity.Identity.REJECTED;
         } catch (RuntimeException rejected) {
             return false;
         }
@@ -2243,23 +2243,23 @@ public final class TurnProcessor {
                     ? expectedLexical.normalize()
                     : root.resolve(expectedLexical).normalize();
             if (candidatePath == null
-                    || !lexicallyWithin(root, candidatePath)
-                    || !lexicallyWithin(root, expectedPath)) {
+                    || !WorkspacePathIdentity.lexicallyWithin(root, candidatePath)
+                    || !WorkspacePathIdentity.lexicallyWithin(root, expectedPath)) {
                 return false;
             }
-            if (guardedPathIdentity(root, candidatePath, expectedPath)
-                    == PathIdentity.SAME) {
+            if (WorkspacePathIdentity.provenIdentity(root, candidatePath, expectedPath)
+                    == WorkspacePathIdentity.Identity.SAME) {
                 return true;
             }
             if (!isMkdirTool(toolName)) return false;
 
             Path expectedParent = expectedPath.getParent();
             while (expectedParent != null
-                    && lexicallyWithin(root, expectedParent)
-                    && guardedPathIdentity(root, expectedParent, root)
-                            != PathIdentity.SAME) {
-                if (guardedPathIdentity(root, candidatePath, expectedParent)
-                        == PathIdentity.SAME) {
+                    && WorkspacePathIdentity.lexicallyWithin(root, expectedParent)
+                    && WorkspacePathIdentity.guardedIdentity(root, expectedParent, root)
+                            != WorkspacePathIdentity.Identity.SAME) {
+                if (WorkspacePathIdentity.provenIdentity(root, candidatePath, expectedParent)
+                        == WorkspacePathIdentity.Identity.SAME) {
                     return true;
                 }
                 expectedParent = expectedParent.getParent();
@@ -2268,91 +2268,6 @@ public final class TurnProcessor {
         } catch (RuntimeException ignored) {
             return false;
         }
-    }
-
-    private static PathIdentity guardedPathIdentity(
-            Path root,
-            Path first,
-            Path second
-    ) {
-        Path a = first.toAbsolutePath().normalize();
-        Path b = second.toAbsolutePath().normalize();
-        boolean sameLexicalShape = a.toString().equals(b.toString())
-                || isWindowsPathPlatform()
-                        && samePathShapeIgnoringCase(a, b);
-        if (!sameLexicalShape) {
-            return PathIdentity.DISTINCT;
-        }
-        try {
-            NoFollowPathPolicy.GuardedRoot guardedRoot =
-                    NoFollowPathPolicy.bindExistingDirectory(root);
-            NoFollowPathPolicy.EntryType firstType = guardedRoot.inspect(first);
-            NoFollowPathPolicy.EntryType secondType = guardedRoot.inspect(second);
-            if (a.toString().equals(b.toString())) return PathIdentity.SAME;
-            if (firstType == NoFollowPathPolicy.EntryType.MISSING
-                    || secondType == NoFollowPathPolicy.EntryType.MISSING) {
-                return PathIdentity.UNPROVEN;
-            }
-            return Files.isSameFile(a, b)
-                    ? PathIdentity.SAME
-                    : PathIdentity.DISTINCT;
-        } catch (java.io.IOException | RuntimeException identityFailure) {
-            return PathIdentity.REJECTED;
-        }
-    }
-
-    private enum PathIdentity {
-        SAME,
-        DISTINCT,
-        UNPROVEN,
-        REJECTED
-    }
-
-    private static boolean lexicallyWithin(Path root, Path candidate) {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Path normalizedCandidate = candidate.toAbsolutePath().normalize();
-        if (normalizedCandidate.startsWith(normalizedRoot)) return true;
-        if (!isWindowsPathPlatform()
-                || normalizedCandidate.getNameCount() < normalizedRoot.getNameCount()
-                || !sameRootIgnoringCase(normalizedCandidate, normalizedRoot)) {
-            return false;
-        }
-        for (int index = 0; index < normalizedRoot.getNameCount(); index++) {
-            if (!normalizedCandidate.getName(index).toString().equalsIgnoreCase(
-                    normalizedRoot.getName(index).toString())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean samePathShapeIgnoringCase(Path first, Path second) {
-        if (first.getNameCount() != second.getNameCount()
-                || !sameRootIgnoringCase(first, second)) {
-            return false;
-        }
-        for (int index = 0; index < first.getNameCount(); index++) {
-            if (!first.getName(index).toString().equalsIgnoreCase(
-                    second.getName(index).toString())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean sameRootIgnoringCase(Path first, Path second) {
-        Path firstRoot = first.getRoot();
-        Path secondRoot = second.getRoot();
-        if (firstRoot == null || secondRoot == null) {
-            return firstRoot == null && secondRoot == null;
-        }
-        return firstRoot.toString().equalsIgnoreCase(secondRoot.toString());
-    }
-
-    private static boolean isWindowsPathPlatform() {
-        return System.getProperty("os.name", "")
-                .toLowerCase(java.util.Locale.ROOT)
-                .contains("win");
     }
 
     private static List<String> orderedExpectedTargets(TaskContract taskContract) {

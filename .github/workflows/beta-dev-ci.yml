@@ -131,3 +131,17 @@ jobs:
 
       - name: Run command portability tests
         run: ./gradlew test --tests "dev.talos.runtime.command.*" --no-daemon
+
+      - name: Run workspace path identity tests
+        run: |
+          ./gradlew test \
+            --tests "dev.talos.tools.WorkspacePathIdentityTest" \
+            --tests "dev.talos.runtime.policy.EvidenceObligationVerifierTest" \
+            --tests "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest" \
+            --tests "dev.talos.runtime.toolcall.PendingActionObligationBreachGuardTest" \
+            --tests "dev.talos.runtime.toolcall.SourceDerivedEvidenceGuardTest" \
+            --tests "dev.talos.runtime.toolcall.StaticWebRewriteGroundingGuardTest" \
+            --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" \
+            --tests "dev.talos.runtime.verification.TargetScopeStaticVerifierTest" \
+            --tests "dev.talos.cli.modes.EvidencePathIdentityTurnTest" \
+            --no-daemon

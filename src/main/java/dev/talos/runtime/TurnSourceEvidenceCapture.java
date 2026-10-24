@@ -15,11 +15,13 @@ import java.util.Set;
  */
 public final class TurnSourceEvidenceCapture {
     private static final ThreadLocal<Set<String>> HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<Set<String>> RECORDED = new ThreadLocal<>();
 
     private TurnSourceEvidenceCapture() {}
 
     public static void begin() {
         HOLDER.set(new LinkedHashSet<>());
+        RECORDED.set(new LinkedHashSet<>());
     }
 
     public static void recordRead(String path) {
@@ -30,6 +32,8 @@ public final class TurnSourceEvidenceCapture {
             return;
         }
         paths.add(normalized);
+        Set<String> recorded = RECORDED.get();
+        if (recorded != null) recorded.add(path);
     }
 
     public static Set<String> readPaths() {
@@ -37,8 +41,15 @@ public final class TurnSourceEvidenceCapture {
         return paths == null ? Set.of() : Set.copyOf(paths);
     }
 
+    /** The read paths as recorded, for identity, since a normalized path can name another file on POSIX. */
+    public static Set<String> recordedReadPaths() {
+        Set<String> paths = RECORDED.get();
+        return paths == null ? Set.of() : Set.copyOf(paths);
+    }
+
     public static void clear() {
         HOLDER.remove();
+        RECORDED.remove();
     }
 
     private static String normalize(String path) {

@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.io.TempDir;
+import java.io.IOException;
+import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -85,5 +88,65 @@ class StaticRepairTargetProgressAccountingTest {
                 false,
                 "summary",
                 "");
+    }
+
+    @Test
+    void fullRewriteTargetRewrittenUnderItsAbsoluteSpellingIsNotRemaining(@TempDir Path temporary)
+            throws IOException {
+        Path root = workspaceWith(temporary,
+                "web/styles.css", "web/index.html", "web/scripts.js", "archive/index.html");
+        LoopState state = stateWithRepairContextAt(root, "web/styles.css, web/index.html, web/scripts.js");
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("web").resolve("styles.css").toString(), true, true));
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("archive").resolve("index.html").toString(), true, true));
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("web").resolve("scripts.js").toString(), false, true));
+
+        assertEquals(
+                List.of("web/index.html", "web/scripts.js"),
+                StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state));
+    }
+
+    @Test
+    void runtimeRequiredTargetRewrittenUnderItsAbsoluteSpellingIsNotRemaining(@TempDir Path temporary)
+            throws IOException {
+        Path root = workspaceWith(temporary, "web/scripts.js", "web/index.html", "old/scripts.js");
+        LoopState state = stateAt(root);
+        state.staticWebFullRewriteRequiredTargets.add("web/scripts.js");
+        state.staticWebFullRewriteRequiredTargets.add("web/index.html");
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("web").resolve("scripts.js").toString(), true, true));
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("old").resolve("scripts.js").toString(), true, true));
+
+        assertEquals(
+                List.of("web/index.html"),
+                StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state));
+    }
+
+    private static Path workspaceWith(Path temporary, String... files) throws IOException {
+        Path root = temporary.toRealPath();
+        for (String file : files) {
+            Path path = root.resolve(file);
+            Files.createDirectories(path.getParent());
+            Files.writeString(path, file + "\n");
+        }
+        return root;
+    }
+
+    private static LoopState stateWithRepairContextAt(Path root, String targets) {
+        LoopState state = stateAt(root);
+        state.messages.add(ChatMessage.system("""
+                [Static verification repair context]
+                Previous static verification problems:
+                - Static verification failed.
+                Full-file replacement targets: %s
+                """.formatted(targets)));
+        return state;
+    }
+
+    private static LoopState stateAt(Path root) {
+        return new LoopState("", List.of(), new ArrayList<>(), root, null, null, 10, 0);
     }
 }

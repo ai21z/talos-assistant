@@ -307,7 +307,7 @@ public final class LoopState {
         }
         if (calls == null || calls.isEmpty()) return false;
         PendingActionObligationBreachGuard.Decision decision =
-                PendingActionObligationBreachGuard.assess(pendingActionObligation, calls);
+                PendingActionObligationBreachGuard.assess(pendingActionObligation, calls, workspace);
         if (!decision.breach() || decision.deferToPolicy()) {
             return false;
         }
@@ -323,7 +323,7 @@ public final class LoopState {
     }
 
     public boolean failStaticRepairAfterInvalidWriteContent(List<ToolCall> calls) {
-        var failure = StaticRepairWriteContentGuard.evaluate(messages, calls);
+        var failure = StaticRepairWriteContentGuard.evaluate(messages, calls, workspace);
         if (failure.isEmpty()) return false;
 
         StaticRepairWriteContentGuard.Failure detail = failure.get();
@@ -339,7 +339,7 @@ public final class LoopState {
     }
 
     public boolean failStaticSelectorRepairAfterInvalidWriteContent(List<ToolCall> calls) {
-        var failure = StaticSelectorRepairWriteGuard.evaluate(messages, calls);
+        var failure = StaticSelectorRepairWriteGuard.evaluate(messages, calls, workspace);
         if (failure.isEmpty()) return false;
 
         StaticSelectorRepairWriteGuard.Failure detail = failure.get();

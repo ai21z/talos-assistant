@@ -32,14 +32,15 @@ final class EditFilePreApprovalGuard {
     ) {
         if (call == null || strict || !"talos.edit_file".equals(call.canonicalToolName())) return null;
         String normalizedPath = normalizePath(pathHint);
-        if (fullRewriteRepairTargets != null && fullRewriteRepairTargets.contains(normalizedPath)) {
+        java.nio.file.Path workspace = state == null ? null : state.workspace;
+        if (namesMember(fullRewriteRepairTargets, normalizedPath, pathHint, workspace)) {
             // The redirect set merges static-web repair targets and T1003
             // invalid-edit recovery targets; the blocked-edit reason must
             // name the actual mechanism because it is rendered verbatim in
             // the terminal answer.
             boolean editRecoveryTarget = state != null
-                    && state.editRecoveryFullRewriteTargets.contains(normalizedPath)
-                    && !state.staticWebFullRewriteRequiredTargets.contains(normalizedPath);
+                    && namesMember(state.editRecoveryFullRewriteTargets, normalizedPath, pathHint, workspace)
+                    && !namesMember(state.staticWebFullRewriteRequiredTargets, normalizedPath, pathHint, workspace);
             return new Decision(
                     Kind.FULL_REWRITE_REPAIR_REQUIRED,
                     editRecoveryTarget
@@ -49,7 +50,7 @@ final class EditFilePreApprovalGuard {
                     false,
                     "");
         }
-        if (staleRereadRequiredAtStart != null && staleRereadRequiredAtStart.contains(normalizedPath)) {
+        if (namesMember(staleRereadRequiredAtStart, normalizedPath, pathHint, workspace)) {
             return new Decision(
                     Kind.STALE_REREAD_REQUIRED,
                     staleEditRereadRequiredDiagnostic(pathHint),
@@ -142,6 +143,25 @@ final class EditFilePreApprovalGuard {
                 + target + ". This talos.edit_file call was not executed, no approval was requested, "
                 + "and no file was changed. Use talos.write_file with the full corrected file content "
                 + "for this small web file.";
+    }
+
+    /**
+     * The path is in a set of recorded paths by text, or names the same workspace file as a member. The members
+     * are normalized, so identity is used only where that spelling is lossless.
+     */
+    private static boolean namesMember(
+            Set<String> members,
+            String normalizedPath,
+            String pathHint,
+            java.nio.file.Path workspace
+    ) {
+        if (members == null || members.isEmpty()) return false;
+        if (members.contains(normalizedPath)) return true;
+        if (workspace == null || !dev.talos.tools.WorkspacePathIdentity.normalizedSpellingIsLossless()) return false;
+        for (String member : members) {
+            if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, member, pathHint)) return true;
+        }
+        return false;
     }
 
     private static String normalizePath(String pathHint) {

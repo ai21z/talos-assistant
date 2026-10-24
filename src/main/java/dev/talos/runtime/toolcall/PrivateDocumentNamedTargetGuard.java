@@ -8,9 +8,11 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -38,7 +40,7 @@ final class PrivateDocumentNamedTargetGuard {
         Set<String> allowedTargets = normalizedTargets(contract);
         if (allowedTargets.isEmpty()) return null;
         String requested = normalizeRequested(workspace, requestedPath, pathHint);
-        if (allowedTargets.contains(requested)) return null;
+        if (allowedTargets.contains(requested) || namesRequestedTarget(contract, workspace, pathHint)) return null;
         if (!PrivacyConfigFacts.privateMode(ctx.cfg())
                 && !looksPrivateOrSensitiveDocumentPath(workspace, requestedPath, requested)) {
             return null;
@@ -49,6 +51,15 @@ final class PrivateDocumentNamedTargetGuard {
                         + "` because it is outside the current requested private document target set: "
                         + renderAllowedTargets(allowedTargets)
                         + ". Ask for this document explicitly in the current turn before reading it.");
+    }
+
+    private static boolean namesRequestedTarget(TaskContract contract, Path workspace, String pathHint) {
+        for (Set<String> targets : List.of(contract.expectedTargets(), contract.sourceEvidenceTargets())) {
+            for (String target : targets) {
+                if (WorkspacePathIdentity.matches(workspace, target, pathHint)) return true;
+            }
+        }
+        return false;
     }
 
     private static Set<String> normalizedTargets(TaskContract contract) {

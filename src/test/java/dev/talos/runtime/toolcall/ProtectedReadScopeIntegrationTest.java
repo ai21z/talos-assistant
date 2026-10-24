@@ -901,4 +901,37 @@ class ProtectedReadScopeIntegrationTest {
             }
         }
     }
+
+    @Test
+    void private_mode_absolute_named_document_target_allows_that_document_under_its_relative_spelling() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        writePdf(root.resolve("docs").resolve("private-report.pdf"), "Named PDF fact");
+        String target = root.resolve("docs").resolve("private-report.pdf").toString().replace('\\', '/');
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
+                .sandbox(new Sandbox(root, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        TurnTaskContractCapture.set(readOnlyContract("Summarize " + target + ".", Set.of(target), Set.of()));
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize " + target + "."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/private-report.pdf\"}}",
+                messages, root, ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("outside the current requested private document target set"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertEquals(1, result.readPaths().size(), result.readPaths().toString());
+    }
 }

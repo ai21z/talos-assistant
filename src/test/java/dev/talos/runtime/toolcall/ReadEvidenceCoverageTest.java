@@ -22,6 +22,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.EvidenceObligation;
+import dev.talos.runtime.policy.EvidenceObligationAssessment;
+import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.tools.ToolError;
+import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -312,5 +319,79 @@ class ReadEvidenceCoverageTest {
         state.messages.add(ChatMessage.assistant("Private document content was withheld by runtime policy."));
         assertTrue(ReadEvidenceCoverage.capture(state)
                 .missingPrivacyNotices(state.toolOutcomes, workspace, required).isEmpty());
+    }
+
+
+    private static final String FALLBACK_REQUEST = "Read docs/report.pdf and docs/report.txt. Do not edit.";
+
+    @Test void textFallbackReadUnderItsAbsolutePathCoversAnUnsupportedTargetInTheObservedAssessment() throws Exception {
+        Path root = workspace.toRealPath();
+        var request = fallbackContract();
+        TurnTaskContractCapture.set(request);
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("report.pdf"), "not a readable document\n");
+        Files.writeString(root.resolve("docs").resolve("report.txt"), "observed\n");
+        var state = state(root);
+        unsupportedRead(state, "docs/report.pdf");
+        full(state, root.resolve("docs").resolve("report.txt").toString());
+        var loop = observedLoop(state);
+        var plan = readTargetPlan(request);
+
+        assertEquals(Status.UNSATISFIED, EvidenceObligationAssessment.assessObserved(plan, loop).result().status());
+        assertEquals(Status.SATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop, null, root).result().status());
+    }
+
+    @Test void unsupportedReadOfASameNameDocumentInAnotherFolderLeavesTheTargetUncovered() throws Exception {
+        Path root = workspace.toRealPath();
+        var request = fallbackContract();
+        TurnTaskContractCapture.set(request);
+        Files.createDirectories(root.resolve("docs"));
+        Files.createDirectories(root.resolve("other"));
+        Files.writeString(root.resolve("docs").resolve("report.txt"), "observed\n");
+        Files.writeString(root.resolve("other").resolve("report.pdf"), "not a readable document\n");
+        var state = state(root);
+        unsupportedRead(state, root.resolve("other").resolve("report.pdf").toString());
+        full(state, root.resolve("docs").resolve("report.txt").toString());
+
+        assertEquals(Status.UNSATISFIED, EvidenceObligationAssessment.assessObserved(
+                readTargetPlan(request), observedLoop(state), null, root).result().status());
+    }
+
+    private static TaskContract fallbackContract() {
+        return new TaskContract(TaskType.READ_ONLY_QA, false, false, false,
+                Set.of("docs/report.pdf", "docs/report.txt"), Set.of(), FALLBACK_REQUEST);
+    }
+
+    private static CurrentTurnPlan readTargetPlan(TaskContract request) {
+        return new CurrentTurnPlan(request, request.originalUserRequest(), ExecutionPhase.INSPECT,
+                ExecutionPhase.INSPECT, null, List.of(), List.of(), List.of(), List.of(),
+                EvidenceObligation.READ_TARGET_REQUIRED.name(), CurrentTurnPlan.NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+    }
+
+    private LoopState state(Path root) {
+        return new LoopState("", List.of(), new ArrayList<>(), root,
+                Context.builder(new Config()).build(), null, 10, 0);
+    }
+
+    private static ToolOutcome unsupportedRead(LoopState state, String path) {
+        String id = "read-" + state.messages.size();
+        var outcome = new ToolOutcome("talos.read_file", path, false, false, false, "",
+                "Unsupported document format.", null, ToolError.UNSUPPORTED_FORMAT);
+        state.messages.add(ChatMessage.assistantWithToolCalls("", List.of(
+                new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path)))));
+        state.messages.add(ChatMessage.toolResult(id, "Unsupported document format."));
+        state.toolOutcomes.add(outcome);
+        state.toolOutcomeResults.bind(outcome, state.messages.size() - 1, state.messages.getLast());
+        return outcome;
+    }
+
+    private static ToolCallLoop.LoopResult observedLoop(LoopState state) {
+        return new ToolCallLoop.LoopResult("answer", 1, state.toolOutcomes.size(),
+                state.toolOutcomes.stream().map(ToolOutcome::toolName).toList(), state.messages,
+                1, 0, false, 0, List.of(), 0, 0, 0, 0, null, state.toolOutcomes, Map.of(), false,
+                null, null, null, ReadEvidenceCoverage.capture(state));
     }
 }

@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,9 +48,13 @@ final class ExpectedTargetProgressAccounting {
             return List.of();
         }
         Set<String> satisfiedTargets = new java.util.HashSet<>();
+        Set<String> satisfiedExactTargets = new java.util.HashSet<>();
+        List<String> mutatedPaths = new java.util.ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
             addSatisfiedExpectedTargetKeys(satisfiedTargets, outcome);
+            addExactMutationKeys(satisfiedExactTargets, outcome);
+            mutatedPaths.addAll(mutatedPaths(outcome));
         }
         expectedTargets = hardExpectedTargetsForProgress(
                 expectedTargets,
@@ -66,10 +71,61 @@ final class ExpectedTargetProgressAccounting {
             }
         }
         return expectedDisplayByKey.entrySet().stream()
-                .filter(entry -> !satisfiedTargets.contains(entry.getKey()))
+                .filter(entry -> !satisfiedExactTargets.contains(entry.getValue()))
+                .filter(entry -> !mutatedUnderAnotherSpelling(state.workspace, entry.getValue(), mutatedPaths))
                 .map(java.util.Map.Entry::getValue)
                 .sorted()
                 .toList();
+    }
+
+    /**
+     * The recorded paths a successful mutation names, for identity. Workspace-operation path effects are stored
+     * normalized, so they are used only where that spelling is lossless.
+     */
+    static List<String> mutatedPaths(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null) return List.of();
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan != null && !plan.pathEffects().isEmpty()) {
+            if (!WorkspacePathIdentity.normalizedSpellingIsLossless()) return List.of();
+            return plan.pathEffects().stream()
+                    .map(WorkspaceOperationPlan.PathEffect::path)
+                    .toList();
+        }
+        return List.of(outcome.pathHint());
+    }
+
+    /**
+     * Exact-case keys of a successful mutation, with the existing file-name key. A case variant is not the
+     * target by text, only when identity shows the file system treats it as the same file.
+     */
+    static void addExactMutationKeys(Set<String> satisfied, ToolCallLoop.ToolOutcome outcome) {
+        if (satisfied == null || outcome == null) return;
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan != null && !plan.pathEffects().isEmpty()) {
+            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
+                addExactPathKeys(satisfied, effect.path());
+            }
+            return;
+        }
+        addExactPathKeys(satisfied, outcome.pathHint());
+    }
+
+    private static void addExactPathKeys(Set<String> satisfied, String path) {
+        String normalized = ToolCallSupport.normalizePath(path);
+        if (normalized.isBlank()) return;
+        satisfied.add(normalized);
+        int slash = normalized.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < normalized.length()) {
+            satisfied.add(normalized.substring(slash + 1));
+        }
+    }
+
+    /** A target written under another spelling of the same workspace file is not remaining. */
+    static boolean mutatedUnderAnotherSpelling(Path workspace, String target, List<String> mutatedPaths) {
+        for (String path : mutatedPaths) {
+            if (WorkspacePathIdentity.matches(workspace, target, path)) return true;
+        }
+        return false;
     }
 
     static String displayExpectedTargetForKey(List<String> targets, String key) {

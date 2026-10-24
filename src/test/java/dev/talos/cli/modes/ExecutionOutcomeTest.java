@@ -5355,4 +5355,42 @@ class ExecutionOutcomeTest {
                 errorCode,
                 plan);
     }
+
+    // Optional boundary test, modeled on preserveRestReplacementRecoveryCompletesOnlyAfterExactVerification (:3170).
+    // Uses package-private ExecutionOutcome.fromToolLoop(String, List, LoopResult, Path, int) (ExecutionOutcome.java:115).
+    // All needed imports are already present. The red cause should be confirmed before relying on it,
+    // because other text-only code in ExecutionOutcome could keep it red after the E2 change.
+
+    @Test
+    void preserveRestRecoveryUnderTheAbsoluteSpellingCompletesAfterExactVerification(@TempDir Path temporary)
+            throws Exception {
+        Path ws = temporary.toRealPath();
+        String before = "Status: draft\nKeep this final line unchanged.\n";
+        String after = "Status: final\nKeep this final line unchanged.\n";
+        Files.writeString(ws.resolve("notes.md"), after);
+        String absolute = ws.resolve("notes.md").toString();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("In notes.md, change draft to final. If an exact edit fails, "
+                + "recover without deleting any other line."));
+        var loopResult = new ToolCallLoop.LoopResult("Updated notes.md.", 2, 2,
+                List.of("talos.edit_file", "talos.write_file"), List.of(), 1, 0, false, 1, List.of(), 0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome("talos.edit_file", absolute, false, true, false, "",
+                                "old_string not found", null, ToolError.INVALID_PARAMS, null,
+                                ToolMutationEvidence.exactEdit("Status: pending", "Status: final"),
+                                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, List.of(), "call-1-1"),
+                        new ToolCallLoop.ToolOutcome("talos.write_file", absolute, true, true, false,
+                                "wrote notes.md", "", dev.talos.tools.VerificationStatus.PASS, "", null,
+                                ToolMutationEvidence.fullWriteReplacement(before, after),
+                                ToolFailureReason.NONE, List.of(), "call-1-2")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+        assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
+        assertFalse(outcome.partialMutation());
+    }
 }

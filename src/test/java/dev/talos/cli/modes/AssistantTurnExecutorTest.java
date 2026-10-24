@@ -1424,6 +1424,103 @@ class AssistantTurnExecutorTest {
     @DisplayName("Non-streaming path")
     class NonStreaming {
 
+        private static final String DIRECT_READ_QUESTION = "Does docs/summary.md mention the private notes marker?";
+        private static final String DIRECT_READ_NO =
+                "No. docs/summary.md does not mention \"private notes marker\" in the inspected content.";
+
+        @Test
+        void directReadTargetAnswerAcceptsTheTargetReadUnderItsAbsoluteSpelling(@TempDir Path temporary)
+                throws Exception {
+            Path root = directReadFixture(temporary);
+            String absolute = root.resolve("docs").resolve("summary.md").toString();
+
+            assertEquals(DIRECT_READ_NO, AssistantTurnExecutor.readTargetAnswerIfApplicable(
+                    "Yes - line 1 references the private-notes marker.",
+                    directReadRequest(), null, directReadLoop(absolute), root));
+        }
+
+        @Test
+        void directReadTargetAnswerAcceptsTheTargetReadUnderItsRelativeSpelling(@TempDir Path temporary)
+                throws Exception {
+            Path root = directReadFixture(temporary);
+
+            assertEquals(DIRECT_READ_NO, AssistantTurnExecutor.readTargetAnswerIfApplicable(
+                    "Yes - line 1 references the private-notes marker.",
+                    directReadRequest(), null, directReadLoop("docs/summary.md"), root));
+        }
+
+        @Test
+        void directReadTargetAnswerIgnoresSameNameElsewhereOrSiblingReads(@TempDir Path temporary) throws Exception {
+            Path root = directReadFixture(temporary);
+            Files.writeString(root.resolve("summary.md"), "Avoid private notes or secrets.\n");
+            Files.writeString(root.resolve("docs").resolve("other.md"), "Avoid private notes or secrets.\n");
+            for (Path read : List.of(root.resolve("summary.md"), root.resolve("docs").resolve("other.md"))) {
+                dev.talos.runtime.TurnTaskContractCapture.clear();
+                assertEquals("", AssistantTurnExecutor.readTargetAnswerIfApplicable(
+                        "Yes - line 1 references the private-notes marker.",
+                        directReadRequest(), null, directReadLoop(read.toString()), root), read.toString());
+            }
+        }
+
+        @Test
+        void readOnlyDirectEvidenceQuestionReadThroughItsAbsolutePathReplacesContradictoryYesAnswer(
+                @TempDir Path temporary) throws Exception {
+            Path root = directReadFixture(temporary);
+            String absolute = root.resolve("docs").resolve("summary.md").toString();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(textProvider(registry, List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\""
+                                    + absolute.replace("\\", "\\\\") + "\"}}",
+                            "Yes - line 1 references the private-notes marker.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(root, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(DIRECT_READ_QUESTION));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, root, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains(DIRECT_READ_NO), out.text());
+            assertFalse(out.text().startsWith("Yes"), out.text());
+        }
+
+        private static Path directReadFixture(Path temporary) throws Exception {
+            Path root = temporary.toRealPath();
+            Files.createDirectories(root.resolve("docs"));
+            Files.writeString(root.resolve("docs").resolve("summary.md"),
+                    "Avoid private notes or secrets.\nPublic summary only.\n");
+            return root;
+        }
+
+        private static List<ChatMessage> directReadRequest() {
+            return new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(DIRECT_READ_QUESTION)));
+        }
+
+        private static ToolCallLoop.LoopResult directReadLoop(String readPath) {
+            var transcript = new ArrayList<ChatMessage>(directReadRequest());
+            transcript.add(ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                    "call-1", "talos.read_file", Map.of("path", readPath)))));
+            transcript.add(ChatMessage.toolResult("call-1", """
+                    [tool_result: talos.read_file]
+                    1 | Avoid private notes or secrets.
+                    2 | Public summary only.
+                    [/tool_result]"""));
+            var outcome = new ToolCallLoop.ToolOutcome(
+                    "talos.read_file", readPath, true, false, false, "read " + readPath, "");
+            return new ToolCallLoop.LoopResult(
+                    "Yes - line 1 references the private-notes marker.", 2, 1, List.of("talos.read_file"),
+                    transcript, 0, 0, false, 0, List.of(readPath), 0, 0, 0, 0, List.of(outcome));
+        }
+
+
         @Test
         void returns_non_empty_answer() {
             var ctx = scriptedContext("non-streamed answer");

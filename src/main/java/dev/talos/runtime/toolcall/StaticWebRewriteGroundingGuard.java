@@ -4,6 +4,7 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.ToolAliasPolicy;
+import dev.talos.tools.WorkspacePathIdentity;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Files;
@@ -30,14 +31,14 @@ final class StaticWebRewriteGroundingGuard {
         if (!contract.mutationAllowed() || !contract.verificationRequired()) return null;
         if (contract.type() != TaskType.FILE_EDIT && contract.type() != TaskType.FILE_CREATE) return null;
         if (contract.expectedTargets().stream()
-                .map(ToolCallSupport::normalizePath)
-                .noneMatch(path::equalsIgnoreCase)) {
+                .noneMatch(target -> path.equalsIgnoreCase(ToolCallSupport.normalizePath(target))
+                        || WorkspacePathIdentity.matches(state.workspace, target, pathHint))) {
             return null;
         }
         if (!looksLikeStaticWebRedesign(contract.originalUserRequest())) return null;
         if (!existingWorkspaceFile(state.workspace, path)) return null;
-        if (state.pathsReadThisTurn.contains(path.toLowerCase(Locale.ROOT))
-                || state.pathsReadThisTurn.contains(path)) {
+        if (TargetReadEvidence.successfullyRead(
+                        pathHint, state.pathsReadThisTurn, state.toolOutcomes, state.workspace)) {
             return null;
         }
         return "Static-web full-file rewrite must be grounded before approval: read "

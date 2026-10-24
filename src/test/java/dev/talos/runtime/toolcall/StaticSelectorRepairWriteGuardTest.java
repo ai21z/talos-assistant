@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,7 +23,7 @@ class StaticSelectorRepairWriteGuardTest {
         String guard = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/StaticSelectorRepairWriteGuard.java"));
 
-        assertTrue(loopState.contains("StaticSelectorRepairWriteGuard.evaluate(messages, calls)"),
+        assertTrue(loopState.contains("StaticSelectorRepairWriteGuard.evaluate(messages, calls, workspace)"),
                 loopState);
         assertFalse(loopState.contains("StaticSelectorRepairGuard"), loopState);
         assertFalse(loopState.contains("staticSelectorRepairFailureAnswer("), loopState);
@@ -183,5 +184,35 @@ class StaticSelectorRepairWriteGuardTest {
         return new ToolCall("talos.write_file", Map.of(
                 "path", path,
                 "content", content));
+    }
+
+    @Test
+    void cssSelectorViolationUnderAnotherSpellingOfTheTargetFailsTheSameWay(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.writeString(root.resolve("styles.css"), "body { margin: 0; }\n");
+
+        for (String spelling : List.of("./styles.css", root.resolve("styles.css").toString())) {
+            var failure = StaticSelectorRepairWriteGuard.evaluate(
+                    cssRepairMessages(),
+                    List.of(writeFile(spelling, ".button { color: red; }\nbody { margin: 0; }\n")),
+                    root);
+
+            assertTrue(failure.isPresent(), spelling);
+            assertTrue(failure.get().reason().contains("missing selector(s): .button"), failure.get().reason());
+        }
+    }
+
+    @Test
+    void writeOfAFileWithTheSameNameElsewhereIsNotTheRepairTarget(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("old"));
+        Files.writeString(root.resolve("old").resolve("styles.css"), "body { margin: 0; }\n");
+
+        var failure = StaticSelectorRepairWriteGuard.evaluate(
+                cssRepairMessages(),
+                List.of(writeFile(root.resolve("old").resolve("styles.css").toString(), ".button { color: red; }\n")),
+                root);
+
+        assertFalse(failure.isPresent());
     }
 }

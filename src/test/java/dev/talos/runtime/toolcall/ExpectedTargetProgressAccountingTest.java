@@ -14,10 +14,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import dev.talos.testsupport.CaseSensitiveFolders;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ExpectedTargetProgressAccountingTest {
 
@@ -358,5 +364,81 @@ class ExpectedTargetProgressAccountingTest {
                 null,
                 "",
                 plan);
+    }
+
+    @Test
+    void targetWrittenThroughItsAbsolutePathIsNotRemaining(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "a\n");
+        LoopState state = state("Create docs/a.md and b.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", root.resolve("docs").resolve("a.md").toString()));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("b.md"), remaining);
+    }
+
+    @Test
+    void siblingOrSubfolderWriteLeavesTheTargetRemaining(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs").resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("b.md"), "b\n");
+        Files.writeString(root.resolve("docs").resolve("docs").resolve("a.md"), "a\n");
+        LoopState state = state("Create docs/a.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", root.resolve("docs").resolve("b.md").toString()));
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("docs").resolve("docs").resolve("a.md").toString()));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("docs/a.md"), remaining);
+    }
+
+    // Uses existing helpers: state(String, Path) (:310), outcome(String, String) (:334).
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void caseVariantWriteLeavesTheTargetRemainingWhereCaseIsSignificant(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Path docs = Files.createDirectories(root.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "this file system ignores case");
+        LoopState state = state("Edit docs/notes.md.", root);
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/Notes.md"));
+
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @Timeout(60)
+    void caseVariantWriteLeavesTheTargetRemainingInACaseSensitiveFolder(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Path docs = Files.createDirectories(root.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.enable(docs), "case-sensitive folders cannot be made here");
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "the folder is not case-sensitive");
+        LoopState state = state("Edit docs/notes.md.", root);
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/Notes.md"));
+
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void caseVariantWriteOfAnExistingFileInAnOrdinaryFolderIsNotRemaining(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("notes.md"), "updated\n");
+        LoopState state = state("Edit docs/notes.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/NOTES.md"));
+
+        assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
     }
 }

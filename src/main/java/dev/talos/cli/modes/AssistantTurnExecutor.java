@@ -2181,7 +2181,7 @@ public final class AssistantTurnExecutor {
             LocalTurnTraceCapture.recordAnswerDeliverySelected(verifyOnlyPathAnswer, false, false);
             return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(verifyOnlyPathAnswer, opts), false);
         }
-        String readTargetAnswer = readTargetAnswerIfApplicable(answer, messages, plan, loopResult);
+        String readTargetAnswer = readTargetAnswerIfApplicable(answer, messages, plan, loopResult, workspace);
         if (!readTargetAnswer.isBlank()) {
             LocalTurnTraceCapture.recordAnswerDeliverySelected(readTargetAnswer, false, false);
             return new AnswerOutputLimit.Presentation(sanitizeAndTruncate(readTargetAnswer, opts), false);
@@ -2332,22 +2332,21 @@ public final class AssistantTurnExecutor {
                 || c == '\\';
     }
 
-    private static String readTargetAnswerIfApplicable(
+    static String readTargetAnswerIfApplicable(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
     ) {
         TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return "";
         if (loopResult == null || loopResult.toolOutcomes() == null) return "";
         String target = contract.expectedTargets().iterator().next();
-        String normalizedTarget = ToolCallSupport.normalizePath(target);
-        boolean targetRead = loopResult.toolOutcomes().stream()
-                .anyMatch(outcome -> "talos.read_file".equals(canonicalToolName(outcome.toolName()))
-                        && outcome.success()
-                        && normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint())));
+        boolean targetRead = dev.talos.runtime.toolcall.TargetReadEvidence.successfullyRead(
+                target, null, loopResult.toolOutcomes(), workspace);
         if (!targetRead) return "";
+        if (!latestSuccessfulReadNamesTarget(target, loopResult.toolOutcomes(), workspace)) return "";
         String body = latestToolResultBodyByCanonical(loopResult.messages(), "talos.read_file");
         if (body.isBlank()) return "";
         String userRequest = latestUserRequest(safePlanFromMessages(plan, messages, null), messages);
@@ -2362,6 +2361,23 @@ public final class AssistantTurnExecutor {
         }
         if (!fallbackNeeded) return "";
         return directAnswer.isBlank() ? "Read " + target + ":\n" + body : directAnswer;
+    }
+
+    /** The latest read body is only the target's body when the latest successful read named the target. */
+    private static boolean latestSuccessfulReadNamesTarget(
+            String target,
+            List<ToolCallLoop.ToolOutcome> outcomes,
+            Path workspace
+    ) {
+        for (int i = outcomes.size() - 1; i >= 0; i--) {
+            ToolCallLoop.ToolOutcome outcome = outcomes.get(i);
+            if (outcome == null || !outcome.success() || outcome.denied()
+                    || !dev.talos.runtime.toolcall.TargetReadEvidence.isRead(outcome)) {
+                continue;
+            }
+            return dev.talos.runtime.toolcall.TargetReadEvidence.names(target, outcome.pathHint(), workspace);
+        }
+        return false;
     }
 
     private static boolean needsReadTargetFallback(String answer, String userRequest) {
@@ -3012,7 +3028,7 @@ public final class AssistantTurnExecutor {
         if (retainedEvidence.proposalSelected()) {
             if (dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.rejectedProposalSynthesis(loopResult)
                     && plan != null
-                    && dev.talos.runtime.policy.EvidenceObligationAssessment.assessObserved(plan, loopResult)
+                    && dev.talos.runtime.policy.EvidenceObligationAssessment.assessObserved(plan, loopResult, null, workspace)
                         .result().status() == dev.talos.runtime.policy.EvidenceObligationVerifier.Status.SATISFIED) {
                 return new ReadOnlyWebDiagnosticResult(
                         Objects.equals(answer, loopResult.finalAnswer()) ? answer

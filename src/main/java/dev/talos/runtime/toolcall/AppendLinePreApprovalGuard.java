@@ -5,8 +5,10 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.Map;
+import java.nio.file.Path;
 
 final class AppendLinePreApprovalGuard {
     private AppendLinePreApprovalGuard() {}
@@ -20,7 +22,7 @@ final class AppendLinePreApprovalGuard {
         if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
         String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonicalTool)) return null;
-        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint, state);
         if (expectation == null) return null;
         String content = firstParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) return null;
@@ -58,7 +60,7 @@ final class AppendLinePreApprovalGuard {
         if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
         String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonicalTool)) return null;
-        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint, state);
         if (expectation == null) return null;
         String content = firstParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) return null;
@@ -75,12 +77,18 @@ final class AppendLinePreApprovalGuard {
                 + expectation.expectedLine() + "`.";
     }
 
-    private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String pathHint) {
+    private static AppendLineExpectation appendLineExpectationForPath(
+            TaskContract contract,
+            String pathHint,
+            LoopState state
+    ) {
         if (contract == null || pathHint == null || pathHint.isBlank()) return null;
         String target = ToolCallSupport.canonicalizeReadPath(pathHint);
+        Path workspace = state == null ? null : state.workspace;
         for (var expectation : TaskExpectationResolver.resolve(contract)) {
             if (expectation instanceof AppendLineExpectation appendLine
-                    && ToolCallSupport.canonicalizeReadPath(appendLine.targetPath()).equals(target)) {
+                    && (ToolCallSupport.canonicalizeReadPath(appendLine.targetPath()).equals(target)
+                    || WorkspacePathIdentity.matches(workspace, appendLine.targetPath(), pathHint))) {
                 return appendLine;
             }
         }

@@ -290,4 +290,98 @@ class AppendLinePreApprovalGuardTest {
     private static ToolCall writeFile(String path, String content) {
         return new ToolCall("talos.write_file", Map.of("path", path, "content", content));
     }
+
+    private static final String NESTED_APPEND_REQUEST =
+            "Read docs/notes.md, then append exactly this line to docs/notes.md: Release gate note";
+
+    @Test
+    void absoluteSpellingOfTheAppendTargetGetsTheRelativeSpellingsDiagnostic() throws Exception {
+        Path root = nestedNotes();
+        String absolute = root.resolve("docs").resolve("notes.md").toString();
+        LoopState state = loopStateAt(root, NESTED_APPEND_REQUEST);
+        addReadback(state, "docs/notes.md", "1 | # Demo\n");
+        var contract = TaskContractResolver.fromUserRequest(NESTED_APPEND_REQUEST);
+
+        String relative = AppendLinePreApprovalGuard.diagnostic(
+                writeFile("docs/notes.md", "Release gate note\n"), state, contract, "docs/notes.md");
+        String absoluteDiagnostic = AppendLinePreApprovalGuard.diagnostic(
+                writeFile(absolute, "Release gate note\n"), state, contract, absolute);
+
+        assertNotNull(relative, "the relative spelling must be diagnosed, otherwise the fixture is wrong");
+        assertEquals(relative.replace("docs/notes.md", absolute), absoluteDiagnostic,
+                "a truncating write under the absolute spelling must not fail open");
+    }
+
+    @Test
+    void absoluteSpellingWithoutReadIsHeldForReadEvidence() throws Exception {
+        Path root = nestedNotes();
+        String absolute = root.resolve("docs").resolve("notes.md").toString();
+        LoopState state = loopStateAt(root, NESTED_APPEND_REQUEST);
+
+        String diagnostic = AppendLinePreApprovalGuard.diagnostic(
+                writeFile(absolute, "Release gate note\n"),
+                state,
+                TaskContractResolver.fromUserRequest(NESTED_APPEND_REQUEST),
+                absolute);
+
+        assertEquals("append-line write_file for " + absolute
+                + " requires complete same-turn read evidence before approval.", diagnostic);
+    }
+
+    @Test
+    void absoluteSpellingOfAValidAppendIsSteeredToAnEditOfThatFile() throws Exception {
+        Path root = nestedNotes();
+        String absolute = root.resolve("docs").resolve("notes.md").toString();
+        LoopState state = loopStateAt(root, NESTED_APPEND_REQUEST);
+        addReadback(state, "docs/notes.md", "1 | # Demo\n");
+
+        ToolCall steered = AppendLinePreApprovalGuard.steeredEditFile(
+                writeFile(absolute, "# Demo\nRelease gate note\n"),
+                state,
+                TaskContractResolver.fromUserRequest(NESTED_APPEND_REQUEST),
+                absolute);
+
+        assertNotNull(steered, "the absolute spelling must steer like the relative spelling");
+        assertEquals("talos.edit_file", steered.toolName());
+        assertEquals(absolute, steered.param("path"));
+        assertEquals("# Demo\n", steered.param("old_string"));
+        assertEquals("# Demo\nRelease gate note\n", steered.param("new_string"));
+    }
+
+    @Test
+    void sameNamedFileInAnotherFolderOrOutsideTheWorkspaceIsNotTheAppendTarget() throws Exception {
+        Path root = nestedNotes();
+        Files.createDirectories(root.resolve("archive"));
+        Files.writeString(root.resolve("archive").resolve("notes.md"), "# Old\n");
+        String sibling = root.resolve("archive").resolve("notes.md").toString();
+        String outside = root.resolveSibling(root.getFileName() + "-outside")
+                .resolve("docs").resolve("notes.md").toString();
+        LoopState state = loopStateAt(root, NESTED_APPEND_REQUEST);
+        addReadback(state, "docs/notes.md", "1 | # Demo\n");
+        var contract = TaskContractResolver.fromUserRequest(NESTED_APPEND_REQUEST);
+
+        for (String path : List.of("archive/notes.md", sibling, outside)) {
+            ToolCall truncating = writeFile(path, "Release gate note\n");
+            assertNull(AppendLinePreApprovalGuard.diagnostic(truncating, state, contract, path), path);
+            assertNull(AppendLinePreApprovalGuard.steeredEditFile(truncating, state, contract, path), path);
+        }
+    }
+
+    private Path nestedNotes() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("notes.md"), "# Demo\n");
+        return root;
+    }
+
+    private static LoopState loopStateAt(Path root, String request) {
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request)));
+        Context ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(root, Map.of()))
+                .llm(LlmClient.scripted(List.of()))
+                .build();
+        return new LoopState("", List.of(), messages, root, ctx, null, 5, 0);
+    }
 }

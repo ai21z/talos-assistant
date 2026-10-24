@@ -24,6 +24,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.WorkspacePathIdentity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -584,7 +585,7 @@ final class MissingMutationRetry {
                         .pendingContentMutationPredecessorPaths().stream()
                         .sorted()
                         .toList()
-                : remainingExpectedTargetsAfterRetry(plan, retryLoop);
+                : remainingExpectedTargetsAfterRetry(plan, retryLoop, workspace);
         boolean workspaceOperationPending = typedWorkspacePlan
                 && TurnTaskContractCapture
                         .workspaceOperationObligationPending();
@@ -743,41 +744,44 @@ final class MissingMutationRetry {
 
     private static List<String> remainingExpectedTargetsAfterRetry(
             CurrentTurnPlan plan,
-            ToolCallLoop.LoopResult retryLoop
+            ToolCallLoop.LoopResult retryLoop,
+            Path workspace
     ) {
         TaskContract contract = plan == null ? null : plan.taskContract();
         if (contract == null || contract.expectedTargets().isEmpty()) return List.of();
         if (retryLoop == null || retryLoop.mutatingToolSuccesses() <= 0) return List.of();
 
         Set<String> satisfied = new LinkedHashSet<>();
+        List<String> mutatedPaths = new java.util.ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : retryLoop.toolOutcomes()) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
             WorkspaceOperationPlan operationPlan = outcome.workspaceOperationPlan();
             if (operationPlan != null && !operationPlan.pathEffects().isEmpty()) {
                 for (WorkspaceOperationPlan.PathEffect effect : operationPlan.pathEffects()) {
                     addSatisfiedExpectedTarget(satisfied, effect.path());
+                    // Path effects are stored normalized, so they reach identity only where that is lossless.
+                    if (WorkspacePathIdentity.normalizedSpellingIsLossless()) mutatedPaths.add(effect.path());
                 }
             } else {
                 addSatisfiedExpectedTarget(satisfied, outcome.pathHint());
+                mutatedPaths.add(outcome.pathHint());
             }
         }
         return orderedExpectedTargets(contract).stream()
-                .filter(target -> !satisfied.contains(expectedTargetKey(target)))
+                .filter(target -> !satisfied.contains(ToolCallSupport.normalizePath(target)))
+                .filter(target -> mutatedPaths.stream()
+                        .noneMatch(path -> WorkspacePathIdentity.matches(workspace, target, path)))
                 .toList();
     }
 
     private static void addSatisfiedExpectedTarget(Set<String> satisfied, String path) {
-        String key = expectedTargetKey(path);
+        String key = ToolCallSupport.normalizePath(path);
         if (key.isBlank()) return;
         satisfied.add(key);
         int slash = key.lastIndexOf('/');
         if (slash >= 0 && slash + 1 < key.length()) {
             satisfied.add(key.substring(slash + 1));
         }
-    }
-
-    private static String expectedTargetKey(String path) {
-        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static List<String> failedMutatingToolTargets(ToolCallLoop.LoopResult retryLoop) {

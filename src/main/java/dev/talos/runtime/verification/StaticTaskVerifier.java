@@ -298,11 +298,15 @@ public final class StaticTaskVerifier {
                 : CapabilityProfileRegistry.select(contract, root, mutatedPaths);
         boolean webCoherenceRequired;
 
+        // Scope checks get the tool's own spelling of file writes. Workspace operations act on their planned,
+        // normalized paths, so those paths are the operated paths.
+        Set<String> recordedScopePaths = new LinkedHashSet<>(mutationReadback.recordedMutationTargets());
+        recordedScopePaths.addAll(workspaceOperationVerification.mutationTargets());
         TargetScopeStaticVerifier.Result targetScopeVerification = TargetScopeStaticVerifier.verify(
                 contract,
                 root,
                 profile,
-                mutatedPaths,
+                recordedScopePaths,
                 expectedTargetExemptions,
                 workspaceOperationVerification.expectedTargetAliases());
         facts.addAll(targetScopeVerification.facts());

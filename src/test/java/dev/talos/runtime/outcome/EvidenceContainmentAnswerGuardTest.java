@@ -218,4 +218,22 @@ class EvidenceContainmentAnswerGuardTest {
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of());
     }
+
+    @Test
+    void protectedReadIncompleteAfterAnEarlierSuccessfulReadSaysTheReadHappened() {
+        String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
+                "The file says SECRET=original.",
+                readTargetPlan(".env"),
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                new EvidenceObligationVerifier.Result(
+                        EvidenceObligationVerifier.Status.UNSATISFIED,
+                        "Required read evidence is no longer current.",
+                        true),
+                MARKERS);
+
+        assertTrue(answer.startsWith("[Protected read incomplete:"), answer);
+        assertFalse(answer.contains("No protected content was read"), answer);
+        assertTrue(answer.contains("returned protected content in this turn"), answer);
+        assertFalse(answer.contains("SECRET=original"), answer);
+    }
 }

@@ -56,7 +56,8 @@ public record EvidenceObligationAssessment(
             }
         }
         List<ToolCallLoop.ToolOutcome> outcomes = evidenceOutcomes(loopResult);
-        EvidenceObligationVerifier.Result coverage = assessCoverage(plan, loopResult, obligation, targets, outcomes, workspace);
+        EvidenceObligationVerifier.Result coverage = assessCoverage(
+                plan, loopResult, obligation, targets, outcomes, workspace, workspace);
         if (coverage != null && coverage.status() != EvidenceObligationVerifier.Status.SATISFIED)
             return new EvidenceObligationAssessment(obligation, coverage);
         if (coverage != null && obligation == EvidenceObligation.READ_TARGET_REQUIRED)
@@ -78,6 +79,12 @@ public record EvidenceObligationAssessment(
 
     public static EvidenceObligationAssessment assessObserved(
             CurrentTurnPlan plan, ToolCallLoop.LoopResult loopResult, Path workspace) {
+        return assessObserved(plan, loopResult, workspace, workspace);
+    }
+
+    /** The identity root only matches spellings of one workspace file and discovers nothing on disk. */
+    public static EvidenceObligationAssessment assessObserved(
+            CurrentTurnPlan plan, ToolCallLoop.LoopResult loopResult, Path workspace, Path identityRoot) {
         if (plan == null) return assess(null, loopResult, null);
         EvidenceObligation obligation = EvidenceObligationPolicy.parse(plan.evidenceObligation());
         var workspaceResults = WorkspaceResultEvidencePolicy.assess(plan, loopResult, workspace);
@@ -88,7 +95,8 @@ public record EvidenceObligationAssessment(
                     ProjectSummaryEvidencePolicy.assess(workspace, plan.taskContract(), loopResult).result());
         Set<String> targets = evidenceTargets(plan.taskContract(), loopResult);
         List<ToolCallLoop.ToolOutcome> outcomes = evidenceOutcomes(loopResult);
-        EvidenceObligationVerifier.Result coverage = assessCoverage(plan, loopResult, obligation, targets, outcomes, workspace);
+        EvidenceObligationVerifier.Result coverage = assessCoverage(
+                plan, loopResult, obligation, targets, outcomes, workspace, identityRoot);
         if (coverage != null && coverage.status() != EvidenceObligationVerifier.Status.SATISFIED)
             return new EvidenceObligationAssessment(obligation, coverage);
         // Unlisted static-web sources may be linked dependencies, not proven optional reads.
@@ -109,19 +117,19 @@ public record EvidenceObligationAssessment(
         }
         return new EvidenceObligationAssessment(obligation, EvidenceObligationVerifier.verify(
                 obligation, targets, outcomes, null,
-                explicitReadOnlyTargets(plan.taskContract(), targets)));
+                explicitReadOnlyTargets(plan.taskContract(), targets), identityRoot));
     }
 
     private static EvidenceObligationVerifier.Result assessCoverage(
             CurrentTurnPlan plan, ToolCallLoop.LoopResult loop, EvidenceObligation obligation,
-            Set<String> targets, List<ToolCallLoop.ToolOutcome> outcomes, Path workspace) {
+            Set<String> targets, List<ToolCallLoop.ToolOutcome> outcomes, Path workspace, Path identityRoot) {
         if (loop == null || !loop.readEvidenceCoverage().captured()
                 || plan.taskContract() == null || plan.taskContract().mutationAllowed()
                 || plan.taskContract().mutationRequested()
                 || obligation != EvidenceObligation.READ_TARGET_REQUIRED
                     && obligation != EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED) return null;
         Set<String> mandatory = obligation == EvidenceObligation.READ_TARGET_REQUIRED
-                ? EvidenceObligationVerifier.withoutUnsupportedTargetsCoveredByTextFallback(targets, outcomes)
+                ? EvidenceObligationVerifier.withoutUnsupportedTargetsCoveredByTextFallback(targets, outcomes, identityRoot)
                 : explicitReadOnlyTargets(plan.taskContract(), targets);
         Set<String> applicable = obligation == EvidenceObligation.READ_TARGET_REQUIRED ? mandatory : targets;
         return loop.readEvidenceCoverage().assess(applicable, mandatory, outcomes, workspace, plan.taskContract());

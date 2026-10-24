@@ -5,7 +5,9 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.ToolAliasPolicy;
+import dev.talos.tools.WorkspacePathIdentity;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /** Verifies mutation evidence needed by task expectations without owning expectation post-state checks. */
@@ -14,6 +16,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     private TaskExpectationMutationEvidenceVerifier() {}
 
     static boolean verifyReplacementPreservation(
+            Path root,
             ReplacementExpectation expectation,
             String pathHint,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
@@ -28,7 +31,7 @@ final class TaskExpectationMutationEvidenceVerifier {
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             if (outcome == null
                     || !outcome.success()
-                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                    || !sameTarget(root, pathHint, outcome.pathHint())) {
                 continue;
             }
             sawRelevantMutation = true;
@@ -80,6 +83,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static FinalStateEvidence collectReplacementFinalStateEvidence(
+            Path root,
             ReplacementExpectation expectation,
             String pathHint,
             String finalContent,
@@ -94,7 +98,7 @@ final class TaskExpectationMutationEvidenceVerifier {
         List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
                 .filter(outcome -> outcome != null
                         && outcome.success()
-                        && normalizePath(outcome.pathHint()).equals(pathHint))
+                        && sameTarget(root, pathHint, outcome.pathHint()))
                 .toList();
         if (relevant.size() != 1) {
             problems.add(pathHint
@@ -162,6 +166,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static boolean verifyAppendLineMutationEvidence(
+            Path root,
             String pathHint,
             String expectedLine,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
@@ -175,7 +180,7 @@ final class TaskExpectationMutationEvidenceVerifier {
             if (outcome != null
                     && outcome.success()
                     && "write_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
-                    && normalizePath(outcome.pathHint()).equals(pathHint)) {
+                    && sameTarget(root, pathHint, outcome.pathHint())) {
                 if (outcome.mutationEvidence() != null
                         && outcome.mutationEvidence().fullWriteReplacement()) {
                     sawRelevantFullWrite = true;
@@ -195,7 +200,7 @@ final class TaskExpectationMutationEvidenceVerifier {
             if (outcome == null
                     || !outcome.success()
                     || !"edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
-                    || !normalizePath(outcome.pathHint()).equals(pathHint)
+                    || !sameTarget(root, pathHint, outcome.pathHint())
                     || outcome.mutationEvidence() == null
                     || !outcome.mutationEvidence().exactEditReplacement()) {
                 continue;
@@ -217,6 +222,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static boolean verifyAppendSectionMutationEvidence(
+            Path root,
             String pathHint,
             String sectionName,
             String expectedSentence,
@@ -231,7 +237,7 @@ final class TaskExpectationMutationEvidenceVerifier {
         boolean sawRelevantMutation = false;
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             if (outcome == null || !outcome.success()
-                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                    || !sameTarget(root, pathHint, outcome.pathHint())) {
                 continue;
             }
             sawRelevantMutation = true;
@@ -269,6 +275,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static FinalStateEvidence collectAppendSectionFinalStateEvidence(
+            Path root,
             String pathHint,
             String sectionName,
             String expectedSentence,
@@ -284,7 +291,7 @@ final class TaskExpectationMutationEvidenceVerifier {
         List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
                 .filter(outcome -> outcome != null
                         && outcome.success()
-                        && normalizePath(outcome.pathHint()).equals(pathHint))
+                        && sameTarget(root, pathHint, outcome.pathHint()))
                 .toList();
         if (relevant.size() != 1) {
             problems.add(pathHint
@@ -342,6 +349,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static boolean verifyAppendStatementMutationEvidence(
+            Path root,
             String pathHint,
             String label,
             String statement,
@@ -350,6 +358,7 @@ final class TaskExpectationMutationEvidenceVerifier {
             List<String> problems
     ) {
         return collectAppendStatementMutationEvidence(
+                root,
                 pathHint,
                 label,
                 statement,
@@ -360,6 +369,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     static AppendStatementEvidence collectAppendStatementMutationEvidence(
+            Path root,
             String pathHint,
             String label,
             String statement,
@@ -376,7 +386,7 @@ final class TaskExpectationMutationEvidenceVerifier {
         String beforeContent = null;
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             if (outcome == null || !outcome.success()
-                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                    || !sameTarget(root, pathHint, outcome.pathHint())) {
                 continue;
             }
             sawRelevantMutation = true;
@@ -546,6 +556,12 @@ final class TaskExpectationMutationEvidenceVerifier {
             idx += needle.length();
         }
         return count;
+    }
+
+    /** The mutation names the target as text, or names the same workspace file under another spelling. */
+    private static boolean sameTarget(Path root, String pathHint, String mutatedPath) {
+        return normalizePath(mutatedPath).equals(pathHint)
+                || WorkspacePathIdentity.matches(root, pathHint, mutatedPath);
     }
 
     private static String normalizePath(String path) {

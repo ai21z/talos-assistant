@@ -312,4 +312,79 @@ class NamedTargetExistenceGuardTest {
     private static ToolCall writeFile(String path, String content) {
         return new ToolCall("talos.write_file", Map.of("path", path, "content", content));
     }
+
+    private static final String NESTED_NAMED_REQUEST = "Modify foo() in src/helper.py so it returns 99.";
+
+    @Test
+    void absoluteSpellingOfTheNamedFileIsBlockedThroughTheChainLikeTheRelativeSpelling() throws Exception {
+        Path root = nestedHelper();
+        String absolute = root.resolve("src").resolve("helper.py").toString();
+        LoopState state = loopStateAt(root, NESTED_NAMED_REQUEST);
+        addReadback(state, "src/helper.py", "1 | def bar():\n2 |     return 1\n");
+        ToolCall write = writeFile(absolute, "def bar():\n    return 99\n");
+        List<String> modelMessages = new ArrayList<>();
+        List<ToolResult> emitted = new ArrayList<>();
+        ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
+                false,
+                (s, nativePath, callIndex, content, outcome) -> modelMessages.add(content),
+                (toolName, result) -> emitted.add(result));
+
+        ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
+                state, write, ToolExecutionPathContext.from(write),
+                TaskContractResolver.fromUserRequest(NESTED_NAMED_REQUEST),
+                false, 0, Set.of(), Set.of());
+
+        assertAll(
+                () -> assertTrue(result.blocked(), "the absolute spelling of the named file must stop before execution"),
+                () -> assertEquals(1, emitted.size()),
+                () -> assertFalse(emitted.getFirst().success()),
+                () -> assertTrue(emitted.getFirst().errorMessage()
+                        .contains("Named target `foo()` was not found in `src/helper.py`"),
+                        emitted.getFirst().errorMessage()),
+                () -> assertTrue(modelMessages.getFirst().contains("Do not mutate another function"),
+                        modelMessages.toString()));
+    }
+
+    @Test
+    void absoluteSpellingOfTheNamedFileRequiresReadEvidenceLikeTheRelativeSpelling() throws Exception {
+        Path root = nestedHelper();
+        String absolute = root.resolve("src").resolve("helper.py").toString();
+        LoopState state = loopStateAt(root, NESTED_NAMED_REQUEST);
+        var contract = TaskContractResolver.fromUserRequest(NESTED_NAMED_REQUEST);
+
+        String relative = NamedTargetExistenceGuard.diagnostic(
+                writeFile("src/helper.py", "def foo():\n    return 99\n"), state, contract, "src/helper.py");
+        String absoluteDiagnostic = NamedTargetExistenceGuard.diagnostic(
+                writeFile(absolute, "def foo():\n    return 99\n"), state, contract, absolute);
+
+        assertNotNull(relative, "the relative spelling must be held, otherwise the fixture is wrong");
+        assertEquals(relative, absoluteDiagnostic);
+    }
+
+    @Test
+    void sameNamedFileInAnotherFolderIsNotTheNamedTarget() throws Exception {
+        Path root = nestedHelper();
+        Files.createDirectories(root.resolve("lib"));
+        Files.writeString(root.resolve("lib").resolve("helper.py"), "def bar():\n    return 1\n");
+        String sibling = root.resolve("lib").resolve("helper.py").toString();
+        LoopState state = loopStateAt(root, NESTED_NAMED_REQUEST);
+        addReadback(state, "src/helper.py", "1 | def bar():\n2 |     return 1\n");
+        var contract = TaskContractResolver.fromUserRequest(NESTED_NAMED_REQUEST);
+
+        for (String path : List.of("lib/helper.py", sibling)) {
+            assertNull(NamedTargetExistenceGuard.diagnostic(
+                    writeFile(path, "def bar():\n    return 99\n"), state, contract, path), path);
+        }
+    }
+
+    private Path nestedHelper() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src").resolve("helper.py"), "def bar():\n    return 1\n");
+        return root;
+    }
+
+    private static LoopState loopStateAt(Path root, String request) {
+        return new LoopState("", List.of(), List.of(ChatMessage.user(request)), root, null, null, 5, 0);
+    }
 }

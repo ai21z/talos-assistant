@@ -3,7 +3,9 @@ package dev.talos.runtime.repair;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,8 +36,17 @@ public final class StaticSelectorRepairGuard {
     }
 
     public static Optional<Violation> violationForWrite(List<ChatMessage> messages, ToolCall call) {
+        return violationForWrite(messages, call, null);
+    }
+
+    /**
+     * A write names a full-file repair target by text or, with a workspace, as the same workspace file, so a
+     * write under another spelling of the target is checked like the target itself.
+     */
+    public static Optional<Violation> violationForWrite(List<ChatMessage> messages, ToolCall call, Path workspace) {
         if (call == null || !"talos.write_file".equals(call.canonicalToolName())) return Optional.empty();
-        String target = ToolCallSupport.normalizePath(call.param("path", ""));
+        String rawPath = call.param("path", "");
+        String target = ToolCallSupport.normalizePath(rawPath);
         if (target.isBlank()) return Optional.empty();
 
         String repairContext = lastStaticRepairContext(messages).orElse("");
@@ -44,10 +55,13 @@ public final class StaticSelectorRepairGuard {
         }
 
         Set<String> fullRewriteTargets = fullRewriteTargetsFromContext(repairContext);
-        if (fullRewriteTargets.isEmpty()
-                || fullRewriteTargets.stream()
-                        .map(ToolCallSupport::normalizePath)
-                        .noneMatch(target::equals)) {
+        String matchedTarget = fullRewriteTargets.stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(candidate -> candidate.equals(target)
+                        || WorkspacePathIdentity.matches(workspace, candidate, rawPath))
+                .findFirst()
+                .orElse(null);
+        if (matchedTarget == null) {
             return Optional.empty();
         }
         if (fullRewriteTargets.stream()
@@ -60,7 +74,7 @@ public final class StaticSelectorRepairGuard {
         if (content == null || content.isBlank()) return Optional.empty();
 
         String facts = repairContext.substring(repairContext.indexOf("[Current static selector facts]"));
-        List<String> selectors = missingSelectorsForTarget(facts, target);
+        List<String> selectors = missingSelectorsForTarget(facts, matchedTarget);
         if (selectors.isEmpty()) return Optional.empty();
 
         List<String> preserved = selectors.stream()

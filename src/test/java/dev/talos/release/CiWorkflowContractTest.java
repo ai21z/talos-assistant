@@ -53,6 +53,27 @@ class CiWorkflowContractTest {
     }
 
     @Test
+    @DisplayName("Linux CI runs the workspace path identity checks that differ by platform")
+    void linuxCiRunsWorkspacePathIdentityChecks() throws IOException {
+        String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
+        String linuxJob = workflowJobBlock(workflow, "linux-command-portability");
+
+        for (String testClass : new String[] {
+                "dev.talos.tools.WorkspacePathIdentityTest",
+                "dev.talos.runtime.policy.EvidenceObligationVerifierTest",
+                "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest",
+                "dev.talos.runtime.toolcall.PendingActionObligationBreachGuardTest",
+                "dev.talos.runtime.toolcall.SourceDerivedEvidenceGuardTest",
+                "dev.talos.runtime.toolcall.StaticWebRewriteGroundingGuardTest",
+                "dev.talos.runtime.verification.StaticTaskVerifierTest",
+                "dev.talos.runtime.verification.TargetScopeStaticVerifierTest",
+                "dev.talos.cli.modes.EvidencePathIdentityTurnTest"}) {
+            assertTrue(linuxJob.contains("--tests \"" + testClass + "\""),
+                    "the Linux job must run " + testClass + ", because POSIX path forms and case-sensitive identity run nowhere else");
+        }
+    }
+
+    @Test
     @DisplayName("CI triggers match the public main and beta-dev branch model")
     void ciTriggersMatchPublicMainAndBetaDevBranchModel() throws IOException {
         String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));

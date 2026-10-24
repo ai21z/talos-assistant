@@ -195,6 +195,9 @@ public final class EvidenceContainmentAnswerGuard {
         if (message.contains("not attempted")) {
             return protectedReadNotAttemptedPrefix(protectedReadNotAttemptedMessage(plan));
         }
+        if (evidenceResult != null && evidenceResult.earlierReadSucceeded()) {
+            return staleProtectedReadPrefix(staleProtectedReadMessage(plan));
+        }
         return protectedReadIncompletePrefix(protectedReadIncompleteMessage(plan));
     }
 
@@ -220,6 +223,23 @@ public final class EvidenceContainmentAnswerGuard {
             return current;
         }
         return prefix + "\n\n" + current;
+    }
+
+    private static String staleProtectedReadPrefix(String answer) {
+        String current = answer == null ? "" : answer;
+        String prefix = "[Protected read incomplete: an approved read happened, but the required protected "
+                + "evidence is incomplete.]";
+        if (current.startsWith(prefix)) {
+            return current;
+        }
+        return prefix + "\n\n" + current;
+    }
+
+    private static String staleProtectedReadMessage(CurrentTurnPlan plan) {
+        return "talos.read_file returned protected content in this turn after approval, but the "
+                + "protected evidence this answer needs is incomplete or no longer current, so no answer "
+                + "is given from it."
+                + targetSentence(plan);
     }
 
     private static String protectedReadIncompleteMessage(CurrentTurnPlan plan) {

@@ -819,4 +819,117 @@ class MissingMutationRetryTest {
                 "compact write spec must keep minLength 1 on path");
     }
 
+    @Test
+    void retryWriteThroughTheAbsoluteSpellingOfANestedTargetSendsNoRemainingTargetContinuation()
+            throws Exception {
+        beginTrace("missing-mutation-absolute-nested-target");
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        String request = "Create docs/a.md containing x.";
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = mutationPlan(request);
+        assertTrue(safePlan.taskContract().expectedTargets().contains("docs/a.md"),
+                safePlan.taskContract().expectedTargets().toString());
+        var writeCall = new ChatMessage.NativeToolCall(
+                "call_write_absolute",
+                "talos.write_file",
+                Map.of("path", root.resolve("docs").resolve("a.md").toString(), "content", "x\n"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(writeCall)),
+                        new LlmClient.StreamResult("Done.", List.of())),
+                16_384);
+        Context ctx = testContext(provider.client(), new FileWriteTool());
+
+        MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
+                "I will create docs/a.md.",
+                messages,
+                safePlan,
+                retryableMutationLoop(messages),
+                root,
+                ctx,
+                (retryMessages, plan, specs) ->
+                        TurnModelDispatcher.dispatchEscalatedRetry(
+                                ctx,
+                                retryMessages,
+                                plan,
+                                specs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
+
+        assertEquals("x\n", Files.readString(root.resolve("docs").resolve("a.md")));
+        assertEquals(1, result.mutationsInRetry(), result.answer());
+        assertFalse(result.actionObligationFailed(), result.answer());
+        List<String> requests = providerRequestTexts(provider);
+        assertFalse(requests.isEmpty(), "the retry must reach the scripted provider");
+        assertTrue(requests.stream().noneMatch(text ->
+                        text.contains("[RemainingExpectedTargetsAfterMutationRetry]")),
+                String.join("\n----\n", requests));
+        assertTrue(requests.stream().noneMatch(text -> text.contains("[Expected target progress]")),
+                String.join("\n----\n", requests));
+    }
+
+    @Test
+    void retryWriteToASameNameFileInAnotherFolderLeavesTheNestedTargetRemaining() throws Exception {
+        beginTrace("missing-mutation-same-name-other-folder");
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.createDirectories(root.resolve("other"));
+        String request = "Create docs/a.md containing x.";
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = mutationPlan(request);
+        var writeCall = new ChatMessage.NativeToolCall(
+                "call_write_other_folder",
+                "talos.write_file",
+                Map.of("path", root.resolve("other").resolve("a.md").toString(), "content", "x\n"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(writeCall)),
+                        new LlmClient.StreamResult("Done.", List.of())),
+                16_384);
+        Context ctx = testContext(provider.client(), new FileWriteTool());
+
+        MissingMutationRetry.retryIfNeeded(
+                "I will create docs/a.md.",
+                messages,
+                safePlan,
+                retryableMutationLoop(messages),
+                root,
+                ctx,
+                (retryMessages, plan, specs) ->
+                        TurnModelDispatcher.dispatchEscalatedRetry(
+                                ctx,
+                                retryMessages,
+                                plan,
+                                specs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
+
+        assertEquals("x\n", Files.readString(root.resolve("other").resolve("a.md")));
+        assertFalse(Files.exists(root.resolve("docs").resolve("a.md")));
+        List<String> requests = providerRequestTexts(provider);
+        List<String> remaining = requests.stream()
+                .skip(1)
+                .flatMap(text -> remainingTargetLists(text).stream())
+                .toList();
+        assertTrue(remaining.stream().anyMatch(list -> list.contains("docs/a.md")),
+                String.join("\n----\n", requests));
+    }
+
+    private static List<String> providerRequestTexts(ScriptedNativeLlmClient.RecordedClient provider) {
+        return provider.requests().stream()
+                .map(request -> request.messages.stream()
+                        .map(message -> message.content() == null ? "" : message.content())
+                        .collect(java.util.stream.Collectors.joining("\n")))
+                .toList();
+    }
+
+    private static List<String> remainingTargetLists(String requestText) {
+        var matcher = java.util.regex.Pattern
+                .compile("Remaining expected target[^:]*:\\s*([^\\n]*)")
+                .matcher(requestText);
+        List<String> lists = new ArrayList<>();
+        while (matcher.find()) {
+            lists.add(matcher.group(1).strip());
+        }
+        return lists;
+    }
 }

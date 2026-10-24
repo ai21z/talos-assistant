@@ -5,6 +5,7 @@ import dev.talos.runtime.obligation.RequestObligation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -45,6 +46,20 @@ public final class RequestObligationVerificationReceipt {
             Set<String> verifiedTargets,
             List<ToolCallLoop.ToolOutcome> successfulMutations
     ) {
+        return verified(obligation, finalState, verifiedTargets, successfulMutations, null);
+    }
+
+    /**
+     * A successful mutation is covered when its recorded path is a verified target by canonical text or, with a
+     * root, names a verified target as the same workspace file.
+     */
+    static RequestObligationVerificationReceipt verified(
+            RequestObligation obligation,
+            RequestObligationFinalStateVerifier.Result finalState,
+            Set<String> verifiedTargets,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            Path root
+    ) {
         if (finalState == null
                 || !finalState.passedFor(obligation)) {
             return NONE;
@@ -65,7 +80,7 @@ public final class RequestObligationVerificationReceipt {
             if (outcome == null || !outcome.success() || !outcome.mutating()) {
                 return NONE;
             }
-            String target = canonicalTarget(outcome.pathHint());
+            String target = coveredTarget(outcome.pathHint(), canonicalVerifiedTargets, root);
             String toolCallId = outcome.toolCallId() == null
                     ? ""
                     : outcome.toolCallId().strip();
@@ -138,6 +153,15 @@ public final class RequestObligationVerificationReceipt {
             if (normalized == null || !canonical.add(normalized)) return null;
         }
         return Set.copyOf(canonical);
+    }
+
+    private static String coveredTarget(String recorded, Set<String> verifiedTargets, Path root) {
+        String canonical = canonicalTarget(recorded);
+        if (canonical != null || root == null) return canonical;
+        for (String target : verifiedTargets) {
+            if (dev.talos.tools.WorkspacePathIdentity.matches(root, target, recorded)) return target;
+        }
+        return null;
     }
 
     private static String canonicalTarget(String target) {

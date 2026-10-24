@@ -10,7 +10,9 @@ import dev.talos.runtime.verification.TaskVerificationEvidence;
 import dev.talos.runtime.verification.TaskVerificationEvidenceSource;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.WorkspacePathIdentity;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -211,6 +213,21 @@ public record MutationRecoveryAssessment(
             int extraMutationSuccesses,
             TaskVerificationEvidence verificationEvidence
     ) {
+        return assess(contract, requestObligation, loopResult, extraMutationSuccesses, verificationEvidence, null);
+    }
+
+    /**
+     * The workspace lets a recorded path count as the obligation target it names under another spelling,
+     * proven by identity. Without it, paths are compared as canonical text only.
+     */
+    public static MutationRecoveryAssessment assess(
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            TaskVerificationEvidence verificationEvidence,
+            Path workspace
+    ) {
         List<ToolCallLoop.ToolOutcome> ordered = loopResult == null
                 ? List.of()
                 : loopResult.toolOutcomes();
@@ -240,7 +257,8 @@ public record MutationRecoveryAssessment(
                         Match.unrecovered(Decision.DENIED_OR_POLICY),
                         Decision.DENIED_OR_POLICY,
                         requestObligation,
-                        evidence));
+                        evidence,
+                        workspace));
                 continue;
             }
 
@@ -254,7 +272,8 @@ public record MutationRecoveryAssessment(
                                 duplicateRepair.outcome().toolCallId()),
                         Decision.REDUNDANT_ALREADY_APPLIED_OPERATION,
                         requestObligation,
-                        evidence));
+                        evidence,
+                        workspace));
                 continue;
             }
 
@@ -264,7 +283,8 @@ public record MutationRecoveryAssessment(
                     requestObligation,
                     compiled,
                     evidence,
-                    extraMutationSuccesses);
+                    extraMutationSuccesses,
+                    workspace);
             if (matched.decision() != Decision.RECOVERED_MATCHED_OBLIGATION) {
                 Match typedSequence = typedRepairSequenceSettlement(
                         indexed,
@@ -273,7 +293,8 @@ public record MutationRecoveryAssessment(
                         requestObligation,
                         compiled,
                         evidence,
-                        extraMutationSuccesses);
+                        extraMutationSuccesses,
+                        workspace);
                 if (typedSequence != null) {
                     matched = typedSequence;
                 }
@@ -283,7 +304,8 @@ public record MutationRecoveryAssessment(
                     matched,
                     matched.decision(),
                     requestObligation,
-                    evidence);
+                    evidence,
+                    workspace);
             assessments.add(failureAssessment);
             if (!failureAssessment.resolved()) {
                 failed.add(outcome);
@@ -312,13 +334,23 @@ public record MutationRecoveryAssessment(
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        return provisional(contract, requestObligation, loopResult, extraMutationSuccesses, null);
+    }
+
+    public static MutationRecoveryAssessment provisional(
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            Path workspace
+    ) {
         return assess(
                 contract,
                 requestObligation,
                 loopResult,
                 extraMutationSuccesses,
                 TaskVerificationEvidence.notRun(
-                        "Post-apply verification has not completed."));
+                        "Post-apply verification has not completed."), workspace);
     }
 
     public boolean partial() {
@@ -360,7 +392,8 @@ public record MutationRecoveryAssessment(
             RequestObligation supplied,
             RequestObligation compiled,
             TaskVerificationEvidence evidence,
-            int extraMutationSuccesses
+            int extraMutationSuccesses,
+            Path workspace
     ) {
         if (!eligibleEditFailure(failure.outcome())) {
             return Match.unrecovered(Decision.FAILURE_NOT_ELIGIBLE);
@@ -375,7 +408,7 @@ public record MutationRecoveryAssessment(
         }
 
         String target = supplied.requiredMutationTargets().getFirst();
-        if (!target.equals(canonicalPath(failure.outcome().pathHint()))) {
+        if (!target.equals(canonicalPath(failure.outcome().pathHint(), workspace, supplied))) {
             return Match.unrecovered(Decision.TARGET_MISMATCH);
         }
         if (evidence.source() != TaskVerificationEvidenceSource.POST_APPLY_STATIC) {
@@ -401,7 +434,7 @@ public record MutationRecoveryAssessment(
             if (candidate.ordinal() <= failure.ordinal()) continue;
             ToolCallLoop.ToolOutcome outcome = candidate.outcome();
             if (!outcome.success()
-                    || !target.equals(canonicalPath(outcome.pathHint()))) {
+                    || !target.equals(canonicalPath(outcome.pathHint(), workspace, supplied))) {
                 continue;
             }
             laterTargetSuccesses.add(candidate);
@@ -466,7 +499,8 @@ public record MutationRecoveryAssessment(
             RequestObligation supplied,
             RequestObligation compiled,
             TaskVerificationEvidence evidence,
-            int extraMutationSuccesses
+            int extraMutationSuccesses,
+            Path workspace
     ) {
         ToolCallLoop.ToolOutcome failed = failure.outcome();
         if (!typedRepairSequenceFailure(failed)
@@ -484,7 +518,7 @@ public record MutationRecoveryAssessment(
             return null;
         }
 
-        String target = canonicalPath(failed.pathHint());
+        String target = canonicalPath(failed.pathHint(), workspace, supplied);
         if (target.isBlank()
                 || !RequestObligation.diagnosticPath(target).equals(target)
                 || !supplied.requiredMutationTargets().contains(target)
@@ -506,7 +540,7 @@ public record MutationRecoveryAssessment(
         for (IndexedOutcome candidate : mutating) {
             ToolCallLoop.ToolOutcome outcome = candidate.outcome();
             if (!outcome.success()) continue;
-            String candidateTarget = canonicalPath(outcome.pathHint());
+            String candidateTarget = canonicalPath(outcome.pathHint(), workspace, supplied);
             if (candidateTarget.isBlank()
                     || !RequestObligation.diagnosticPath(candidateTarget)
                             .equals(candidateTarget)
@@ -534,7 +568,9 @@ public record MutationRecoveryAssessment(
                         failure,
                         repair,
                         ordered,
-                        target)) {
+                        target,
+                        workspace,
+                        supplied)) {
             return null;
         }
         return new Match(
@@ -602,7 +638,9 @@ public record MutationRecoveryAssessment(
             IndexedOutcome failure,
             IndexedOutcome repair,
             List<ToolCallLoop.ToolOutcome> ordered,
-            String target
+            String target,
+            Path workspace,
+            RequestObligation supplied
     ) {
         if (ordered == null
                 || failure.ordinal() <= 0
@@ -627,9 +665,9 @@ public record MutationRecoveryAssessment(
                 && read.failureReason() == ToolFailureReason.NONE
                 && ToolMutationEvidence.none().equals(read.mutationEvidence())
                 && "talos.read_file".equals(read.canonicalToolName())
-                && target.equals(canonicalPath(read.pathHint()))
+                && target.equals(canonicalPath(read.pathHint(), workspace, supplied))
                 && read.sourcePaths().stream()
-                        .map(MutationRecoveryAssessment::canonicalPath)
+                        .map(path -> canonicalPath(path, workspace, supplied))
                         .anyMatch(target::equals)
                 && !read.toolCallId().isBlank()
                 && !read.toolCallId().equals(
@@ -669,9 +707,10 @@ public record MutationRecoveryAssessment(
             Match match,
             Decision decision,
             RequestObligation obligation,
-            TaskVerificationEvidence evidence
+            TaskVerificationEvidence evidence,
+            Path workspace
     ) {
-        String target = canonicalPath(failure.outcome().pathHint());
+        String target = canonicalPath(failure.outcome().pathHint(), workspace, obligation);
         return new FailureAssessment(
                 failure.ordinal(),
                 match.repairOrdinal(),
@@ -699,6 +738,19 @@ public record MutationRecoveryAssessment(
             }
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * The canonical text of a recorded path, or, when that text is not a canonical target, the obligation target
+     * the path is proven to name as the same workspace file.
+     */
+    private static String canonicalPath(String path, Path workspace, RequestObligation obligation) {
+        String canonical = canonicalPath(path);
+        if (!canonical.isBlank() || workspace == null || obligation == null) return canonical;
+        for (String target : obligation.requiredMutationTargets()) {
+            if (WorkspacePathIdentity.matches(workspace, target, path)) return target;
+        }
+        return "";
     }
 
     private static String canonicalPath(String path) {

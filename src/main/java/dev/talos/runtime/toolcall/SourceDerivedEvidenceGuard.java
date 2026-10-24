@@ -4,6 +4,7 @@ import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -80,7 +81,11 @@ final class SourceDerivedEvidenceGuard {
         String canonical = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonical)) return null;
         String target = ToolCallSupport.normalizePath(pathHint);
-        if (target.isBlank() || !expectedTargetContains(contract, target)) return null;
+        if (target.isBlank() || !(expectedTargetContains(contract, target)
+                || contract.expectedTargets().stream()
+                        .anyMatch(expected -> WorkspacePathIdentity.matches(state.workspace, expected, pathHint)))) {
+            return null;
+        }
         List<SourceReadback> sourceReadbacks = sourceReadbacks(state, contract);
         if (sourceReadbacks.isEmpty()) return null;
         String content = deterministicEvidenceSummary(target, sourceReadbacks);
@@ -120,11 +125,23 @@ final class SourceDerivedEvidenceGuard {
         for (String sourceTarget : contract.sourceEvidenceTargets()) {
             String normalized = evidencePathKey(sourceTarget);
             if (normalized.isBlank()) continue;
-            if (!readPaths.contains(normalized)) {
+            if (!readPaths.contains(normalized) && !sourceReadUnderAnotherSpelling(state, sourceTarget)) {
                 missing.add(normalized);
             }
         }
         return List.copyOf(missing);
+    }
+
+    /**
+     * A source read through another spelling of the same workspace file counts. Only recorded read paths, from
+     * this loop's outcomes or the turn capture, are compared by identity, never normalized ones.
+     */
+    private static boolean sourceReadUnderAnotherSpelling(LoopState state, String sourceTarget) {
+        if (TargetReadEvidence.successfullyRead(sourceTarget, null, state.toolOutcomes, state.workspace)) return true;
+        for (String readPath : TurnSourceEvidenceCapture.recordedReadPaths()) {
+            if (WorkspacePathIdentity.matches(state.workspace, sourceTarget, readPath)) return true;
+        }
+        return false;
     }
 
     static String deterministicEvidenceSummary(

@@ -223,4 +223,37 @@ class EditFilePreApprovalGuardTest {
                 "old_string", oldString,
                 "new_string", newString));
     }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void anEditUnderAnotherSpellingOfARepairOrStaleTargetGetsTheSameDiagnostic() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.writeString(root.resolve("script.js"), "old\n");
+        LoopState state = new LoopState("", List.of(), new ArrayList<>(List.of(ChatMessage.user("Fix script.js."))),
+                root, null, null, 5, 0);
+        String absolute = root.resolve("script.js").toString();
+
+        var repair = EditFilePreApprovalGuard.decision(
+                editFile(absolute, "old", "new"), state, absolute, false, Set.of(), Set.of("script.js"));
+        var stale = EditFilePreApprovalGuard.decision(
+                editFile(absolute, "old", "new"), state, absolute, false, Set.of("script.js"), Set.of());
+
+        assertNotNull(repair, "a full-rewrite target edited under its absolute spelling must be redirected");
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, repair.kind());
+        assertNotNull(stale, "a stale target edited under its absolute spelling must be re-read first");
+        assertEquals(EditFilePreApprovalGuard.Kind.STALE_REREAD_REQUIRED, stale.kind());
+    }
+
+    @Test
+    void anEditOfAFileWithTheSameNameElsewhereIsNotARepairTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("old"));
+        Files.writeString(root.resolve("old").resolve("script.js"), "old\n");
+        LoopState state = new LoopState("", List.of(), new ArrayList<>(List.of(ChatMessage.user("Fix script.js."))),
+                root, null, null, 5, 0);
+        String other = root.resolve("old").resolve("script.js").toString();
+
+        assertNull(EditFilePreApprovalGuard.decision(
+                editFile(other, "old", "new"), state, other, false, Set.of("script.js"), Set.of("script.js")));
+    }
 }

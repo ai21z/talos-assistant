@@ -5,6 +5,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -39,7 +40,8 @@ final class StaticWebRequiredAssetWriteGuard {
         if (!StaticWebCapabilityProfile.isSmallWebFile(path)) {
             return null;
         }
-        if (!isExpectedTarget(contract, path)) {
+        String matchedTarget = matchedExpectedTarget(contract, path, pathHint, state);
+        if (matchedTarget == null) {
             return null;
         }
         String content = call.param("content");
@@ -49,7 +51,7 @@ final class StaticWebRequiredAssetWriteGuard {
         if (content == null || !content.isBlank()) {
             return null;
         }
-        if (explicitlyAllowsBlankRequiredAsset(contract.originalUserRequest(), path)) {
+        if (explicitlyAllowsBlankRequiredAsset(contract.originalUserRequest(), matchedTarget)) {
             return null;
         }
         return "Static-web write rejected before approval: " + path
@@ -58,15 +60,22 @@ final class StaticWebRequiredAssetWriteGuard {
                 + "No approval was requested and no file was changed.";
     }
 
-    private static boolean isExpectedTarget(TaskContract contract, String path) {
-        if (contract == null || path == null || path.isBlank()) return false;
+    /** The contract target this write names, by text or as the same workspace file, or null. */
+    private static String matchedExpectedTarget(
+            TaskContract contract,
+            String path,
+            String pathHint,
+            LoopState state
+    ) {
+        if (contract == null || path == null || path.isBlank()) return null;
         for (String target : contract.expectedTargets()) {
             String normalized = ToolCallSupport.normalizePath(target);
-            if (path.equals(normalized) || path.equalsIgnoreCase(normalized)) {
-                return true;
+            if (path.equals(normalized) || path.equalsIgnoreCase(normalized)
+                    || WorkspacePathIdentity.matches(state == null ? null : state.workspace, target, pathHint)) {
+                return normalized;
             }
         }
-        return false;
+        return null;
     }
 
     private static boolean explicitlyAllowsBlankRequiredAsset(String request, String path) {

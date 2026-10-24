@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -33,7 +34,10 @@ final class NamedTargetExistenceGuard {
         if (target == null) return null;
 
         String actualPath = ToolCallSupport.normalizePath(pathHint);
-        if (!samePath(actualPath, target.path())) return null;
+        if (!samePath(actualPath, target.path())
+                && !WorkspacePathIdentity.matches(state.workspace, target.path(), pathHint)) {
+            return null;
+        }
 
         String readback = latestCompleteReadbackForPath(state, target.path());
         if (readback == null) {

@@ -328,4 +328,61 @@ class RejectedProposalSynthesisIntegrationTest {
     }
 
     private record Turn(CurrentTurnPlan plan, List<ChatMessage> messages, ToolCallLoop.LoopResult loop) {}
+
+    @Test void sourceReadUnderItsAbsolutePathStillSelectsTheSynthesisUnavailableAnswer() throws Exception {
+        var sourceFiles = sources();
+        for (var source : sourceFiles.entrySet()) Files.writeString(workspace.resolve(source.getKey()), source.getValue());
+        String absoluteNotes = workspace.resolve("notes.md").toString();
+        var config = new dev.talos.core.Config();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(config,
+                List.of(new LlmClient.StreamResult("Must not be dispatched.", List.of())), 2_048);
+        clients.add(recorded.client());
+        LocalTurnTraceCapture.begin("synthesis-absolute-read-integration", "local-test", 1,
+                "2026-10-21T00:00:00Z", "workspace-hash", "ask", "test", "test-model", REQUEST);
+        var contract = WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromUserRequest(REQUEST), workspace);
+        TurnTaskContractCapture.set(contract);
+        dev.talos.runtime.TurnAuditCapture.begin();
+        dev.talos.runtime.TurnUserRequestCapture.set(REQUEST);
+        var registry = new dev.talos.tools.ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        registry.register(new dev.talos.runtime.toolcall.DocumentComparisonTool());
+        var specs = registry.descriptors().stream().map(descriptor -> new dev.talos.spi.types.ToolSpec(
+                descriptor.name(), descriptor.description(), descriptor.parametersSchema())).toList();
+        var context = dev.talos.cli.repl.Context.builder(config).llm(recorded.client())
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, Map.of()))
+                .toolRegistry(registry).nativeToolSpecs(specs).build();
+        var calls = new ArrayList<ChatMessage.NativeToolCall>();
+        for (String path : sourceFiles.keySet()) calls.add(new ChatMessage.NativeToolCall(
+                "read-" + path, "talos.read_file", Map.of("path", path.equals("notes.md") ? absoluteNotes : path)));
+        for (var requirement : dev.talos.runtime.task.DocumentComparisonRequest.from(contract).requirements()) {
+            calls.add(new ChatMessage.NativeToolCall("compare-" + calls.size(),
+                    dev.talos.runtime.toolcall.DocumentComparisonTool.NAME,
+                    Map.of("left", requirement.pair().left(), "right", requirement.pair().right())));
+        }
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(REQUEST)));
+        var loop = new ToolCallLoop(new dev.talos.runtime.TurnProcessor(null,
+                new dev.talos.runtime.NoOpApprovalGate(), registry), 4).runRuntimeDeterministic("", calls,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API, messages, workspace, context);
+        assertEquals(0, loop.failedCalls());
+        assertTrue(loop.toolOutcomes().stream().anyMatch(outcome -> outcome.success()
+                && absoluteNotes.equals(outcome.pathHint())), loop.toolOutcomes().toString());
+        assertTrue(TerminalReadOnlyStopAnswer.rejectedProposalSynthesis(loop), loop.finalAnswer());
+        var plan = CurrentTurnPlan.create(contract, ExecutionPhase.INSPECT,
+                specs.stream().map(dev.talos.spi.types.ToolSpec::name).toList(),
+                specs.stream().map(dev.talos.spi.types.ToolSpec::name).toList(), List.of());
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop).result().status());
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop, workspace).result().status());
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop, null, workspace).result().status());
+        var selected = AssistantTurnExecutor.selectReadOnlyWebDiagnosticsIfNeeded(
+                "Unrelated candidate must not inherit runtime status.", plan, messages, loop, workspace);
+        assertEquals(ReadOnlyWebAnswerAssessment.Reason.SYNTHESIS_UNAVAILABLE, selected.assessment().reason());
+        assertEquals(TerminalReadOnlyStopAnswer.synthesisUnavailableAnswer(), selected.answer());
+        var outcome = finish(new Turn(plan, messages, loop), loop);
+        assertEquals(loop.finalAnswer(), outcome.finalAnswer());
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+    }
 }

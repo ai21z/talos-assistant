@@ -57,21 +57,111 @@ public final class ProtectedReadAnswerGuard {
 
     public static String summarizeDeniedProtectedReadOutcomesIfNeeded(
             String answer,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
     ) {
         if (loopResult == null) return answer;
         List<ToolCallLoop.ToolOutcome> deniedProtectedReads = loopResult.toolOutcomes().stream()
                 .filter(ProtectedReadAnswerGuard::isDeniedProtectedReadOutcome)
                 .toList();
         if (deniedProtectedReads.isEmpty()) return answer;
+        List<ToolCallLoop.ToolOutcome> deniedAfterApprovedRead = deniedProtectedReads.stream()
+                .filter(denied -> approvedReadOfSameFile(loopResult, denied, workspace))
+                .toList();
+        if (deniedAfterApprovedRead.isEmpty()) {
+            List<String> otherApprovedReads = approvedProtectedReadPaths(loopResult, workspace);
+            if (otherApprovedReads.isEmpty()) {
+                return deniedProtectedReadSummary(deniedProtectedReads);
+            }
+            return deniedProtectedReadSummary(deniedProtectedReads)
+                    .replace("[Approval blocked: protected content was not read]",
+                            "[Approval blocked: protected content of the denied file(s) was not read]")
+                    + "\n\nAn approved read in this turn returned content from: "
+                    + String.join(", ", otherApprovedReads) + ".";
+        }
+        List<ToolCallLoop.ToolOutcome> unread = deniedProtectedReads.stream()
+                .filter(denied -> !deniedAfterApprovedRead.contains(denied))
+                .toList();
+        StringBuilder note = new StringBuilder("[Protected read: approval was denied for one read of ");
+        note.append(String.join(", ", deniedAfterApprovedRead.stream()
+                .map(outcome -> workspaceDisplayPath(outcome, workspace))
+                .distinct()
+                .toList()));
+        note.append(". Another approved read of that file in this turn returned its content.]");
+        if (!unread.isEmpty()) {
+            return note + "\n\n" + deniedProtectedReadSummary(unread);
+        }
+        return note + "\n\n" + (answer == null ? "" : answer);
+    }
+
+    public static String summarizeDeniedProtectedReadOutcomesIfNeeded(
+            String answer,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        return summarizeDeniedProtectedReadOutcomesIfNeeded(answer, loopResult, null);
+    }
+
+    private static boolean approvedReadOfSameFile(
+            ToolCallLoop.LoopResult loopResult,
+            ToolCallLoop.ToolOutcome denied,
+            Path workspace
+    ) {
+        String deniedPath = canonicalDisplayPath(denied.pathHint());
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.success() || outcome.denied()) continue;
+            if (!"read_file".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(outcome.toolName()))) continue;
+            if (!deniedPath.isBlank() && deniedPath.equals(canonicalDisplayPath(outcome.pathHint()))) return true;
+            if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, outcome.pathHint(), denied.pathHint())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> approvedProtectedReadPaths(ToolCallLoop.LoopResult loopResult, Path workspace) {
+        return loopResult.toolOutcomes().stream()
+                .filter(outcome -> outcome != null && outcome.success() && !outcome.denied()
+                        && "read_file".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(outcome.toolName()))
+                        && dev.talos.runtime.policy.ProtectedContentPolicy.looksProtectedPathString(
+                                canonicalDisplayPath(outcome.pathHint())))
+                .map(outcome -> workspaceDisplayPath(outcome, workspace))
+                .distinct()
+                .toList();
+    }
+
+    /** A path inside the workspace is shown relative to it, so an answer does not reveal the home folder. */
+    private static String workspaceDisplayPath(ToolCallLoop.ToolOutcome outcome, Path workspace) {
+        String display = displayPath(outcome);
+        if (workspace == null) return display;
+        try {
+            Path recorded = Path.of(outcome.pathHint().strip());
+            Path root = workspace.toAbsolutePath().normalize();
+            if (recorded.isAbsolute()) {
+                Path normalized = recorded.normalize();
+                if (dev.talos.tools.WorkspacePathIdentity.lexicallyWithin(root, normalized)) {
+                    String relative = root.relativize(normalized).toString().replace('\\', '/');
+                    if (!relative.isBlank()) return relative;
+                }
+            }
+        } catch (RuntimeException unavailable) {
+            return display;
+        }
+        return display;
+    }
+
+    private static String displayPath(ToolCallLoop.ToolOutcome outcome) {
+        String path = canonicalDisplayPath(outcome.pathHint());
+        return path.isBlank() ? outcome.toolName() : path;
+    }
+
+    private static String deniedProtectedReadSummary(List<ToolCallLoop.ToolOutcome> deniedProtectedReads) {
 
         StringBuilder out = new StringBuilder();
         out.append("[Approval blocked: protected content was not read]\n\n")
                 .append("Protected content was not read because approval was denied for:\n");
         for (ToolCallLoop.ToolOutcome outcome : deniedProtectedReads) {
-            String path = canonicalDisplayPath(outcome.pathHint());
             out.append("- ")
-                    .append(path.isBlank() ? outcome.toolName() : path)
+                    .append(displayPath(outcome))
                     .append(": approval denied\n");
         }
         out.append("\nNo protected file content was shown. ")

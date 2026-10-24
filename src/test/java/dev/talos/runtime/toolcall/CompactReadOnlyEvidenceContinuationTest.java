@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -219,6 +220,60 @@ class CompactReadOnlyEvidenceContinuationTest {
                 state,
                 new ToolCall("talos.read_file", java.util.Map.of("path", "README.md")),
                 "README.md",
+                ToolResult.ok("1 | # Fixture\n2 | Evidence for a wording proposal."));
+        return state;
+    }
+
+    @Test
+    void absoluteSpelledReadOfTheTargetBuildsTheCompactAnswer(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.writeString(root.resolve("README.md"), "# Fixture\nEvidence for a wording proposal.\n");
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("Suggestion: name the fixture.", List.of())), 2048);
+        LoopState state = readOnlyEvidenceStateAt(recorded.client(), root, root.resolve("README.md").toString());
+        beginTrace();
+
+        boolean answered = CompactReadOnlyEvidenceContinuation.tryAnswer(state, "tool-call loop continuation");
+
+        assertTrue(answered, "an absolute-spelled read of README.md is the target read");
+        assertEquals("Suggestion: name the fixture.", state.currentText);
+        assertEquals(1, recorded.requests().size());
+        String compactPrompt = recorded.requests().getFirst().messages.stream()
+                .map(ChatMessage::content)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(compactPrompt.contains("Evidence for a wording proposal."), compactPrompt);
+        assertTrue(compactPrompt.contains("Target: README.md"), compactPrompt);
+    }
+
+    @Test
+    void sameNameInAnotherFolderOrSiblingReadDoesNotBuildTheCompactAnswer(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("README.md"), "# Fixture\n");
+        Files.writeString(root.resolve("docs").resolve("README.md"), "# Docs\n");
+        Files.writeString(root.resolve("CHANGELOG.md"), "# Changes\n");
+        for (Path read : List.of(root.resolve("docs").resolve("README.md"), root.resolve("CHANGELOG.md"))) {
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("Must not be requested.", List.of())), 2048);
+            LoopState state = readOnlyEvidenceStateAt(recorded.client(), root, read.toString());
+
+            assertFalse(CompactReadOnlyEvidenceContinuation.tryAnswer(state, "tool-call loop continuation"),
+                    read.toString());
+            assertEquals(0, recorded.requests().size(), read.toString());
+        }
+    }
+
+    private static LoopState readOnlyEvidenceStateAt(LlmClient llm, Path root, String readPath) {
+        String request = "Review README.md and propose one wording improvement, but do not edit it.";
+        var ctx = Context.builder(new Config()).llm(llm).build();
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        LoopState state = new LoopState("", List.of(), messages, root, ctx, null, 5, 0);
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.read_file", readPath, true, false, false, "read " + readPath, ""));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", java.util.Map.of("path", readPath)),
+                readPath,
                 ToolResult.ok("1 | # Fixture\n2 | Evidence for a wording proposal."));
         return state;
     }

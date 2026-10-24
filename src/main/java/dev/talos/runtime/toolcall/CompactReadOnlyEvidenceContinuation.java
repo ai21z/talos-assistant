@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.tools.WorkspacePathIdentity;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnExecutionStage;
@@ -142,7 +143,8 @@ final class CompactReadOnlyEvidenceContinuation {
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
+            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))
+                    || WorkspacePathIdentity.matches(state.workspace, normalizedPath, outcome.pathHint())) {
                 return true;
             }
         }

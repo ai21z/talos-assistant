@@ -35,6 +35,7 @@ final class MutationTargetReadbackVerifier {
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         Set<String> mutationTargets = new LinkedHashSet<>();
+        Set<String> recordedMutationTargets = new LinkedHashSet<>();
         List<WorkspaceOperationPlan> workspaceOperationPlans = new ArrayList<>();
         List<String> workspaceOperationToolNames = new ArrayList<>();
 
@@ -72,6 +73,7 @@ final class MutationTargetReadbackVerifier {
                     continue;
                 }
                 mutationTargets.add(pathHint);
+                recordedMutationTargets.add(outcome.pathHint());
                 verifyTarget(root, pathHint, outcome.fileVerificationStatus(), facts, problems);
             }
         }
@@ -82,7 +84,7 @@ final class MutationTargetReadbackVerifier {
                 workspaceOperationToolNames,
                 problems);
 
-        return new Result(facts, problems, mutationTargets, workspaceOperationPlans);
+        return new Result(facts, problems, mutationTargets, workspaceOperationPlans, recordedMutationTargets);
     }
 
     private static void requireWorkspaceOperationIdentity(
@@ -128,12 +130,26 @@ final class MutationTargetReadbackVerifier {
         }
     }
 
+    /**
+     * The verified mutation targets. mutationTargets are normalized for text checks. recordedMutationTargets keep
+     * the tool's own spelling, so identity never reads a rewritten backslash as a separator.
+     */
     record Result(
             List<String> facts,
             List<String> problems,
             Set<String> mutationTargets,
-            List<WorkspaceOperationPlan> workspaceOperationPlans
+            List<WorkspaceOperationPlan> workspaceOperationPlans,
+            Set<String> recordedMutationTargets
     ) {
+        Result(
+                List<String> facts,
+                List<String> problems,
+                Set<String> mutationTargets,
+                List<WorkspaceOperationPlan> workspaceOperationPlans
+        ) {
+            this(facts, problems, mutationTargets, workspaceOperationPlans, mutationTargets);
+        }
+
         Result {
             facts = facts == null ? List.of() : List.copyOf(facts);
             problems = problems == null ? List.of() : List.copyOf(problems);
@@ -143,6 +159,9 @@ final class MutationTargetReadbackVerifier {
             workspaceOperationPlans = workspaceOperationPlans == null
                     ? List.of()
                     : List.copyOf(workspaceOperationPlans);
+            recordedMutationTargets = recordedMutationTargets == null
+                    ? Set.of()
+                    : Collections.unmodifiableSet(new LinkedHashSet<>(recordedMutationTargets));
         }
     }
 
