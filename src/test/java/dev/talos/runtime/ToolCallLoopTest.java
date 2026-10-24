@@ -4252,6 +4252,142 @@ class ToolCallLoopTest {
         }
     }
 
+    /**
+     * A case variant of a pending static-web target that does not exist yet is an attempt at the target.
+     * The breach guard lets it through, the pre-approval rule refuses it, and the scope repair then
+     * writes the exact target.
+     */
+    @Test
+    void pendingExpectedTargetCaseVariantOfAMissingWebAssetIsRepairedInsteadOfStoppingTheTurn() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-expected-case-variant-web-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Create index.html and Styles.css for a BMI calculator.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String indexWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"<!doctype html><html><head><title>BMI</title><link rel=stylesheet href=Styles.css></head><body><h1>BMI Calculator</h1></body></html>"}}
+                    """;
+            String caseVariantWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body { margin: 0; }"}}
+                    """;
+            String repairedWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"Styles.css","content":"body { margin: 0; }"}}
+                    """;
+            // The static-web profile also projects script.js, which is not part of this case.
+            String scriptWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"console.log(1);"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            caseVariantWrite, repairedWrite, scriptWrite, "All files are written.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderText(
+                        loop, indexWrite, List.of("talos.write_file", "talos.read_file"), messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            var decision = result.failureDecision();
+            String reason = decision == null ? "" : decision.reason();
+            assertFalse(reason.contains("EXPECTED_TARGETS_REMAINING"),
+                    "a case variant of a missing target is not a breach: " + reason);
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            outcome.failureReason() == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED
+                                    && "styles.css".equals(outcome.pathHint())),
+                    "the case variant must still be refused before approval: " + result.toolOutcomes());
+            assertTrue(Files.exists(ws.resolve("Styles.css")),
+                    "the scope repair must write the exact target: reason=" + reason
+                            + " outcomes=" + result.toolOutcomes());
+            assertEquals("body { margin: 0; }", Files.readString(ws.resolve("Styles.css")));
+            try (var entries = Files.list(ws)) {
+                assertTrue(entries.map(path -> path.getFileName().toString()).anyMatch("Styles.css"::equals),
+                        "the file must exist under the requested spelling");
+            }
+            List<String> written = result.toolOutcomes().stream()
+                    .filter(outcome -> outcome.success() && outcome.mutating())
+                    .map(ToolCallLoop.ToolOutcome::pathHint)
+                    .toList();
+            assertTrue(written.contains("index.html") && written.contains("Styles.css"), written.toString());
+            assertFalse(written.contains("styles.css"), "the case variant never executes: " + written);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
+     * Without a readback or a static-web target there is no scope repair, so the turn stops on the
+     * pre-approval refusal that names the expected set, not on a breach that hides it.
+     */
+    @Test
+    void pendingExpectedTargetCaseVariantOfAMissingFileStopsOnThePreApprovalRefusalNotABreach() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-expected-case-variant-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.write_file twice. First write status=new into notes.md. "
+                    + "Then write status2=new into More.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String firstWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"notes.md","content":"status=new"}}
+                    """;
+            String caseVariantWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"more.md","content":"status2=new"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(caseVariantWrite, "should not be reached")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderText(
+                        loop, firstWrite, List.of("talos.write_file", "talos.read_file"), messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            String reason = result.failureDecision().reason();
+            assertFalse(reason.contains("EXPECTED_TARGETS_REMAINING"), reason);
+            assertTrue(reason.contains("Target outside expected targets before approval"), reason);
+            assertTrue(reason.contains("More.md"), reason);
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            outcome.failureReason() == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED
+                                    && "more.md".equals(outcome.pathHint())),
+                    "the case variant must be refused before approval: " + result.toolOutcomes());
+            assertFalse(Files.exists(ws.resolve("More.md")), "no file is written under either spelling");
+            assertFalse(Files.exists(ws.resolve("more.md")), "no file is written under either spelling");
+            assertEquals(1, result.mutatingToolSuccesses());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     @Test
     void appendLineFullWriteThatDoesNotPreserveReadbackIsRejectedBeforeApproval() throws Exception {
         Path ws = Files.createTempDirectory("talos-append-line-preapproval-");

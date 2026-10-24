@@ -146,8 +146,9 @@ final class EditFilePreApprovalGuard {
     }
 
     /**
-     * The path is in a set of recorded paths by text, or names the same workspace file as a member. The members
-     * are normalized, so identity is used only where that spelling is lossless.
+     * The path is in a set of recorded paths by text, or names the same workspace file as a member. Both
+     * decisions block, so identity is consulted on every platform. On POSIX a normalized member whose name
+     * held a backslash can only add a block, never let an edit through.
      */
     private static boolean namesMember(
             Set<String> members,
@@ -157,7 +158,7 @@ final class EditFilePreApprovalGuard {
     ) {
         if (members == null || members.isEmpty()) return false;
         if (members.contains(normalizedPath)) return true;
-        if (workspace == null || !dev.talos.tools.WorkspacePathIdentity.normalizedSpellingIsLossless()) return false;
+        if (workspace == null) return false;
         for (String member : members) {
             if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, member, pathHint)) return true;
         }

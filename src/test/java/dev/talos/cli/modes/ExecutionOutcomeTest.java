@@ -251,6 +251,69 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
     }
 
+    /** The status follows the evidence verdict. A denial that left nothing required unread does not block the turn. */
+    @Test
+    void deniedReadAfterAnApprovedReadOfTheSameFileCompletesTheTurn() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file sets MODE to dev.", 1, 2,
+                List.of("talos.read_file", "talos.read_file"), List.of(),
+                2, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", true, false, false,
+                                "MODE=dev", "", null, null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", false, false, true,
+                                "", "User did not approve the talos.read_file call.",
+                                null, ToolError.DENIED
+                        ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file sets MODE to dev.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().completionStatus() != TaskCompletionStatus.BLOCKED_BY_APPROVAL,
+                "a delivered, verified answer is not blocked by approval: " + outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("approval was denied for one read of .env"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("The file sets MODE to dev."), outcome.finalAnswer());
+    }
+
+    @Test
+    void deniedReadOfTheRequiredFileStaysBlockedWhenAnotherProtectedFileWasRead() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file sets MODE to dev.", 1, 2,
+                List.of("talos.read_file", "talos.read_file"), List.of(),
+                2, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "secrets.json", true, false, false,
+                                "{}", "", null, null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", false, false, true,
+                                "", "User did not approve the talos.read_file call.",
+                                null, ToolError.DENIED
+                        ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file sets MODE to dev.", messages, loopResult, null, 0);
+
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("protected content of the denied file(s) was not read"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("returned content from: secrets.json"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("MODE to dev"), outcome.finalAnswer());
+    }
+
     @Test
     void deniedMutationDominatesMixedInvalidAndDeniedNoSuccessTurn() {
         var messages = new ArrayList<ChatMessage>();

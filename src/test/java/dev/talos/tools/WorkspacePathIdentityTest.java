@@ -164,6 +164,26 @@ class WorkspacePathIdentityTest {
         assertTrue(WorkspacePathIdentity.matches(workspace, "cs/notes.txt", lower.toString()));
     }
 
+    @Test
+    void aMissingCaseVariantIsRecognisedOnlyWhileNeitherSpellingExists() throws IOException {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        String absoluteVariant = root.resolve("docs").resolve("more.md").toString();
+
+        assertTrue(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", "docs/more.md"));
+        assertTrue(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", absoluteVariant));
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", "docs/More.md"),
+                "the same spelling is not a variant");
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", "docs/other.md"));
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", "../More.md"));
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(null, "docs/More.md", "docs/more.md"));
+
+        Files.writeString(root.resolve("docs").resolve("more.md"), "x\n");
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", "docs/more.md"),
+                "an existing file is judged by identity, not by this rule");
+        assertFalse(WorkspacePathIdentity.missingCaseVariant(root, "docs/More.md", absoluteVariant));
+    }
+
     private static boolean madeCaseSensitive(Path folder) {
         try {
             Process process = new ProcessBuilder(

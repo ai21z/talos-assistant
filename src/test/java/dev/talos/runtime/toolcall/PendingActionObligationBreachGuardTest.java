@@ -277,6 +277,28 @@ class PendingActionObligationBreachGuardTest {
         assertFalse(staticRepair.breach(), staticRepair.detail());
     }
 
+    /**
+     * A case variant of a target that does not exist yet is an attempt at the target, not a breach.
+     * The pre-approval rule still refuses the write, and the scope repair names the exact target.
+     */
+    @Test
+    void expectedTargetCaseVariantOfAMissingTargetIsNotABreach() throws IOException {
+        Path root = workspaceWith("docs/notes.md");
+        PendingActionObligation obligation = PendingActionObligation.expectedTargets(List.of("docs/More.md"));
+
+        for (String spelling : List.of("docs/more.md", root.resolve("docs").resolve("more.md").toString())) {
+            var decision = PendingActionObligationBreachGuard.assess(
+                    obligation, List.of(writeFile(spelling, "x\n")), root);
+            assertFalse(decision.breach(), spelling + ": " + decision.detail());
+        }
+        assertTrue(PendingActionObligationBreachGuard.assess(
+                obligation, List.of(writeFile("docs/other.md", "x\n")), root).breach(),
+                "another file stays a breach");
+        assertTrue(PendingActionObligationBreachGuard.assess(
+                obligation, List.of(writeFile("docs/more.md", "x\n")), null).breach(),
+                "without a workspace the case variant stays a breach");
+    }
+
     @Test
     @DisabledOnOs(OS.WINDOWS)
     void expectedTargetCaseVariantIsAnotherFileWhereCaseIsSignificant() throws IOException {

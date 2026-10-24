@@ -61,6 +61,7 @@ class CiWorkflowContractTest {
         for (String testClass : new String[] {
                 "dev.talos.tools.WorkspacePathIdentityTest",
                 "dev.talos.runtime.policy.EvidenceObligationVerifierTest",
+                "dev.talos.runtime.toolcall.EditFilePreApprovalGuardTest",
                 "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest",
                 "dev.talos.runtime.toolcall.PendingActionObligationBreachGuardTest",
                 "dev.talos.runtime.toolcall.SourceDerivedEvidenceGuardTest",

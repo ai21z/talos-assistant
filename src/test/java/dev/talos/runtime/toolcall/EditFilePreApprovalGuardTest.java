@@ -224,8 +224,8 @@ class EditFilePreApprovalGuardTest {
                 "new_string", newString));
     }
 
+    /** Both decisions block, so identity applies on every platform, including POSIX. */
     @Test
-    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
     void anEditUnderAnotherSpellingOfARepairOrStaleTargetGetsTheSameDiagnostic() throws Exception {
         Path root = workspace.toRealPath();
         Files.writeString(root.resolve("script.js"), "old\n");

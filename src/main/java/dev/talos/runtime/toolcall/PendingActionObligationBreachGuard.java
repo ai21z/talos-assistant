@@ -123,6 +123,7 @@ final class PendingActionObligationBreachGuard {
             String path = ToolCallSupport.normalizePath(rawPath);
             if (!path.isBlank() && (matchesPendingExpectedTarget(call.toolName(), path, normalizedTargets)
                     || sameWorkspaceFileAsTarget(workspace, targets, rawPath)
+                    || caseVariantOfMissingTarget(workspace, targets, rawPath)
                     || mkdirOfTargetParent(call.toolName(), workspace, targets, rawPath))) {
                 continue;
             }
@@ -191,6 +192,19 @@ final class PendingActionObligationBreachGuard {
         if (workspace == null || targets == null) return false;
         for (String target : targets) {
             if (WorkspacePathIdentity.matchesKeepingCase(workspace, target, path)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A case variant of a target that exists under neither spelling is an attempt at the target.
+     * The pre-approval rule still refuses it, and the scope repair then names the exact target,
+     * so no ordinary folder becomes stricter and no case-sensitive folder becomes looser.
+     */
+    private static boolean caseVariantOfMissingTarget(Path workspace, List<String> targets, String path) {
+        if (workspace == null || targets == null) return false;
+        for (String target : targets) {
+            if (WorkspacePathIdentity.missingCaseVariant(workspace, target, path)) return true;
         }
         return false;
     }

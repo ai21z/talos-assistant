@@ -66,6 +66,45 @@ public final class WorkspacePathIdentity {
     }
 
     /**
+     * True when the spellings differ only in case and the file exists under
+     * neither, so the file system cannot yet say whether they are one file. A
+     * caller that only routes such an attempt to approval may treat it as
+     * aimed at the requested file. An existing file under either spelling
+     * gives false, so two files in a case-sensitive folder stay distinct.
+     */
+    public static boolean missingCaseVariant(Path workspace, String requested, String recorded) {
+        if (workspace == null || !workspace.isAbsolute()
+                || requested == null || requested.isBlank()
+                || recorded == null || recorded.isBlank()) {
+            return false;
+        }
+        try {
+            Path root = workspace.normalize();
+            Path recordedPath = PathArgumentCanonicalizer
+                    .canonicalizeExistingPathWhitespace(root, recorded)
+                    .resolvedPath();
+            Path requestedPath = root.resolve(requested.strip()).normalize();
+            if (recordedPath == null
+                    || !recordedPath.isAbsolute()
+                    || !requestedPath.isAbsolute()
+                    || !lexicallyWithin(root, recordedPath)
+                    || !lexicallyWithin(root, requestedPath)) {
+                return false;
+            }
+            Path a = recordedPath.toAbsolutePath().normalize();
+            Path b = requestedPath.toAbsolutePath().normalize();
+            if (a.toString().equals(b.toString()) || !samePathShapeIgnoringCase(a, b)) {
+                return false;
+            }
+            NoFollowPathPolicy.GuardedRoot guardedRoot = NoFollowPathPolicy.bindExistingDirectory(root);
+            return guardedRoot.inspect(recordedPath) == NoFollowPathPolicy.EntryType.MISSING
+                    && guardedRoot.inspect(requestedPath) == NoFollowPathPolicy.EntryType.MISSING;
+        } catch (IOException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    /**
      * True when the spellings may name the same workspace file, including an
      * unproven case variant, a rooted spelling without an absolute form and a
      * path rejected by no-follow inspection. Used where a match must be

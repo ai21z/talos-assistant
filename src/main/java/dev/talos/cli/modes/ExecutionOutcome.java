@@ -281,7 +281,7 @@ record ExecutionOutcome(
 
         shaped = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
                 current, loopResult, workspace);
-        boolean deniedProtectedRead = !Objects.equals(current, shaped);
+        boolean protectedReadAnswerShaped = !Objects.equals(current, shaped);
         current = shaped;
 
         shaped = MutationFailureAnswerRenderer.summarizeInvalidMutationOutcomesIfNeeded(
@@ -289,7 +289,7 @@ record ExecutionOutcome(
         boolean invalidMutation = !Objects.equals(current, shaped);
         current = shaped;
         boolean outputLimitRelevant = documentAnswer.inputRetained() && !(staticWebImportGroundedOverride
-                || webDiagnosticGroundedOverride || selectorGroundedOverride || deniedProtectedRead || invalidMutation
+                || webDiagnosticGroundedOverride || selectorGroundedOverride || protectedReadAnswerShaped || invalidMutation
                 || (deniedMutation && !readOnlyDeniedMutation));
 
         MutationRecoveryAssessment provisionalMutationAssessment =
@@ -355,6 +355,10 @@ record ExecutionOutcome(
                 : EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
         EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
         var evidenceResult = evidenceAssessment.result();
+        // The status follows the evidence verdict. A denied read of a file that an approved read already
+        // covers is kept in the answer note and the trace, not turned into a blocked status.
+        boolean deniedProtectedRead = protectedReadAnswerShaped
+                && evidenceResult.status() != EvidenceObligationVerifier.Status.SATISFIED;
         boolean missingEvidence = evidenceAssessment.missingEvidence();
         boolean readEvidencePolicyBlocked = evidenceResult.status() == EvidenceObligationVerifier.Status.BLOCKED
                 && !deniedProtectedRead;
@@ -406,15 +410,19 @@ record ExecutionOutcome(
             LocalTurnTraceCapture.recordProtocolSanitized(
                     EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
-            ProtectedReadAnswerGuard.PostconditionResult protectedReadPostcondition =
-                    ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
-                            current,
-                            loopResult,
-                            workspace,
-                            messages);
-            current = protectedReadPostcondition.answer();
-            approvedProtectedReadPostcondition = protectedReadPostcondition.repaired();
-            if (approvedProtectedReadPostcondition) outputLimitRelevant = false;
+            if (!deniedProtectedRead) {
+                // A denial summary for a file that stayed unread is not a model refusal to replace
+                // with the evidence of another approved read.
+                ProtectedReadAnswerGuard.PostconditionResult protectedReadPostcondition =
+                        ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                                current,
+                                loopResult,
+                                workspace,
+                                messages);
+                current = protectedReadPostcondition.answer();
+                approvedProtectedReadPostcondition = protectedReadPostcondition.repaired();
+                if (approvedProtectedReadPostcondition) outputLimitRelevant = false;
+            }
             shaped = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
                     current,
                     messages,

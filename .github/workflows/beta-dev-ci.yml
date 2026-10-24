@@ -137,6 +137,7 @@ jobs:
           ./gradlew test \
             --tests "dev.talos.tools.WorkspacePathIdentityTest" \
             --tests "dev.talos.runtime.policy.EvidenceObligationVerifierTest" \
+            --tests "dev.talos.runtime.toolcall.EditFilePreApprovalGuardTest" \
             --tests "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest" \
             --tests "dev.talos.runtime.toolcall.PendingActionObligationBreachGuardTest" \
             --tests "dev.talos.runtime.toolcall.SourceDerivedEvidenceGuardTest" \
