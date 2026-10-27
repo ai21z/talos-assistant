@@ -58,7 +58,7 @@ class UiChromeContractTest {
         String summary = ToolLoopResultSummaryFormatter.format(
                 result,
                 new ToolLoopResultSummaryFormatter.GroundingDisclosure(
-                        "1 of 3 workspace candidate files read, unread: todos.md, notes.md"));
+                        "1 of 3 workspace candidate files read in full, unread: todos.md, notes.md"));
 
         assertTrue(summary.contains("workspace candidate files read"), summary);
         assertStripped(summary);

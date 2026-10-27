@@ -1457,7 +1457,12 @@ public final class TaskContractResolver {
         if (containsAny(lower, DIAGNOSE_MARKERS)) {
             return TaskType.DIAGNOSE_ONLY;
         }
-        if (containsWorkspaceMarker(lower)) {
+        // The requested result decides: a scoped text search asks for search evidence, not for a
+        // project explanation, and a workspace word inside a quotation is not the request.
+        if (dev.talos.runtime.intent.ContentSearchRequest.matches(lower)) {
+            return TaskType.READ_ONLY_QA;
+        }
+        if (containsWorkspaceMarker(dev.talos.runtime.intent.ContentSearchRequest.unquotedLower(lower))) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
         if (looksSmallTalkOnly(lower)) {

@@ -21,6 +21,8 @@ public final class FinalAnswerStatusRenderer {
                 case RUNTIME_SAFE_CAP -> "runtime output limit";
                 case LOCAL_PRESENTATION_LIMIT -> "presentation limit";
                 case INCOMPLETE_PROVIDER_GENERATION -> "uncommitted provider answer withheld";
+                case INCOMPLETE_PROVIDER_GENERATION_WITHOUT_TEXT ->
+                        "provider generation ended without text, runtime text selected";
             }).toList()) + (status.associationAvailable() ? "" : ", some association unavailable");
         };
         return List.of("Work outcome: " + status.operational().status() + " ("

@@ -182,4 +182,62 @@ class AnswerGroundingDisclosureTest {
     private static ToolCallLoop.ToolOutcome outcome(String toolName, String path) {
         return new ToolCallLoop.ToolOutcome(toolName, path, true, false, false, "ok", "");
     }
+
+    /** A search or listing outcome whose source paths name the files it touched. */
+    private static ToolCallLoop.ToolOutcome outcomeWithSources(String toolName, String target, List<String> sources) {
+        return new ToolCallLoop.ToolOutcome(toolName, target, true, false, false, toolName + " " + target, "",
+                null, "", null, null, null, sources, "", null, null);
+    }
+
+    /** C2: a file that a search matched is neither read in full nor unread. The header says which. */
+    @Test
+    void searchMatchesAreCountedSeparatelyFromFullReads(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "readme\n");
+        Files.writeString(workspace.resolve("calc.py"), "def bmi(): pass\n");
+        Files.writeString(workspace.resolve("index.html"), "<html></html>\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(
+                        outcomeWithSources("talos.list_dir", ".", List.of("README.md", "calc.py", "index.html")),
+                        outcomeWithSources("talos.grep", "bmi", List.of("calc.py")),
+                        outcome("talos.read_file", "README.md")),
+                List.of("README.md"));
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("What is this project?"),
+                ChatMessage.toolResult("call_list",
+                        "[tool_result:talos.list_dir]\nREADME.md\ncalc.py\nindex.html\n[/tool_result]"));
+
+        String note = AnswerGroundingDisclosure.toolLoopDisclosure(
+                loopResult, workspaceExplainPlan("What is this project?"), workspace, messages)
+                .workspaceCandidateNote();
+
+        assertTrue(note.contains("1 of 3 workspace candidate files read in full"), note);
+        assertTrue(note.contains("1 searched with matches: calc.py"), note);
+        assertTrue(note.contains("unread: index.html"), note);
+        assertTrue(!note.contains("unread: calc.py") && !note.contains("unread: index.html, calc.py"),
+                "a searched file is not unread: " + note);
+    }
+
+    /** C2: candidates come from the listing outcome of this turn, not from listing text compaction removed. */
+    @Test
+    void enumeratedCandidatesComeFromTheListingOutcomeNotFromCompactedText(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("src"));
+        Files.writeString(workspace.resolve("src").resolve("app.py"), "x\n");
+        Files.writeString(workspace.resolve("README.md"), "readme\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(
+                        outcomeWithSources("talos.list_dir", ".", List.of("README.md", "src/app.py")),
+                        outcome("talos.read_file", "README.md")),
+                List.of("README.md"));
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("What is this project?"),
+                ChatMessage.toolResult("call_list",
+                        "[compacted: talos.list_dir result, 40 chars - full output elided to keep context focused]"));
+
+        String note = AnswerGroundingDisclosure.toolLoopDisclosure(
+                loopResult, workspaceExplainPlan("What is this project?"), workspace, messages)
+                .workspaceCandidateNote();
+
+        assertTrue(note.contains("1 of 2 workspace candidate files read in full"), note);
+        assertTrue(note.contains("unread: src/app.py"), note);
+    }
 }

@@ -476,7 +476,7 @@ public final class TurnProcessor {
     private static void clearCapturedTurnState() {
         TurnUserRequestCapture.clear();
         TurnTaskContractCapture.clear();
-        TurnSourceEvidenceCapture.clear();
+        TurnSourceEvidenceCapture.clear(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
         TurnTraceCapture.clear();
         LocalTurnTraceCapture.clear();
         if (TurnAuditCapture.isActive()) {
@@ -1324,7 +1324,10 @@ public final class TurnProcessor {
         if (!operationPathsResolved && fallbackPath != null && !fallbackPath.isBlank()) {
             paths.add(fallbackPath);
         }
-        if (result != null && result.contentMetadata() != null) {
+        // A listing names entries it did not touch. Its own directory is the audited path, so the
+        // listed names are not persisted as hints.
+        if (result != null && result.contentMetadata() != null
+                && !"list_dir".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             paths.addAll(result.contentMetadata().sourcePaths());
         }
         return List.copyOf(paths);

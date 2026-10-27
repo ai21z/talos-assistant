@@ -269,6 +269,36 @@ class FinalAnswerStatusTest {
     }
 
     private static final String TYPE = FinalAnswerStatus.TYPE;
+    /** C7: a generation that held only a tool call dropped no provider prose, so nothing was "withheld". */
+    @Test void aGenerationWithoutTextIsNotReportedAsWithheldProviderText() {
+        begin();
+        providerWithoutEos("");
+        String notice = "[Answer incomplete: the provider generation ended without text.]";
+        LocalTurnTraceCapture.recordOperatorAnswerSelected(notice);
+        LocalTurnTraceCapture.recordUncommittedProviderAnswer(notice);
+        completeRead();
+        var trace = finish(notice);
+        var status = FinalAnswerStatus.decode(trace);
+        assertFalse(status.causes().contains(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION),
+                "no provider text existed to withhold: " + status.causes());
+        String rendered = String.join("\n", dev.talos.cli.ui.FinalAnswerStatusRenderer.lines(trace));
+        assertFalse(rendered.contains("uncommitted provider answer withheld"), rendered);
+        assertTrue(rendered.contains("without text"), rendered);
+    }
+
+    @Test void aGenerationWithTextThatWasWithheldStillSaysSo() {
+        begin();
+        providerWithoutEos("Partial provider prose");
+        String notice = "[Answer incomplete: uncommitted provider text was withheld.]";
+        LocalTurnTraceCapture.recordOperatorAnswerSelected(notice);
+        LocalTurnTraceCapture.recordUncommittedProviderAnswer(notice);
+        completeRead();
+        var trace = finish(notice);
+        assertTrue(FinalAnswerStatus.decode(trace).causes().contains(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION));
+        assertTrue(String.join("\n", dev.talos.cli.ui.FinalAnswerStatusRenderer.lines(trace))
+                .contains("uncommitted provider answer withheld"));
+    }
+
     private static void begin() {
         LocalTurnTraceCapture.begin("final-status", "status-tests", 1, "2026-10-09T00:00:00Z",
                 "workspace", "test", "llama_cpp", "fixture", "Answer the request.");
@@ -279,6 +309,17 @@ class FinalAnswerStatusTest {
     private static LocalTurnTrace finish(String answer) {
         LocalTurnTraceCapture.recordRoutedAnswerCaptured(answer);
         return LocalTurnTraceCapture.complete();
+    }
+    private static ProviderResponseCapture.Receipt providerWithoutEos(String answer) {
+        var generation = ProviderResponseCapture.openGeneration(ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        var attempt = generation.startAttempt(ProviderResponseCapture.AttemptKind.PRIMARY, ProviderResponseCapture.RetryReason.NONE);
+        ObservedProviderTransportFixture.completeBodyEof(attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
+        var receipt = attempt.respond(new ProviderResponseCapture.Response(answer, 0,
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS, false, false));
+        generation.complete(receipt);
+        return receipt;
     }
     private static ProviderResponseCapture.Receipt provider(String answer, ProviderResponseCapture.Completion completion) {
         var generation = ProviderResponseCapture.openGeneration(ProviderResponseCapture.Source.FOREGROUND_PROVIDER,

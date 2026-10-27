@@ -49,7 +49,9 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
                     + "(?:workspace|directory|folder)\\s+(?:location|path)\\b"
                     + "|\\bwhat(?:'s|’s|\\s+is)\\s+the\\s+(?:(?:full|absolute|current)\\s+)?(?:path|location)\\s+"
                     + "(?:of|to|for)\\s+(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder)\\b"
-                    + "|\\b(?:which|what)\\s+(?:workspace|directory|folder)\\s+(?:are\\s+we|am\\s+i)\\s+(?:working\\s+)?in\\b");
+                    + "|\\b(?:which|what)\\s+(?:workspace|directory|folder)\\s+(?:are\\s+we|am\\s+i)\\s+(?:working\\s+)?in\\b"
+                    + "|\\b(?:(?:tell|give|show)\\s+me\\s+)?the\\s+(?:(?:full|absolute|current)\\s+)?(?:path|location)\\s+"
+                    + "(?:of|to|for)\\s+(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder)\\b");
     private static final Pattern CONTENTS = Pattern.compile(
             "\\b(?:is|whether)\\s+(?:(?:this|the|our|current|active)\\s+)*(?:it|workspace|directory|folder)\\s+empty\\b"
                     + "|\\b(?:list|show)\\s+(?:(?:me|the|all|top\\s+level)\\s+)*(?:files|entries|contents|directories)\\b"
@@ -62,11 +64,18 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
             "\\bwhat\\s+does\\s+(?:this|the|our)\\s+(?:project|workspace)\\s+do\\b"
                     + "|\\bwhat\\s+is\\s+(?:this|the|our)\\s+(?:project|workspace)\\b"
                     + "|\\b(?:project|workspace)\\s+(?:purpose|about)\\b"
-                    + "|\\b(?:explain|summarize|describe)\\s+(?:this|the|our)\\s+(?:project|workspace)\\b");
+                    + "|\\b(?:explain|summarize|describe)\\s+(?:this|the|our)\\s+(?:project|workspace)\\b"
+                    // "it" after a workspace noun elsewhere in the request, which compile() requires.
+                    + "|\\bwhat\\s+does\\s+it\\s+do\\b|\\bwhat\\s+is\\s+it\\s+(?:for|about)\\b");
+    // An inspection restriction is framing: it withholds tools, it does not ask for a result of its own.
+    private static final Pattern INSPECTION_RESTRICTION = Pattern.compile(
+            "\\b(?:do\\s+not|don['’]?t|never|without)\\s+"
+                    + "(?:read(?:ing)?|inspect(?:ing)?|open(?:ing)?|search(?:ing)?|check(?:ing)?|scan(?:ning)?)\\s+"
+                    + "(?:(?:any|the|my|our|these|those|all)\\s+)?(?:files?|workspace|folder|directory|anything)\\b");
     // Only grammatical framing and workspace scope may remain after requested results are bound.
     private static final Pattern FRAME = Pattern.compile(
             "\\b(?:can|could|would|will|you|please|tell|me|read|inspect|check|access|look|at|this|the|our|current|active|"
-                    + "workspace|directory|folder|here|and|also|then|in|of|for|top|level|now|exactly)\\b|[\\s?,.!:;-]+");
+                    + "workspace|directory|folder|here|and|also|then|in|of|for|top|level|now|exactly|just)\\b|[\\s?,.!:;-]+");
     // A greeting is framing only where the request opens with it.
     private static final Pattern GREETING = Pattern.compile("^[\\s,.!]*(?:hey|hi|hello)\\b");
     // Any other word directly before a scope noun names a different folder, such as "the hello folder".
@@ -126,6 +135,8 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
         char[] remaining = masked.toCharArray();
         var greeting = GREETING.matcher(masked);
         if (greeting.find()) java.util.Arrays.fill(remaining, greeting.start(), greeting.end(), ' ');
+        var restriction = INSPECTION_RESTRICTION.matcher(masked);
+        while (restriction.find()) java.util.Arrays.fill(remaining, restriction.start(), restriction.end(), ' ');
         String scoped = new String(remaining);
         collect(results, remaining, masked, LOCATION, Kind.WORKSPACE_LOCATION, EvidenceBasis.TURN_WORKSPACE);
         collect(results, remaining, masked, CONTENTS, Kind.DIRECTORY_CONTENTS, EvidenceBasis.SCOPED_DIRECTORY_OBSERVATION);

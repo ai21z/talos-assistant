@@ -237,15 +237,32 @@ public final class ToolCallSupport {
             List<ChatMessage> messages,
             Map<Integer, String> originalsOut
     ) {
-        if (messages == null || messages.size() < 4) return;
+        compactOlderToolResultsInPlace(messages, originalsOut, java.util.Set.of());
+    }
+
+    /** One tool result removed from the model's view: its message index and its size before compaction. */
+    public record CompactedToolResult(int messageIndex, int chars) {}
+
+    /**
+     * Notices are runtime text in a tool carrier, not evidence. They neither take a keep slot nor get
+     * compacted, so a suppressed duplicate cannot push the result it points at out of the model's view.
+     */
+    public static List<CompactedToolResult> compactOlderToolResultsInPlace(
+            List<ChatMessage> messages,
+            Map<Integer, String> originalsOut,
+            java.util.Set<Integer> noticeIndices
+    ) {
+        List<CompactedToolResult> compacted = new ArrayList<>();
+        if (messages == null || messages.size() < 4) return compacted;
         List<Integer> toolResultIndices = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
-            if ("tool".equals(messages.get(i).role())) {
+            if ("tool".equals(messages.get(i).role())
+                    && (noticeIndices == null || !noticeIndices.contains(i))) {
                 toolResultIndices.add(i);
             }
         }
         int keepFrom = toolResultIndices.size() - KEEP_RECENT_TOOL_RESULTS;
-        if (keepFrom <= 0) return;
+        if (keepFrom <= 0) return compacted;
         for (int k = 0; k < keepFrom; k++) {
             int idx = toolResultIndices.get(k);
             ChatMessage m = messages.get(idx);
@@ -258,7 +275,9 @@ public final class ToolCallSupport {
             String summary = summarizeToolResult(content);
             messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary)
                     .withContentRestrictions(m.contentRestrictions()));
+            compacted.add(new CompactedToolResult(idx, content.length()));
         }
+        return compacted;
     }
 
     public static String resolvePathHint(ToolCall call) {

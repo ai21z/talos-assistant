@@ -88,6 +88,8 @@ public final class LoopState {
      * request and re-compact it afterwards.
      */
     public final Map<Integer, String> compactedToolResultOriginals = new HashMap<>();
+    /** Message indices of runtime notices (such as a suppressed duplicate), which are not tool evidence. */
+    public final java.util.Set<Integer> noticeMessageIndices = new java.util.HashSet<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     /**
      * T1013: typed, ordered read evidence bound to the effective execution

@@ -115,7 +115,10 @@ final class ToolCallPreExecutionGuardChain {
             resultMessageAppender.append(state, nativePath, callIndex, diagnostic, null);
             LOG.debug("  Suppressed redundant {} call (sig: {})",
                     effective.toolName(), SafeLogFormatter.value(redundantReadDecision.readSignature()));
-            recordBlockedCall(effective, redundantReadDecision.diagnostic());
+            // The suppression is a classified block in the audit and the trace, so /last lists it.
+            dev.talos.runtime.TurnAuditCapture.recordBlockedToolCall(effective, pathHint, "tool_loop",
+                    "duplicate call suppressed while its earlier result is still visible",
+                    redundantReadDecision.diagnostic());
             return Result.blocked(effective, pathContext, 0, false);
         }
 

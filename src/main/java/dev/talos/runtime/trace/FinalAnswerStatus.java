@@ -8,7 +8,11 @@ import java.util.Set;
 /** Selected delivery facts are kept separate from operational and semantic outcomes. */
 public final class FinalAnswerStatus {
     public static final String TYPE = "ANSWER_FINAL_STATUS";
-    public enum Cause { PROVIDER_LENGTH, RUNTIME_SAFE_CAP, LOCAL_PRESENTATION_LIMIT, INCOMPLETE_PROVIDER_GENERATION }
+    public enum Cause {
+        PROVIDER_LENGTH, RUNTIME_SAFE_CAP, LOCAL_PRESENTATION_LIMIT, INCOMPLETE_PROVIDER_GENERATION,
+        /** The provider generation ended before completion but held no text, so no provider prose was withheld. */
+        INCOMPLETE_PROVIDER_GENERATION_WITHOUT_TEXT
+    }
     public enum Delivery { NO_KNOWN_LIMIT, LIMITED, UNAVAILABLE }
     public enum Coverage { NOT_ASSESSED, UNAVAILABLE }
     public record Decoded(boolean available, LocalTurnTrace.OutcomeSummary operational,

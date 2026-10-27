@@ -335,7 +335,7 @@ public final class AssistantTurnExecutor {
         boolean useStreaming = !composeRuntimeIdentity && shouldUseStreaming(ctx, currentTurnPlan, workspace);
         // Transport capture remains bounded. Public presentation follows settlement.
 
-        TurnSourceEvidenceCapture.begin();
+        TurnSourceEvidenceCapture.begin(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
         TurnTaskContractCapture.set(currentTaskResolution, messages, runtimeIdentity, composeRuntimeIdentity);
         TurnTaskContractCapture.setRequestedResults(currentTurnPlan.requestedResults());
         try {
@@ -351,7 +351,7 @@ public final class AssistantTurnExecutor {
                 completeStream(ctx);
 
                 if (incompletePublicCandidate(streamResult)) {
-                    out.append(incompleteGenerationAnswer(messages, currentTurnPlan, ctx, opts));
+                    out.append(incompleteGenerationAnswer(streamResult, messages, currentTurnPlan, ctx, opts));
                 } else if (answer != null) {
                     if (isAbortedGeneration(streamResult, answer)) {
                         // An interrupted partial is failure evidence, never a
@@ -408,7 +408,7 @@ public final class AssistantTurnExecutor {
                 }
                 String answer = streamResult.text();
                 if (incompletePublicCandidate(streamResult)) {
-                    out.append(incompleteGenerationAnswer(messages, currentTurnPlan, ctx, opts));
+                    out.append(incompleteGenerationAnswer(streamResult, messages, currentTurnPlan, ctx, opts));
                 } else if (answer != null) {
                     if (isAbortedGeneration(streamResult, answer)) {
                         recordLlmAbortOutcome(streamResult, answer);
@@ -466,7 +466,7 @@ public final class AssistantTurnExecutor {
             throw propagateGenerationFailure(e);
         } finally {
             TurnTaskContractCapture.clear();
-            TurnSourceEvidenceCapture.clear();
+            TurnSourceEvidenceCapture.clear(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
         }
 
         return composeRuntimeIdentity
@@ -488,12 +488,12 @@ public final class AssistantTurnExecutor {
         return dev.talos.runtime.IncompleteGenerationPresentation.required(result);
     }
 
-    private static String incompleteGenerationAnswer(List<ChatMessage> messages, CurrentTurnPlan plan,
-                                                     Context ctx, Options opts) {
-        String notice = dev.talos.runtime.IncompleteGenerationPresentation.NOTICE;
+    private static String incompleteGenerationAnswer(LlmClient.StreamResult result, List<ChatMessage> messages,
+                                                     CurrentTurnPlan plan, Context ctx, Options opts) {
+        String notice = dev.talos.runtime.IncompleteGenerationPresentation.notice(result);
         LocalTurnTraceCapture.recordOperatorAnswerSelected(notice);
         String answer = shapeAnswerWithoutToolsSelected(notice, messages, plan, ctx, true, false, opts).answer();
-        dev.talos.runtime.IncompleteGenerationPresentation.record(answer);
+        dev.talos.runtime.IncompleteGenerationPresentation.record(answer, result);
         return answer;
     }
 
@@ -993,7 +993,7 @@ public final class AssistantTurnExecutor {
             return directTurnOutput("The selected draft cannot be presented unchanged with the current display settings. "
                     + "No write was attempted. Please request a new draft.", ctx, opts);
         }
-        TurnSourceEvidenceCapture.begin();
+        TurnSourceEvidenceCapture.begin(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
         TurnTaskContractCapture.set(resolution, messages);
         TurnTaskContractCapture.setRequestedResults(plan.requestedResults());
         try {
@@ -1003,7 +1003,7 @@ public final class AssistantTurnExecutor {
                     LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT, messages, workspace, ctx);
             String answer = shapeAnswerAfterToolLoop(result.finalAnswer(), messages, plan, result, workspace, 0, opts);
             return completeTurnOutput(answer, false);
-        } finally { TurnTaskContractCapture.clear(); TurnSourceEvidenceCapture.clear(); }
+        } finally { TurnTaskContractCapture.clear(); TurnSourceEvidenceCapture.clear(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear(); }
     }
 
     private static TurnOutput directTurnOutput(String answer, Context ctx, Options opts,

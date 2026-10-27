@@ -287,6 +287,56 @@ class MicaOrdinaryWorkflowBoundaryTest {
                         dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
     }
 
+    /** The original MICA trigger: a location question that follows a project explanation. */
+    @Test void pathQuestionAfterAProjectExplanationStillNamesTheWorkspaceFolder() throws Exception {
+        var gate = new Gate();
+        run("What does this project do?", gate, "It is a calculator.");
+        Run run = run("What's the path of this directory?", gate, "The path is /somewhere/else.");
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertTrue(run.answer().contains(workspace.toString()), run.answer()),
+                () -> assertFalse(run.answer().contains("/somewhere/else"), run.answer()),
+                () -> assertFalse(run.answer().contains("project summary"), run.answer()),
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
+    }
+
+    @Test void combinedLocationAndPurposeKeepsTheLocationWhenThePurposeLacksEvidence() throws Exception {
+        Run run = run("Where is this workspace and what does it do?", new Gate(), "It is a calculator.");
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertFalse(run.answer().contains("It is a calculator."),
+                        "an unsupported purpose claim is not asserted as fact: " + run.answer()));
+    }
+
+    @Test void anInspectionRestrictionIsHonoredAndTheLocationIsStillAnswered() throws Exception {
+        Run run = run("Do not read any file, just tell me the path of this workspace", new Gate(),
+                "The path is /somewhere/else.");
+        assertEquals(0, run.audit().toolCalls().size(), "no inspection at all: " + run.answer());
+        assertAll(
+                () -> assertTrue(run.answer().contains("The current workspace folder is "
+                        + workspace.getFileName() + "."), run.answer()),
+                () -> assertFalse(run.answer().contains("/somewhere/else"), run.answer()));
+    }
+
+    @Test void aScopedSearchIsAnsweredFromItsReadEvidenceWithoutAProjectSummaryDemand() throws Exception {
+        // A README anchor exists, so a project-summary obligation would demand it and displace the search answer.
+        Files.writeString(workspace.resolve("README.md"), "# Calculator\n\nA small BMI calculator.\n");
+        Files.writeString(workspace.resolve("notes.txt"), "TODO: tidy the calculator\n");
+        Run run = run("Search the workspace for TODO", new Gate(),
+                call("talos.read_file", Map.of("path", "notes.txt")),
+                "TODO appears once, in notes.txt: tidy the calculator.");
+        assertEquals(1, successes(run, "talos.read_file"), run.answer());
+        assertAll(
+                () -> assertTrue(run.answer().contains("TODO appears once, in notes.txt"), run.answer()),
+                () -> assertFalse(run.answer().contains("project summary"), run.answer()),
+                () -> assertFalse(run.answer().contains("candidate files read"), run.answer()),
+                () -> assertFalse(run.answer().contains(
+                        dev.talos.runtime.policy.EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), run.answer()));
+    }
+
     @Test void pathQuestionNamesTheWorkspaceFolderWithoutHeaderOrListing() throws Exception {
         Run run = run("What's the path of this directory?", new Gate(), "The path is /somewhere/else.");
         assertEquals(0, successes(run, "talos.list_dir"), run.answer());

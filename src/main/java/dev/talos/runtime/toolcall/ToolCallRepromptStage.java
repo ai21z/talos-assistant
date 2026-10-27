@@ -152,8 +152,11 @@ public final class ToolCallRepromptStage {
         if (supportingAcquisition.isPresent()) return supportingAcquisition.get();
 
         if (state.iterations >= 3) {
-            ToolCallSupport.compactOlderToolResultsInPlace(
-                    state.messages, state.compactedToolResultOriginals);
+            for (ToolCallSupport.CompactedToolResult compacted : ToolCallSupport.compactOlderToolResultsInPlace(
+                    state.messages, state.compactedToolResultOriginals, state.noticeMessageIndices)) {
+                dev.talos.runtime.trace.LocalTurnTraceCapture.recordToolResultCompacted(
+                        compacted.messageIndex(), compacted.chars());
+            }
         }
 
         String userTask =

@@ -26,7 +26,16 @@ class RedundantReadSuppressionGuardTest {
     Path workspace;
 
     @AfterEach
-    void clearCapture() { TurnTaskContractCapture.clear(); }
+    void clearCapture() {
+        TurnTaskContractCapture.clear();
+        TurnReadCallRegister.clear();
+        dev.talos.runtime.trace.LocalTurnTraceCapture.clear();
+    }
+
+    private static void beginTurn(String id) {
+        dev.talos.runtime.trace.LocalTurnTraceCapture.begin(id, "session", 1, "2026-10-25T00:00:00Z",
+                "workspace", "test", "llama_cpp", "fixture", "Read the file.");
+    }
 
     @Test
     void duplicateReadDuringCapturedMutationDoesNotRequestAnImmediateAnswer() {
@@ -34,8 +43,7 @@ class RedundantReadSuppressionGuardTest {
         var messages = List.of(ChatMessage.user("Change README.md from old title to new title."));
         TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
-                state, read, "README.md", ToolResult.ok("1 | old title"));
+        record(state, read, "README.md", "1 | old title");
 
         var decision = RedundantReadSuppressionGuard.decision(read, state, false);
 
@@ -53,8 +61,7 @@ class RedundantReadSuppressionGuardTest {
         TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
         state.ctx.executionPhaseState().moveTo(dev.talos.runtime.phase.ExecutionPhase.VERIFY);
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
-                state, read, "README.md", ToolResult.ok("1 | new title"));
+        record(state, read, "README.md", "1 | new title");
 
         var decision = RedundantReadSuppressionGuard.decision(read, state, false);
 
@@ -67,8 +74,7 @@ class RedundantReadSuppressionGuardTest {
     void duplicateReadOnlyCallReturnsExactNudgeAndSignature() {
         LoopState state = loopState();
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
-                state, read, "README.md", ToolResult.ok("1 | # Demo"));
+        record(state, read, "README.md", "1 | # Demo");
 
         RedundantReadSuppressionGuard.Decision decision =
                 RedundantReadSuppressionGuard.decision(read, state, false);
@@ -86,8 +92,7 @@ class RedundantReadSuppressionGuardTest {
     void strictModeAndMutationSinceStartReturnNoDecision() {
         LoopState state = loopState();
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
-                state, read, "README.md", ToolResult.ok("1 | # Demo"));
+        record(state, read, "README.md", "1 | # Demo");
 
         assertNull(RedundantReadSuppressionGuard.decision(read, state, true));
 
@@ -113,6 +118,62 @@ class RedundantReadSuppressionGuardTest {
         assertTrue(source.contains("RedundantReadSuppressionGuard.decision"), source);
         assertFalse(source.contains("You already gathered this information and the workspace has not changed since then"),
                 source);
+    }
+
+    /** C4: an identical call is redundant only while its earlier result is still visible to the model. */
+    @Test
+    void aCompactedResultDoesNotMakeTheIdenticalCallRedundant() {
+        LoopState state = loopState();
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
+        record(state, read, "README.md", "1 | old title");
+        assertNotNull(RedundantReadSuppressionGuard.decision(read, state, false),
+                "the result is still visible, so the identical call is redundant");
+
+        state.messages.set(state.messages.size() - 1, ChatMessage.toolResult("call_1",
+                "[compacted: talos.read_file result, 30 chars - full output elided to keep context focused]"));
+        assertNull(RedundantReadSuppressionGuard.decision(read, state, false),
+                "a compacted result is not available to the model, so the call runs again");
+    }
+
+    /** C4: search identities are scoped to the turn, so a nested loop sees the outer loop's searches. */
+    @Test
+    void anIdenticalCallFromAnOuterLoopOfTheSameTurnIsRedundantWhileVisible() {
+        beginTurn("register-visible");
+        LoopState outer = loopState();
+        ToolCall grep = new ToolCall("talos.grep", Map.of("pattern", "TODO", "path", "."));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(outer, grep, ".", ToolResult.ok("notes.txt:1:TODO"));
+
+        LoopState inner = loopState();
+        inner.messages.add(ChatMessage.toolResult("call_g", "[tool_result:talos.grep]\nnotes.txt:1:TODO\n[/tool_result]"));
+        assertNotNull(RedundantReadSuppressionGuard.decision(grep, inner, false),
+                "the outer loop's result is visible to the nested loop");
+
+        inner.messages.set(inner.messages.size() - 1, ChatMessage.toolResult("call_g",
+                "[compacted: talos.grep result, 30 chars - full output elided to keep context focused]"));
+        assertNull(RedundantReadSuppressionGuard.decision(grep, inner, false),
+                "once compacted the nested loop may search again");
+    }
+
+    @Test
+    void aMutationAnywhereInTheTurnReopensIdenticalReadsForLaterLoops() {
+        beginTurn("register-mutation");
+        LoopState outer = loopState();
+        ToolCall grep = new ToolCall("talos.grep", Map.of("pattern", "TODO", "path", "."));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(outer, grep, ".", ToolResult.ok("notes.txt:1:TODO"));
+        outer.mutationSinceStart = true;
+        ReadEvidenceStateAccounting.clearSuccessfulReadCaches(outer);
+
+        LoopState inner = loopState();
+        inner.messages.add(ChatMessage.toolResult("call_g", "[tool_result:talos.grep]\nnotes.txt:1:TODO\n[/tool_result]"));
+        assertNull(RedundantReadSuppressionGuard.decision(grep, inner, false),
+                "after a mutation the earlier search is stale evidence");
+    }
+
+    /** Records a successful read and the tool message the model would see for it. */
+    private static void record(LoopState state, ToolCall call, String path, String output) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(state, call, path, ToolResult.ok(output));
+        state.messages.add(ChatMessage.toolResult("call-" + state.messages.size(),
+                "[tool_result:" + call.toolName() + "]\n" + output + "\n[/tool_result]"));
     }
 
     private LoopState loopState() {

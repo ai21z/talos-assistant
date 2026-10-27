@@ -8,6 +8,8 @@ import dev.talos.spi.types.ProviderResponseCapture;
 public final class IncompleteGenerationPresentation {
     public static final String NOTICE = "[Answer incomplete: uncommitted provider text was withheld. "
             + "Execution and verification evidence are reported separately.]";
+    public static final String NOTICE_WITHOUT_TEXT = "[Answer incomplete: the provider generation ended "
+            + "without text, so nothing was withheld. Execution and verification evidence are reported separately.]";
 
     private IncompleteGenerationPresentation() { }
 
@@ -18,8 +20,20 @@ public final class IncompleteGenerationPresentation {
                 || result.completion() == ProviderResponseCapture.Completion.RUNTIME_ABORT);
     }
 
+    /** The notice names what was dropped: provider text, or nothing when the generation held none. */
+    public static String notice(LlmClient.StreamResult result) {
+        // Without a result nothing is known about the text, and the existing wording is kept.
+        return result != null && (result.text() == null || result.text().isBlank()) ? NOTICE_WITHOUT_TEXT : NOTICE;
+    }
+
     public static void record(String selected) {
         LocalTurnTraceCapture.recordUncommittedProviderAnswer(selected);
+    }
+
+    /** Records the withheld answer with the result's own knowledge of whether provider text existed. */
+    public static void record(String selected, LlmClient.StreamResult result) {
+        LocalTurnTraceCapture.recordUncommittedProviderAnswer(selected,
+                result == null ? null : result.text() != null && !result.text().isBlank());
     }
 
     public static boolean isAbortedFailure(Throwable failure) {

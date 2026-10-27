@@ -64,6 +64,23 @@ class ListDirToolTest {
         assertTrue(r.output().contains("sub/"));  // directory suffix
     }
 
+    /** C2: the listing outcome carries the file entries it returned, so coverage is judged without listing text. */
+    @Test
+    void listedFileEntriesTravelAsSourcePaths() {
+        ToolResult root = tool.execute(new ToolCall("talos.list_dir", Map.of("path", ".")), ctx);
+        assertTrue(root.success());
+        var sources = root.contentMetadata().sourcePaths();
+        assertTrue(sources.contains("hello.txt"), sources.toString());
+        assertTrue(sources.contains("README.md"), sources.toString());
+        assertTrue(sources.stream().noneMatch(path -> path.endsWith("/") || path.equals("sub")),
+                "directories are not file entries: " + sources);
+
+        ToolResult sub = tool.execute(new ToolCall("talos.list_dir", Map.of("path", "sub")), ctx);
+        assertTrue(sub.contentMetadata().sourcePaths().contains("nested.txt"), sub.contentMetadata().sourcePaths().toString());
+        assertTrue(sub.contentMetadata().sourcePaths().stream().noneMatch(path -> path.startsWith("deep")),
+                sub.contentMetadata().sourcePaths().toString());
+    }
+
     @Test
     void listSubdirectory() {
         ToolCall call = new ToolCall("talos.list_dir", Map.of("path", "sub"));

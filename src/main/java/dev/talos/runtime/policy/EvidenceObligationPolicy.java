@@ -113,7 +113,8 @@ public final class EvidenceObligationPolicy {
         }
         String request = contract.originalUserRequest();
         return request != null && (UNNAMED_FILE_CONTENT_LOOKUP.matcher(request).matches()
-                || dev.talos.runtime.intent.FileContentEvidenceRequest.requiresCurrentFiles(request));
+                || dev.talos.runtime.intent.FileContentEvidenceRequest.requiresCurrentFiles(request)
+                || dev.talos.runtime.intent.ContentSearchRequest.matches(request));
     }
 
     public static EvidenceObligation parse(String value) {

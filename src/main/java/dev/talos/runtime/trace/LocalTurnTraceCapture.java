@@ -120,7 +120,9 @@ public final class LocalTurnTraceCapture {
         RUNTIME_IDENTITY_INCOMPLETE,
         WORK_STATUS_INCOMPLETE,
         OUTPUT_TRUNCATED,
-        UNCOMMITTED_PROVIDER_ANSWER
+        UNCOMMITTED_PROVIDER_ANSWER,
+        /** The provider generation ended before completion without any text, so runtime text was selected. */
+        PROVIDER_GENERATION_WITHOUT_TEXT
     }
 
     public enum ProviderToolSuppressionReason {
@@ -189,7 +191,9 @@ public final class LocalTurnTraceCapture {
     public enum AnswerCandidateRestorationReason {
         SPECULATIVE_RETRY_REJECTED,
         SPECULATIVE_RETRY_FAILED,
-        SPECULATIVE_RETRY_EMPTY
+        SPECULATIVE_RETRY_EMPTY,
+        /** The speculative retry ran out of its own iteration budget or stopped before a complete answer. */
+        SPECULATIVE_RETRY_EXHAUSTED
     }
 
     /**
@@ -458,6 +462,11 @@ public final class LocalTurnTraceCapture {
         ContextLedgerCapture.begin(traceId, turnNumber);
     }
 
+    /** An opaque token that identifies the active turn capture instance, or null when none is active. */
+    public static Object currentTurnToken() {
+        return HOLDER.get();
+    }
+
     public static boolean isActive() {
         return HOLDER.get() != null;
     }
@@ -673,7 +682,8 @@ public final class LocalTurnTraceCapture {
                 && Objects.equals(candidate.rawAnswer(), Objects.toString(retainedAssistantText, ""));
         bag.routedDelivery = candidateMatches ? candidate.delivery() : DeliveryFacts.unavailable();
         bag.routedAnswerHash = routedHash;
-        if (bag.routedDelivery.causes().stream().anyMatch(cause -> cause != FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION)) {
+        if (bag.routedDelivery.causes().stream().anyMatch(cause -> cause != FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION
+                && cause != FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION_WITHOUT_TEXT)) {
             recordAnswerPresentationLimitation(AnswerPresentationLimitation.OUTPUT_TRUNCATED);
         }
         ProviderResponseCapture.AnswerOrigin origin = candidateMatches
@@ -881,12 +891,21 @@ public final class LocalTurnTraceCapture {
             data.put("reasonCode", reason.name());
             bag.builder.event(TurnTraceEvent.simple(
                     "ANSWER_TRANSFORMED", now(), data));
+            // Provider origin survives a transformation only when provider prose was its source. A
+            // candidate seeded from an empty generation carries no prose, so the transformed text is
+            // runtime text and is not attributed to the provider.
+            boolean providerProse = current.origin() == ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER
+                    && !current.rawAnswer().isBlank();
+            ProviderResponseCapture.AnswerOrigin origin = providerProse
+                    || current.origin() != ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER
+                    ? current.origin() : ProviderResponseCapture.AnswerOrigin.NONE;
             bag.answerCandidate = new AnswerCandidate(
                     targetHash,
                     target,
-                    current.origin(),
-                    current.sourceGenerationId(),
-                    current.sourceAttemptId(), current.delivery().transformed(current.rawAnswer(), target));
+                    origin,
+                    origin == ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER ? current.sourceGenerationId() : "",
+                    origin == ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER ? current.sourceAttemptId() : "",
+                    current.delivery().transformed(current.rawAnswer(), target));
         }
     }
 
@@ -1040,18 +1059,46 @@ public final class LocalTurnTraceCapture {
 
     /** The operator notice retains a known omission, not provider text or terminal delivery proof. */
     public static void recordUncommittedProviderAnswer(String answer) {
+        recordUncommittedProviderAnswer(answer, null);
+    }
+
+    /**
+     * The caller that holds the incomplete result says whether it carried provider text. Without that
+     * knowledge the latest provider response of the turn decides, and an unknown response counts as text.
+     */
+    public static void recordUncommittedProviderAnswer(String answer, Boolean providerTextKnown) {
         recordAnswerDeliverySelected(answer, false, false);
         Bag bag = HOLDER.get();
         if (bag == null) return;
+        boolean providerText;
         synchronized (bag) {
+            // Only provider prose can be withheld. A generation that held nothing but a tool call, or
+            // nothing at all, dropped no provider text, and the account says so.
+            providerText = providerTextKnown != null ? providerTextKnown : latestProviderResponseHadText(bag);
+            FinalAnswerStatus.Cause cause = providerText
+                    ? FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION
+                    : FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION_WITHOUT_TEXT;
             AnswerCandidate current = bag.answerCandidate;
             if (current != null && !bag.routedAnswerRecorded && !bag.outcomeRendered) {
                 bag.answerCandidate = new AnswerCandidate(current.answerHash(), current.rawAnswer(), current.origin(),
                         current.sourceGenerationId(), current.sourceAttemptId(),
-                        new DeliveryFacts(true, Set.of(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION), 0, 0));
+                        new DeliveryFacts(true, Set.of(cause), 0, 0));
             }
         }
-        recordAnswerPresentationLimitation(AnswerPresentationLimitation.UNCOMMITTED_PROVIDER_ANSWER);
+        recordAnswerPresentationLimitation(providerText
+                ? AnswerPresentationLimitation.UNCOMMITTED_PROVIDER_ANSWER
+                : AnswerPresentationLimitation.PROVIDER_GENERATION_WITHOUT_TEXT);
+    }
+
+    /** True unless the latest provider response of this turn is known and carried no assistant text. */
+    private static boolean latestProviderResponseHadText(Bag bag) {
+        ProviderResponseCapture.Response latest = bag.selectedProviderResponse;
+        for (PendingProviderResponse pending : bag.providerResponses.values()) {
+            if (pending != null && pending.response() != null) latest = pending.response();
+        }
+        if (latest == null) return true;
+        String text = latest.assistantText();
+        return text != null && !text.isBlank();
     }
 
     /** A producer-owned prefix projection cannot retain delivery facts from an excluded component. */
@@ -2960,6 +3007,18 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null || snapshot == null || !snapshot.hasPromptAuditData()) return;
         PromptAuditTraceRecorder.record(bag.builder, snapshot);
+    }
+
+    /** A tool result was compacted out of the model's view. The index and size name what was removed. */
+    public static void recordToolResultCompacted(int messageIndex, int chars) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        synchronized (bag) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("index", messageIndex);
+            data.put("chars", chars);
+            bag.builder.event(TurnTraceEvent.simple("TOOL_RESULT_COMPACTED", now(), data));
+        }
     }
 
     public static void recordRepair(String status, String summary) {

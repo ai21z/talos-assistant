@@ -330,6 +330,98 @@ class InspectCompletenessRetryTest {
                 fallbackKind.restorationReason());
     }
 
+    /** C3: a speculative retry that exhausts its budget leaves the admitted candidate and the turn's status alone. */
+    @Test
+    void speculativeRetryThatHitsItsIterationLimitKeepsTheOriginalCandidateAndItsStatus() throws Exception {
+        beginTrace("inspect-completeness-limit");
+        InspectLineageFixture fixture = inspectLineageFixture(lineageWorkspace);
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "limit_1", "talos.read_file", Map.of("path", "script.js")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "limit_2", "talos.read_file", Map.of("path", "index.html")))),
+                        new LlmClient.StreamResult("A late answer that never arrives in time.", List.of())),
+                16_384);
+        Context ctx = providerContext(lineageWorkspace, provider.client(), 2);
+        var plan = plan(fixture.request());
+        TurnTaskContractCapture.set(plan.taskContract());
+        assertEquals(1, ctx.toolCallLoop().remainingIterations(fixture.originalLoop()),
+                "the fixture leaves the retry one iteration");
+
+        InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
+                fixture.answer(), messages(fixture.request()), plan, fixture.originalLoop(), lineageWorkspace, ctx,
+                sent -> TurnModelDispatcher.dispatchBuffered(ctx, sent, plan));
+
+        assertEquals(fixture.answer(), result.answer(), "the admitted candidate survives a retry that ran out of budget");
+        assertNotNull(result.loopResult(), "the evidence the retry gathered is kept");
+        assertFalse(result.loopResult().hitIterLimit(), "the speculative retry's exhausted budget is not the turn's");
+        assertFalse(result.loopResult().failureDecision().shouldStop(), result.loopResult().failureDecision().reason());
+        var outcome = ExecutionOutcome.fromToolLoop(
+                result.answer(), plan, messages(fixture.request()), result.loopResult(), lineageWorkspace, 0);
+        assertFalse(outcome.finalAnswer().contains(
+                dev.talos.runtime.outcome.ReadOnlyToolLimitOutcome.REPLACEMENT_ANSWER), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains(fixture.answer()), outcome.finalAnswer());
+        assertNotEquals(dev.talos.runtime.outcome.TaskCompletionStatus.COMPLETED_VERIFIED,
+                outcome.taskOutcome().completionStatus(), "restoration never implies verified completion");
+    }
+
+    /** C4: the nested completeness retry sees the outer loop's searches, so a visible identical search is not repeated. */
+    @Test
+    void nestedRetryDoesNotRepeatASearchWhoseResultIsStillVisible() throws Exception {
+        beginTrace("inspect-completeness-nested-duplicate");
+        Files.writeString(lineageWorkspace.resolve("index.html"),
+                "<!DOCTYPE html><html><body><script src=\"script.js\"></script></body></html>");
+        Files.writeString(lineageWorkspace.resolve("script.js"), "console.log('evidence');\n");
+        String request = "Read the main files and verify the web page.";
+        var grep = new ChatMessage.NativeToolCall("o-0", "talos.grep", Map.of("pattern", "script", "path", "."));
+        var grepAgain = new ChatMessage.NativeToolCall("r-0", "talos.grep", Map.of("pattern", "script", "path", "."));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                new LlmClient.StreamResult("", List.of(grep)),
+                new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                        "o-1", "talos.read_file", Map.of("path", "index.html")))),
+                new LlmClient.StreamResult("HTML-only answer.", List.of()),
+                new LlmClient.StreamResult("", List.of(grepAgain)),
+                new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                        "r-2", "talos.read_file", Map.of("path", "script.js")))),
+                new LlmClient.StreamResult("Both files answer.", List.of())), 16_384);
+        try (LlmClient llm = recorded.client()) {
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+            Context ctx = Context.builder(new Config())
+                    .llm(llm)
+                    .sandbox(new Sandbox(lineageWorkspace, Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(new ToolCallLoop(processor, 6))
+                    .nativeToolSpecs(specsFrom(registry))
+                    .build();
+            // The plan allows the search tool, which the fixture's read-only plan does not.
+            var plan = CurrentTurnPlan.compatibility(TaskContractResolver.fromUserRequest(request),
+                    ExecutionPhase.INSPECT, List.of("talos.read_file", "talos.grep"),
+                    List.of("talos.read_file", "talos.grep"), List.of());
+            TurnTaskContractCapture.set(plan.taskContract());
+            var messages = messages(request);
+            var initial = TurnModelDispatcher.dispatchBuffered(ctx, messages, plan);
+            var original = ctx.toolCallLoop().run(initial.text(), initial.toolCalls(), initial.provenance(),
+                    messages, lineageWorkspace, ctx);
+            assertEquals(2, original.toolsInvoked(), "search and index read: " + original.toolOutcomes());
+            assertEquals("HTML-only answer.", original.finalAnswer());
+
+            var result = InspectCompletenessRetry.retryIfNeeded(original.finalAnswer(), messages, plan, original,
+                    lineageWorkspace, ctx, sent -> TurnModelDispatcher.dispatchBuffered(ctx, sent, plan));
+
+            assertEquals("Both files answer.", result.answer());
+            assertEquals(3, result.loopResult().toolsInvoked(), "the search runs once, then index.html and script.js");
+            assertEquals(1, result.loopResult().cushionFiresRedundantRead(), "the repeated search is suppressed");
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+            var trace = LocalTurnTraceCapture.complete();
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_CALL_BLOCKED".equals(event.type())),
+                    "the block is recorded for /last");
+        }
+    }
+
     @Test
     void wrappedCancellationEscapesInspectCompletenessRetry() throws Exception {
         InspectLineageFixture fixture = inspectLineageFixture(lineageWorkspace);
@@ -531,6 +623,10 @@ class InspectCompletenessRetryTest {
     }
 
     private static Context providerContext(Path workspace, LlmClient llm) {
+        return providerContext(workspace, llm, 5);
+    }
+
+    private static Context providerContext(Path workspace, LlmClient llm, int maxIterations) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
@@ -538,7 +634,7 @@ class InspectCompletenessRetryTest {
                 .llm(llm)
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .toolRegistry(registry)
-                .toolCallLoop(new ToolCallLoop(processor, 5))
+                .toolCallLoop(new ToolCallLoop(processor, maxIterations))
                 .nativeToolSpecs(specsFrom(registry))
                 .build();
     }

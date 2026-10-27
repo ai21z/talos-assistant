@@ -70,12 +70,17 @@ final class AnswerGroundingDisclosure {
         if (candidates.isEmpty()) {
             return ToolLoopResultSummaryFormatter.GroundingDisclosure.none();
         }
+        // Three states, never conflated: read in full, searched with a matching excerpt, unread.
         Set<String> read = readFilePathKeys(loopResult);
+        Set<String> searched = searchMatchPathKeys(loopResult);
         List<String> unread = new ArrayList<>();
+        List<String> searchedOnly = new ArrayList<>();
         int readCandidates = 0;
         for (Map.Entry<String, String> candidate : candidates.entrySet()) {
             if (read.contains(candidate.getKey())) {
                 readCandidates++;
+            } else if (searched.contains(candidate.getKey())) {
+                searchedOnly.add(candidate.getValue());
             } else {
                 unread.add(candidate.getValue());
             }
@@ -87,7 +92,10 @@ final class AnswerGroundingDisclosure {
             return new ToolLoopResultSummaryFormatter.GroundingDisclosure("not all workspace candidate files were read");
         }
         String note = readCandidates + " of " + candidates.size()
-                + " workspace candidate files read, unread: " + boundedUnread(unread);
+                + " workspace candidate files read in full"
+                + (searchedOnly.isEmpty() ? ""
+                        : ", " + searchedOnly.size() + " searched with matches: " + boundedUnread(searchedOnly))
+                + ", unread: " + boundedUnread(unread);
         return new ToolLoopResultSummaryFormatter.GroundingDisclosure(note);
     }
 
@@ -141,52 +149,20 @@ final class AnswerGroundingDisclosure {
             ToolCallLoop.LoopResult loopResult,
             List<ChatMessage> messages
     ) {
+        // The listing outcome carries the entries it returned. Listing text in the messages may already
+        // have been compacted away, so it is not consulted.
         if (loopResult == null || loopResult.toolOutcomes() == null || out.size() >= CANDIDATE_CAP) return;
-        List<String> bodies = successfulToolBodies(messages, "talos.list_dir");
-        int bodyIndex = 0;
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (out.size() >= CANDIDATE_CAP) return;
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.list_dir".equals(outcome.canonicalToolName())) continue;
-            if (bodyIndex >= bodies.size()) return;
-            String body = bodies.get(bodyIndex++);
             String base = normalizePath(outcome.pathHint());
-            for (String line : body.lines().toList()) {
+            for (String entry : outcome.sourcePaths()) {
                 if (out.size() >= CANDIDATE_CAP) return;
-                String entry = line == null ? "" : line.strip();
-                if (entry.isBlank()
-                        || entry.endsWith("/")
-                        || entry.startsWith("[")
-                        || entry.startsWith("...")
-                        || "(empty directory)".equalsIgnoreCase(entry)) {
-                    continue;
-                }
-                addCandidate(out, workspace, joinPath(base, entry));
+                if (entry == null || entry.isBlank() || entry.endsWith("/")) continue;
+                addCandidate(out, workspace, joinPath(base, entry.strip()));
             }
         }
-    }
-
-    private static List<String> successfulToolBodies(List<ChatMessage> messages, String canonicalToolName) {
-        if (messages == null || messages.isEmpty()) return List.of();
-        List<String> out = new ArrayList<>();
-        for (ChatMessage message : messages) {
-            if (message == null || message.content() == null) continue;
-            String content = message.content().strip();
-            int prefixStart = content.indexOf("[tool_result:");
-            if (prefixStart < 0) continue;
-            int prefixEnd = content.indexOf(']', prefixStart);
-            if (prefixEnd < 0) continue;
-            String rawToolName = content.substring(prefixStart + "[tool_result:".length(), prefixEnd).strip();
-            if (!canonicalToolName.equals(canonicalToolName(rawToolName))) continue;
-            String body = content.substring(prefixEnd + 1).strip();
-            int end = body.indexOf("[/tool_result]");
-            if (end >= 0) {
-                body = body.substring(0, end).strip();
-            }
-            if (body.contains("[error]")) continue;
-            out.add(body);
-        }
-        return out;
     }
 
     private static void addPromptNamedFiles(Map<String, String> out, Path workspace, CurrentTurnPlan plan) {
@@ -197,6 +173,22 @@ final class AnswerGroundingDisclosure {
         while (matcher.find() && out.size() < CANDIDATE_CAP) {
             addCandidate(out, workspace, matcher.group(1));
         }
+    }
+
+    /** Files a search returned matching excerpts from. A match is not a full read. */
+    private static Set<String> searchMatchPathKeys(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return Set.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.success()) continue;
+            String tool = outcome.canonicalToolName();
+            if (!"talos.grep".equals(tool) && !"talos.retrieve".equals(tool)) continue;
+            for (String path : outcome.sourcePaths()) {
+                String normalized = normalizePath(path);
+                if (!normalized.isBlank()) out.add(normalized.toLowerCase(Locale.ROOT));
+            }
+        }
+        return Set.copyOf(out);
     }
 
     private static Set<String> readFilePathKeys(ToolCallLoop.LoopResult loopResult) {

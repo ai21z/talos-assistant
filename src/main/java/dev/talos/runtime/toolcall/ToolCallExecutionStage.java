@@ -527,6 +527,8 @@ public final class ToolCallExecutionStage {
             state.messages.add(ChatMessage.user(content));
         }
         state.toolOutcomeResults.bind(outcome, state.messages.size() - 1, state.messages.getLast());
+        // A message without an outcome is a runtime notice. It never counts as a kept tool result.
+        if (outcome == null) state.noticeMessageIndices.add(state.messages.size() - 1);
     }
 
     private void emitProgress(String toolName, String action, String detail) {

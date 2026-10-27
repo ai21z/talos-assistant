@@ -32,6 +32,7 @@ public final class ReadEvidenceStateAccounting {
             // the raw call is preserved on the entry for trace/debug and
             // identical-call redundancy only.
             state.readEvidence.record(call, pathHint, output);
+            TurnReadCallRegister.record(call, output);
         }
     }
 
@@ -43,6 +44,7 @@ public final class ReadEvidenceStateAccounting {
     public static void clearSuccessfulReadCaches(LoopState state) {
         if (state == null) return;
         state.readEvidence.invalidateReusableEvidence();
+        TurnReadCallRegister.invalidate();
     }
 
     static boolean isReadFileTool(ToolCall call) {

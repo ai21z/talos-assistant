@@ -4388,6 +4388,177 @@ class ToolCallLoopTest {
         }
     }
 
+    /** C6: a decisive search result stays in the dispatched request while duplicate notices accumulate. */
+    @Test
+    void duplicateNoticesDoNotPushTheSearchResultOutOfTheDispatchedRequest() throws Exception {
+        Path ws = Files.createTempDirectory("talos-notice-slots-");
+        try {
+            Files.writeString(ws.resolve("calc.py"), "def bmi():\n    return 'DECISIVE_HIT'\n");
+            var registry = new ToolRegistry();
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+            java.util.function.Function<String, ChatMessage.NativeToolCall> grep = id ->
+                    new ChatMessage.NativeToolCall(id, "talos.grep", Map.of("pattern", "DECISIVE_HIT", "path", "."));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(grep.apply("g2"))),
+                    new LlmClient.StreamResult("", List.of(grep.apply("g3"))),
+                    new LlmClient.StreamResult("", List.of(grep.apply("g4"))),
+                    new LlmClient.StreamResult("calc.py holds DECISIVE_HIT.", List.of())), 16_384);
+            String request = "Which file holds DECISIVE_HIT?";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-notice-slots", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(grep.apply("g1")), List.of("talos.grep", "talos.read_file"), messages, ws, ctx);
+                LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals(1, result.toolsInvoked(), "the search runs once: " + result.toolOutcomes());
+            assertEquals(3, result.cushionFiresRedundantRead(), "each repeat is suppressed while the result is visible");
+            var dispatched = recorded.requests().getLast().messages;
+            assertTrue(dispatched.stream().anyMatch(message -> "tool".equals(message.role())
+                            && message.content().contains("DECISIVE_HIT")
+                            && !message.content().startsWith("[compacted:")),
+                    "the decisive search result is still dispatched: " + dispatched.stream()
+                            .filter(message -> "tool".equals(message.role()))
+                            .map(message -> message.content().substring(0, Math.min(60, message.content().length())))
+                            .toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** C4: a compacted full read is still available, because the overlay re-delivers it, so its repeat is redundant. */
+    @Test
+    void aCompactedFullReadIsStillAvailableAndItsRepeatIsSuppressed() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compacted-read-available-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "README_BODY_MARKER line\n");
+            Files.writeString(ws.resolve("a.txt"), "alpha\n");
+            Files.writeString(ws.resolve("b.txt"), "beta\n");
+            Files.writeString(ws.resolve("c.txt"), "gamma\n");
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+            java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> read = (id, path) ->
+                    new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(read.apply("r2", "a.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r3", "b.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r4", "c.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r5", "README.md"))),
+                    new LlmClient.StreamResult("README.md says README_BODY_MARKER.", List.of())), 16_384);
+            // A content lookup without named targets takes the generic reprompt path, which compacts.
+            String request = "Which file holds README_BODY_MARKER?";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-compacted-read", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(read.apply("r1", "README.md")), List.of("talos.read_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            // The message list may be restored by evidence overlays after the loop, so the trace is the witness.
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_RESULT_COMPACTED".equals(event.type())
+                            && event.data().containsKey("index") && event.data().containsKey("chars")),
+                    "the fixture crosses the compaction boundary and compaction is traced with index and size: "
+                            + trace.events().stream().map(event -> event.type()).distinct().toList());
+            assertEquals(4, result.toolsInvoked(), "README.md is read once: " + result.toolOutcomes());
+            assertEquals(1, result.cushionFiresRedundantRead(), "the repeated README.md read is redundant");
+            var dispatched = recorded.requests().getLast().messages;
+            assertTrue(dispatched.stream().anyMatch(message -> message.content() != null
+                            && message.content().contains("README_BODY_MARKER")
+                            && !message.content().stripLeading().startsWith("[compacted:")),
+                    "the README body reaches the answering request: " + dispatched.stream()
+                            .map(message -> message.role() + ": " + message.content().substring(0,
+                                    Math.min(50, message.content() == null ? 0 : message.content().length())))
+                            .toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** C7: a runtime notice written after generations that held only tool calls is not provider text. */
+    @Test
+    void runtimeLimitNoticeAfterToolCallOnlyGenerationsIsNotProviderText() throws Exception {
+        Path ws = Files.createTempDirectory("talos-limit-attribution-");
+        try {
+            for (String name : List.of("a.txt", "b.txt", "c.txt")) Files.writeString(ws.resolve(name), name + "\n");
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 2);
+            java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> read = (id, path) ->
+                    new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(read.apply("r2", "b.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r3", "c.txt")))), 16_384);
+            String request = "Read a.txt, b.txt and c.txt.";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-limit-attribution", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(read.apply("r1", "a.txt")), List.of("talos.read_file"), messages, ws, ctx);
+                LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.finalAnswer());
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.hitIterLimit(), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("[Tool-call limit reached"), result.finalAnswer());
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst().orElseThrow();
+            assertNotEquals("MODEL_PROVIDER", terminal.data().get("origin"),
+                    "no provider prose survived into the runtime notice: " + terminal.data());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     @Test
     void appendLineFullWriteThatDoesNotPreserveReadbackIsRejectedBeforeApproval() throws Exception {
         Path ws = Files.createTempDirectory("talos-append-line-preapproval-");

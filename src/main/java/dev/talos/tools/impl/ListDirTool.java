@@ -89,6 +89,9 @@ public final class ListDirTool implements TalosTool {
             boolean[] truncated = {false};
             var fields = boundary.fields();
 
+            // The file entries the listing returned, so a later check can judge coverage from the
+            // outcome rather than from listing text that compaction may have removed.
+            java.util.List<String> listedFiles = new java.util.ArrayList<>();
             try (Stream<Path> stream = boundary.observe(Action.ENUMERATE, resolved, () -> Files.walk(resolved, maxDepth))) {
                 stream
                     .filter(p -> !p.equals(resolved)) // skip the root itself
@@ -111,11 +114,16 @@ public final class ListDirTool implements TalosTool {
                             sb.append(rel).append("/\n");
                         } else {
                             sb.append(rel).append('\n');
+                            listedFiles.add(rel.toString().replace('\\', '/'));
                         }
                     });
             }
 
-            ToolContentMetadata metadata = ToolContentMetadata.normal().withDirectoryObservation(
+            ToolContentMetadata metadata = (listedFiles.isEmpty()
+                    ? ToolContentMetadata.normal()
+                    : ToolContentMetadata.workspaceEvidence(
+                            ToolContentMetadata.ContentSource.TOOL_OUTPUT, listedFiles, "directory listing"))
+                    .withDirectoryObservation(
                     new DirectoryObservation(resolved.toAbsolutePath().normalize().toString(),
                             maxDepth, count[0], !truncated[0], !controlled || fields.hiddenFactsPublic()));
             if (controlled && boundary.publication() == Publication.NO_NAMES)

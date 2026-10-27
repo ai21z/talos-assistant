@@ -40,6 +40,9 @@ class RedundantReadSuppressionGuardEmptyEditTest {
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "index.html"));
         ReadEvidenceStateAccounting.recordSuccessfulToolResult(
                 state, read, "index.html", ToolResult.ok("1 | <html>\n"));
+        // The earlier result is still visible to the model, which the suppression requires.
+        state.messages.add(ChatMessage.toolResult("call_index",
+                "[tool_result:talos.read_file]\n1 | <html>\n\n[/tool_result]"));
 
         assertNotNull(RedundantReadSuppressionGuard.decision(read, state, false),
                 "ordinary duplicate reads keep the existing suppression");

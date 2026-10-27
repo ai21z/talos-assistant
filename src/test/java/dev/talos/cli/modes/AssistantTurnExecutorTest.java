@@ -5624,7 +5624,7 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains(
                     "read: notes/meeting-notes.md, notes/project-notes.md"), out.text());
             assertTrue(out.text().contains(
-                    "2 of 3 workspace candidate files read, unread: todos.md"), out.text());
+                    "2 of 3 workspace candidate files read in full, unread: todos.md"), out.text());
             assertTrue(out.text().contains("clean the release notes"), out.text());
         }
 

@@ -139,26 +139,37 @@ final class InspectCompletenessRetry {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retry.provenance(),
                         retryMessages, workspace, ctx, loopResult.readOnlyEvidenceHandoff(), remainingIterations);
-                ToolCallLoop.LoopResult groundedRetryLoop = mergeReadOnlyRetryEvidence(loopResult, retryLoop);
                 String mergedAnswer = retryLoop.finalAnswer();
                 boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
                 boolean equalFallback = !emptyFallback && mergedAnswer.equals(answer);
-                if (emptyFallback || equalFallback) {
+                // A speculative retry that ran out of its own budget, or stopped, without an accepted
+                // bounded synthesis produced nothing better. Its exhausted budget belongs to the attempt,
+                // not to the admitted candidate it was meant to improve, so the candidate and the turn's
+                // own status are kept. The evidence the retry gathered is kept too, and the
+                // missing-evidence checks still judge the final answer.
+                boolean exhausted = (retryLoop.hitIterLimit() || retryLoop.failureDecision().shouldStop())
+                        && retryLoop.readOnlySynthesisStatus() != ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED;
+                boolean keepOriginal = emptyFallback || equalFallback || exhausted;
+                ToolCallLoop.LoopResult groundedRetryLoop =
+                        mergeReadOnlyRetryEvidence(loopResult, retryLoop, !keepOriginal);
+                if (keepOriginal) {
                     boolean restored = restoreOriginalCandidate(
                             originalCandidate,
                             answer,
                             emptyFallback
                                     ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
-                                    : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                                    : equalFallback
+                                    ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED
+                                    : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EXHAUSTED);
                     groundedRetryLoop = withRestoredAnswer(groundedRetryLoop, answer,
                             restored ? loopResult.readOnlyFinalizationEvidence()
                                     : ReadOnlyFinalizationEvidence.empty());
                 }
                 return new Result(
-                        emptyFallback ? answer : mergedAnswer,
+                        keepOriginal ? answer : mergedAnswer,
                         groundedRetryLoop,
                         groundedRetryLoop == null ? retryLoop.summary() : groundedRetryLoop.summary(),
-                        emptyFallback || equalFallback ? AnswerOutputLimit.KEEP_ORIGINAL
+                        keepOriginal ? AnswerOutputLimit.KEEP_ORIGINAL
                                 : AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached()));
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
@@ -199,6 +210,19 @@ final class InspectCompletenessRetry {
             ToolCallLoop.LoopResult original,
             ToolCallLoop.LoopResult retry
     ) {
+        return mergeReadOnlyRetryEvidence(original, retry, true);
+    }
+
+    /**
+     * Merges the retry's evidence into the original loop. When the retry's outcome is not adopted,
+     * the original's iteration limit, failure decision and output-limit facts are kept, so a
+     * speculative attempt that ran out of budget cannot relabel the admitted candidate.
+     */
+    static ToolCallLoop.LoopResult mergeReadOnlyRetryEvidence(
+            ToolCallLoop.LoopResult original,
+            ToolCallLoop.LoopResult retry,
+            boolean adoptRetryOutcome
+    ) {
         if (retry == null) return null;
         if (original == null) return retry;
         if (original.mutatingToolSuccesses() > 0 || retry.mutatingToolSuccesses() > 0) return retry;
@@ -219,17 +243,17 @@ final class InspectCompletenessRetry {
                 retry.messages(),
                 original.failedCalls() + retry.failedCalls(),
                 original.retriedCalls() + retry.retriedCalls(),
-                original.hitIterLimit() || retry.hitIterLimit(),
+                adoptRetryOutcome ? original.hitIterLimit() || retry.hitIterLimit() : original.hitIterLimit(),
                 retry.mutatingToolSuccesses(),
                 mergedReadPaths,
                 original.cushionFiresRedundantRead() + retry.cushionFiresRedundantRead(),
                 original.cushionFiresAliasRescue() + retry.cushionFiresAliasRescue(),
                 original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
                 original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
-                retry.failureDecision(),
+                adoptRetryOutcome ? retry.failureDecision() : original.failureDecision(),
                 mergedOutcomes,
                 retry.readFileBodies(),
-                retry.finalAnswerOutputLimitReached(),
+                adoptRetryOutcome ? retry.finalAnswerOutputLimitReached() : original.finalAnswerOutputLimitReached(),
                 selectedRetrySynthesisStatus(original, retry),
                 retry.readOnlyEvidenceHandoff(), retry.readOnlyFinalizationEvidence(),
                 original.readEvidenceCoverage().followedBy(retry.readEvidenceCoverage()));
