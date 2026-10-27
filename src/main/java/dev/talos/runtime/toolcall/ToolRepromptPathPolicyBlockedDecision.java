@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import org.slf4j.Logger;
@@ -26,7 +27,8 @@ final class ToolRepromptPathPolicyBlockedDecision {
                 ExpectedTargetScopeRepairPlanner.nextPlan(
                         state,
                         ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                        ToolCallSupport.latestUserRequestIn(state.messages));
+                        TurnTaskContractCapture.originalUserRequestOrResolve(
+                                state.messages));
         if (expectedTargetRepair.isPresent()) {
             ExpectedTargetScopeRepairPlanner.Plan repair = expectedTargetRepair.get();
             state.failureDecision = FailureDecision.continueLoop();
@@ -35,12 +37,34 @@ final class ToolRepromptPathPolicyBlockedDecision {
             state.expectedTargetScopeRepairPromptedKeys.add(repair.key());
             if (repair.exactReplacementRepair() != null) {
                 LocalTurnTraceCapture.recordRepair("PLANNED", repair.traceDetail());
-                state.currentText = "";
-                state.currentNativeCalls = List.of(repair.exactReplacementRepair());
+                state.setRuntimeNativeCalls(
+                        "",
+                        List.of(repair.exactReplacementRepair()),
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .EXPECTED_TARGET_SCOPE_REPAIR);
                 return Optional.of(true);
             }
             return Optional.of(ToolRepromptChatExecutor.execute(
                     state, repair.messages(), repair.tools(), repair.controls(), repair.retryName()));
+        }
+        Optional<StaticWebContinuationPlanner.Plan> blockedDirectoryContinuation =
+                StaticWebContinuationPlanner.blockedUnrequestedDirectoryPlan(
+                        state,
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state));
+        if (blockedDirectoryContinuation.isPresent()) {
+            StaticWebContinuationPlanner.Plan continuation =
+                    blockedDirectoryContinuation.get();
+            state.failureDecision = FailureDecision.continueLoop();
+            LocalTurnTraceCapture.recordRepair(
+                    "PLANNED",
+                    "STATIC_WEB_BLOCKED_DIRECTORY_CONTINUATION: rejected "
+                            + "unrequested directory authority; continuing with write_file only");
+            return Optional.of(ToolRepromptChatExecutor.execute(
+                    state,
+                    continuation.messages(),
+                    continuation.tools(),
+                    continuation.controls(),
+                    continuation.retryName()));
         }
         state.finishWithAnswer(state.failureDecision.shouldStop()
                 ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)

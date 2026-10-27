@@ -2,6 +2,8 @@
 
 Talos is a local-first CLI assistant for developer workspaces. The architecture is built around one rule: model output is never enough evidence by itself. A turn is useful only when policy, tools, approvals, verification, and trace records agree with the final claim.
 
+Supported action claims are checked against collected tool evidence. Read-only explanations may remain unverified, and incomplete or unsupported checks are reported explicitly.
+
 Talos is not designed as an unbounded background agent. It is a bounded execution harness:
 
 - classify the user request before selecting tools
@@ -9,28 +11,39 @@ Talos is not designed as an unbounded background agent. It is a bounded executio
 - keep filesystem operations inside the workspace boundary
 - ask before mutation and bounded command execution
 - checkpoint risky writes when policy requires rollback support
-- verify the final state before claiming success
+- verify supported final-state claims before reporting success
 - preserve trace and prompt-debug evidence for review
 
 ## System Shape
 
 ```mermaid
 flowchart LR
-    User["User / terminal"] --> CLI["CLI commands and REPL"]
-    CLI --> Mode["Mode controller - auto, ask, plan, agent"]
-    Mode --> Contract["Task contract resolver - intent, targets, risk, phase"]
-    Contract --> Surface["Capability posture - visible tool surface"]
-    Surface --> Prompt["Prompt builder - current-turn contract"]
-    Prompt --> Model["Local model backend - managed llama.cpp or configured engine"]
-    Model --> Loop["Tool-call loop"]
-    Loop --> Policy["Runtime policy gates"]
-    Policy --> Tools["Workspace tools - read, grep, edit, command, batch"]
-    Tools --> Verify["Verification and outcome classifier"]
-    Verify --> Trace["Trace, prompt-debug, artifacts"]
-    Trace --> Answer["Final answer"]
+    accTitle: From request to evidence-bound answer
+    accDescr: A request is narrowed into a current-turn contract. Model proposals pass through runtime policy before tools are used. Supported outcomes are checked against evidence before an answer is presented.
+    subgraph Request["Request and capability"]
+        direction TB
+        CLI["Terminal and REPL"] --> Contract["Mode and task contract"]
+        Contract --> Prompt["Allowed tools and prompt"]
+    end
+    subgraph Proposal["Model suggestion"]
+        Model["Local model backend"]
+    end
+    subgraph Authority["Runtime authority"]
+        direction TB
+        Policy["Tool loop and policy gates"] --> Tools["Bounded workspace tools"]
+    end
+    subgraph Evidence["Evidence and presentation"]
+        direction TB
+        Verify["Verification and outcome"] --> Trace["Trace and final answer"]
+    end
+    Request --> Proposal
+    Proposal --> Authority
+    Authority --> Evidence
 ```
 
 The important separation is between model suggestion and runtime authority. The model may ask for a tool call, but runtime policy decides whether that tool is available, whether approval is required, whether the path is allowed, and whether the result supports the final answer.
+
+Responsibilities are grouped in this overview. Detailed interactions are shown in [the execution model](execution-model.md#turn-pipeline), with isolation domains shown in [the trust boundary map](trust-boundaries.md#boundary-map).
 
 ## Main Components
 

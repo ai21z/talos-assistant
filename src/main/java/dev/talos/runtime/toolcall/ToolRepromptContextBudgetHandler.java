@@ -26,6 +26,9 @@ final class ToolRepromptContextBudgetHandler {
             LOG.info("Skipping {} because it exceeded the local context budget.", retryName);
             return false;
         }
+        var delivery = ReadOnlyEvidenceContext.delivery(state);
+        if (delivery.retentionLimited() || !delivery.carriers().isEmpty() || delivery.excludedSourceCount() > 0)
+            return ReadEvidenceDeliveryRequest.stop(state, "CONTEXT_BUDGET_PREVENTED_EVIDENCE_DELIVERY");
         CompactMutationContinuationExecutor.Outcome compactMutation =
                 CompactMutationContinuationExecutor.tryExecute(
                         state,

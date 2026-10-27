@@ -58,6 +58,41 @@ class SessionCommandTest {
     }
     // -- Save + Load --
     @Nested class SaveAndLoad {
+        @Test void loadKeepsRestoredHistoryWhenSessionOnlyModelIsMissing() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("missing-model-workspace");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            String savedId = wsId + "-20260612080000";
+            try (var writer = st.acquireSessionWriter(savedId)) {
+                writer.save(new SessionData(savedId, ws.toString(), "restored sketch", 1, Instant.now(),
+                        List.of(new SessionData.Turn("user", "saved question", ""),
+                                new SessionData.Turn("assistant", "saved answer", "ok")),
+                        "llama_cpp/session-only-import"));
+            }
+            Config cfg = new Config();
+            cfg.data.put("llm", java.util.Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+            cfg.data.put("engines", java.util.Map.of("llama_cpp", java.util.Map.of("mode", "managed", "model", "configured-model")));
+            SessionMemory memory = new SessionMemory();
+            ConversationManager cm = new ConversationManager(memory);
+            cm.addTurn("previous question", "previous answer");
+            try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+                Context ctx = Context.builder(cfg).llm(llm).memory(memory).conversationManager(cm).build();
+                var command = new SessionCommand(ws, st, wsId + "-20260612090000");
+
+                Result.Info result = assertInstanceOf(Result.Info.class, command.execute("load", ctx));
+
+                assertTrue(result.text.contains("Session restored"));
+                assertTrue(result.text.contains("Saved model was not restored"));
+                assertTrue(result.text.contains("previous model selection was preserved"));
+                assertEquals("llama_cpp/configured-model", llm.getModel());
+                assertFalse(llm.modelSelectionUnavailable());
+                assertEquals(1, cm.turnCount());
+                assertEquals("restored sketch", cm.sketch());
+                assertTrue(memory.get().contains("saved answer"));
+                assertFalse(memory.get().contains("previous answer"));
+            }
+        }
+
         /**
          * T800: the cross-process flow. Session A saves under its instance
          * id; a NEW session (different instance id, same workspace) runs
@@ -68,7 +103,7 @@ class SessionCommandTest {
             var st = store();
             Path ws = Path.of("/test/project").toAbsolutePath().normalize();
             String wsId = JsonSessionStore.sessionIdFor(ws);
-            var sessionA = new SessionCommand(ws, st, wsId + "-20260612080000");
+            String sessionAId = wsId + "-20260612080000";
             // Set up context with conversation history
             SessionMemory mem = new SessionMemory();
             mem.update("What is Java?", "Java is a programming language.");
@@ -80,9 +115,12 @@ class SessionCommandTest {
                     .conversationManager(cm)
                     .build();
             // Save
-            Result saveResult = sessionA.execute("save", ctx);
-            assertInstanceOf(Result.Info.class, saveResult);
-            assertTrue(((Result.Info) saveResult).text.contains("Session saved"));
+            try (var writer = st.acquireSessionWriter(sessionAId)) {
+                var sessionA = new SessionCommand(ws, writer, sessionAId);
+                Result saveResult = sessionA.execute("save", ctx);
+                assertInstanceOf(Result.Info.class, saveResult);
+                assertTrue(((Result.Info) saveResult).text.contains("Session saved"));
+            }
             // A later session of the same workspace
             var sessionB = new SessionCommand(ws, st, wsId + "-20260612090000");
             SessionMemory freshMem = new SessionMemory();
@@ -103,9 +141,9 @@ class SessionCommandTest {
         @Test void save_persistsActiveTaskContextAndArtifactGoal() throws Exception {
             var st = store();
             Path ws = Path.of("/active/project").toAbsolutePath().normalize();
-            var cmd = new SessionCommand(ws, st);
+            String sessionId = JsonSessionStore.sessionIdFor(ws);
             SessionMemory mem = new SessionMemory();
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
             mem.setActiveTaskContext(context);
@@ -115,10 +153,12 @@ class SessionCommandTest {
                     .conversationManager(new ConversationManager(mem))
                     .build();
 
-            Result saveResult = cmd.execute("save", ctx);
-
-            assertInstanceOf(Result.Info.class, saveResult);
-            SessionData saved = st.load(cmd.sessionId()).orElseThrow();
+            try (var writer = st.acquireSessionWriter(sessionId)) {
+                var cmd = new SessionCommand(ws, writer, sessionId);
+                Result saveResult = cmd.execute("save", ctx);
+                assertInstanceOf(Result.Info.class, saveResult);
+            }
+            SessionData saved = st.load(sessionId).orElseThrow();
             assertEquals(context, saved.activeTaskContext());
             assertEquals(goal, saved.artifactGoal());
         }
@@ -134,8 +174,11 @@ class SessionCommandTest {
             String wsId = JsonSessionStore.sessionIdFor(ws);
             // The crashed session left only a turn log; this run is a new instance.
             var cmd = new SessionCommand(ws, st, wsId + "-20260612090000");
-            st.appendTurn(wsId + "-20260612080000", new TurnRecord(1, Instant.now(), 0L,
-                    "recover me", "recovered answer", List.of(), 0, 0, 0, "", "ok"));
+            String crashedId = wsId + "-20260612080000";
+            try (var writer = st.acquireSessionWriter(crashedId)) {
+                writer.appendTurn(crashedId, new TurnRecord(1, Instant.now(), 0L,
+                        "recover me", "recovered answer", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             SessionMemory freshMem = new SessionMemory();
             ConversationManager freshCm = new ConversationManager(freshMem);
@@ -155,10 +198,13 @@ class SessionCommandTest {
             Path ws = Path.of("/context/project").toAbsolutePath().normalize();
             String wsId = JsonSessionStore.sessionIdFor(ws);
             var cmd = new SessionCommand(ws, st, wsId + "-20260612090000");
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
-            st.save(new SessionData(wsId + "-20260612080000", ws.toString(), "", 0, Instant.now(), List.of(), "",
-                    context, ArtifactGoal.fromActiveContext(context)));
+            String savedId = wsId + "-20260612080000";
+            try (var writer = st.acquireSessionWriter(savedId)) {
+                writer.save(new SessionData(savedId, ws.toString(), "", 0, Instant.now(), List.of(), "",
+                        context, ArtifactGoal.fromActiveContext(context)));
+            }
 
             SessionMemory freshMem = new SessionMemory();
             ConversationManager freshCm = new ConversationManager(freshMem);
@@ -181,31 +227,44 @@ class SessionCommandTest {
     @Nested class Clear {
         @Test void clear_existing_deletesFile() throws Exception {
             var st = store();
-            var cmd = new SessionCommand(Path.of("/ws"), st);
-            // Manually save something
-            st.save(new SessionData(cmd.sessionId(), "/ws", "sketch", 3,
-                    Instant.now(), List.of()));
-            Result r = cmd.execute("clear", minimalCtx());
-            assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
-            assertTrue(st.load(cmd.sessionId()).isEmpty());
+            Path workspace = Path.of("/ws");
+            String sessionId = JsonSessionStore.sessionIdFor(workspace);
+            try (var writer = st.acquireSessionWriter(sessionId)) {
+                var cmd = new SessionCommand(workspace, writer, sessionId);
+                // Manually save something
+                writer.save(new SessionData(sessionId, "/ws", "sketch", 3,
+                        Instant.now(), List.of()));
+                Result r = cmd.execute("clear", minimalCtx());
+                assertInstanceOf(Result.Info.class, r);
+                assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
+            }
+            assertTrue(st.load(sessionId).isEmpty());
         }
         @Test void clear_noFile_returnsInfo() throws Exception {
-            var cmd = new SessionCommand(Path.of("/ws"), store());
-            Result r = cmd.execute("clear", minimalCtx());
-            assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("No current saved session to delete"));
+            JsonSessionStore st = store();
+            Path workspace = Path.of("/ws");
+            String sessionId = JsonSessionStore.sessionIdFor(workspace);
+            try (var writer = st.acquireSessionWriter(sessionId)) {
+                var cmd = new SessionCommand(workspace, writer, sessionId);
+                Result r = cmd.execute("clear", minimalCtx());
+                assertInstanceOf(Result.Info.class, r);
+                assertTrue(((Result.Info) r).text.contains("No current saved session to delete"));
+            }
         }
         @Test void clear_turnLogOnly_deletesCompanionFile() throws Exception {
             var st = store();
-            var cmd = new SessionCommand(Path.of("/ws-turn-log-only"), st);
-            st.appendTurn(cmd.sessionId(), new TurnRecord(1, Instant.now(), 0L,
-                    "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            Path workspace = Path.of("/ws-turn-log-only");
+            String sessionId = JsonSessionStore.sessionIdFor(workspace);
+            try (var writer = st.acquireSessionWriter(sessionId)) {
+                var cmd = new SessionCommand(workspace, writer, sessionId);
+                writer.appendTurn(sessionId, new TurnRecord(1, Instant.now(), 0L,
+                        "u", "a", List.of(), 0, 0, 0, "", "ok"));
 
-            Result r = cmd.execute("clear", minimalCtx());
-            assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
-            assertTrue(st.loadTurns(cmd.sessionId()).isEmpty());
+                Result r = cmd.execute("clear", minimalCtx());
+                assertInstanceOf(Result.Info.class, r);
+                assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
+            }
+            assertTrue(st.loadTurns(sessionId).isEmpty());
         }
     }
     // -- List (T800) --
@@ -218,14 +277,20 @@ class SessionCommandTest {
             String previous = wsId + "-20260611090000";
             var cmd = new SessionCommand(ws, st, current);
 
-            st.save(new SessionData(wsId, ws.toString(), "", 1,
-                    Instant.parse("2026-06-09T09:00:00Z"),
-                    List.of(new SessionData.Turn("user", "u", ""),
-                            new SessionData.Turn("assistant", "a", "ok")), "model-l"));
-            st.save(new SessionData(previous, ws.toString(), "", 2,
-                    Instant.parse("2026-06-11T09:00:00Z"), List.of(), "model-p"));
-            st.appendTurn(current, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
-                    "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            try (var writer = st.acquireSessionWriter(wsId)) {
+                writer.save(new SessionData(wsId, ws.toString(), "", 1,
+                        Instant.parse("2026-06-09T09:00:00Z"),
+                        List.of(new SessionData.Turn("user", "u", ""),
+                                new SessionData.Turn("assistant", "a", "ok")), "model-l"));
+            }
+            try (var writer = st.acquireSessionWriter(previous)) {
+                writer.save(new SessionData(previous, ws.toString(), "", 2,
+                        Instant.parse("2026-06-11T09:00:00Z"), List.of(), "model-p"));
+            }
+            try (var writer = st.acquireSessionWriter(current)) {
+                writer.appendTurn(current, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
+                        "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             String text = ((Result.Info) cmd.execute("list", minimalCtx())).text;
 
@@ -247,8 +312,10 @@ class SessionCommandTest {
             Path ws = Path.of("/list/markers").toAbsolutePath().normalize();
             String current = JsonSessionStore.sessionIdFor(ws) + "-20260612090000";
             var cmd = new SessionCommand(ws, st, current);
-            st.appendTurn(current, new TurnRecord(1, Instant.now(), 0L,
-                    "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            try (var writer = st.acquireSessionWriter(current)) {
+                writer.appendTurn(current, new TurnRecord(1, Instant.now(), 0L,
+                        "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             String text = ((Result.Info) cmd.execute("list", minimalCtx())).text;
 
@@ -271,9 +338,11 @@ class SessionCommandTest {
 
         private void saveSnapshot(JsonSessionStore st, Path ws, String id, Instant createdAt,
                                   String user, String assistant) {
-            st.save(new SessionData(id, ws.toString(), "", 1, createdAt,
-                    List.of(new SessionData.Turn("user", user, ""),
-                            new SessionData.Turn("assistant", assistant, "ok")), ""));
+            try (var writer = st.acquireSessionWriter(id)) {
+                writer.save(new SessionData(id, ws.toString(), "", 1, createdAt,
+                        List.of(new SessionData.Turn("user", user, ""),
+                                new SessionData.Turn("assistant", assistant, "ok")), ""));
+            }
         }
 
         @Test void resume_defaultsToLatestOtherSession() throws Exception {
@@ -287,8 +356,10 @@ class SessionCommandTest {
             saveSnapshot(st, ws, wsId + "-20260611090000", Instant.parse("2026-06-11T09:00:00Z"),
                     "newer-q", "newer-a");
             // The current session's own (newest) crash log must be skipped.
-            st.appendTurn(current, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
-                    "current-q", "current-a", List.of(), 0, 0, 0, "", "ok"));
+            try (var writer = st.acquireSessionWriter(current)) {
+                writer.appendTurn(current, new TurnRecord(1, Instant.parse("2026-06-12T09:01:00Z"), 0L,
+                        "current-q", "current-a", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem);
@@ -370,8 +441,10 @@ class SessionCommandTest {
             Path ws = Path.of("/resume/own").toAbsolutePath().normalize();
             String current = JsonSessionStore.sessionIdFor(ws) + "-20260612090000";
             var cmd = new SessionCommand(ws, st, current);
-            st.appendTurn(current, new TurnRecord(1, Instant.now(), 0L,
-                    "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            try (var writer = st.acquireSessionWriter(current)) {
+                writer.appendTurn(current, new TurnRecord(1, Instant.now(), 0L,
+                        "u", "a", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             assertEquals("No saved session found for this workspace.",
                     ((Result.Info) cmd.execute("resume", minimalCtx())).text);
@@ -389,10 +462,12 @@ class SessionCommandTest {
 
         private void saveSnapshot(JsonSessionStore st, Path ws, String id, Instant createdAt,
                                   String user, String assistant) {
-            st.save(new SessionData(id, ws.toString(), "", 1, createdAt,
-                    List.of(new SessionData.Turn("user", user, ""),
-                            new SessionData.Turn("assistant", assistant, "ok")),
-                    "ollama/qwen2.5-coder:14b"));
+            try (var writer = st.acquireSessionWriter(id)) {
+                writer.save(new SessionData(id, ws.toString(), "", 1, createdAt,
+                        List.of(new SessionData.Turn("user", user, ""),
+                                new SessionData.Turn("assistant", assistant, "ok")),
+                        "llama_cpp/qwen2.5-coder-14b"));
+            }
         }
 
         private Path exportedPath(Result r) {
@@ -419,7 +494,7 @@ class SessionCommandTest {
             String doc = java.nio.file.Files.readString(exported);
             assertTrue(doc.startsWith("# Talos session 20260611090000\n"), "newest session wins");
             assertTrue(doc.contains("- Session ID: " + wsId + "-20260611090000"));
-            assertTrue(doc.contains("- Model: ollama/qwen2.5-coder:14b"));
+            assertTrue(doc.contains("- Model: llama_cpp/qwen2.5-coder-14b"));
             assertTrue(doc.contains("- Exchanges: 1"));
             assertTrue(doc.contains("## Turn 1"));
             assertTrue(doc.contains("**User:**\n\nnewer question"));
@@ -450,10 +525,12 @@ class SessionCommandTest {
             String wsId = JsonSessionStore.sessionIdFor(ws);
             String crashed = wsId + "-20260610090000";
             var cmd = command(ws, st, wsId + "-20260612090000");
-            st.appendTurn(crashed, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
-                    "good question", "good answer", List.of(), 0, 0, 0, "", "ok"));
-            st.appendTurn(crashed, new TurnRecord(2, Instant.parse("2026-06-10T09:02:00Z"), 0L,
-                    "doomed question", "confabulated garbage", List.of(), 0, 0, 0, "", "aborted"));
+            try (var writer = st.acquireSessionWriter(crashed)) {
+                writer.appendTurn(crashed, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
+                        "good question", "good answer", List.of(), 0, 0, 0, "", "ok"));
+                writer.appendTurn(crashed, new TurnRecord(2, Instant.parse("2026-06-10T09:02:00Z"), 0L,
+                        "doomed question", "confabulated garbage", List.of(), 0, 0, 0, "", "aborted"));
+            }
 
             Path exported = exportedPath(cmd.execute("export", minimalCtx()));
 
@@ -470,8 +547,10 @@ class SessionCommandTest {
             String id = wsId + "-20260610090000";
             var cmd = command(ws, st, wsId + "-20260612090000");
             saveSnapshot(st, ws, id, Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
-            st.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
-                    "q", "a", List.of(), 0, 0, 0, "", "ok"));
+            try (var writer = st.acquireSessionWriter(id)) {
+                writer.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
+                        "q", "a", List.of(), 0, 0, 0, "", "ok"));
+            }
 
             Result r = cmd.execute("export --raw", minimalCtx());
 
@@ -519,6 +598,137 @@ class SessionCommandTest {
             String doc = java.nio.file.Files.readString(exported);
             assertTrue(doc.contains("It contains " + canary + " and nothing else."),
                     "the seeded redaction placeholder must survive export verbatim");
+        }
+
+        @Test void export_refusesARelativePathThatLeavesTheWorkspace() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-escape-ws"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export 20260610 ../escaped.md", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertEquals("Export path is outside the workspace: ../escaped.md. "
+                            + "Run /session export without a path to save it in the Talos exports folder.",
+                    ((Result.Error) r).message);
+            assertFalse(java.nio.file.Files.exists(tempDir.resolve("escaped.md")));
+        }
+
+        @Test void export_refusesAnAbsolutePathOutsideTheWorkspace() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-absolute-ws"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+            Path outside = tempDir.resolve("elsewhere").resolve("escaped.md").toAbsolutePath().normalize();
+
+            Result r = cmd.execute("export 20260610 " + outside, minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertTrue(((Result.Error) r).message.startsWith("Export path is outside the workspace: "),
+                    ((Result.Error) r).message);
+            assertFalse(java.nio.file.Files.exists(outside));
+            assertFalse(java.nio.file.Files.exists(outside.getParent()),
+                    "no folder is created outside the workspace");
+        }
+
+        @Test void export_refusesAProtectedLocationInsideTheWorkspace() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-protected-ws"));
+            java.nio.file.Files.createDirectories(ws.resolve(".git"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export 20260610 .git/talos-export.md", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertEquals("Export path names a protected location: .git/talos-export.md. "
+                            + "Run /session export without a path to save it in the Talos exports folder.",
+                    ((Result.Error) r).message);
+            assertFalse(java.nio.file.Files.exists(ws.resolve(".git").resolve("talos-export.md")));
+        }
+
+        @Test void export_refusesALinkedFolderThatLeadsOutsideTheWorkspace() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-link-ws"));
+            Path outside = java.nio.file.Files.createDirectories(tempDir.resolve("export-link-outside"));
+            linkDirectory(ws.resolve("linked"), outside);
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export 20260610 linked/escaped.md", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertFalse(java.nio.file.Files.exists(outside.resolve("escaped.md")));
+        }
+
+        @Test void export_writesAnExplicitWorkspacePathIntoANewFolder() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-inside-ws"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            String id = wsId + "-20260610090000";
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, id, Instant.parse("2026-06-10T09:00:00Z"), "inside question", "inside answer");
+            try (var writer = st.acquireSessionWriter(id)) {
+                writer.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
+                        "inside question", "inside answer", List.of(), 0, 0, 0, "", "ok"));
+            }
+
+            Result r = cmd.execute("export 20260610 notes/session.md --raw", minimalCtx());
+
+            Path exported = exportedPath(r);
+            assertEquals(ws.toRealPath().resolve("notes").resolve("session.md"), exported);
+            assertTrue(java.nio.file.Files.readString(exported).contains("inside answer"));
+            String text = ((Result.TrustedInfo) r).text;
+            assertTrue(text.contains("Raw turn log copied to: "
+                    + ws.toRealPath().resolve("notes").resolve("session.jsonl")), text);
+        }
+
+        private void linkDirectory(Path link, Path target) throws Exception {
+            if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+                Process process = new ProcessBuilder(
+                        "cmd.exe", "/d", "/c", "mklink", "/J", link.toString(), target.toString())
+                        .redirectErrorStream(true)
+                        .start();
+                String output = new String(process.getInputStream().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                assertEquals(0, process.waitFor(), output);
+            } else {
+                java.nio.file.Files.createSymbolicLink(link, target);
+            }
+        }
+
+        @Test void export_backslashSegmentsAreClassifiedAsTheyWillBeWritten() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-backslash-ws"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export 20260610 .github\\x\\..\\workflows\\e.yml", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertTrue(((Result.Error) r).message.startsWith("Export path names a protected location: "),
+                    ((Result.Error) r).message);
+            assertFalse(java.nio.file.Files.exists(ws.resolve(".github")));
+        }
+
+        @Test void export_unparsablePathIsReportedAsInvalid() throws Exception {
+            var st = store();
+            Path ws = java.nio.file.Files.createDirectories(tempDir.resolve("export-invalid-ws"));
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export 20260610 notes/a\u0000b.md", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertEquals("Export path is not a valid file path. Nothing was written.",
+                    ((Result.Error) r).message);
         }
 
         @Test void export_noSessions_reportsNoSavedSession() throws Exception {

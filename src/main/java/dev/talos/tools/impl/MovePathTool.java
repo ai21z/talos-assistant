@@ -72,7 +72,10 @@ public final class MovePathTool implements TalosTool {
             return ToolResult.fail(ToolError.invalidParams(
                     "Destination already exists: " + to + ". Set overwrite=true to replace it."));
         }
-        ToolResult parentResult = WorkspaceOperationToolSupport.createParentDirectories(ctx, destination.path());
+        ToolResult parentResult =
+                WorkspaceOperationToolSupport.requireExistingOrdinaryParent(
+                        ctx,
+                        destination.path());
         if (parentResult != null) return parentResult;
         try {
             if (overwrite) {

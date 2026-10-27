@@ -54,6 +54,38 @@ class ConversationBoundaryPolicyTest {
     }
 
     @Test
+    void blanketNoWorkspaceAccessWordingIsRequestShapedAndDirectAnswerOnly() {
+        for (String input : List.of(
+                "Without opening any workspace file, explain in one sentence what a JSON configuration file usually contains.",
+                "Without opening files, explain what JSON usually contains.",
+                "Do not open any workspace files, answer from general knowledge.",
+                "Do not inspect my files, explain entropy.",
+                "Do not inspect or change any files. Tell me one question you would ask before editing this project.",
+                "Do not change or inspect any files. Tell me what you need before editing.",
+                "Without searching the repo, explain what a repository is.",
+                "Do not list repository files, explain what a file tree is.",
+                "Answer from general knowledge without using this workspace.")) {
+            assertEquals(PRIVACY_NO_WORKSPACE, ConversationBoundaryPolicy.classification(input), input);
+            assertTrue(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);
+        }
+    }
+
+    @Test
+    void blanketNoWorkspaceWordingDoesNotErasePositiveOrMixedScopeRequests() {
+        for (String input : List.of(
+                "Open README.md and summarize it.",
+                "Read this workspace and explain it.",
+                "List the workspace files.",
+                "Show me how to make one, do not edit files.",
+                "Do not open secrets.env; read README.md.",
+                "Do not open any workspace files except README.md; summarize README.md.",
+                "Without opening config.json, read README.md.")) {
+            assertEquals(NONE, ConversationBoundaryPolicy.classification(input), input);
+            assertFalse(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);
+        }
+    }
+
+    @Test
     void privacyNoWorkspaceWordingDoesNotOverrideExplicitWorkspaceActionIntent() {
         for (String input : List.of(
                 "Do not read files, create index.html",

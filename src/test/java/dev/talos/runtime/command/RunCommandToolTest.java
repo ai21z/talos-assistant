@@ -6,11 +6,14 @@ import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -249,7 +252,49 @@ class RunCommandToolTest {
         assertFalse(result.success());
         assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
         assertTrue(result.errorMessage().startsWith("Command timed out: gradle_test"));
-        assertTrue(result.errorMessage().contains("process killed"));
+        assertTrue(result.errorMessage().contains("termination attempted"));
+        assertFalse(result.errorMessage().contains("process killed"));
+        assertFalse(result.errorMessage().contains("diagnostic:"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void timeoutRetainsUnconfirmedCleanupDiagnostic(boolean terminationAttempted) throws Exception {
+        createGradleWrapper();
+        String diagnostic = "Command stream cleanup did not settle; process-tree quiescence is unconfirmed.";
+        RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
+                plan, -1, 1_001, true, terminationAttempted, "", "", false, false, false, diagnostic));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        assertFalse(result.success());
+        assertEquals(ToolFailureReason.COMMAND_TIMEOUT, result.error().reason());
+        assertTrue(result.errorMessage().startsWith("Command timed out: gradle_test"));
+        assertTrue(result.errorMessage().contains(diagnostic), result.errorMessage());
+        assertEquals(terminationAttempted, result.errorMessage().contains("termination attempted"));
+        assertFalse(result.errorMessage().contains("process killed"));
+    }
+
+    @Test
+    void timeoutDiagnosticIsSanitizedAndBoundedWithoutLosingUncertaintyTail() throws Exception {
+        createGradleWrapper();
+        String diagnostic = "discarded-prefix " + "x".repeat(3_000)
+                + " API_TOKEN=fixture-secret; process-tree quiescence is unconfirmed.";
+        RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
+                plan, -1, 1_001, true, true, "", "", false, false, false, diagnostic));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        String message = result.errorMessage();
+        assertFalse(result.success());
+        assertEquals(ToolFailureReason.COMMAND_TIMEOUT, result.error().reason());
+        assertTrue(message.contains("process-tree quiescence is unconfirmed."), message);
+        assertTrue(message.contains("diagnostic:\n..."));
+        assertFalse(message.contains("fixture-secret"));
+        assertFalse(message.contains("discarded-prefix"));
+        assertTrue(message.length() < 2_700, "diagnostic must not include the full unbounded message");
     }
 
     private ToolContext context() {

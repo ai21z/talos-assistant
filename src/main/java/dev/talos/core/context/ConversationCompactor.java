@@ -148,7 +148,7 @@ public final class ConversationCompactor {
         String userPrompt = buildCompactionPrompt(existingSketch, oldTurns);
 
         try {
-            String sketch = llm.chatPlain(COMPACTION_SYSTEM_PROMPT, userPrompt);
+            String sketch = llm.chatPlainBackgroundMaintenance(COMPACTION_SYSTEM_PROMPT, userPrompt);
             if (sketch == null || sketch.isBlank()) {
                 LOG.warn("Compaction returned empty sketch, keeping existing");
                 return CompactionResult.blankOutput(existingSketch);

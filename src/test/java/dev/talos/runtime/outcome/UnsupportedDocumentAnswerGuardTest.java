@@ -13,6 +13,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UnsupportedDocumentAnswerGuardTest {
 
     @Test
+    void searchNoteRetainsInputButDoesNotInventInputWhenAllClaimsWereRemoved() {
+        var searchMessages = List.of(ChatMessage.assistant(
+                "[tool_result: talos.grep]\nSearch was limited: skipped unsupported files."));
+        var prefixed = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "No matches were found.", loopResult(searchMessages, grepOutcome()));
+        assertTrue(prefixed.inputRetained());
+        assertTrue(prefixed.answer().contains("No matches were found."));
+
+        var removed = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "sample.pdf is empty with no matches.", loopResult(searchMessages, grepOutcome(),
+                        readOutcome("sample.pdf", false, "", "Unsupported binary document format", ToolError.UNSUPPORTED_FORMAT)));
+        assertFalse(removed.inputRetained(), "the generated search note is not retained provider prose");
+        assertFalse(removed.answer().contains("sample.pdf is empty"));
+        assertTrue(removed.answer().contains("Search was limited"));
+    }
+
+    @Test
+    void survivingSupportedFragmentRetainsLimitButPureFallbackDoesNot() {
+        var evidence = loopResult(List.of(), readOutcome("notes.txt", true, "notes read", "", null),
+                readOutcome("sample.pdf", false, "", "Unsupported binary document format", ToolError.UNSUPPORTED_FORMAT));
+        var partial = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded(
+                "notes.txt says the value is 42. sample.pdf is empty.", evidence);
+        assertTrue(partial.inputRetained());
+        assertTrue(partial.answer().contains("notes.txt says the value is 42."));
+        var fallback = UnsupportedDocumentAnswerGuard.selectUnsupportedDocumentClaimsIfNeeded("sample.pdf is empty.", evidence);
+        assertFalse(fallback.inputRetained());
+        assertTrue(fallback.answer().contains("Talos inspected the supported text files"));
+    }
+
+    @Test
     void unsupportedDocumentReadRemovesContentClaimsAndKeepsSupportedTextEvidence() {
         ToolCallLoop.LoopResult loopResult = loopResult(
                 List.of(),
@@ -47,6 +77,28 @@ class UnsupportedDocumentAnswerGuardTest {
     }
 
     @Test
+    void unsupportedDocumentReadAliasRemovesContentClaims() {
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(),
+                readOutcome(
+                        "file_utils:read_file",
+                        "brief.pdf",
+                        false,
+                        "",
+                        "Unsupported binary document format: brief.pdf (PDF).",
+                        ToolError.UNSUPPORTED_FORMAT));
+
+        String answer = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
+                "brief.pdf is empty and does not contain any readable text.",
+                loopResult);
+
+        assertTrue(answer.startsWith("[Document capability note:"), answer);
+        assertTrue(answer.contains("brief.pdf"), answer);
+        assertFalse(answer.contains("brief.pdf is empty"), answer);
+        assertFalse(answer.contains("does not contain any readable text"), answer);
+    }
+
+    @Test
     void unsupportedSearchNoMatchesClaimGetsCapabilityNote() {
         ToolCallLoop.LoopResult loopResult = loopResult(
                 List.of(ChatMessage.assistant("[tool_result: talos.grep]\nSearch was limited: skipped unsupported files.")),
@@ -68,8 +120,19 @@ class UnsupportedDocumentAnswerGuardTest {
             String errorMessage,
             String errorCode
     ) {
+        return readOutcome("talos.read_file", path, success, summary, errorMessage, errorCode);
+    }
+
+    private static ToolCallLoop.ToolOutcome readOutcome(
+            String toolName,
+            String path,
+            boolean success,
+            String summary,
+            String errorMessage,
+            String errorCode
+    ) {
         return new ToolCallLoop.ToolOutcome(
-                "talos.read_file", path, success, false, false,
+                toolName, path, success, false, false,
                 summary, errorMessage, null, errorCode);
     }
 

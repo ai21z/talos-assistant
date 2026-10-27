@@ -19,7 +19,7 @@ class EngineRuntimeConfigTest {
         assertEquals("llama_cpp", runtime.backend());
         assertEquals("talos-agent", runtime.model());
         assertEquals("llama_cpp/talos-agent", runtime.displayModel());
-        assertFalse(runtime.policyLabel().contains("Ollama"));
+        assertEquals("network on; local engine only (llama_cpp)", runtime.policyLabel());
     }
 
     @Test
@@ -47,24 +47,6 @@ class EngineRuntimeConfigTest {
 
         assertEquals("gpt-oss-20b-GGUF", runtime.model());
         assertEquals("llama_cpp/gpt-oss-20b-GGUF", runtime.displayModel());
-    }
-
-    @Test
-    void explicitOllamaSelectionStillUsesLegacyOllamaConfig() {
-        Config cfg = new Config(null);
-        cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));
-        cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
-                "host", "http://127.0.0.1:11434",
-                "model", "qwen2.5-coder:14b",
-                "allow_remote", false)));
-
-        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
-
-        assertEquals("ollama", runtime.backend());
-        assertEquals("qwen2.5-coder:14b", runtime.model());
-        assertEquals("ollama/qwen2.5-coder:14b", runtime.displayModel());
-        assertEquals("http://127.0.0.1:11434", runtime.hostLabel());
-        assertEquals("network on; local Ollama only", runtime.policyLabel());
     }
 
     @Test

@@ -38,7 +38,7 @@ public final class ExactLiteralWriteCallCorrector {
     }
 
     public static Correction correct(ToolCall call, TaskContract contract) {
-        if (call == null || !"talos.write_file".equals(call.toolName())) {
+        if (call == null || !"talos.write_file".equals(call.canonicalToolName())) {
             return Correction.unchanged(call);
         }
         LiteralContentExpectation literal = literalExpectation(contract);

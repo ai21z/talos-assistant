@@ -8,10 +8,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class StaticWebRenderVerifierTest {
     @TempDir
@@ -143,6 +146,78 @@ class StaticWebRenderVerifierTest {
         assertEquals(VerificationReport.empty(), report);
     }
 
+    @Test
+    void directRenderCancellationPropagates() throws Exception {
+        writeFixture();
+        CancellationException cancellation = new CancellationException("stop render");
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> StaticWebRenderVerifier.verify(
+                        workspace,
+                        contract(),
+                        selectors(),
+                        (root, input) -> { throw cancellation; }));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void wrappedRenderInterruptionPropagatesAndRestoresFlag() throws Exception {
+        writeFixture();
+        RuntimeException wrapper = new RuntimeException(new InterruptedException("stop render"));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> StaticWebRenderVerifier.verify(
+                            workspace,
+                            contract(),
+                            selectors(),
+                            (root, input) -> { throw wrapper; }));
+
+            assertSame(wrapper, thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void directRenderInterruptionPropagatesAndRestoresFlag() throws Exception {
+        writeFixture();
+        InterruptedException interruption = new InterruptedException("stop render");
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> StaticWebRenderVerifier.verify(
+                            workspace,
+                            contract(),
+                            selectors(),
+                            (root, input) -> sneakyThrow(interruption)));
+
+            assertSame(interruption, thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void ordinaryRenderFailureRemainsUnavailable() throws Exception {
+        writeFixture();
+
+        VerificationReport report = StaticWebRenderVerifier.verify(
+                workspace,
+                contract(),
+                selectors(),
+                (root, input) -> { throw new IllegalStateException("renderer unavailable"); });
+
+        assertEquals(VerificationVerdict.UNAVAILABLE, report.verifierResults().get(0).verdict());
+        assertTrue(report.limitations().stream().anyMatch(value -> value.contains("renderer unavailable")));
+    }
+
     private void writeFixture() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -169,5 +244,10 @@ class StaticWebRenderVerifierTest {
         return StaticWebSelectorAnalyzer.analyze(
                 workspace,
                 StaticWebSurfaceDetector.obviousPrimaryFiles(workspace));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable, R> R sneakyThrow(Throwable throwable) throws T {
+        throw (T) throwable;
     }
 }

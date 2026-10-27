@@ -1,10 +1,10 @@
 {
-  "name": "natural site diagnostic prompt is grounded",
+  "name": "unbound natural site diagnosis remains limited",
   "fixture": "broken-bmi-site",
   "v1Pack": true,
   "claims": [
     "natural-site-diagnostic-intent",
-    "read-only-web-diagnostics-use-static-workspace-facts"
+    "unbound-read-only-web-diagnosis-remains-limited"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",

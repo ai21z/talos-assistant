@@ -4,6 +4,9 @@ import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.TokenChunk;
 
 import java.util.ArrayList;
@@ -14,6 +17,9 @@ import java.util.NoSuchElementException;
 import java.util.Spliterators;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -21,6 +27,63 @@ public final class ScriptedNativeLlmClient {
     private ScriptedNativeLlmClient() {}
 
     public static LlmClient of(List<LlmClient.StreamResult> responses) {
+        return scripted(responses, false);
+    }
+
+    /** Provider fixture that returns the supplied responses, then throws once exhausted. */
+    public static LlmClient ofThenFailure(
+            List<LlmClient.StreamResult> responses,
+            RuntimeException terminalFailure
+    ) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent(
+                "llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        return new LlmClient(config, new Resolver(
+                responses,
+                false,
+                terminalFailure == null
+                        ? new RuntimeException("scripted terminal failure")
+                        : terminalFailure));
+    }
+
+    /**
+     * Foreground provider fixture with an authoritative non-native tool
+     * capability, used to exercise the explicit JSON-text fallback surface.
+     */
+    public static LlmClient textToolFallbackOf(List<LlmClient.StreamResult> responses) {
+        return scripted(responses, true);
+    }
+
+    /**
+     * Foreground provider fixture for deterministic textual responses on the
+     * explicitly selected JSON-text tool surface.
+     */
+    public static LlmClient textToolFallbackStrings(List<String> responses) {
+        List<LlmClient.StreamResult> scriptedResponses =
+                responses == null || responses.isEmpty()
+                        ? List.of(new LlmClient.StreamResult("", List.of()))
+                        : responses.stream()
+                                .map(response -> new LlmClient.StreamResult(
+                                        response == null ? "" : response,
+                                        List.of()))
+                                .toList();
+        return scripted(scriptedResponses, true);
+    }
+
+    public static LlmClient textToolFallbackStrings(String response) {
+        return textToolFallbackStrings(List.of(response == null ? "" : response));
+    }
+
+    private static LlmClient scripted(
+            List<LlmClient.StreamResult> responses,
+            boolean authoritativeNonNative
+    ) {
         Config config = new Config();
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
@@ -28,10 +91,46 @@ public final class ScriptedNativeLlmClient {
             Map<String, Object> llm = (Map<String, Object>) map;
             llm.put("transport", "engine");
         }
-        return new LlmClient(config, new Resolver(responses));
+        return new LlmClient(config, new Resolver(responses, authoritativeNonNative));
     }
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
+
+    /** The current identity is supplied independently of scripted provider responses. */
+    public static RecordedClient recordingTextToolFallbackWithIdentity(
+            String response,
+            java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier) {
+        return recordingTextToolFallbackWithIdentity(
+                List.of(new LlmClient.StreamResult(response, List.of())), identitySupplier);
+    }
+
+    public static RecordedClient recordingTextToolFallbackWithIdentity(
+            List<LlmClient.StreamResult> responses,
+            java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier) {
+        Config config = new Config(null);
+        config.data.put("llm", new java.util.LinkedHashMap<>(
+                Map.of("transport", "engine", "default_backend", "llama_cpp")));
+        RecordingResolver resolver = new RecordingResolver(responses, 16_384, true);
+        resolver.identitySupplier = java.util.Objects.requireNonNull(identitySupplier);
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
+    /** Constructed responses can use the actual admitted request, including its frozen catalog. */
+    public static RecordedClient recordingResponder(java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder,
+                                                    int contextWindowTokens) {
+        Config config = new Config(null);
+        config.data.put("llm", new java.util.LinkedHashMap<>(Map.of("transport", "engine", "default_backend", "llama_cpp")));
+        RecordingResolver resolver = new RecordingResolver(List.of(), contextWindowTokens, false);
+        resolver.responder = java.util.Objects.requireNonNull(responder);
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
+    public record BlockingClient(
+            LlmClient client,
+            CountDownLatch firstChunkEmitted,
+            AtomicBoolean streamClosed,
+            AtomicInteger chatCalls
+    ) {}
 
     public record CompactAwareClient(
             LlmClient client,
@@ -44,13 +143,65 @@ public final class ScriptedNativeLlmClient {
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
         Config config = new Config();
-        return recordingWithContextWindow(config, responses, contextWindowTokens);
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, false);
+    }
+
+    public static RecordedClient recordingTextToolFallbackWithContextWindow(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens) {
+        Config config = new Config();
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, true);
     }
 
     public static RecordedClient recordingWithContextWindow(
             Config config,
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, false);
+    }
+
+    public static RecordedClient recordingWithJsonSchemaCapability(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean jsonSchemaResponse) {
+        return recordingWithContextWindow(
+                new Config(), responses, contextWindowTokens, false, jsonSchemaResponse);
+    }
+
+    /** Native/REQUIRED-capable foreground fixture that records every request, then fails once exhausted. */
+    public static RecordedClient recordingThenFailureWithContextWindow(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            RuntimeException terminalFailure) {
+        Config config = new Config();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> llm = (Map<String, Object>) config.data.computeIfAbsent(
+                "llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        llm.put("transport", "engine");
+        llm.put("default_backend", "llama_cpp");
+        RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens, false,
+                java.util.Objects.requireNonNull(terminalFailure));
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
+    private static RecordedClient recordingWithContextWindow(
+            Config config,
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean authoritativeNonNative) {
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, authoritativeNonNative, !authoritativeNonNative);
+    }
+
+    private static RecordedClient recordingWithContextWindow(
+            Config config,
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean authoritativeNonNative,
+            boolean jsonSchemaResponse) {
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
             @SuppressWarnings("unchecked")
@@ -58,7 +209,8 @@ public final class ScriptedNativeLlmClient {
             llm.put("transport", "engine");
             llm.put("default_backend", "llama_cpp");
         }
-        RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens);
+        RecordingResolver resolver = new RecordingResolver(
+                responses, contextWindowTokens, authoritativeNonNative, null, jsonSchemaResponse);
         return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
     }
 
@@ -101,14 +253,99 @@ public final class ScriptedNativeLlmClient {
         return new LlmClient(config, new CompatRecoveryResolver(recovery, followups));
     }
 
+    /**
+     * Client whose first generation emits {@code partialText} as a visible
+     * chunk and then fails with an external {@link EngineException.Transient}
+     * (connection reset mid-stream). LlmClient converts that shape into an
+     * aborted result carrying the partial text plus the trailing abort
+     * marker - the exact shape the abort-truth paths must recognize. Any
+     * later generation returns {@code "retry-output"} so a caller that
+     * wrongly re-generates after the abort is observable.
+     */
+    public static LlmClient transientAfterPartialOutput(String partialText) {
+        return transientAfterPartialOutput(partialText, false);
+    }
+
+    /**
+     * Foreground provider fixture that selects the JSON-text tool surface,
+     * emits a partial provider response, and then fails before provider EOS.
+     */
+    public static LlmClient transientTextToolAfterPartialOutput(String partialText) {
+        return transientAfterPartialOutput(partialText, true);
+    }
+
+    private static LlmClient transientAfterPartialOutput(
+            String partialText,
+            boolean authoritativeNonNative) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        return new LlmClient(
+                config,
+                new TransientAfterPartialResolver(
+                        partialText,
+                        authoritativeNonNative));
+    }
+
+    public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs) {
+        return blockingAfterFirstChunk(configuredTimeoutMs, 1_000L);
+    }
+
+    public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs, long configuredIdleMs) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        Object limitsBlock = config.data.computeIfAbsent("limits", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (limitsBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> limits = (Map<String, Object>) map;
+            limits.put("llm_timeout_ms", configuredTimeoutMs);
+            limits.put("llm_idle_ms", configuredIdleMs);
+        }
+        CountDownLatch firstChunkEmitted = new CountDownLatch(1);
+        AtomicBoolean streamClosed = new AtomicBoolean();
+        AtomicInteger chatCalls = new AtomicInteger();
+        BlockingResolver resolver = new BlockingResolver(firstChunkEmitted, streamClosed, chatCalls);
+        return new BlockingClient(
+                new LlmClient(config, resolver),
+                firstChunkEmitted,
+                streamClosed,
+                chatCalls);
+    }
+
     private static final class Resolver implements LlmEngineResolver {
         private final List<LlmClient.StreamResult> responses;
+        private final boolean authoritativeNonNative;
+        private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
 
-        private Resolver(List<LlmClient.StreamResult> responses) {
+        private Resolver(
+                List<LlmClient.StreamResult> responses,
+                boolean authoritativeNonNative
+        ) {
+            this(responses, authoritativeNonNative, null);
+        }
+
+        private Resolver(
+                List<LlmClient.StreamResult> responses,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure
+        ) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
+            this.authoritativeNonNative = authoritativeNonNative;
+            this.terminalFailure = terminalFailure;
         }
 
         @Override
@@ -117,12 +354,22 @@ public final class ScriptedNativeLlmClient {
 
         @Override
         public Capabilities capabilities() {
-            return Capabilities.of(true, false, false, 0);
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, !authoritativeNonNative, false, false);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
         }
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
-            int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
+            int next = cursor.getAndIncrement();
+            if (terminalFailure != null && next >= responses.size()) {
+                throw terminalFailure;
+            }
+            int index = Math.min(next, responses.size() - 1);
             LlmClient.StreamResult response = responses.get(index);
             List<TokenChunk> chunks = new ArrayList<>();
             if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
@@ -131,8 +378,16 @@ public final class ScriptedNativeLlmClient {
             if (response.text() != null && !response.text().isEmpty()) {
                 chunks.add(TokenChunk.of(response.text()));
             }
-            chunks.add(TokenChunk.eos());
+            chunks.add(TokenChunk.eos(response.finishReason()));
             return chunks.stream();
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -141,20 +396,53 @@ public final class ScriptedNativeLlmClient {
     }
 
     private static final class RecordingResolver implements LlmEngineResolver {
+        private java.util.function.Function<ChatRequest, LlmClient.StreamResult> responder;
+        private java.util.function.Supplier<ModelIdentitySnapshot> identitySupplier = ModelIdentitySnapshot::empty;
         private final List<LlmClient.StreamResult> responses;
+        private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
         private final int contextWindowTokens;
+        private final boolean authoritativeNonNative;
+        private final boolean jsonSchemaResponse;
         private final List<ChatRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
-        private RecordingResolver(List<LlmClient.StreamResult> responses, int contextWindowTokens) {
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative) {
+            this(responses, contextWindowTokens, authoritativeNonNative, null);
+        }
+
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure) {
+            this(responses, contextWindowTokens, authoritativeNonNative, terminalFailure, !authoritativeNonNative);
+        }
+
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure,
+                boolean jsonSchemaResponse) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
             this.contextWindowTokens = Math.max(256, contextWindowTokens);
+            this.authoritativeNonNative = authoritativeNonNative;
+            this.jsonSchemaResponse = jsonSchemaResponse;
+            this.terminalFailure = terminalFailure;
         }
 
         private List<ChatRequest> requests() {
             return requests;
+        }
+
+        @Override
+        public ModelIdentitySnapshot modelIdentity() {
+            return identitySupplier.get();
         }
 
         @Override
@@ -165,15 +453,33 @@ public final class ScriptedNativeLlmClient {
         public Capabilities capabilities() {
             return Capabilities.of(
                     true, true, false, contextWindowTokens,
-                    true, true, true,
-                    false, false, false, true);
+                    !authoritativeNonNative,
+                    !authoritativeNonNative,
+                    !authoritativeNonNative,
+                    false, jsonSchemaResponse, false, true);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
         }
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             requests.add(request);
-            int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
+            if (responder != null) return chunks(responder.apply(request));
+            int next = cursor.getAndIncrement();
+            if (terminalFailure != null && next >= responses.size()) throw terminalFailure;
+            int index = Math.min(next, responses.size() - 1);
             return chunks(responses.get(index));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -220,7 +526,7 @@ public final class ScriptedNativeLlmClient {
             return Capabilities.of(
                     true, true, false, 16_384,
                     true, true, true,
-                    false, false, false, true);
+                    false, true, false, true);
         }
 
         @Override
@@ -238,6 +544,14 @@ public final class ScriptedNativeLlmClient {
             }
             int index = normalContinuations.getAndIncrement();
             return chunks(normalResponses.get(Math.min(index, normalResponses.size() - 1)));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -269,7 +583,7 @@ public final class ScriptedNativeLlmClient {
             return Capabilities.of(
                     true, true, false, 16_384,
                     true, true, true,
-                    false, false, false, true);
+                    false, true, false, true);
         }
 
         @Override
@@ -282,8 +596,24 @@ public final class ScriptedNativeLlmClient {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
+        }
+
+        @Override
         public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) {
             return chunks(recovery);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStreamNonStreaming(request));
         }
 
         @Override
@@ -299,8 +629,145 @@ public final class ScriptedNativeLlmClient {
         if (response.text() != null && !response.text().isEmpty()) {
             chunks.add(TokenChunk.of(response.text()));
         }
-        chunks.add(TokenChunk.eos());
+        chunks.add(TokenChunk.eos(response.finishReason()));
         return chunks.stream();
+    }
+
+    private static final class BlockingResolver implements LlmEngineResolver {
+        private final CountDownLatch firstChunkEmitted;
+        private final AtomicBoolean streamClosed;
+        private final AtomicInteger chatCalls;
+
+        private BlockingResolver(
+                CountDownLatch firstChunkEmitted,
+                AtomicBoolean streamClosed,
+                AtomicInteger chatCalls) {
+            this.firstChunkEmitted = firstChunkEmitted;
+            this.streamClosed = streamClosed;
+            this.chatCalls = chatCalls;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, true, false, false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            chatCalls.incrementAndGet();
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    while (!streamClosed.get()) {
+                        try {
+                            TimeUnit.MILLISECONDS.sleep(10);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                    throw new EngineException.Transient(
+                            "stream closed by Talos",
+                            new java.io.IOException("stream closed by Talos"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    firstChunkEmitted.countDown();
+                    return TokenChunk.of("partial");
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+                    .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class TransientAfterPartialResolver implements LlmEngineResolver {
+        private final String partialText;
+        private final boolean authoritativeNonNative;
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        private TransientAfterPartialResolver(
+                String partialText,
+                boolean authoritativeNonNative) {
+            this.partialText = partialText == null ? "" : partialText;
+            this.authoritativeNonNative = authoritativeNonNative;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, false, false, 0,
+                    false, false, false, false, !authoritativeNonNative, false, false);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            if (chatCalls.incrementAndGet() > 1) {
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    throw new EngineException.Transient(
+                            "external stream dropped after visible output",
+                            new java.io.IOException("connection reset after partial output"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    return TokenChunk.of(partialText);
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
     private static Stream<TokenChunk> malformedToolArgumentStream() {
@@ -319,4 +786,5 @@ public final class ScriptedNativeLlmClient {
         };
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
     }
+
 }

@@ -1,8 +1,11 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
@@ -11,6 +14,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -75,6 +80,24 @@ class MutationFailureAnswerRendererTest {
     }
 
     @Test
+    void turkishDefaultLocaleDoesNotHideFalseMutationClaims() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            String answer = "I modified index.html.";
+            assertTrue(MutationFailureAnswerRenderer.containsMutationClaim(answer), answer);
+            String out = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
+                    answer,
+                    loopResult(List.of(readOnlyOutcome())),
+                    0);
+            assertTrue(out.startsWith(MutationFailureAnswerRenderer.FALSE_MUTATION_ANNOTATION), out);
+        } finally {
+            Locale.setDefault(previous);
+        }
+    }
+
+    @Test
     void deniedMutationSummarySeparatesPolicyAndApprovalDenials() {
         var messages = messages("Edit index.html and .env.");
         var loopResult = loopResult(List.of(
@@ -114,6 +137,39 @@ class MutationFailureAnswerRendererTest {
         assertTrue(out.contains("approval was denied"));
         assertTrue(out.contains("index.html: approval denied"));
         assertFalse(out.contains("manual replacement prose"));
+    }
+
+    @Test
+    void nullPlanFailureRenderingUsesCapturedContractBeforeSyntheticTail() {
+        String original = "Explain the current status without changing files.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(original));
+        var messages = messages(original);
+        messages.add(ChatMessage.user("Edit index.html now."));
+        var denied = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.edit_file",
+                "index.html",
+                false,
+                true,
+                true,
+                "",
+                "policy denied",
+                null,
+                ToolError.DENIED)));
+        try {
+            String out =
+                    MutationFailureAnswerRenderer
+                            .summarizeDeniedMutationOutcomesIfNeeded(
+                                    "captured read-only answer",
+                                    null,
+                                    messages,
+                                    denied,
+                                    0);
+
+            assertEquals("captured read-only answer", out);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     @Test
@@ -183,6 +239,101 @@ class MutationFailureAnswerRendererTest {
     }
 
     @Test
+    void invalidMutationInWithheldContractDoesNotBecomeReadOnlyDenial() {
+        String request = "Create a file at ../outside-talos-qa.txt with the text hello from Talos.";
+        // A withheld contract is supplied to isolate rendering from destination parsing.
+        var contract = new TaskContract(TaskType.FILE_CREATE, true, false, true,
+                Set.of("../outside-talos-qa.txt"), Set.of(), request, "withheld-for-clarification");
+        var plan = CurrentTurnPlan.create(contract, ExecutionPhase.INSPECT, List.of(), List.of(), List.of());
+        assertFalse(plan.taskContract().mutationAllowed());
+        assertTrue(plan.taskContract().mutationRequested());
+        var loopResult = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.write_file", "../outside-talos-qa.txt", false, true, false,
+                "", "Path not allowed before approval. No approval was requested and no file was changed.",
+                null, ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.PRE_APPROVAL_PATH_NOT_ALLOWED)));
+
+        String unchanged = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                "I created the file.", plan, messages(request), loopResult, 0);
+        assertEquals("I created the file.", unchanged);
+        String out = MutationFailureAnswerRenderer.summarizeInvalidMutationOutcomesIfNeeded(
+                unchanged, plan, messages(request), loopResult, 0);
+        assertTrue(out.startsWith(MutationFailureAnswerRenderer.INVALID_MUTATION_ANNOTATION), out);
+        assertTrue(out.contains("Path not allowed before approval"), out);
+        assertFalse(out.contains("classified as read-only"), out);
+        assertFalse(out.contains("I created the file."), out);
+    }
+
+    @Test
+    void nonDeniedFailureInReadOnlyContractDoesNotBecomeReadOnlyDenial() {
+        String answer = "The attempted operation failed.";
+        for (String errorCode : List.of(ToolError.INTERNAL_ERROR, ToolError.INVALID_PARAMS,
+                ToolError.INVALID_AUTHORITY)) {
+            var loopResult = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                    "talos.write_file", "index.html", false, true, false,
+                    "", "Unexpected failure", null, errorCode)));
+
+            assertEquals(answer, MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                    answer, plan("Explain index.html. Do not change files."),
+                    messages("Explain index.html. Do not change files."), loopResult, 0), errorCode);
+        }
+    }
+
+    @Test
+    void typedAuthorityRejectionOnReadOnlyTurnIsDisclosedWithoutInventingItsCause() {
+        String request = "Explain index.html. Do not change files.";
+        var loopResult = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.write_file", "", false, true, false,
+                "", "Authority rejected", null, ToolError.INVALID_AUTHORITY)
+                .withFailureReason(ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)));
+
+        String out = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                "Please approve these changes so I can apply them.", plan(request), messages(request), loopResult, 0);
+
+        assertEquals(MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT, out);
+        assertTrue(out.contains("read-only"), out);
+        assertTrue(out.contains("No file changes were applied"), out);
+        assertTrue(out.contains("executable authority was not established"), out);
+        assertFalse(out.contains("classified as read-only, so"), out);
+        assertFalse(out.contains("not approved"), out);
+        assertFalse(out.contains("Please approve"), out);
+    }
+
+    @Test
+    void typedAuthorityRejectionOfWithheldMutationDoesNotBecomeReadOnlyDenial() {
+        String request = "Save a short story.";
+        var contract = new TaskContract(TaskType.FILE_CREATE, true, false, true,
+                Set.of(), Set.of(), request, "withheld-for-clarification");
+        var plan = CurrentTurnPlan.create(contract, ExecutionPhase.INSPECT, List.of(), List.of(), List.of());
+        var loopResult = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.write_file", "", false, true, false,
+                "", "Authority rejected", null, ToolError.INVALID_AUTHORITY)
+                .withFailureReason(ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)));
+
+        assertEquals("The proposed write was rejected.",
+                MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                        "The proposed write was rejected.", plan, messages(request), loopResult, 0));
+    }
+
+    @Test
+    void deniedMutationStillDominatesEarlierInvalidAttempt() {
+        String request = "Edit index.html.";
+        var loopResult = loopResult(List.of(
+                new ToolCallLoop.ToolOutcome("talos.edit_file", "index.html", false, true, false,
+                        "", "Invalid edit arguments", null, ToolError.INVALID_PARAMS),
+                new ToolCallLoop.ToolOutcome("talos.edit_file", "index.html", false, true, true,
+                        "", "User did not approve the edit", null, ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        String denied = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
+                "I edited index.html.", plan(request), messages(request), loopResult, 0);
+        assertTrue(denied.startsWith(MutationFailureAnswerRenderer.DENIED_MUTATION_ANNOTATION), denied);
+        assertTrue(denied.contains("Earlier invalid mutation attempts"), denied);
+        assertEquals(denied, MutationFailureAnswerRenderer.summarizeInvalidMutationOutcomesIfNeeded(
+                denied, plan(request), messages(request), loopResult, 0));
+    }
+
+    @Test
     void invalidMutationSummaryPreservesFailurePolicyReason() {
         var loopResult = new ToolCallLoop.LoopResult(
                 "I updated index.html.",
@@ -225,6 +376,41 @@ class MutationFailureAnswerRendererTest {
         assertTrue(out.contains("Failure policy reason:"));
         assertTrue(out.contains("failure policy stopped after invalid edit arguments"));
         assertFalse(out.contains("I updated index.html."));
+    }
+
+    @Test
+    void mixedOutcomeScopesNoChangeDiagnosticToTheFailedCall() {
+        var loopResult = loopResult(List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file",
+                        "README.md",
+                        false,
+                        true,
+                        false,
+                        "",
+                        "Invalid arguments. No approval was requested and no file was changed.",
+                        null,
+                        ToolError.INVALID_PARAMS)
+                        .withFailureReason(ToolFailureReason.EDIT_EMPTY_ARGUMENTS),
+                new ToolCallLoop.ToolOutcome(
+                        "talos.write_file",
+                        "README.md",
+                        true,
+                        true,
+                        false,
+                        "Updated README.md",
+                        "")));
+
+        String out = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
+                "Updated README.md.",
+                loopResult,
+                0);
+
+        assertTrue(out.contains("Succeeded:"));
+        assertTrue(out.contains("Failed:"));
+        assertTrue(out.contains("That failed call requested no approval and changed no file."));
+        assertFalse(out.contains("No approval was requested"));
+        assertFalse(out.contains("no file was changed"));
     }
 
     private static CurrentTurnPlan plan(String request) {

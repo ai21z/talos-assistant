@@ -90,6 +90,30 @@ public final class ResponseObligationVerifier {
         return deterministicNoActionAnswer();
     }
 
+    public static String deterministicIncompleteTypedWorkspacePlanAnswer(
+            List<String> pendingContentPaths,
+            boolean workspaceOperationPending
+    ) {
+        List<String> pending = pendingContentPaths == null
+                ? List.of()
+                : pendingContentPaths.stream()
+                        .filter(path -> path != null && !path.isBlank())
+                        .distinct()
+                        .toList();
+        StringBuilder answer = new StringBuilder(
+                "[Action obligation failed: the typed workspace mutation plan remained incomplete.]\n\n");
+        if (!pending.isEmpty()) {
+            answer.append("The required content mutation did not complete for: ")
+                    .append(String.join(", ", pending))
+                    .append(". ");
+        }
+        if (workspaceOperationPending) {
+            answer.append("The exact requested workspace operation was not applied. ");
+        }
+        answer.append("Any successful earlier mutation remains reported as partial work; Talos does not claim the complete request succeeded.");
+        return answer.toString();
+    }
+
     public static String deterministicContextBudgetRetrySkippedAnswer(
             String retryName,
             EngineException.ContextBudgetExceeded budget

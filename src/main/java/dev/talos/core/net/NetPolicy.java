@@ -32,7 +32,8 @@ public final class NetPolicy {
         Map<String,Object> root = cfg.data;
         Map<String,Object> m = asMap(root.get("net"));
 
-        this.enabled = asBool(m.get("enabled"), false);
+        // One parser for every reader of net.enabled. Absent or unrecognized means off.
+        this.enabled = cfg.view().net().enabled();
         // If config has explicit read_only, use it; otherwise infer from enabled
         this.readOnly = asBool(m.get("read_only"), !this.enabled);
 

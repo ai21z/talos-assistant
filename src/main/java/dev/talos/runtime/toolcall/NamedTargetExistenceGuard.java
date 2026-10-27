@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -33,7 +34,10 @@ final class NamedTargetExistenceGuard {
         if (target == null) return null;
 
         String actualPath = ToolCallSupport.normalizePath(pathHint);
-        if (!samePath(actualPath, target.path())) return null;
+        if (!samePath(actualPath, target.path())
+                && !WorkspacePathIdentity.matches(state.workspace, target.path(), pathHint)) {
+            return null;
+        }
 
         String readback = latestCompleteReadbackForPath(state, target.path());
         if (readback == null) {
@@ -69,36 +73,21 @@ final class NamedTargetExistenceGuard {
     }
 
     private static String latestCompleteReadbackForPath(LoopState state, String path) {
-        if (state == null || path == null || path.isBlank()) return null;
-        String target = ToolCallSupport.canonicalizeReadPath(path);
-        if (target.isBlank()) return null;
-
-        String out = null;
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String signature = entry.getKey();
-            if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
-            String parsed = parseCompleteReadFileBody(entry.getValue());
-            if (parsed != null) {
-                out = parsed;
-            }
+        if (state == null) return null;
+        // T1013: newest-first, first PARSEABLE complete read wins (a
+        // truncated re-read must not poison earlier evidence); fall back
+        // to the newest parseable read of any range for the whole turn,
+        // matching the previous never-cleared path-keyed fallback.
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(path, true)) {
+            if (read.ranged()) continue;
+            String parsed = parseCompleteReadFileBody(read.body());
+            if (parsed != null) return parsed;
         }
-        if (out != null) return out;
-
-        String body = state.readFileBodiesThisTurn.get(target);
-        if (body == null) {
-            body = state.readFileBodiesThisTurn.get(ToolCallSupport.normalizePath(target));
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(path, false)) {
+            String parsed = parseCompleteReadFileBody(read.body());
+            if (parsed != null) return parsed;
         }
-        return parseCompleteReadFileBody(body);
-    }
-
-    private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))
-                && signature.contains("path=" + target + ";")
-                && !signature.contains("offset=");
+        return null;
     }
 
     private static String parseCompleteReadFileBody(String body) {

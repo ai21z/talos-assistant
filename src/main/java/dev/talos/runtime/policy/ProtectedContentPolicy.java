@@ -36,6 +36,10 @@ public final class ProtectedContentPolicy {
         return ProtectedContentSanitizer.sanitizeText(text);
     }
 
+    public static String sanitizeTextPrefix(String text) {
+        return ProtectedContentSanitizer.sanitizeTextPrefix(text);
+    }
+
     public static String sanitizeSearchLine(String line) {
         return ProtectedContentSanitizer.sanitizeSearchLine(line);
     }
@@ -58,15 +62,19 @@ public final class ProtectedContentPolicy {
 
     public static ToolResult sanitizeToolResult(ToolResult result) {
         if (result == null) return null;
+        var effects = result.mutationEffects().mapPaths(path ->
+                looksProtectedPathString(path) ? REDACTED_PATH : sanitizeText(path));
         if (result.success()) {
             return new ToolResult(true, sanitizeText(result.output()), null, result.verification(),
-                    result.contentMetadata());
+                    result.contentMetadata(), effects);
         }
         ToolError error = result.error();
         if (error == null) return result;
         // Preserve the typed failure reason (T758): redaction rewrites the
         // message prose, never the classification.
-        return ToolResult.fail(new ToolError(error.code(), sanitizeText(error.message()), error.reason()));
+        return new ToolResult(false, null,
+                new ToolError(error.code(), sanitizeText(error.message()), error.reason()),
+                result.verification(), result.contentMetadata(), effects);
     }
 
     public static boolean containsProtectedContentSignal(String text) {

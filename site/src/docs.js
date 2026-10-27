@@ -1,6 +1,7 @@
 import "./styles.css";
 import { setupRitualMenu } from "./menu.js";
 import { escapeHtml, renderMarkdown } from "./docs-markdown.js";
+import { closeDiagram, renderDiagrams, setupDiagramExpansion } from "./docs-diagrams.js";
 
 document.documentElement.classList.add("js");
 setupRitualMenu();
@@ -15,13 +16,13 @@ const docModules = import.meta.glob("../../docs/**/*.md", {
 });
 
 // Map slug -> raw markdown text. "index" becomes the docs landing page.
-const docsBySlug = {};
+const docsBySlug = new Map();
 const docsRootPrefix = "../../docs/";
 for (const [path, raw] of Object.entries(docModules)) {
   const slug = path.startsWith(docsRootPrefix)
     ? path.slice(docsRootPrefix.length).replace(/\.md$/, "")
     : path.replace(/^.*\//, "").replace(/\.md$/, "");
-  docsBySlug[slug] = raw;
+  docsBySlug.set(slug, raw);
 }
 
 // --- Routing --------------------------------------------------------------
@@ -32,7 +33,10 @@ const STATUS_NOTE_HTML = `
   <p><strong>Beta status.</strong> Talos 0.10.8 installs from GitHub Release assets.
   Windows x64 is unsigned and requires <code>-AllowUnsigned</code>. Ubuntu/WSL x64
   uses the runtime-bundled installer and starts <code>talos setup wizard</code>.
-  To upgrade, rerun the installer with <code>--force</code> and the pinned version.</p>
+  Unreleased capabilities are identified separately and are not established in
+  those published artifacts.
+  To upgrade, rerun the installer with <code>-Force</code> on Windows or
+  <code>--force</code> on Linux and the pinned version.</p>
 </aside>`;
 
 function currentRoute() {
@@ -47,13 +51,16 @@ function currentRoute() {
   };
 }
 
-function scrollToArticle(anchor = "") {
-  if (anchor) {
-    const target = document.getElementById(anchor);
-    if (target) {
-      target.scrollIntoView({ block: "start", behavior: "auto" });
-      return;
-    }
+function scrollToArticle(anchor = "", focus = false) {
+  const candidate = anchor ? document.getElementById(anchor) : null;
+  const target = candidate && article.contains(candidate) ? candidate : article.querySelector("h1");
+  if (focus && target) {
+    target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }
+  if ((anchor || focus) && target) {
+    target.scrollIntoView({ block: "start", behavior: "auto" });
+    return;
   }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -69,35 +76,62 @@ function setActiveLink(slug) {
   }
 }
 
-function renderRoute() {
+let routeGeneration = 0;
+let renderedSlug;
+let pendingAnchor = "";
+window.addEventListener("wheel", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("touchmove", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("pointerdown", () => { pendingAnchor = ""; }, { passive: true });
+window.addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) pendingAnchor = "";
+});
+setupDiagramExpansion(article);
+
+function renderRoute({ focus = false } = {}) {
   const { slug, anchor } = currentRoute();
+  pendingAnchor = anchor;
   setActiveLink(slug);
+  if (renderedSlug === slug) {
+    closeDiagram(false);
+    scrollToArticle(anchor, focus);
+    return;
+  }
+  closeDiagram(false);
+  renderedSlug = slug;
+  const generation = ++routeGeneration;
 
   if (slug === "" || slug === "index") {
     article.innerHTML = renderLandingHtml();
     document.title = "Talos documentation | Local-first CLI workspace operator";
-    scrollToArticle(anchor);
+    scrollToArticle(anchor, focus);
     return;
   }
 
-  const md = docsBySlug[slug];
-  if (!md) {
+  const md = docsBySlug.get(slug);
+  if (typeof md !== "string") {
     article.innerHTML = `
 <h1>Page not found</h1>
 <p>The documentation page <code>${escapeHtml(slug)}</code> does not exist.</p>
 <p><a href="#/">Return to the documentation overview</a>.</p>`;
     document.title = "Not found | Talos documentation";
+    scrollToArticle("", focus);
     return;
   }
 
-  article.innerHTML = renderMarkdown(md, { currentSlug: () => currentRoute().slug });
+  article.innerHTML = renderMarkdown(md, { currentSlug: slug });
   const firstHeading = article.querySelector("h1");
   document.title = firstHeading
     ? `${firstHeading.textContent.trim()} | Talos documentation`
     : "Talos documentation";
   article.scrollTo?.({ top: 0 });
   article.parentElement?.scrollTo?.({ top: 0 });
-  scrollToArticle(anchor);
+  scrollToArticle(anchor, focus);
+  void renderDiagrams(article, () => generation === routeGeneration).then(() => {
+    if (generation === routeGeneration && pendingAnchor && currentRoute().anchor === pendingAnchor) {
+      scrollToArticle(pendingAnchor);
+      pendingAnchor = "";
+    }
+  });
 }
 
 function renderLandingHtml() {
@@ -140,6 +174,7 @@ function renderLandingHtml() {
       items: [
         ["Overview", "architecture/overview", "The main execution spine."],
         ["Execution model", "architecture/execution-model", "Contract, posture, tools, approval, verification."],
+        ["Model profile lifecycle", "architecture/model-profile-lifecycle", "How evidence, profile status, and hardware support stay separate."],
         ["Trust boundaries", "architecture/trust-boundaries", "Local safety and evidence boundaries."],
         ["Package map", "architecture/package-map", "High-level Java package ownership."],
       ],
@@ -148,6 +183,7 @@ function renderLandingHtml() {
       group: "Development",
       items: [
         ["Developer setup", "development/developer-setup", "Local tools for source contributors."],
+        ["Onboard new models", "development/onboard-new-models", "Freeze, test, qualify, and review a local model profile."],
         ["Build and test", "development/build-and-test", "Local build and verification commands."],
         ["CI/CD", "development/ci-cd", "Current workflow and staging policy."],
         ["Quality reports", "development/quality-reports", "Local report outputs and review evidence."],
@@ -200,7 +236,24 @@ ${STATUS_NOTE_HTML}
 ${cardHtml}`;
 }
 
-window.addEventListener("hashchange", renderRoute);
+document.querySelector(".skip-link").addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  pendingAnchor = "";
+  closeDiagram(false);
+  scrollToArticle("", true);
+});
+document.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest("a[href]");
+  if (!link || link.target || link.hasAttribute("download")) return;
+  const destination = new URL(link.href, location.href);
+  if (destination.origin === location.origin && destination.pathname === location.pathname && destination.search === location.search && destination.hash === location.hash && destination.hash.startsWith("#/")) {
+    event.preventDefault();
+    renderRoute({ focus: true });
+  }
+});
+window.addEventListener("hashchange", () => renderRoute({ focus: true }));
 renderRoute();
 
 // Copy-to-clipboard for rendered code blocks (delegated; survives re-render).
@@ -217,6 +270,8 @@ if (article && navigator.clipboard) {
         button.textContent = "Copy";
         delete button.dataset.copied;
       }, 1600);
+    }).catch(() => {
+      button.textContent = "Copy unavailable";
     });
   });
 }

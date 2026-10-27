@@ -2,12 +2,15 @@ package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.io.AtomicFileWriter;
+import dev.talos.core.io.StrictUtf8;
 import dev.talos.tools.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tool that creates or overwrites a file within the workspace.
@@ -29,8 +32,15 @@ public final class FileWriteTool implements TalosTool {
 
     private static final String NAME = "talos.write_file";
     private static final long MAX_CONTENT_SIZE = 1024 * 1024L; // 1 MiB content cap
+    private final AtomicFileWriter atomicFileWriter;
 
-    public FileWriteTool() { }
+    public FileWriteTool() {
+        this(new AtomicFileWriter());
+    }
+
+    FileWriteTool(AtomicFileWriter atomicFileWriter) {
+        this.atomicFileWriter = Objects.requireNonNull(atomicFileWriter, "atomicFileWriter");
+    }
 
     @Override public String name() { return NAME; }
     @Override public String description() { return "Create or overwrite a file in the workspace."; }
@@ -102,6 +112,10 @@ public final class FileWriteTool implements TalosTool {
                     UnsupportedDocumentFormats.writeCapabilityMessage(resolved)));
         }
 
+        ToolMutationEffects effects = ToolMutationEffects.none();
+        String effectPath = ctx.workspace().toAbsolutePath().normalize()
+                .relativize(resolved.toAbsolutePath().normalize()).toString();
+        String parentCreationAttempt = null;
         try {
             // Create parent directories if needed
             Path parent = resolved.getParent();
@@ -111,14 +125,23 @@ public final class FileWriteTool implements TalosTool {
                     return ToolResult.fail(ToolError.invalidParams(
                             "Parent directory not allowed: " + ctx.sandbox().explain(parent)));
                 }
+                parentCreationAttempt = ctx.workspace().toAbsolutePath().normalize()
+                        .relativize(parent.toAbsolutePath().normalize()).toString();
                 Files.createDirectories(parent);
+                effects = effects.plus(ToolMutationEffects.applied(parentCreationAttempt));
+                parentCreationAttempt = null;
             }
 
-            boolean existed = Files.exists(resolved);
+            AtomicFileWriter.Preimage preimage = atomicFileWriter.capture(resolved);
+            boolean existed = preimage.existed();
 
             // Undo snapshots moved to the governed checkpoint machinery
             // (T795/T796) - captured pre-approval by the runtime, not here.
-            Files.writeString(resolved, content);
+            atomicFileWriter.replace(
+                    resolved,
+                    StrictUtf8.encode(content),
+                    preimage);
+            effects = ToolMutationEffects.applied(effectPath).plus(effects);
 
             long lines = content.chars().filter(c -> c == '\n').count() + (content.isEmpty() ? 0 : 1);
             String verb = existed ? "Updated" : "Created";
@@ -126,9 +149,14 @@ public final class FileWriteTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, content);
-            return FileVerificationToolResult.from(base, vr);
+            return FileVerificationToolResult.from(base, vr).withMutationEffects(effects);
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()));
+            effects = FileVerificationToolResult.failedWriteEffects(e, effectPath).plus(effects);
+            if (parentCreationAttempt != null) {
+                effects = effects.plus(ToolMutationEffects.uncertain(parentCreationAttempt));
+            }
+            return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()))
+                    .withMutationEffects(effects);
         }
     }
 

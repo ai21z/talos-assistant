@@ -113,7 +113,7 @@ describe("Talos landing page static contract", () => {
     assert.equal(pkg.scripts.build, "vite build");
     assert.equal(pkg.scripts.preview, "vite preview");
     assert.equal(pkg.scripts.test, "npm run test:static");
-    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js test/docs-renderer.test.js");
+    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js test/docs-renderer.test.js test/smoke-lifecycle.test.js");
     assert.equal(pkg.scripts["test:deploy-surface"], "node --test test/deploy-surface.test.js");
     assert.equal(pkg.scripts["test:e2e"], "playwright test");
   });
@@ -242,7 +242,9 @@ describe("Talos landing page static contract", () => {
     for (const copy of [
       "Inspects before acting",
       "Asks before mutation",
-      "Verifies before claiming success",
+      "Checks supported actions against tool evidence",
+      "Read-only explanations may remain unverified",
+      "incomplete or unsupported checks stay explicit",
       "Approved writes only",
       "Interactive turns leave local trace evidence",
       "No hosted workspace handoff",
@@ -280,6 +282,14 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(hero, /talos setup models/i);
     assert.doesNotMatch(hero, /talos status --verbose/i);
     assert.doesNotMatch(hero, /TalosProject\.TalosCLI/i);
+  });
+
+  it("labels terminal timings as illustrative rather than measured", () => {
+    const hero = sectionSlice(read("index.html"), "overview", "execution");
+    assert.match(hero, /Illustrative terminal example/);
+    assert.match(hero, /Displayed timings are examples, not measured performance claims/);
+    assert.match(hero, /Illustrative Talos terminal turn, with example timings/);
+    assert.doesNotMatch(hero, /Modeled on a real Talos terminal turn|Values mirror a managed/);
   });
 
   it("keeps primary GitHub and docs actions in the sticky header", () => {
@@ -382,10 +392,12 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
   });
 
-  it("ships a linear execution flow with one compact tool evidence strip", () => {
+  it("presents a conceptual execution cycle without forbidding bounded repair", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const execution = sectionSlice(html, "execution", "turn-ui");
+    assert.match(execution.replace(/\s+/g, " "), /Bounded repair may repeat inspection, approval, mutation and verification without bypassing the required gates/);
+    assert.doesNotMatch(execution, /never runs them out of order|Stations run in order/);
     const stepOrder = ["Classify", "Inspect", "Approve", "Mutate", "Verify", "Trace"];
     let cursor = 0;
     for (const step of stepOrder) {
@@ -690,6 +702,35 @@ describe("Talos landing page static contract", () => {
     assert.match(smoke, /frag\s*=\s*vec4\(col,\s*alpha\)/);
   });
 
+  it("defines the smoke vignette as an ordered descending smoothstep ramp", () => {
+    const fragment = read("src/smoke.js").match(/const FRAG = `([\s\S]*?)`;/)?.[1];
+    assert.ok(fragment, "missing smoke fragment shader");
+    const expression = fragment.match(/\bfloat\s+vig\s*=\s*([^;]+);/)?.[1].trim();
+    assert.ok(expression, "missing smoke vignette expression");
+    const ramp = expression.match(/^(1(?:\.0+)?\s*-\s*)?smoothstep\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*length\([\s\S]*\)\s*\)$/);
+    assert.ok(ramp, "vignette must be a radial smoothstep ramp");
+    const [edge0, edge1] = [Number(ramp[2]), Number(ramp[3])];
+    assert.ok(edge0 < edge1, "GLSL smoothstep requires edge0 < edge1");
+    assert.ok(ramp[1], "vignette must invert the ordered ramp to fade outward");
+    assert.deepEqual([edge0, edge1], [0.32, 1.3], "preserve the vignette transition distances");
+
+    // CPU reference for the GLSL expression; not a shader-execution or pixel test.
+    const descendingRamp = (distance) => {
+      const t = Math.max(0, Math.min(1, (distance - edge0) / (edge1 - edge0)));
+      return 1 - t * t * (3 - 2 * t);
+    };
+    for (const [distance, expected] of [[0, 1], [edge0, 1], [(edge0 + edge1) / 2, 0.5], [edge1, 0], [2, 0]]) {
+      assert.ok(Math.abs(descendingRamp(distance) - expected) < 1e-12, `vignette value at ${distance}`);
+    }
+    let previous = 1;
+    for (let step = 0; step <= 100; step++) {
+      const value = descendingRamp(step / 50);
+      assert.ok(value >= 0 && value <= 1, "vignette must remain bounded");
+      assert.ok(value <= previous, "vignette must not increase with radial distance");
+      previous = value;
+    }
+  });
+
   it("renders the ichor vein and its vigil nail", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
@@ -825,9 +866,11 @@ describe("Talos in-site documentation contract", () => {
     "reference/release-channels",
     "architecture/overview",
     "architecture/execution-model",
+    "architecture/model-profile-lifecycle",
     "architecture/trust-boundaries",
     "architecture/package-map",
     "development/developer-setup",
+    "development/onboard-new-models",
     "development/build-and-test",
     "development/ci-cd",
     "development/quality-reports",
@@ -852,12 +895,14 @@ describe("Talos in-site documentation contract", () => {
   it("keeps every public doc routable or explicitly excluded", () => {
     assert.deepEqual(publicDocSlugs, [
       "architecture/execution-model",
+      "architecture/model-profile-lifecycle",
       "architecture/overview",
       "architecture/package-map",
       "architecture/trust-boundaries",
       "development/build-and-test",
       "development/ci-cd",
       "development/developer-setup",
+      "development/onboard-new-models",
       "development/quality-reports",
       "development/release-process",
       "development/runtime-artifacts",
@@ -921,7 +966,10 @@ describe("Talos in-site documentation contract", () => {
     assert.doesNotMatch(html, /class="site-nav"/);
     assert.match(html, /data-docs-fallback/);
     assert.match(html, /Loading bundled documentation/);
-    assert.match(html, /source Markdown on GitHub/);
+    assert.match(html, /current-source Markdown on GitHub/);
+    assert.match(html, /tree\/main\/docs/);
+    assert.doesNotMatch(html, /tree\/v0\.9\.0-beta-dev/);
+    assert.match(html, /This may include unreleased changes/);
     assert.match(html, /type="module"\s+src="\/src\/docs\.js"/);
     for (const group of ["Get Started", "Using Talos", "Reference", "Architecture", "Development"]) {
       assert.match(html, new RegExp(`>${escapeRegExp(group)}<`));
@@ -970,9 +1018,11 @@ describe("Talos in-site documentation contract", () => {
       "reference/release-channels",
       "architecture/overview",
       "architecture/execution-model",
+      "architecture/model-profile-lifecycle",
       "architecture/trust-boundaries",
       "architecture/package-map",
       "development/developer-setup",
+      "development/onboard-new-models",
       "development/build-and-test",
       "development/ci-cd",
       "development/quality-reports",
@@ -1050,7 +1100,8 @@ describe("Talos in-site documentation contract", () => {
     for (const required of [
       "Where to get `llama-server`",
       "https://github.com/ggml-org/llama.cpp/releases/tag/b9860",
-      "llama-b9860-bin-win-cpu-x64.zip",
+      "https://github.com/ggml-org/llama.cpp/releases/tag/b9918",
+      "llama-b9918-bin-win-cpu-x64.zip",
       "llama-b9860-bin-ubuntu-x64.tar.gz",
       "Ubuntu x64 (CPU)",
       "Windows x64 (CPU)",

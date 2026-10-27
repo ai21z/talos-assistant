@@ -8,11 +8,17 @@ import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ProposalContextTestSupport;
+import dev.talos.runtime.task.TaskContract;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -35,6 +41,33 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  */
 class TalosBootstrapReconcileTest {
+
+    @Test
+    void restoresTypedEffectsWithoutReplayingFailedProseThroughEitherRestoreRoute(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "effect-restore";
+        var effects = new dev.talos.tools.ToolMutationEffects(List.of("docs", "note.txt"), List.of("maybe.txt"));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "safe question"),
+                            new SessionData.Turn("assistant", "safe answer"))));
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "failed mutation", "DO_NOT_REPLAY_FAILED_MODEL_PROSE",
+                    List.of(new TurnRecord.ToolCallSummary("talos.apply_workspace_batch", "docs",
+                            List.of("docs", "note.txt", "maybe.txt"), false, "partial", effects)),
+                    1, 1, 0, "", "error"));
+        }
+        SessionMemory snapshot = new SessionMemory();
+        TalosBootstrap.replaySnapshot(store, sid, snapshot, cm(snapshot));
+        assertFalse(snapshot.get().contains("DO_NOT_REPLAY_FAILED_MODEL_PROSE"));
+        assertEquals(List.of("docs", "note.txt", "maybe.txt"), snapshot.changeSummaryContext()
+                .changedFiles().stream().map(dev.talos.runtime.context.ChangeSummaryContext.FileChange::path).toList());
+        assertTrue(snapshot.changeSummaryContext().renderForChangeSummaryQuestion().contains("UNKNOWN"));
+        SessionMemory crash = new SessionMemory();
+        assertEquals(0, TalosBootstrap.replayTurnLog(store, sid, crash));
+        assertTrue(crash.get() == null || !crash.get().contains("DO_NOT_REPLAY_FAILED_MODEL_PROSE"));
+        assertEquals(snapshot.changeSummaryContext(), crash.changeSummaryContext());
+    }
 
     private static ConversationManager cm(SessionMemory mem) {
         return new ConversationManager(mem, new TokenBudget());
@@ -85,13 +118,15 @@ class TalosBootstrapReconcileTest {
         String sid = "ws-1";
 
         // Snapshot has one paired turn.
-        store.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
-                List.of(new SessionData.Turn("user", "from-snap-u"),
-                        new SessionData.Turn("assistant", "from-snap-a"))));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "from-snap-u"),
+                            new SessionData.Turn("assistant", "from-snap-a"))));
 
-        // JSONL has a *different* turn - must be ignored when snapshot wins.
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+            // JSONL has a *different* turn - must be ignored when snapshot wins.
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
@@ -109,17 +144,21 @@ class TalosBootstrapReconcileTest {
     void snapshotRestoresActiveTaskContextAndArtifactGoal(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
-        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
-                context, goal));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                    context, goal));
+        }
 
         SessionMemory mem = new SessionMemory();
         TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
 
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }
 
@@ -128,29 +167,33 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-only";
         Instant created = Instant.parse("2026-01-15T10:30:00Z");
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
-        store.save(new SessionData(sid, "/ws", "", 0, created, List.of(), "ollama/qwen2.5-coder:14b",
-                context, goal));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, created, List.of(), "llama_cpp/qwen2.5-coder-14b",
+                    context, goal));
+        }
 
         var summary = TalosBootstrap.inspectSavedSession(store, sid);
 
         assertTrue(summary.hasSavedSession(), "context-only snapshot should count as available");
         assertEquals(0, summary.pairsReplayed());
         assertEquals(created, summary.createdAt());
-        assertEquals("ollama/qwen2.5-coder:14b", summary.model());
+        assertEquals("llama_cpp/qwen2.5-coder-14b", summary.model());
     }
 
     @Test
     void restoreSavedSessionRestoresContextOnlySnapshot(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-only-restore";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
-        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
-                context, goal));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                    context, goal));
+        }
 
         SessionMemory mem = new SessionMemory();
         var summary = TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
@@ -159,6 +202,8 @@ class TalosBootstrapReconcileTest {
         assertEquals(0, summary.pairsReplayed());
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }
 
@@ -166,13 +211,15 @@ class TalosBootstrapReconcileTest {
     void restoreSavedSessionFallsBackToJsonlForContextOnlySnapshot(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-context-with-jsonl";
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+        ActiveTaskContext context = ProposalContextTestSupport.accepted(
                 3, "trace-save", List.of("README.md"), "Improve README.");
         ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
-        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
-                context, goal));
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                    context, goal));
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         var summary = TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
@@ -181,8 +228,58 @@ class TalosBootstrapReconcileTest {
         assertEquals(1, summary.pairsReplayed());
         assertTrue(mem.get().contains("from-jsonl-u"));
         assertTrue(mem.get().contains("from-jsonl-a"));
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertTrue(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(context.proposalProvenance(), mem.activeTaskContext().proposalProvenance());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "restore", "jsonl-fallback"})
+    void legacyProposalRestorationRetainsContextWithoutAuthorityOrRewritingFiles(
+            String route, @TempDir Path dir) throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "legacy-proposal-" + route;
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        boolean fallback = route.equals("jsonl-fallback");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            if (fallback) {
+                writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                        "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+            }
+        }
+        Path snapshot = dir.resolve(sid + ".json");
+        Path turnLog = dir.resolve(sid + ".turns.jsonl");
+        byte[] snapshotBefore = Files.readAllBytes(snapshot);
+        byte[] turnLogBefore = fallback ? Files.readAllBytes(turnLog) : null;
+        SessionMemory mem = new SessionMemory();
+        var summary = route.equals("snapshot")
+                ? TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem))
+                : TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertTrue(summary.hasSavedSession());
+        assertEquals(fallback ? 1 : 0, summary.pairsReplayed());
+        if (fallback) {
+            assertTrue(mem.get().contains("from-jsonl-u"));
+            assertTrue(mem.get().contains("from-jsonl-a"));
+        }
+        assertEquals(context, mem.activeTaskContext());
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
+        assertFalse(mem.activeTaskContext().hasBoundProposal());
+        assertEquals(ArtifactGoal.none(), mem.artifactGoal());
+        var decision = ActiveTaskContextPolicy.evaluate("apply those changes",
+                TaskContract.unknown("apply those changes"), mem.activeTaskContext(), mem.artifactGoal(), 4);
+        assertFalse(decision.consumed());
+        assertFalse(decision.taskContract().mutationRequested());
+        assertFalse(decision.taskContract().mutationAllowed());
+        assertEquals(context, decision.memoryContext());
+        assertEquals(ActiveTaskContext.State.SUPPRESSED, decision.planContext().state());
+        assertArrayEquals(snapshotBefore, Files.readAllBytes(snapshot));
+        if (fallback) assertArrayEquals(turnLogBefore, Files.readAllBytes(turnLog));
     }
 
     @Test
@@ -196,7 +293,7 @@ class TalosBootstrapReconcileTest {
                     configWithSessionPolicy(true, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()),
                     workspace);
-            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+            ActiveTaskContext context = ProposalContextTestSupport.accepted(
                     3, "trace-save", List.of("README.md"), "Improve README.");
             router.context().memory().setActiveTaskContext(context);
             router.context().memory().setArtifactGoal(ArtifactGoal.fromActiveContext(context));
@@ -214,6 +311,8 @@ class TalosBootstrapReconcileTest {
             SessionData saved = store.load(sessions.get(0).sessionId()).orElseThrow();
             assertEquals(ActiveTaskContext.State.ACTIVE, saved.activeTaskContext().state());
             assertEquals(List.of("README.md"), saved.activeTaskContext().targets());
+            assertTrue(saved.activeTaskContext().hasBoundProposal());
+            assertEquals(context.proposalProvenance(), saved.activeTaskContext().proposalProvenance());
             assertEquals(ArtifactGoal.ArtifactKind.README, saved.artifactGoal().artifactKind());
         });
     }
@@ -252,12 +351,16 @@ class TalosBootstrapReconcileTest {
         String instance = JsonSessionStore.newSessionInstanceId(
                 workspace, Instant.parse("2026-06-11T10:00:00Z"));
 
-        store.save(new SessionData(workspaceId, "/ws", "", 1, Instant.parse("2026-06-09T10:00:00Z"),
-                List.of(new SessionData.Turn("user", "old-u", ""),
-                        new SessionData.Turn("assistant", "old-a", "ok"))));
-        store.save(new SessionData(instance, "/ws", "", 1, Instant.parse("2026-06-11T10:00:00Z"),
-                List.of(new SessionData.Turn("user", "new-u", ""),
-                        new SessionData.Turn("assistant", "new-a", "ok"))));
+        try (var writer = store.acquireSessionWriter(workspaceId)) {
+            writer.save(new SessionData(workspaceId, "/ws", "", 1, Instant.parse("2026-06-09T10:00:00Z"),
+                    List.of(new SessionData.Turn("user", "old-u", ""),
+                            new SessionData.Turn("assistant", "old-a", "ok"))));
+        }
+        try (var writer = store.acquireSessionWriter(instance)) {
+            writer.save(new SessionData(instance, "/ws", "", 1, Instant.parse("2026-06-11T10:00:00Z"),
+                    List.of(new SessionData.Turn("user", "new-u", ""),
+                            new SessionData.Turn("assistant", "new-a", "ok"))));
+        }
 
         assertEquals(instance, TalosBootstrap.latestSessionId(store, workspaceId));
 
@@ -282,10 +385,12 @@ class TalosBootstrapReconcileTest {
         String sid = "ws-2";
 
         // No snapshot - simulate crash before onSessionEnd fired.
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "q1", "a1", List.of(), 0, 0, 0, ""));
-        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
-                "q2", "a2", List.of(), 0, 0, 0, ""));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "q1", "a1", List.of(), 0, 0, 0, ""));
+            writer.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                    "q2", "a2", List.of(), 0, 0, 0, ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
@@ -305,9 +410,11 @@ class TalosBootstrapReconcileTest {
 
         // Snapshot exists but empty (e.g., save fired with a session that
         // had no turns yet - defensive case).
-        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of()));
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "only-in-jsonl-u", "only-in-jsonl-a", List.of(), 0, 0, 0, ""));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of()));
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "only-in-jsonl-u", "only-in-jsonl-a", List.of(), 0, 0, 0, ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
@@ -335,19 +442,21 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-9";
 
-        store.save(new SessionData(sid, "/ws", "", 2, Instant.now(),
-                List.of(
-                        new SessionData.Turn("user", "u1", ""),
-                        new SessionData.Turn("assistant", "poison", "error"),
-                        new SessionData.Turn("user", "u2", ""),
-                        new SessionData.Turn("assistant", "clean", "ok")
-                ),
-                "ollama/qwen2.5-coder:14b"));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 2, Instant.now(),
+                    List.of(
+                            new SessionData.Turn("user", "u1", ""),
+                            new SessionData.Turn("assistant", "poison", "error"),
+                            new SessionData.Turn("user", "u2", ""),
+                            new SessionData.Turn("assistant", "clean", "ok")
+                    ),
+                    "llama_cpp/qwen2.5-coder-14b"));
+        }
 
         SessionMemory mem = new SessionMemory();
         var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
         assertEquals(1, snap.pairsReplayed());
-        assertEquals("ollama/qwen2.5-coder:14b", snap.model());
+        assertEquals("llama_cpp/qwen2.5-coder-14b", snap.model());
         assertTrue(mem.get().contains("u2"));
         assertFalse(mem.get().contains("poison"));
     }
@@ -356,10 +465,12 @@ class TalosBootstrapReconcileTest {
     void turnRecordsWithBlankTextAreSkipped(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-5";
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "", "", List.of(), 0, 0, 0, ""));
-        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
-                "real-u", "real-a", List.of(), 0, 0, 0, ""));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "", "", List.of(), 0, 0, 0, ""));
+            writer.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                    "real-u", "real-a", List.of(), 0, 0, 0, ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
@@ -383,13 +494,15 @@ class TalosBootstrapReconcileTest {
         // status="aborted" (the abortedText below mirrors what LlmClient
         // emits on wall-clock expiry). The garbage prose that streamed
         // before the timeout is captured in assistantText.
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 387_800L,
-                "user turn 1",
-                "The user's prompt is 'The user's prompt is 'The user's prompt is",
-                List.of(), 0, 0, 0, "", "aborted"));
-        // A legitimate turn afterwards - must still replay.
-        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
-                "user turn 2", "clean reply", List.of(), 0, 0, 0, "", "ok"));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 387_800L,
+                    "user turn 1",
+                    "The user's prompt is 'The user's prompt is 'The user's prompt is",
+                    List.of(), 0, 0, 0, "", "aborted"));
+            // A legitimate turn afterwards - must still replay.
+            writer.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                    "user turn 2", "clean reply", List.of(), 0, 0, 0, "", "ok"));
+        }
 
         SessionMemory mem = new SessionMemory();
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
@@ -409,12 +522,14 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-7";
 
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "u-err", "tool crashed", List.of(), 0, 0, 0, "", "error"));
-        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
-                "u-info", "some info line", List.of(), 0, 0, 0, "", "info"));
-        store.appendTurn(sid, new TurnRecord(3, Instant.now(), 0L,
-                "u-ok", "real answer", List.of(), 0, 0, 0, "", "ok"));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "u-err", "tool crashed", List.of(), 0, 0, 0, "", "error"));
+            writer.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                    "u-info", "some info line", List.of(), 0, 0, 0, "", "info"));
+            writer.appendTurn(sid, new TurnRecord(3, Instant.now(), 0L,
+                    "u-ok", "real answer", List.of(), 0, 0, 0, "", "ok"));
+        }
 
         SessionMemory mem = new SessionMemory();
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
@@ -435,8 +550,10 @@ class TalosBootstrapReconcileTest {
     void legacyBlankStatusRecordsStillReplay(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-8";
-        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
-                "legacy-u", "legacy-a", List.of(), 0, 0, 0, "", ""));
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                    "legacy-u", "legacy-a", List.of(), 0, 0, 0, "", ""));
+        }
 
         SessionMemory mem = new SessionMemory();
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);

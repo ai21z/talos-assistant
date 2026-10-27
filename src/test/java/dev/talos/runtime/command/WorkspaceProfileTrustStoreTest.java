@@ -12,6 +12,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * T789: trust pins are explicit consent records over declaration bytes -
@@ -64,6 +65,35 @@ class WorkspaceProfileTrustStoreTest {
 
         assertEquals(WorkspaceProfileTrustStore.TrustState.INVALID,
                 store.state(ws, WorkspaceCommandProfilesLoader.load(ws)));
+    }
+
+    @Test
+    void deletionFailureDoesNotClaimToRevokeAStillReadablePin() throws IOException {
+        Path ws = workspace();
+        declare(ws, "profiles:\n  - id: check\n    executable: npm\n");
+        WorkspaceProfileTrustStore store = new WorkspaceProfileTrustStore(tempDir.resolve("trust"), file -> {
+            throw new IOException("injected access denial");
+        });
+        var loaded = WorkspaceCommandProfilesLoader.load(ws);
+        store.pin(ws, loaded.declarationSha256(), 1, Instant.EPOCH);
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> store.unpin(ws));
+
+        assertTrue(failure.getMessage().contains("may remain active"));
+        assertEquals(WorkspaceProfileTrustStore.TrustState.TRUSTED, store.state(ws, loaded));
+        assertTrue(store.readPin(WorkspaceProfileTrustStore.workspaceId(ws)).isPresent());
+    }
+
+    @Test
+    void revocationRequiresObservedAbsenceEvenIfDeleterReturnsNormally() throws IOException {
+        Path ws = workspace();
+        declare(ws, "profiles:\n  - id: check\n    executable: npm\n");
+        WorkspaceProfileTrustStore store = new WorkspaceProfileTrustStore(tempDir.resolve("trust"), file -> {});
+        var loaded = WorkspaceCommandProfilesLoader.load(ws);
+        store.pin(ws, loaded.declarationSha256(), 1, Instant.EPOCH);
+
+        assertThrows(IllegalStateException.class, () -> store.unpin(ws));
+        assertEquals(WorkspaceProfileTrustStore.TrustState.TRUSTED, store.state(ws, loaded));
     }
 
     @Test

@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -17,9 +19,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompactMutationContinuationExecutorTest {
@@ -76,6 +81,26 @@ class CompactMutationContinuationExecutorTest {
         assertTrue(state.currentNativeCalls.isEmpty());
     }
 
+    @Test
+    void wrappedCancellationEscapesCompactMutationContinuation() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Old\n");
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel compact mutation continuation"));
+        LoopState state = mutationState(
+                "Rewrite README.md with a short project note.",
+                LlmClient.scriptedFailure(wrapped));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                CompactMutationContinuationExecutor.tryExecute(
+                        state,
+                        baseTools(),
+                        "tool-call loop continuation",
+                        "exceeded context budget"));
+
+        assertSame(wrapped, thrown,
+                "continuation cancellation must preserve the caller-owned runtime wrapper");
+    }
+
     private LoopState mutationState(String request, LlmClient llm) {
         LoopState state = state(request, llm);
         state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
@@ -86,9 +111,11 @@ class CompactMutationContinuationExecutorTest {
                 false,
                 "Read README.md",
                 ""));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=README.md;",
-                "1 | # Old\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Old\n"));
         return state;
     }
 

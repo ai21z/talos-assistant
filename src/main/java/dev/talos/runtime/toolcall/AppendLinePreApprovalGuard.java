@@ -5,8 +5,10 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.Map;
+import java.nio.file.Path;
 
 final class AppendLinePreApprovalGuard {
     private AppendLinePreApprovalGuard() {}
@@ -20,19 +22,33 @@ final class AppendLinePreApprovalGuard {
         if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
         String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonicalTool)) return null;
-        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint, state);
         if (expectation == null) return null;
         String content = firstParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) return null;
         String previousContent = priorReadContentForPath(state, pathHint);
         if (previousContent == null) return null;
         if (!appendLineContentPreservesReadback(previousContent, content, expectation.expectedLine())) return null;
+        // T1012: derive the mutation from the CURRENT DISK BYTES, not the
+        // LF-normalized readback, so the steered edit raw-matches the file
+        // exactly and preserves its line-ending style and terminal-newline
+        // state. The readback still gates eligibility above; the disk text
+        // must agree with it (modulo the read surface's LF normalization
+        // and forced terminal newline) or steering is refused and the
+        // write path's own format preservation takes over.
+        String disk = currentDiskTextForSteering(state, pathHint);
+        if (disk == null) return null;
+        if (!normalizedForComparison(disk).equals(normalizedForComparison(previousContent))) return null;
+        String line = normalizeLineEndings(expectation.expectedLine()).strip();
+        if (line.isBlank() || line.contains("\n")) return null;
+        String appended = appendPreservingDiskFormat(disk, line);
+        if (appended == null || appended.equals(disk)) return null;
         String path = firstParam(call, "path", "file_path", "filepath", "file", "filename");
         if (path == null || path.isBlank()) path = pathHint;
         return new ToolCall("talos.edit_file", Map.of(
                 "path", path,
-                "old_string", previousContent,
-                "new_string", content));
+                "old_string", disk,
+                "new_string", appended));
     }
 
     static String diagnostic(
@@ -44,7 +60,7 @@ final class AppendLinePreApprovalGuard {
         if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
         String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonicalTool)) return null;
-        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint, state);
         if (expectation == null) return null;
         String content = firstParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) return null;
@@ -61,12 +77,18 @@ final class AppendLinePreApprovalGuard {
                 + expectation.expectedLine() + "`.";
     }
 
-    private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String pathHint) {
+    private static AppendLineExpectation appendLineExpectationForPath(
+            TaskContract contract,
+            String pathHint,
+            LoopState state
+    ) {
         if (contract == null || pathHint == null || pathHint.isBlank()) return null;
         String target = ToolCallSupport.canonicalizeReadPath(pathHint);
+        Path workspace = state == null ? null : state.workspace;
         for (var expectation : TaskExpectationResolver.resolve(contract)) {
             if (expectation instanceof AppendLineExpectation appendLine
-                    && ToolCallSupport.canonicalizeReadPath(appendLine.targetPath()).equals(target)) {
+                    && (ToolCallSupport.canonicalizeReadPath(appendLine.targetPath()).equals(target)
+                    || WorkspacePathIdentity.matches(workspace, appendLine.targetPath(), pathHint))) {
                 return appendLine;
             }
         }
@@ -92,33 +114,65 @@ final class AppendLinePreApprovalGuard {
     }
 
     private static String priorReadContentForPath(LoopState state, String pathHint) {
+        return completeReadBodyForPath(state, pathHint);
+    }
+
+    /**
+     * The single complete-read evidence owner shared by the append-line
+     * guard and the T1003 invalid-edit recovery planner. Content is only
+     * ever taken from the newest PARSEABLE complete (unranged, numbered)
+     * read_file entry for the effective path, so an offset read that
+     * reaches EOF can never masquerade as the whole file, a hedged alias
+     * key can never satisfy the lookup, and a truncated re-read cannot
+     * poison evidence an earlier complete read established. Recency is
+     * the ledger's deterministic sequence order: a later fresh parseable
+     * complete read supersedes an older one, and consumers that need
+     * exact source agreement (recovery, steering) keep their
+     * disk-agreement gate as the fail-closed arbiter.
+     */
+    static String completeReadBodyForPath(LoopState state, String pathHint) {
+        QualifiedRead read = qualifiedCompleteRead(state, pathHint);
+        return read == null ? null : read.parsed();
+    }
+
+    /**
+     * The RAW (line-numbered) body of the qualifying complete read for
+     * the path, under the same qualification rules as
+     * {@link #completeReadBodyForPath}. The T1011 recovery overlay uses it
+     * to locate the real read tool-result message, which carries the file
+     * bytes so they never occupy a system-role message.
+     */
+    static String completeReadRawBodyForPath(LoopState state, String pathHint) {
+        QualifiedRead read = qualifiedCompleteRead(state, pathHint);
+        return read == null ? null : read.raw();
+    }
+
+    private record QualifiedRead(String raw, String parsed) {}
+
+    private static QualifiedRead qualifiedCompleteRead(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
-        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
-        if (target.isBlank() || state.successfulReadCallBodies.isEmpty()) return null;
-        String out = null;
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String signature = entry.getKey();
-            if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
-            String parsed = parseCompleteReadFileBody(entry.getValue());
+        // Newest-first, first PARSEABLE complete read wins: a truncated or
+        // otherwise unparseable re-read (the empty-edit repair flow itself
+        // demands one) must not poison the evidence an earlier complete
+        // read established. Exact-source consumers still gate on current
+        // disk agreement on top of this recency rule.
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(pathHint, true)) {
+            if (read.ranged()) continue;
+            String parsed = parseCompleteReadFileBody(read.body());
             if (parsed != null) {
-                out = parsed;
+                return new QualifiedRead(read.body(), parsed);
             }
         }
-        return out;
+        return null;
     }
 
-    private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        String normalized = target.replace('\\', '/');
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))
-                && signature.contains("path=" + normalized + ";")
-                && !signature.contains("offset=");
-    }
-
-    private static String parseCompleteReadFileBody(String body) {
+    /**
+     * Reconstructs the real file content from a complete line-numbered
+     * read_file body, or returns null when the body is truncated or not a
+     * numbered read. Package-visible: the T1003 invalid-edit recovery
+     * planner shares this single owner of the numbered-body format.
+     */
+    static String parseCompleteReadFileBody(String body) {
         if (body == null || body.isBlank()) return null;
         if (body.contains("... (") || body.contains("output truncated") || body.startsWith("(file has")) {
             return null;
@@ -167,5 +221,62 @@ final class AppendLinePreApprovalGuard {
     private static String stripSingleTerminalNewline(String value) {
         if (value == null || value.isEmpty()) return value;
         return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    /** Read basis for disk-vs-readback agreement: LF-normalized, forced terminal newline. */
+    private static String normalizedForComparison(String value) {
+        String normalized = normalizeLineEndings(value);
+        return normalized.endsWith("\n") || normalized.isEmpty() ? normalized : normalized + "\n";
+    }
+
+    private static final long MAX_STEERING_DISK_BYTES = 1024 * 1024L;
+
+    private static String currentDiskTextForSteering(LoopState state, String pathHint) {
+        if (state == null || state.workspace == null || pathHint == null || pathHint.isBlank()) {
+            return null;
+        }
+        try {
+            java.nio.file.Path root = state.workspace.normalize();
+            java.nio.file.Path target = root.resolve(pathHint.strip()).normalize();
+            if (!target.startsWith(root)) return null;
+            if (!java.nio.file.Files.isRegularFile(target)) return null;
+            if (java.nio.file.Files.size(target) > MAX_STEERING_DISK_BYTES) return null;
+            return java.nio.file.Files.readString(target);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Appends one line to the exact disk text: the new line takes the
+     * file's own separator style (uniform ending, or the last existing
+     * ending when the file mixes styles, or LF when the file has none)
+     * and the terminal-newline state is preserved as-is.
+     */
+    private static String appendPreservingDiskFormat(String disk, String line) {
+        if (disk == null || line == null) return null;
+        String ending = lastLineEnding(disk);
+        boolean terminal = !disk.isEmpty()
+                && (disk.charAt(disk.length() - 1) == '\n' || disk.charAt(disk.length() - 1) == '\r');
+        if (disk.isEmpty()) {
+            return line + "\n";
+        }
+        if (terminal) {
+            return disk + line + ending;
+        }
+        return disk + ending + line;
+    }
+
+    private static String lastLineEnding(String text) {
+        for (int i = text.length() - 1; i >= 0; i--) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                return i > 0 && text.charAt(i - 1) == '\r' ? "\r\n" : "\n";
+            }
+            if (c == '\r') {
+                return "\r";
+            }
+        }
+        return "\n";
     }
 }

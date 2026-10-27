@@ -41,7 +41,7 @@ class EvidenceContainmentAnswerGuardTest {
         assertEquals("""
                 [Evidence incomplete: required workspace evidence was not gathered in this turn.]
 
-                I did not inspect the required workspace target this turn, so I cannot answer from its contents or propose grounded changes yet. Required target(s): README.md.""",
+                Current evidence for the required workspace target was not established. An answer from its contents or grounded changes cannot be supported yet. Required target(s): README.md.""",
                 answer);
         assertFalse(answer.contains("Talos is complete"), answer);
         assertFalse(answer.contains("Proposed change"), answer);
@@ -66,6 +66,22 @@ class EvidenceContainmentAnswerGuardTest {
         assertTrue(answer.contains("script.js"), answer);
         assertFalse(answer.contains("scripts.js does not exist"), answer);
         assertFalse(answer.contains("script.js exists"), answer);
+    }
+
+    @Test
+    void projectSummaryMissingAnchorSuppressesBroadProjectClaim() {
+        String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
+                "The project is a one-file JavaScript utility.",
+                null,
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                EvidenceObligationVerifier.Result.unsatisfied(
+                        "Project summary requires source-bearing evidence from README.md."),
+                MARKERS);
+
+        assertTrue(answer.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), answer);
+        assertTrue(answer.contains("Required evidence was incomplete in this turn"), answer);
+        assertTrue(answer.contains("README.md"), answer);
+        assertFalse(answer.contains("one-file JavaScript utility"), answer);
     }
 
     @Test
@@ -201,5 +217,23 @@ class EvidenceContainmentAnswerGuardTest {
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of());
+    }
+
+    @Test
+    void protectedReadIncompleteAfterAnEarlierSuccessfulReadSaysTheReadHappened() {
+        String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
+                "The file says SECRET=original.",
+                readTargetPlan(".env"),
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                new EvidenceObligationVerifier.Result(
+                        EvidenceObligationVerifier.Status.UNSATISFIED,
+                        "Required read evidence is no longer current.",
+                        true),
+                MARKERS);
+
+        assertTrue(answer.startsWith("[Protected read incomplete:"), answer);
+        assertFalse(answer.contains("No protected content was read"), answer);
+        assertTrue(answer.contains("returned protected content in this turn"), answer);
+        assertFalse(answer.contains("SECRET=original"), answer);
     }
 }

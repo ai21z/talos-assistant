@@ -11,6 +11,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
+import dev.talos.tools.ToolFailureReason;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,8 +62,10 @@ class TaskExpectationStaticVerifierTest {
         assertFalse(verifier.contains("Files.isRegularFile"));
         assertFalse(verifier.contains("Files.readString"));
         assertTrue(reader.contains("final class TaskExpectationTargetReader"));
-        assertTrue(reader.contains("Files.isRegularFile"));
-        assertTrue(reader.contains("Files.readString"));
+        assertFalse(reader.contains("Files.isRegularFile"));
+        assertFalse(reader.contains("Files.readString"));
+        assertTrue(reader.contains("StaticWebFileAccess.isRegularFile"));
+        assertTrue(reader.contains("StaticWebFileAccess.readString"));
     }
 
     @Test
@@ -109,7 +116,7 @@ class TaskExpectationStaticVerifierTest {
                 "2026-05-23T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
 
@@ -146,6 +153,112 @@ class TaskExpectationStaticVerifierTest {
         }
     }
 
+    @Test
+    void replacementExpectationPassesWhenNewTextContainsOldTextAndOldTextOnlyAppearsInsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023-2024\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace 2023 with 2023-2024 in notes.md."),
+                workspace,
+                List.of(successfulWrite("notes.md", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().isEmpty(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("notes.md: replacement text observed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void replacementExpectationFailsWhenNewTextContainsOldTextButOldTextAlsoRemainsOutsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023\nRelease 2023-2024\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace 2023 with 2023-2024 in notes.md."),
+                workspace,
+                List.of(successfulWrite("notes.md", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("notes.md: replacement old text remained")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementExpectationFailsWhenTrimEditDidNotLand() throws Exception {
+        Files.writeString(workspace.resolve("code.java"), "final int x\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace final int x with int x in code.java."),
+                workspace,
+                List.of(successfulWrite("code.java", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("code.java: replacement old text remained")),
+                result.problems().toString());
+    }
+
+    @Test
+    void writeThroughTheAbsolutePathIsCoveredByTheTargetExpectation() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.writeString(root.resolve("index.html"), "AFTER");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Overwrite index.html with exactly AFTER. Use talos.write_file."),
+                root,
+                List.of(successfulWrite(root.resolve("index.html").toString(), VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().isEmpty(), result.problems().toString());
+        assertTrue(result.coversAllSuccessfulMutations());
+    }
+
+    @Test
+    void writeToASiblingIsNotCoveredByTheTargetExpectation() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.writeString(root.resolve("index.html"), "AFTER");
+        Files.writeString(root.resolve("other.html"), "AFTER");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Overwrite index.html with exactly AFTER. Use talos.write_file."),
+                root,
+                List.of(successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite(root.resolve("other.html").toString(), VerificationStatus.PASS)),
+                false);
+
+        assertFalse(result.coversAllSuccessfulMutations());
+    }
+
+    @Test
+    void appendEvidenceIsCheckedForAWriteThroughTheAbsolutePath() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.writeString(root.resolve("notes.md"), "first\nAFTER\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest("Append exactly this line to notes.md: AFTER"),
+                root,
+                List.of(successfulWrite(root.resolve("notes.md").toString(), VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("cannot prove append-only preservation")),
+                result.problems().toString());
+    }
+
     private void assertProblem(String request, String expectedProblem) {
         TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
                 TaskContractResolver.fromUserRequest(request),
@@ -165,5 +278,251 @@ class TaskExpectationStaticVerifierTest {
         return new ToolCallLoop.ToolOutcome(
                 "talos.write_file", path, true, true, false,
                 "wrote " + path, "", verificationStatus);
+    }
+
+    private static final String NESTED_REPLACE_REQUEST =
+            "In docs/notes.md, change draft to final. If an exact edit fails, "
+                    + "recover without deleting any other line.";
+    private static final String NESTED_APPEND_SECTION_REQUEST =
+            "Append a Contributing section to docs/README.md with one sentence saying "
+                    + "Run tests before review. Preserve all current text.";
+    private static final String SECTION_BEFORE =
+            "# Atlas Notes\n\nA small local project for qualification tests.\n\n"
+                    + "## Setup\n\nRun the local checks before committing.\n";
+    private static final String SECTION_AFTER =
+            SECTION_BEFORE + "\n### Contributing\nRun tests before review.\n";
+
+    @Test
+    void replacementObligationCountsAnAbsoluteEditOfTheSameNestedFileAsASecondMutation() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs/notes.md"), "Status: final\nKeep this final line unchanged.\n");
+        TaskContract contract = TaskContractResolver.fromUserRequest(NESTED_REPLACE_REQUEST);
+        assertCompleteObligation(contract, RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST, "docs/notes.md");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                contract,
+                root,
+                List.of(successfulExactEdit(
+                                "docs/notes.md", "Status: draft", "Status: final", VerificationStatus.PASS),
+                        successfulExactEdit(
+                                root.resolve("docs/notes.md").toString(),
+                                "Status: draft",
+                                "Status: final",
+                                VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains(
+                                "preserve-rest replacement requires exactly one successful matching mutation")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementObligationDoesNotCountAnAbsoluteEditOfASameNamedFileInAnotherFolder() throws Exception {
+        Path root = workspace.toRealPath();
+        String updated = "Status: final\nKeep this final line unchanged.\n";
+        Files.createDirectories(root.resolve("docs"));
+        Files.createDirectories(root.resolve("other"));
+        Files.writeString(root.resolve("docs/notes.md"), updated);
+        Files.writeString(root.resolve("other/notes.md"), updated);
+        TaskContract contract = TaskContractResolver.fromUserRequest(NESTED_REPLACE_REQUEST);
+        assertCompleteObligation(contract, RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST, "docs/notes.md");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                contract,
+                root,
+                List.of(successfulExactEdit(
+                                "docs/notes.md", "Status: draft", "Status: final", VerificationStatus.PASS),
+                        successfulExactEdit(
+                                root.resolve("other/notes.md").toString(),
+                                "Status: draft",
+                                "Status: final",
+                                VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .noneMatch(problem -> problem.contains(
+                                "requires exactly one successful matching mutation")),
+                result.problems().toString());
+        assertTrue(result.problems().contains(
+                        "Request-obligation evidence did not cover every successful mutation."),
+                result.problems().toString());
+        assertFalse(result.coversAllSuccessfulMutations());
+    }
+
+    @Test
+    void appendSectionObligationCountsAnAbsoluteWriteOfTheSameNestedFileAsASecondMutation() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs/README.md"), SECTION_AFTER);
+        TaskContract contract = TaskContractResolver.fromUserRequest(NESTED_APPEND_SECTION_REQUEST);
+        assertCompleteObligation(contract, RequestObligation.ActionKind.APPEND_SECTION, "docs/README.md");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                contract,
+                root,
+                List.of(successfulFullWrite(
+                                "docs/README.md", SECTION_BEFORE, SECTION_AFTER, VerificationStatus.PASS),
+                        successfulFullWrite(
+                                root.resolve("docs/README.md").toString(),
+                                SECTION_BEFORE,
+                                SECTION_AFTER,
+                                VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains(
+                                "append-section verification requires exactly one successful matching mutation")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionObligationDoesNotCountAnAbsoluteWriteOfASameNamedFileInAnotherFolder() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.createDirectories(root.resolve("other"));
+        Files.writeString(root.resolve("docs/README.md"), SECTION_AFTER);
+        Files.writeString(root.resolve("other/README.md"), SECTION_AFTER);
+        TaskContract contract = TaskContractResolver.fromUserRequest(NESTED_APPEND_SECTION_REQUEST);
+        assertCompleteObligation(contract, RequestObligation.ActionKind.APPEND_SECTION, "docs/README.md");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                contract,
+                root,
+                List.of(successfulFullWrite(
+                                "docs/README.md", SECTION_BEFORE, SECTION_AFTER, VerificationStatus.PASS),
+                        successfulFullWrite(
+                                root.resolve("other/README.md").toString(),
+                                SECTION_BEFORE,
+                                SECTION_AFTER,
+                                VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .noneMatch(problem -> problem.contains(
+                                "requires exactly one successful matching mutation")),
+                result.problems().toString());
+        assertTrue(result.problems().contains(
+                        "Request-obligation evidence did not cover every successful mutation."),
+                result.problems().toString());
+        assertFalse(result.coversAllSuccessfulMutations());
+    }
+
+    @Test
+    void appendLineExactEditThroughTheAbsolutePathMustAppendOnlyTheRequestedLine() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs/notes.md"), "first\nEXTRA\nAFTER\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest("Append exactly this line to docs/notes.md: AFTER"),
+                root,
+                List.of(successfulExactEdit(
+                        root.resolve("docs/notes.md").toString(),
+                        "first",
+                        "first\nEXTRA\nAFTER",
+                        VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.appendLineRequired());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains(
+                                "exact edit did not preserve prior content before appended line")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendLineExactEditOfASameNamedFileInAnotherFolderIsNotCheckedAsTheTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.createDirectories(root.resolve("other"));
+        Files.writeString(root.resolve("docs/notes.md"), "first\nAFTER\n");
+        Files.writeString(root.resolve("other/notes.md"), "first\nEXTRA\nAFTER\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest("Append exactly this line to docs/notes.md: AFTER"),
+                root,
+                List.of(successfulExactEdit(
+                                "docs/notes.md", "first", "first\nAFTER", VerificationStatus.PASS),
+                        successfulExactEdit(
+                                root.resolve("other/notes.md").toString(),
+                                "first",
+                                "first\nEXTRA\nAFTER",
+                                VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().stream()
+                        .noneMatch(problem -> problem.contains("exact edit did not preserve prior content")),
+                result.problems().toString());
+        assertTrue(result.facts().contains(
+                        "docs/notes.md: exact edit evidence preserved prior content before appended line."),
+                result.facts().toString());
+        assertFalse(result.coversAllSuccessfulMutations());
+    }
+
+    private static void assertCompleteObligation(
+            TaskContract contract,
+            RequestObligation.ActionKind actionKind,
+            String target) {
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        assertEquals(RequestObligation.DerivationStatus.COMPLETE, obligation.derivationStatus());
+        assertEquals(actionKind, obligation.actionKind());
+        assertEquals(List.of(target), obligation.requiredMutationTargets());
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulExactEdit(
+            String path,
+            String oldString,
+            String newString,
+            VerificationStatus verificationStatus) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.edit_file", path, true, true, false,
+                "edited " + path, "", verificationStatus, "",
+                null,
+                ToolMutationEvidence.exactEdit(oldString, newString),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulFullWrite(
+            String path,
+            String previousContent,
+            String newContent,
+            VerificationStatus verificationStatus) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.write_file", path, true, true, false,
+                "wrote " + path, "", verificationStatus, "",
+                null,
+                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
+    }
+
+    // Uses existing members: @TempDir workspace, NESTED_REPLACE_REQUEST (:283),
+    // assertCompleteObligation(TaskContract, ActionKind, String) (:464),
+    // successfulExactEdit(String, String, String, VerificationStatus) (:474, id call-1-1).
+    // No new imports are needed. Expected red cause today: the receipt assertion only.
+
+    @Test
+    void replacementWrittenOnlyThroughTheAbsolutePathMintsAReceiptForThatCall() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs/notes.md"), "Status: final\nKeep this final line unchanged.\n");
+        TaskContract contract = TaskContractResolver.fromUserRequest(NESTED_REPLACE_REQUEST);
+        assertCompleteObligation(contract, RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST, "docs/notes.md");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                contract, root,
+                List.of(successfulExactEdit(root.resolve("docs/notes.md").toString(),
+                        "Status: draft", "Status: final", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().isEmpty(), result.problems().toString());
+        assertTrue(result.coversAllSuccessfulMutations());
+        assertTrue(result.requestObligationReceipt().proves(RequestObligationCompiler.compile(contract)));
+        assertEquals(List.of("call-1-1"), result.requestObligationReceipt().coveredToolCallIds());
     }
 }

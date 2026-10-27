@@ -1,6 +1,5 @@
 package dev.talos.runtime.verification;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -65,7 +64,7 @@ final class StaticWebSelectorAnalyzer {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
-            String html = Files.readString(root.resolve(htmlFile));
+            String html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
             List<String> htmlIdOccurrences = htmlIdOccurrences(html);
             Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
@@ -76,8 +75,8 @@ final class StaticWebSelectorAnalyzer {
             String cssFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedCssFiles, preferredAssetFiles, ".css");
             String jsFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedJsFiles, preferredAssetFiles, ".js");
             if (cssFile == null || jsFile == null) return null;
-            String css = Files.readString(root.resolve(cssFile));
-            String js = Files.readString(root.resolve(jsFile));
+            String css = StaticWebFileAccess.readString(root, root.resolve(cssFile));
+            String js = StaticWebFileAccess.readString(root, root.resolve(jsFile));
             return new Facts(
                     htmlFile,
                     cssFile,
@@ -112,7 +111,7 @@ final class StaticWebSelectorAnalyzer {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
-            String html = Files.readString(root.resolve(htmlFile));
+            String html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
             List<String> htmlIdOccurrences = htmlIdOccurrences(html);
             Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
@@ -129,12 +128,12 @@ final class StaticWebSelectorAnalyzer {
             Set<String> cssIds = Set.of();
             Set<String> cssBareClassSelectors = Set.of();
             if (cssFile != null) {
-                css = Files.readString(root.resolve(cssFile));
+                css = StaticWebFileAccess.readString(root, root.resolve(cssFile));
                 cssClasses = extractCssSelectors(css, CSS_CLASS_SELECTOR);
                 cssIds = extractCssSelectors(css, CSS_ID_SELECTOR);
                 cssBareClassSelectors = extractBareClassSelectors(css, htmlClasses);
             }
-            String js = Files.readString(root.resolve(jsFile));
+            String js = StaticWebFileAccess.readString(root, root.resolve(jsFile));
 
             return new Facts(
                     htmlFile,
@@ -160,6 +159,19 @@ final class StaticWebSelectorAnalyzer {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    static Facts analyzeObserved(
+            String htmlFile, String html, Set<String> htmlClasses, List<String> htmlIds,
+            String jsFile, String js,
+            String cssFile, String css, List<String> linkedCss, List<String> linkedJs) {
+        return new Facts(
+                htmlFile, cssFile, jsFile, htmlClasses, new LinkedHashSet<>(htmlIds), htmlIds,
+                extractCssSelectors(css, CSS_CLASS_SELECTOR),
+                extractCssSelectors(css, CSS_ID_SELECTOR), extractBareClassSelectors(css, htmlClasses),
+                extractJsClasses(js), extractJsDynamicClasses(js), extractJsIds(js),
+                new LinkedHashSet<>(linkedCss), new LinkedHashSet<>(linkedJs), linkedCss, linkedJs,
+                html, css, js, Set.of());
     }
 
     record Facts(
@@ -208,11 +220,15 @@ final class StaticWebSelectorAnalyzer {
         }
 
         List<String> contentProblems() {
+            return contentProblems(true);
+        }
+
+        List<String> contentProblems(boolean cssInspected) {
             List<String> out = new ArrayList<>();
             if (looksLikeNearPlaceholder(html, "html")) {
                 out.add(htmlFile + ": HTML file appears to be placeholder content.");
             }
-            if (looksLikeNearPlaceholder(css, "css")) {
+            if (cssInspected && looksLikeNearPlaceholder(css, "css")) {
                 out.add(cssFile + ": CSS file appears to be placeholder content.");
             }
             if (looksLikeNearPlaceholder(js, "javascript")) {
@@ -223,9 +239,16 @@ final class StaticWebSelectorAnalyzer {
         }
 
         List<String> selectorProblems() {
-            List<String> out = new ArrayList<>();
+            return new ArrayList<>(selectorDiagnostics().stream().map(StaticWebDiagnostic::message).toList());
+        }
+
+        List<StaticWebDiagnostic> selectorDiagnostics() {
+            List<StaticWebDiagnostic> out = new ArrayList<>();
             for (String id : duplicateValues(htmlIdOccurrences)) {
-                out.add("HTML defines duplicate IDs: `#" + id + "`");
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.HTML_DUPLICATE_ID,
+                        htmlFile, htmlFile, List.of(id),
+                        "HTML defines duplicate IDs: `#" + id + "`"));
             }
             Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
             cssMissingClasses.removeAll(htmlClasses);
@@ -240,22 +263,37 @@ final class StaticWebSelectorAnalyzer {
             jsMissingIds.removeAll(htmlIds);
 
             if (!cssMissingClasses.isEmpty()) {
-                out.add("CSS references missing class selectors: " + renderSelectors(cssMissingClasses, "."));
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.CSS_MISSING_CLASS,
+                        cssFile, htmlFile, cssMissingClasses.stream().sorted().toList(),
+                        "CSS references missing class selectors: " + renderSelectors(cssMissingClasses, ".")));
             }
             if (!cssMissingIds.isEmpty()) {
-                out.add("CSS references missing ID selectors: " + renderSelectors(cssMissingIds, "#"));
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.CSS_MISSING_ID,
+                        cssFile, htmlFile, cssMissingIds.stream().sorted().toList(),
+                        "CSS references missing ID selectors: " + renderSelectors(cssMissingIds, "#")));
             }
             if (!cssBareClassSelectors.isEmpty()) {
-                out.add("CSS likely uses bare element selectors where HTML defines classes: "
-                        + renderBareClassSelectorHints(cssBareClassSelectors));
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.CSS_BARE_CLASS,
+                        cssFile, htmlFile, cssBareClassSelectors.stream().sorted().toList(),
+                        "CSS likely uses bare element selectors where HTML defines classes: "
+                                + renderBareClassSelectorHints(cssBareClassSelectors)));
             }
             if (!jsMissingClasses.isEmpty()) {
-                out.add("JavaScript references missing class selectors: " + renderSelectors(jsMissingClasses, "."));
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.JAVASCRIPT_MISSING_CLASS,
+                        jsFile, htmlFile, jsMissingClasses.stream().sorted().toList(),
+                        "JavaScript references missing class selectors: " + renderSelectors(jsMissingClasses, ".")));
             }
             if (!jsMissingIds.isEmpty()) {
-                out.add("JavaScript references missing IDs: " + renderSelectors(jsMissingIds, "#"));
+                out.add(new StaticWebDiagnostic(
+                        StaticWebDiagnostic.Kind.JAVASCRIPT_MISSING_ID,
+                        jsFile, htmlFile, jsMissingIds.stream().sorted().toList(),
+                        "JavaScript references missing IDs: " + renderSelectors(jsMissingIds, "#")));
             }
-            return out;
+            return List.copyOf(out);
         }
 
         List<String> linkageProblems() {
@@ -355,16 +393,12 @@ final class StaticWebSelectorAnalyzer {
     }
 
     static Set<String> existingFileNames(Path root) {
-        Set<String> out = new LinkedHashSet<>();
-        try (var stream = Files.list(root)) {
-            stream.filter(Files::isRegularFile)
-                    .map(path -> path.getFileName() == null ? "" : path.getFileName().toString())
-                    .filter(name -> !name.isBlank())
-                    .forEach(out::add);
+        try {
+            return StaticWebFileAccess.immediateRegularFileNames(root);
         } catch (Exception ignored) {
             // Linkage verification will fail elsewhere if primary files cannot be read.
+            return Set.of();
         }
-        return out;
     }
 
     static String pickPrimary(List<String> files, String... exts) {

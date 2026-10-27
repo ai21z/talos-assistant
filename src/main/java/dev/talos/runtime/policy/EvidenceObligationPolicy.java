@@ -4,16 +4,37 @@ import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.intent.RequestedResultInventory;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Deterministic derivation for current-turn evidence obligations. */
 public final class EvidenceObligationPolicy {
     private static final Config DEFAULT_CAPABILITY_CONFIG = new Config(null);
+    private static final Pattern UNNAMED_FILE_CONTENT_LOOKUP = Pattern.compile(
+            "(?is).*\\b(?:locate|find|search|identify|look\\s+up)\\b.{0,160}"
+                    + "\\b(?:file|files|key|value|port|setting|config|configuration|endpoint|"
+                    + "dependency|version|script)\\b.*");
 
     private EvidenceObligationPolicy() {}
+
+    /** Projects the already captured inventory without reinterpreting the request during acquisition. */
+    public static EvidenceObligation forRequestedResults(
+            RequestedResultInventory inventory, EvidenceObligation legacy) {
+        if (inventory == null || !inventory.boundedWorkspaceQuery()
+                && !dev.talos.runtime.observation.TurnRequestFrame.admits(inventory)) return legacy;
+        if (inventory.requires(RequestedResultInventory.Kind.PROJECT_PURPOSE))
+            return EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED;
+        if (inventory.requires(RequestedResultInventory.Kind.DIRECTORY_CONTENTS)
+                || inventory.requires(RequestedResultInventory.Kind.DIRECTORY_COUNT)
+                || inventory.requires(RequestedResultInventory.Kind.DIRECTORY_EMPTINESS))
+            return EvidenceObligation.LIST_DIRECTORY_ONLY;
+        return EvidenceObligation.NONE;
+    }
 
     public static EvidenceObligation derive(TaskContract contract, ExecutionPhase phase, Path workspace) {
         return derive(contract, phase, workspace, DEFAULT_CAPABILITY_CONFIG);
@@ -26,6 +47,14 @@ public final class EvidenceObligationPolicy {
             Config cfg
     ) {
         if (contract == null) return EvidenceObligation.NONE;
+        var frame = dev.talos.runtime.observation.TurnRequestFrame.current();
+        var admitted = frame == null ? null : frame.inventoryFor(contract);
+        if (admitted != null) return forRequestedResults(admitted, EvidenceObligation.NONE);
+        // The session workspace is the only base. Without one, targets are judged by their protected names only.
+        Path base = workspace != null ? workspace : frame == null ? null : frame.workspace();
+        var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (comparison.comparisonOnly() || !comparison.unresolved().isEmpty())
+            return EvidenceObligation.DOCUMENT_COMPARISON_REQUIRED;
         TaskType type = contract.type() == null ? TaskType.UNKNOWN : contract.type();
         if (type == TaskType.UNKNOWN || type == TaskType.SMALL_TALK) {
             return EvidenceObligation.NONE;
@@ -39,10 +68,10 @@ public final class EvidenceObligationPolicy {
         if (hasUnsupportedDocumentTarget(contract, cfg)) {
             return EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
         }
-        if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, workspace)) {
+        if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, base)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
-        if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
+        if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, base)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
         if (hasReadOnlyPathExistenceObligation(contract)) {
@@ -57,10 +86,35 @@ public final class EvidenceObligationPolicy {
         if (!contract.mutationAllowed() && !contract.expectedTargets().isEmpty()) {
             return EvidenceObligation.READ_TARGET_REQUIRED;
         }
-        if (type == TaskType.WORKSPACE_EXPLAIN || type == TaskType.DIAGNOSE_ONLY) {
+        if (requiresUnnamedFileContentLookup(contract, type)) {
+            return EvidenceObligation.FILE_CONTENT_LOOKUP_REQUIRED;
+        }
+        if (type == TaskType.WORKSPACE_EXPLAIN) {
+            return EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED;
+        }
+        if (type == TaskType.DIAGNOSE_ONLY) {
             return EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED;
         }
+        // Rejected historical shortcuts retain evidence requirements after stronger current-work checks.
+        if (type == TaskType.READ_ONLY_QA
+                && TaskContractResolver.hasHistoricalEvidenceIntent(contract.originalUserRequest())) {
+            return EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE;
+        }
         return EvidenceObligation.NONE;
+    }
+
+    private static boolean requiresUnnamedFileContentLookup(TaskContract contract, TaskType type) {
+        if (contract == null
+                || type != TaskType.READ_ONLY_QA
+                || contract.mutationAllowed()
+                || !contract.expectedTargets().isEmpty()
+                || !contract.sourceEvidenceTargets().isEmpty()) {
+            return false;
+        }
+        String request = contract.originalUserRequest();
+        return request != null && (UNNAMED_FILE_CONTENT_LOOKUP.matcher(request).matches()
+                || dev.talos.runtime.intent.FileContentEvidenceRequest.requiresCurrentFiles(request)
+                || dev.talos.runtime.intent.ContentSearchRequest.matches(request));
     }
 
     public static EvidenceObligation parse(String value) {
@@ -95,7 +149,9 @@ public final class EvidenceObligationPolicy {
 
     private static boolean hasProtectedExpectedTarget(TaskContract contract, Path workspace) {
         for (String target : evidenceTargets(contract)) {
-            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
+            if (workspace == null
+                    ? ProtectedContentPolicy.looksProtectedPathString(target)
+                    : ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
                 return true;
             }
         }

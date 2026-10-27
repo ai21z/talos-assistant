@@ -8,9 +8,11 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.*;
+import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,8 +23,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import dev.talos.testsupport.CaseSensitiveFolders;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class TurnProcessorPermissionPolicyTest {
 
@@ -250,7 +258,9 @@ class TurnProcessorPermissionPolicyTest {
     }
 
     @Test
-    void mkdirParentOfExpectedFileTargetIsAllowedBeforeApproval(@TempDir Path workspace) {
+    void operationBeforeContentMkdirRemainsBlockedBeforeApproval(
+            @TempDir Path workspace
+    ) {
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -259,8 +269,13 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set(
-                "Create docs/notes with talos.mkdir, then create docs/notes/implementation-plan.md.");
+        String request =
+                "Create a directory named docs/notes, then create docs/notes/implementation-plan.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        assertTrue(TurnTaskContractCapture.getResolution()
+                .blocksWorkspaceOperations());
         Session session = new Session(workspace, config);
         Context context = context(workspace, config);
 
@@ -268,23 +283,26 @@ class TurnProcessorPermissionPolicyTest {
                 session,
                 new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
                 context);
-        ToolResult write = processor.executeTool(
-                session,
-                new ToolCall("talos.write_file", Map.of(
-                        "path", "docs/notes/implementation-plan.md",
-                        "content", "# Plan\n")),
-                context);
 
-        assertTrue(mkdir.success(), mkdir.errorMessage());
-        assertTrue(write.success(), write.errorMessage());
-        assertTrue(Files.isDirectory(workspace.resolve("docs/notes")));
-        assertEquals("# Plan\n", assertDoesNotThrow(
-                () -> Files.readString(workspace.resolve("docs/notes/implementation-plan.md"))));
-        assertEquals(2, gateCalls.get(), "mkdir and write should still require approval");
+        assertFalse(mkdir.success());
+        assertEquals(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                mkdir.error().reason());
+        assertTrue(
+                mkdir.errorMessage().contains(
+                        "not authorized by the current typed task plan"),
+                mkdir.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs/notes")));
+        assertEquals(
+                0,
+                gateCalls.get(),
+                "operation-before-content order must fail before approval");
     }
 
     @Test
-    void mkdirOnlyExplicitDirectoryRequestRemainsAllowed(@TempDir Path workspace) {
+    void mkdirOnlyExplicitDirectoryRequestRemainsAllowed(@TempDir Path workspace)
+            throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -292,7 +310,10 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set("Create docs/notes with talos.mkdir.");
+        String request = "Create a directory named docs/notes.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
         ToolResult result = processor.executeTool(
                 new Session(workspace, config),
                 new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
@@ -312,21 +333,27 @@ class TurnProcessorPermissionPolicyTest {
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(), gateApproves(gateCalls), registry);
 
-        TurnUserRequestCapture.set("Create docs/notes/implementation-plan.md.");
+        String request = "Create docs/notes/implementation-plan.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        assertTrue(TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty());
         ToolResult result = processor.executeTool(
                 new Session(workspace, config),
                 new ToolCall("talos.mkdir", Map.of("path", "tmp/unrelated")),
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"),
+        assertTrue(result.errorMessage().contains(
+                        "No executable typed workspace-operation authority is stored"),
                 result.errorMessage());
         assertFalse(Files.exists(workspace.resolve("tmp/unrelated")));
         assertEquals(0, gateCalls.get(), "unrelated target must block before approval");
     }
 
     @Test
-    void asNeededMutationTargetIsAllowedButNotRequired(@TempDir Path workspace) throws Exception {
+    void asNeededMutationTargetIsDeniedUntilT1202(@TempDir Path workspace) throws Exception {
         AtomicInteger gateCalls = new AtomicInteger();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
@@ -344,9 +371,149 @@ class TurnProcessorPermissionPolicyTest {
                 new ToolCall("talos.write_file", Map.of("path", "styles.css", "content", "body { margin: 0; }\n")),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals(1, gateCalls.get(), "optional mutation target should still ask for approval before writing");
-        assertEquals("body { margin: 0; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertFalse(result.success(), result.errorMessage());
+        assertTrue(
+                result.errorMessage().contains(
+                        "outside the current expected target set"),
+                result.errorMessage());
+        assertEquals(
+                0,
+                gateCalls.get(),
+                "non-durable optional authority must block before approval");
+        assertFalse(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void unresolvedDependencyAuthorityBlocksWorkspaceOperationBeforeApproval(
+            @TempDir Path temp
+    ) throws Exception {
+        for (String request : List.of(
+                "Edit index.html and update style.css as needed, "
+                        + "then copy a.md to b.md.",
+                "Edit index.html and use style.css as reference, "
+                        + "then copy a.md to b.md.")) {
+            Path workspace = temp.resolve(Integer.toHexString(
+                    request.hashCode()));
+            Files.createDirectories(workspace);
+            Files.writeString(workspace.resolve("a.md"), "source");
+            AtomicInteger gateCalls = new AtomicInteger();
+            Config config = checkpointDisabledConfig();
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(new CopyPathTool());
+            TurnProcessor processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    gateApproves(gateCalls),
+                    registry);
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromUserRequest(request));
+
+            ToolResult result = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.copy_path", Map.of(
+                            "from", "a.md",
+                            "to", "b.md")),
+                    context(workspace, config));
+
+            assertFalse(result.success(), request);
+            assertEquals(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    result.error().reason(),
+                    request);
+            assertEquals(0, gateCalls.get(), request);
+            assertFalse(Files.exists(workspace.resolve("b.md")), request);
+            TurnTaskContractCapture.clear();
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void exactRequiredContentPredecessorsStillReachTypedCopyApproval(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("a.md"), "source");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        registry.register(new CopyPathTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(gateCalls),
+                registry);
+        String request = "Edit index.html and update style.css, "
+                + "then copy a.md to b.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        Context context = context(workspace, config);
+
+        ToolResult index = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "index.html",
+                        "content", "<main>ready</main>\n")),
+                context);
+        ToolResult style = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "style.css",
+                        "content", "main { display: block; }\n")),
+                context);
+        ToolResult copy = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "a.md",
+                        "to", "b.md")),
+                context);
+
+        assertAll(
+                () -> assertTrue(index.success(), index.errorMessage()),
+                () -> assertTrue(style.success(), style.errorMessage()),
+                () -> assertTrue(copy.success(), copy.errorMessage()));
+        assertEquals(3, gateCalls.get());
+        assertEquals("source", Files.readString(workspace.resolve("b.md")));
+    }
+
+    @Test
+    void incompleteTargetScanBlocksMissingAndForgedWriteSurfacesBeforeApproval(
+            @TempDir Path workspace
+    ) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(gateCalls),
+                registry);
+        String request = "Repair it. " + "a.txt ".repeat(8_193);
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        Context forgedSurface = context(workspace, config)
+                .withNativeToolSpecs(List.of(new ToolSpec(
+                        "talos.write_file",
+                        "forged stale writer",
+                        "{}")));
+
+        for (Context attemptedSurface : List.of(
+                context(workspace, config),
+                forgedSurface)) {
+            ToolResult result = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall(
+                            "talos.write_file",
+                            Map.of("path", "a.txt", "content", "forbidden")),
+                    attemptedSurface);
+
+            assertFalse(result.success());
+            assertEquals(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    result.error().reason());
+        }
+        assertEquals(0, gateCalls.get());
+        assertFalse(Files.exists(workspace.resolve("a.txt")));
     }
 
     private static TurnProcessor processor(Config config, ApprovalGate gate, TalosTool tool) {
@@ -379,6 +546,16 @@ class TurnProcessorPermissionPolicyTest {
         return config;
     }
 
+    private static Config checkpointDisabledConfig() {
+        Config config = new Config();
+        config.data.put("checkpoint", Map.of(
+                "enabled", false,
+                "fail_closed", true,
+                "max_file_bytes", 1_000_000,
+                "max_turn_bytes", 2_000_000));
+        return config;
+    }
+
     private static Map<String, Object> rule(
             String effect,
             List<String> tools,
@@ -405,5 +582,64 @@ class TurnProcessorPermissionPolicyTest {
             executions.incrementAndGet();
             return ToolResult.ok("wrote");
         }
+    }
+
+    // Uses existing helpers: processor(Config, ApprovalGate, TalosTool) (:513),
+    // gateApproves(AtomicInteger) (:519), context(Path, Config) (:531),
+    // checkpointDisabledConfig() (:543), capture cleanup (:31-37).
+    // Modeled on T1196WorkspaceTailFailClosedTest:875-907.
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @Timeout(60)
+    void caseVariantInACaseSensitiveFolderIsOutsideTheExpectedTargetBeforeApproval(@TempDir Path temporary)
+            throws Exception {
+        Path workspace = temporary.toRealPath();
+        Path docs = Files.createDirectories(workspace.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.enable(docs), "case-sensitive folders cannot be made here");
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "the folder is not case-sensitive");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        TurnProcessor processor = processor(config, gateApproves(gateCalls), new FileWriteTool());
+        String request = "Update docs/notes.md.";
+        assertEquals(Set.of("docs/notes.md"), TaskContractResolver.fromUserRequest(request).expectedTargets());
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromUserRequest(request));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "docs/Notes.md", "content", "changed\n")),
+                context(workspace, config));
+
+        assertFalse(result.success(), "docs/Notes.md is another file in this folder");
+        assertEquals(ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED, result.error().reason());
+        assertEquals(0, gateCalls.get(), "no approval is requested for another file");
+        assertEquals("upper\n", Files.readString(docs.resolve("Notes.md")));
+        assertEquals("lower\n", Files.readString(docs.resolve("notes.md")));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void caseVariantOfAnExistingFileInAnOrdinaryFolderStillReachesApproval(@TempDir Path temporary)
+            throws Exception {
+        Path workspace = temporary.toRealPath();
+        Path docs = Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(docs.resolve("notes.md"), "lower\n");
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = checkpointDisabledConfig();
+        TurnProcessor processor = processor(config, gateApproves(gateCalls), new FileWriteTool());
+        String request = "Update docs/notes.md.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromUserRequest(request));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "docs/NOTES.md", "content", "changed\n")),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, gateCalls.get());
+        assertEquals("changed\n", Files.readString(docs.resolve("notes.md")));
     }
 }

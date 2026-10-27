@@ -1,8 +1,9 @@
 package dev.talos.runtime.verification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 
-import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -156,12 +157,22 @@ final class WorkspaceOperationStaticVerifier {
             return;
         }
 
+        NoFollowPathPolicy.EntryType targetType;
+        try {
+            targetType = StaticWebFileAccess.inspect(root, target);
+        } catch (IOException rejected) {
+            problems.add(expectation.factPrefix() + " failed: "
+                    + expectation.path() + " failed containment validation.");
+            return;
+        }
+
         if (expectation.shouldExist()) {
-            if (!Files.exists(target)) {
+            if (targetType == NoFollowPathPolicy.EntryType.MISSING) {
                 problems.add(expectation.factPrefix() + " failed: " + expectation.path() + " is missing.");
                 return;
             }
-            if (expectation.directory() && !Files.isDirectory(target)) {
+            if (expectation.directory()
+                    && targetType != NoFollowPathPolicy.EntryType.DIRECTORY) {
                 problems.add(expectation.factPrefix() + " failed: " + expectation.path()
                         + " is not a directory.");
                 return;
@@ -170,7 +181,7 @@ final class WorkspaceOperationStaticVerifier {
             return;
         }
 
-        if (Files.exists(target)) {
+        if (targetType != NoFollowPathPolicy.EntryType.MISSING) {
             problems.add(expectation.factPrefix() + " failed: " + expectation.path() + " still exists.");
         } else {
             facts.add(expectation.factPrefix() + ": " + expectation.path() + ".");

@@ -1,11 +1,15 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
+
+import java.util.LinkedHashSet;
+import java.util.List;
 
 final class ToolOutcomeFactory {
     private static final int LIST_DIR_EVIDENCE_SUMMARY_CHARS = 4_000;
@@ -18,6 +22,16 @@ final class ToolOutcomeFactory {
             String diagnosticError,
             EditFilePreApprovalGuard.Decision decision
     ) {
+        return failedEditPreApproval(call, pathHint, diagnosticError, decision, null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedEditPreApproval(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            EditFilePreApprovalGuard.Decision decision,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
+    ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
                 pathHint,
@@ -30,7 +44,9 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_PARAMS,
                 null,
                 null,
-                editPreApprovalReason(decision));
+                editPreApprovalReason(decision),
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionMutation(
@@ -39,6 +55,23 @@ final class ToolOutcomeFactory {
             String diagnosticError,
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolFailureReason failureReason
+    ) {
+        return failedPreExecutionMutation(
+                call,
+                pathHint,
+                diagnosticError,
+                workspaceOperationPlan,
+                failureReason,
+                null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedPreExecutionMutation(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolFailureReason failureReason,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -52,13 +85,24 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_PARAMS,
                 workspaceOperationPlan,
                 null,
-                failureReason);
+                failureReason,
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionRead(
             ToolCall call,
             String pathHint,
             String diagnosticError
+    ) {
+        return failedPreExecutionRead(call, pathHint, diagnosticError, null);
+    }
+
+    static ToolCallLoop.ToolOutcome failedPreExecutionRead(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -69,7 +113,51 @@ final class ToolOutcomeFactory {
                 "",
                 diagnosticError,
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS,
+                null,
+                null,
+                ToolFailureReason.NONE,
+                List.of(),
+                toolCallId(permit));
+    }
+
+    static ToolCallLoop.ToolOutcome failedAuthority(
+            ToolCall call,
+            String diagnosticError
+    ) {
+        return failedAuthority(call, diagnosticError, null);
+    }
+
+    static ToolCallLoop.ToolOutcome requestDenied(ToolCall call, ToolResult blocked,
+                                                 LocalTurnTraceCapture.ParsedToolCallPermit permit,
+                                                 boolean mutating) {
+        return new ToolCallLoop.ToolOutcome(toolName(call), "", false,
+                mutating, true, "",
+                blocked.error().message(), null, blocked.error().code(), null, null,
+                blocked.error().reason(), List.of(), toolCallId(permit));
+    }
+
+    static ToolCallLoop.ToolOutcome failedAuthority(
+            ToolCall call,
+            String diagnosticError,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
+    ) {
+        dev.talos.runtime.TurnAuditCapture.recordAuthorityRejectedToolCall(call, diagnosticError);
+        return new ToolCallLoop.ToolOutcome(
+                toolName(call),
+                "",
+                false,
+                call != null && ToolCallSupport.isMutatingTool(call.toolName()),
+                false,
+                "",
+                diagnosticError,
+                null,
+                ToolError.INVALID_AUTHORITY,
+                null,
+                null,
+                ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                List.of(),
+                toolCallId(permit));
     }
 
     static ToolCallLoop.ToolOutcome executed(
@@ -80,6 +168,25 @@ final class ToolOutcomeFactory {
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolMutationEvidence mutationEvidence
     ) {
+        return executed(
+                call,
+                pathHint,
+                result,
+                classification,
+                workspaceOperationPlan,
+                mutationEvidence,
+                null);
+    }
+
+    static ToolCallLoop.ToolOutcome executed(
+            ToolCall call,
+            String pathHint,
+            ToolResult result,
+            ToolExecutionFailureClassifier.Classification classification,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolMutationEvidence mutationEvidence,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit
+    ) {
         boolean success = result != null && result.success();
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -87,7 +194,7 @@ final class ToolOutcomeFactory {
                 success,
                 call != null && ToolCallSupport.isMutatingTool(call.toolName()),
                 classification != null && classification.denied(),
-                success ? toolOutcomeSummary(toolName(call), result.output()) : "",
+                success ? toolOutcomeSummary(canonicalToolName(call), result.output()) : "",
                 success ? "" : errorMessage(result),
                 result == null ? null : result.verification(),
                 result == null || result.error() == null ? "" : result.error().code(),
@@ -95,7 +202,29 @@ final class ToolOutcomeFactory {
                 mutationEvidence,
                 result == null || result.error() == null
                         ? ToolFailureReason.NONE
-                        : result.error().reason());
+                        : result.error().reason(),
+                evidenceSourcePaths(call, pathHint, result),
+                toolCallId(permit),
+                result == null ? null : result.mutationEffects(),
+                result == null ? null : result.contentMetadata().directoryObservation());
+    }
+
+    private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {
+        return permit == null ? "" : permit.toolCallId();
+    }
+
+    private static List<String> evidenceSourcePaths(ToolCall call, String pathHint, ToolResult result) {
+        if (result == null || !result.success()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (result.contentMetadata() != null) {
+            out.addAll(result.contentMetadata().sourcePaths());
+        }
+        if ("talos.read_file".equals(canonicalToolName(call))
+                && pathHint != null
+                && !pathHint.isBlank()) {
+            out.add(pathHint.strip().replace('\\', '/'));
+        }
+        return List.copyOf(out);
     }
 
     /** Maps the edit pre-approval guard's typed verdict to a failure reason (T758). */
@@ -110,8 +239,16 @@ final class ToolOutcomeFactory {
         };
     }
 
-    private static String toolOutcomeSummary(String toolName, String output) {
-        if (!"talos.list_dir".equals(toolName)) {
+    /**
+     * Summary policy keys on the CANONICAL tool name: downstream evidence
+     * consumers canonicalize, so an accepted list_dir alias ("ls",
+     * "list_dir", ...) must get the same full evidence summary as
+     * "talos.list_dir" - a first-sentence summary of a directory listing
+     * reads as missing evidence and causes a false refusal. The outcome
+     * itself still carries the raw name for trace.
+     */
+    private static String toolOutcomeSummary(String canonicalToolName, String output) {
+        if (!"talos.list_dir".equals(canonicalToolName)) {
             return ToolCallSupport.firstSentenceSummary(output);
         }
         String value = output == null ? "" : output.strip();
@@ -124,6 +261,10 @@ final class ToolOutcomeFactory {
 
     private static String toolName(ToolCall call) {
         return call == null ? "" : call.toolName();
+    }
+
+    private static String canonicalToolName(ToolCall call) {
+        return call == null ? "" : call.canonicalToolName();
     }
 
     private static String errorMessage(ToolResult result) {

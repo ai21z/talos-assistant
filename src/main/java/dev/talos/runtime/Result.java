@@ -14,7 +14,12 @@ public sealed interface Result
 
     final class Ok implements Result {
         public final String text;
-        public Ok(String text) { this.text = text == null ? "" : text; }
+        public final PreparedAnswer presentation;
+        public Ok(String text) { this(text, null); }
+        Ok(String text, PreparedAnswer presentation) {
+            this.text = text == null ? "" : text;
+            this.presentation = presentation;
+        }
         @Override public String toString() { return text; }
     }
 
@@ -75,16 +80,20 @@ public sealed interface Result
     }
 
     /**
-     * Content was already streamed to the terminal during execution.
-     * The {@code suffix} (e.g., citations, metadata) is rendered after the streamed body.
-     * The {@code fullText} is kept for memory/listener updates but NOT re-rendered.
+     * Legacy complete answer value. Prior fragment emission is not assumed.
+     * A suffix already ending fullText is not appended a second time.
      */
     final class Streamed implements Result {
         public final String fullText;
         public final String suffix;
+        public final PreparedAnswer presentation;
         public Streamed(String fullText, String suffix) {
+            this(fullText, suffix, null);
+        }
+        Streamed(String fullText, String suffix, PreparedAnswer presentation) {
             this.fullText = fullText == null ? "" : fullText;
             this.suffix = suffix == null ? "" : suffix;
+            this.presentation = presentation;
         }
         @Override public String toString() { return fullText + suffix; }
     }

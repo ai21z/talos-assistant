@@ -109,28 +109,24 @@ public final class ConversationManager {
      * @return list of ChatMessage in chronological order
      */
     public List<ChatMessage> buildHistory(int availableTokens) {
-        List<ChatMessage> allTurns = memory.getTurns();
-        if (allTurns.isEmpty() || availableTokens <= 0) {
-            // Even with no turns, include sketch if available
-            String sk = sketch;
-            if (sk != null && !sk.isBlank() && availableTokens > 0) {
-                int sketchTokens = budget.estimateTokens(sk);
-                if (sketchTokens <= availableTokens) {
-                    return List.of(ChatMessage.assistant("[Conversation context] " + sk));
-                }
-            }
+        if (availableTokens <= 0) {
             return List.of();
         }
 
+        List<ChatMessage> allTurns = memory.getTurns();
         List<ChatMessage> selected = new ArrayList<>();
         int tokensUsed = 0;
 
-        // Reserve space for sketch if present
+        // Reserve only an admitted sketch, including its represented prefix.
         String sk = sketch;
-        int sketchTokens = 0;
+        ChatMessage summary = null;
         if (sk != null && !sk.isBlank()) {
-            sketchTokens = budget.estimateTokens("[Conversation context] " + sk);
-            tokensUsed += sketchTokens;
+            ChatMessage candidate = ChatMessage.assistant("[Conversation context] " + sk);
+            int sketchTokens = budget.estimateTokens(candidate.content());
+            if (sketchTokens <= availableTokens) {
+                summary = candidate;
+                tokensUsed = sketchTokens;
+            }
         }
 
         // Walk backward through pairs, accumulate most recent that fit
@@ -151,8 +147,8 @@ public final class ConversationManager {
         }
 
         // Prepend sketch as first message if present
-        if (sk != null && !sk.isBlank() && sketchTokens <= availableTokens) {
-            selected.addFirst(ChatMessage.assistant("[Conversation context] " + sk));
+        if (summary != null) {
+            selected.addFirst(summary);
         }
 
         return List.copyOf(selected);

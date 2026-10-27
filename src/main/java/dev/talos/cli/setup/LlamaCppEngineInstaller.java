@@ -62,6 +62,23 @@ public final class LlamaCppEngineInstaller {
                             "Extracted archive did not contain " + entry.executableName());
                 }
 
+                LlamaCppEngineManifest.CompanionAsset companion = entry.companion();
+                if (companion != null) {
+                    // The driver runtime is a separate upstream archive. It is
+                    // verified with its own digest and extracted into the
+                    // directory containing the server executable, all before
+                    // promotion, so a failure here leaves no partial install.
+                    Path companionArchive = tmpRoot.resolve(companion.assetName());
+                    downloader.download(companion.url(), companionArchive);
+                    String companionActual = sha256Hex(companionArchive);
+                    if (!companionActual.equalsIgnoreCase(companion.sha256())) {
+                        return new Result(Status.FAILED, null,
+                                "SHA-256 mismatch for " + companion.assetName() + ": expected "
+                                        + companion.sha256() + " but got " + companionActual);
+                    }
+                    extractor.extract(companionArchive, server.getParent());
+                }
+
                 deleteRecursivelyIfExists(installDir);
                 Files.createDirectories(installDir.getParent());
                 promoteDirectory(staging, installDir);
@@ -96,21 +113,35 @@ public final class LlamaCppEngineInstaller {
         return HexFormat.of().formatHex(digest.digest());
     }
 
-    private static Path findExecutable(Path root, String name) throws IOException {
-        if (!Files.isDirectory(root)) {
-            return null;
+    /**
+     * Read-only recursive search for a lane executable under an install
+     * root. Single owner of the installed-layout knowledge: Windows zips
+     * extract the exe at the top level, the Ubuntu tar nests it (build/bin),
+     * and both the installer's reuse check and {@code talos tune}'s
+     * installed-lane detection must recognize the same layouts.
+     */
+    public static java.util.Optional<Path> locateInstalledExecutable(Path root, String name) {
+        if (root == null || name == null || name.isBlank() || !Files.isDirectory(root)) {
+            return java.util.Optional.empty();
         }
         try (var stream = Files.walk(root)) {
             return stream
                     .filter(path -> path.getFileName() != null && path.getFileName().toString().equals(name))
                     .filter(Files::isRegularFile)
                     .findFirst()
-                    .map(path -> {
-                        path.toFile().setExecutable(true, false);
-                        return path.toAbsolutePath().normalize();
-                    })
-                    .orElse(null);
+                    .map(path -> path.toAbsolutePath().normalize());
+        } catch (IOException e) {
+            return java.util.Optional.empty();
         }
+    }
+
+    private static Path findExecutable(Path root, String name) {
+        return locateInstalledExecutable(root, name)
+                .map(path -> {
+                    path.toFile().setExecutable(true, false);
+                    return path;
+                })
+                .orElse(null);
     }
 
     private void promoteDirectory(Path source, Path target) throws IOException {

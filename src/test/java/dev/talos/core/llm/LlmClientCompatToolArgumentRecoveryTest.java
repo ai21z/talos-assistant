@@ -6,6 +6,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -19,11 +20,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Spliterators;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -78,6 +84,63 @@ class LlmClientCompatToolArgumentRecoveryTest {
         assertEquals("compat chat stream tool arguments", error.context());
     }
 
+    @Test
+    void interruptedNonStreamingRecoveryEscapesAsControlFlow() {
+        InterruptedRecoveryResolver resolver = new InterruptedRecoveryResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        client.setModel("llama_cpp/qwen2.5-coder-14b");
+
+        try {
+            RuntimeException error = assertThrows(
+                    RuntimeException.class,
+                    () -> client.chatFull(
+                            messages(),
+                            5_000L,
+                            List.of(writeSpec()),
+                            requiredToolControls()));
+
+            assertFalse(error instanceof EngineException.ResponseError,
+                    "caller control flow must not become a provider response failure");
+            assertInstanceOf(InterruptedException.class, error.getCause());
+            assertFalse(Thread.currentThread().isInterrupted(),
+                    "a provider-worker exception alone must not invent a caller interrupt");
+            assertEquals(1, resolver.streamCalls.get());
+            assertEquals(1, resolver.nonStreamingCalls.get());
+        } finally {
+            Thread.interrupted();
+            client.close();
+        }
+    }
+
+    @Test
+    void wrappedCancellationInNonStreamingRecoveryEscapesAsControlFlow() {
+        CompletionException cancellation = new CompletionException(
+                new CancellationException("compat recovery cancelled"));
+        WrappedCancellationRecoveryResolver resolver =
+                new WrappedCancellationRecoveryResolver(cancellation);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        client.setModel("llama_cpp/qwen2.5-coder-14b");
+
+        try {
+            RuntimeException error = assertThrows(
+                    RuntimeException.class,
+                    () -> client.chatFull(
+                            messages(),
+                            5_000L,
+                            List.of(writeSpec()),
+                            requiredToolControls()));
+
+            assertInstanceOf(CancellationException.class, error);
+            assertSame(cancellation.getCause(), error);
+            assertFalse(error instanceof EngineException.ResponseError,
+                    "caller cancellation must not become a provider response failure");
+            assertEquals(1, resolver.streamCalls.get());
+            assertEquals(1, resolver.nonStreamingCalls.get());
+        } finally {
+            client.close();
+        }
+    }
+
     private static List<ChatMessage> messages() {
         return List.of(
                 ChatMessage.system("[CurrentTurnCapability]\n[ExpectedTargets]\nrequiredTargets: scripts.js"),
@@ -90,7 +153,9 @@ class LlmClientCompatToolArgumentRecoveryTest {
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("required-mutation"));
+                List.of("required-mutation"))
+                .withToolAuthorityMode(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
     }
 
     private static ToolSpec writeSpec() {
@@ -147,6 +212,66 @@ class LlmClientCompatToolArgumentRecoveryTest {
                             "talos.write_file",
                             Map.of("path", "scripts.js", "content", "ok")))),
                     TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class InterruptedRecoveryResolver implements LlmEngineResolver {
+        private final AtomicInteger streamCalls = new AtomicInteger();
+        private final AtomicInteger nonStreamingCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            streamCalls.incrementAndGet();
+            return malformedToolArgumentStream();
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request)
+                throws InterruptedException {
+            nonStreamingCalls.incrementAndGet();
+            throw new InterruptedException("compat recovery interrupted");
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class WrappedCancellationRecoveryResolver implements LlmEngineResolver {
+        private final AtomicInteger streamCalls = new AtomicInteger();
+        private final AtomicInteger nonStreamingCalls = new AtomicInteger();
+        private final RuntimeException cancellation;
+
+        private WrappedCancellationRecoveryResolver(RuntimeException cancellation) {
+            this.cancellation = cancellation;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            streamCalls.incrementAndGet();
+            return malformedToolArgumentStream();
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) {
+            nonStreamingCalls.incrementAndGet();
+            throw cancellation;
         }
 
         @Override

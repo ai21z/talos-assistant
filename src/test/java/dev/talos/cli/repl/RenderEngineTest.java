@@ -92,6 +92,39 @@ class RenderEngineTest {
     class TurnStats {
 
         @Test
+        void recordedPolicyBlockIsPresentedInsteadOfGreenSuccess() {
+            var trace = dev.talos.runtime.trace.LocalTurnTrace.builder("trace", "session", 7, "time")
+                    .outcome("BLOCKED", "NOT_RUN", "NONE", "NOT_ATTEMPTED", "BLOCKED_BY_POLICY").build();
+            var audit = dev.talos.runtime.TurnAudit.empty().withLocalTrace(trace);
+            var turn = new dev.talos.runtime.TurnResult(new dev.talos.runtime.Result.Ok("Blocked answer"),
+                    null, 7, java.time.Duration.ofMillis(12836), audit);
+            engine(true).printTurnStats(turn, 215);
+            assertTrue(output().contains("BLOCKED_BY_POLICY"), output());
+            assertFalse(output().contains("✓"), output());
+        }
+
+        @Test
+        void cancellationErrorRetainsTheRecordedCancelledOutcome() {
+            var trace = dev.talos.runtime.trace.LocalTurnTrace.builder("trace", "session", 7, "time")
+                    .outcome("ABORTED", "NOT_RUN", "NONE", "NOT_ATTEMPTED", "TURN_CANCELLED").build();
+            var turn = new dev.talos.runtime.TurnResult(new dev.talos.runtime.Result.Error("Cancelled", 499),
+                    null, 7, java.time.Duration.ofMillis(300), dev.talos.runtime.TurnAudit.empty().withLocalTrace(trace));
+            engine(true).printTurnStats(turn, 0);
+            assertTrue(output().contains("CANCELLED"), output());
+            assertFalse(output().contains("FAILED"), output());
+        }
+
+        @Test
+        void missingOutcomeIsUnknownAndRedirectedOutputRemainsQuiet() {
+            var turn = new dev.talos.runtime.TurnResult(new dev.talos.runtime.Result.Ok("Answer"), 1);
+            engine(false).printTurnStats(turn, 6);
+            assertEquals("", output());
+            engine(true).printTurnStats(turn, 6);
+            assertTrue(output().contains("UNKNOWN"), output());
+            assertFalse(output().contains("✓"), output());
+        }
+
+        @Test
         void showsTurnNumberAndElapsedSeconds() {
             var re = engine(true);
             re.printTurnStats(3, 2500, 0);
@@ -285,24 +318,48 @@ class RenderEngineTest {
                     "\n\n[Sources]\n - src/App.java#0\n"));
 
             String text = output();
+            assertTrue(text.contains("Answer body"), "Legacy complete results must render their full body");
             assertTrue(text.contains("Sources"));
             assertTrue(text.contains("src/App.java#0"));
+            assertEquals(1, text.split("src/App\\.java#0", -1).length - 1,
+                    "A suffix already present in the full answer must not be repeated");
             assertFalse(text.contains("[Sources]"), "Streamed source suffix should be normalized");
         }
 
         @Test
-        void streamedChunksUseSameAnswerRailAsOkResults() {
+        void discardedProviderChunksArePresentedOnlyByTheFinalOkResult() {
             var re = semanticEngine(true);
 
-            re.render(new Result.StreamChunk("hello\nwor"));
-            re.render(new Result.StreamChunk("ld"));
+            var sink = re.answerStreamSink(null);
+            sink.accept("hello\nwor");
+            sink.accept("ld");
+            assertEquals("", output());
             re.render(new Result.StreamEnd());
+            assertEquals("", output(), "StreamEnd must not commit discarded text");
+            re.render(new Result.Ok("hello\nworld"));
 
             String text = output();
             assertTrue(text.contains("┌─ answer"));
             assertTrue(text.contains("│ hello"));
             assertTrue(text.contains("│ world"));
             assertTrue(text.contains("└─ answer"));
+        }
+
+        @Test
+        void legacyStreamChunkIsRejectedBeforeOutput() {
+            var re = semanticEngine(true);
+            assertThrows(IllegalArgumentException.class, () -> re.render(new Result.StreamChunk("hello")));
+            re.render(new Result.StreamEnd());
+            assertEquals("", output());
+        }
+
+        @Test
+        void legacyStreamedResultAppendsASeparateSuffixToItsCompleteBody() {
+            var re = semanticEngine(false);
+            re.render(new Result.Streamed("Answer body", "\n\n[Sources]\n - src/App.java#0\n"));
+            assertTrue(output().contains("Answer body"));
+            assertTrue(output().contains("Sources"));
+            assertEquals(1, output().split("src/App\\.java#0", -1).length - 1);
         }
     }
 

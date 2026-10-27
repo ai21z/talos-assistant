@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -121,8 +122,16 @@ class ToolCallSupportBoundaryCharacterizationTest {
         assertAll(
                 () -> assertEquals("src/main", ToolCallSupport.canonicalizeReadPath("./src/main/")),
                 () -> assertEquals("src/main", ToolCallSupport.canonicalizeReadPath("src\\main")),
-                () -> assertEquals("talos.read_file:max_lines=10;path=src/main;",
-                        ToolCallSupport.buildReadCallSignature(read)),
+                () -> {
+                    LoopState state = new LoopState(
+                            "", List.of(), List.of(), null, null, null, 5, 0);
+                    ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                            state, read, "./src/main/", ToolResult.ok("Main.java"));
+                    assertNotNull(state.readEvidence.latestIdenticalCall(
+                            new ToolCall("talos.read_file", Map.of(
+                                    "max_lines", "10",
+                                    "path", "./src/main/")), true));
+                },
                 () -> assertSame(missingPathWrite, ToolCallSupport.repairMissingPath(missingPathWrite)),
                 () -> assertTrue(ToolCallSupport.hasEmptyEditArguments(editMissingNew)),
                 () -> assertFalse(ToolCallSupport.hasEmptyEditArguments(editDelete)),

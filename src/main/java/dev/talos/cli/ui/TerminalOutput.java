@@ -34,7 +34,13 @@ public final class TerminalOutput {
         // sides of this adapter must use the writer's actual charset or
         // non-ASCII chrome mangles to '?'.
         Charset charset = terminal.outputEncoding();
-        return new PrintStream(new WriterOutputStream(terminal.writer(), charset), true, charset);
+        var writer = terminal.writer();
+        return new PrintStream(new WriterOutputStream(writer, charset), true, charset) {
+            @Override public boolean checkError() {
+                boolean outer = super.checkError();
+                return writer.checkError() || outer;
+            }
+        };
     }
 
     private TerminalOutput() {

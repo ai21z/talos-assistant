@@ -23,5 +23,10 @@ public final class TurnTraceCapture {
         TRACE.remove();
         return t;
     }
+
+    /** Clear any unconsumed retrieval evidence at a turn boundary. */
+    public static void clear() {
+        TRACE.remove();
+    }
 }
 

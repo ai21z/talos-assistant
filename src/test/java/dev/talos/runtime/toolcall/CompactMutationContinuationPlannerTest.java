@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,9 +32,7 @@ class CompactMutationContinuationPlannerTest {
         String request = "Rewrite README.md with a short project note.";
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("README.md"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=readme.md;",
-                "1 | # Old\n2 | Existing README content.");
+        addReadback(state, "README.md", "1 | # Old\n2 | Existing README content.");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -64,12 +64,8 @@ class CompactMutationContinuationPlannerTest {
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("board-brief.md"));
         state.toolOutcomes.add(readOutcome("client-notes.md"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=board-brief.md;",
-                "1 | Board brief marker: ORBITAL-DECK-71.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=client-notes.md;",
-                "1 | Client note marker: NEON-RESPONSE-44.");
+        addReadback(state, "board-brief.md", "1 | Board brief marker: ORBITAL-DECK-71.");
+        addReadback(state, "client-notes.md", "1 | Client note marker: NEON-RESPONSE-44.");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -79,13 +75,13 @@ class CompactMutationContinuationPlannerTest {
 
         assertTrue(plan.isPresent(), "source-derived write should keep exact source evidence in compact frame");
         String prompt = prompt(plan.get().messages());
-        assertTrue(prompt.contains("[RequiredSourceEvidence]"), prompt);
+        // T1011: the evidence rides as user-role JSON data, referenced from
+        // the system frame.
+        assertTrue(prompt.contains("[CompactMutationData]"), prompt);
         assertTrue(prompt.contains("office-summary.md"), prompt);
-        assertTrue(prompt.contains("board-brief.md: include exact phrase `Board brief marker: ORBITAL-DECK-71.`"),
-                prompt);
-        assertTrue(prompt.contains("client-notes.md: include exact phrase `Client note marker: NEON-RESPONSE-44.`"),
-                prompt);
-        assertTrue(prompt.contains("[SourceEvidenceReadbacks]"), prompt);
+        assertTrue(prompt.contains("\"requiredEvidencePhrase\":\"Board brief marker: ORBITAL-DECK-71.\""), prompt);
+        assertTrue(prompt.contains("\"requiredEvidencePhrase\":\"Client note marker: NEON-RESPONSE-44.\""), prompt);
+        assertTrue(prompt.contains("requiredEvidencePhrase must contribute"), prompt);
     }
 
     @Test
@@ -95,12 +91,8 @@ class CompactMutationContinuationPlannerTest {
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("index.html"));
         state.toolOutcomes.add(readOutcome("script.js"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=index.html;",
-                "1 | <html><script src=\"scripts.js\"></script></html>");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=script.js;",
-                "1 | console.log('similar wrong target');");
+        addReadback(state, "index.html", "1 | <html><script src=\"scripts.js\"></script></html>");
+        addReadback(state, "script.js", "1 | console.log('similar wrong target');");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -111,9 +103,41 @@ class CompactMutationContinuationPlannerTest {
         assertTrue(plan.isPresent(), "similar sibling readback should stay available for target disambiguation");
         String prompt = prompt(plan.get().messages());
         assertTrue(prompt.contains("script.js and scripts.js are different target paths"), prompt);
-        assertTrue(prompt.contains("Path: script.js"), prompt);
+        assertTrue(prompt.contains("\"path\":\"script.js\""), prompt);
         assertTrue(prompt.contains("similar wrong target"), prompt);
         assertTrue(prompt.contains("Cross-file coherence checklist"), prompt);
+    }
+
+    @Test
+    void staticWriteOnlyContinuationDoesNotAdvertiseEditFile() {
+        String request =
+                "Repair README.md using a complete file replacement.";
+        LoopState state = state(request);
+        state.messages.add(1, ChatMessage.system("""
+                [Static verification repair context]
+                Expected targets: README.md
+                Full-file replacement targets: README.md
+                """));
+        state.toolOutcomes.add(readOutcome("README.md"));
+        addReadback(
+                state,
+                "README.md",
+                "1 | # Existing\n2 | Old content.");
+
+        CompactMutationContinuationPlanner.Plan plan =
+                CompactMutationContinuationPlanner.planForContextBudget(
+                                state,
+                                baseTools(),
+                                "static repair continuation")
+                        .orElseThrow();
+
+        assertEquals(
+                List.of("talos.write_file"),
+                toolNames(plan.tools()));
+        String payload = prompt(plan.messages());
+        assertTrue(payload.contains("Call talos.write_file now."), payload);
+        assertFalse(payload.contains("talos.edit_file"), payload);
+        assertFalse(payload.contains("write/edit"), payload);
     }
 
     @Test
@@ -188,6 +212,14 @@ class CompactMutationContinuationPlannerTest {
                 false,
                 "Read " + path,
                 "");
+    }
+
+    private static void addReadback(LoopState state, String path, String readback) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static List<ToolSpec> baseTools() {

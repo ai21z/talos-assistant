@@ -30,6 +30,41 @@ class EvidenceObligationAssessmentTest {
     }
 
     @Test
+    void observedAssessmentRetainsDeniedInferredReadWithoutDiskDiscovery() {
+        var plan = plan(EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                contract(Set.of("index.html"), Set.of()));
+        var loop = loopResult(List.of("talos.read_file"), List.of("index.html"), List.of(
+                readOutcome("index.html"), new ToolCallLoop.ToolOutcome("talos.read_file", "app.js",
+                        false, false, true, "Read approval was denied.", "")));
+        assertEquals(EvidenceObligationVerifier.Status.BLOCKED,
+                EvidenceObligationAssessment.assessObserved(plan, loop).result().status());
+    }
+
+    @Test
+    void observedAssessmentRetainsFailedInferredReadWithoutDiskDiscovery() {
+        var plan = plan(EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                contract(Set.of("index.html"), Set.of()));
+        var loop = loopResult(List.of("talos.read_file"), List.of("index.html"), List.of(
+                readOutcome("index.html"), new ToolCallLoop.ToolOutcome("read_file", "app.js",
+                        false, false, false, "A source read failed.", "")));
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, loop).result().status());
+    }
+
+    @Test
+    void observedAssessmentCannotHideAStopAfterSuccessfulReads() {
+        var plan = plan(EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                contract(Set.of("index.html"), Set.of()));
+        var stopped = new ToolCallLoop.LoopResult("A diagnosis could not be completed.", 1, 1,
+                List.of("talos.read_file"), List.of(), 0, 0, false, 0, List.of("index.html"),
+                0, 0, 0, 0, dev.talos.runtime.failure.FailureDecision.stop(
+                        dev.talos.runtime.failure.FailureAction.ASK_USER, "Diagnosis was stopped."),
+                List.of(readOutcome("index.html")), java.util.Map.of());
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED,
+                EvidenceObligationAssessment.assessObserved(plan, stopped).result().status());
+    }
+
+    @Test
     void sourceEvidenceTargetsArePreferredOverExpectedTargets() {
         CurrentTurnPlan plan = plan(
                 EvidenceObligation.READ_TARGET_REQUIRED,

@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.Comparator;
 import java.util.List;
@@ -23,14 +24,27 @@ public final class CurrentTurnCapabilityFrame {
         if (plan == null) {
             return render(null, ExecutionPhase.INSPECT, List.of());
         }
-        return render(
+        String frame = render(
                 plan.taskContract(),
                 plan.phaseInitial(),
-                plan.nativeTools(),
+                plan.visibleTools(),
                 EvidenceObligationPolicy.parse(plan.evidenceObligation()),
                 plan.activeTaskContext(),
                 plan.artifactGoal(),
-                plan.taskExpectations());
+                plan.taskExpectations(),
+                plan.actionObligation(),
+                plan.workspaceOperationPlan(),
+                plan.contentMutationPredecessorPaths());
+        var binding = plan.contentSaveRequest().clarificationBinding();
+        if (binding != null) {
+            frame += "\n[OperandClarification]\nOriginal task turn: " + binding.originTurn()
+                    + "\nFilename reply turn: " + binding.replyTurn()
+                    + "\nThe original task remains authoritative. Only its missing destination was clarified. "
+                    + "All requested results and dependencies must be retained. "
+                    + "Whole request coverage remains unassessed. A verified file operation does not prove complete fulfillment. "
+                    + "Normal proposal validation and approval remain required.\n[/OperandClarification]";
+        }
+        return frame;
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
@@ -41,9 +55,12 @@ public final class CurrentTurnCapabilityFrame {
                 EvidenceObligationPolicy.derive(
                         contract,
                         phase,
-                        java.nio.file.Path.of("").toAbsolutePath()),
+                        null),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                List.of(),
+                null,
+                null,
                 List.of());
     }
 
@@ -54,15 +71,22 @@ public final class CurrentTurnCapabilityFrame {
             EvidenceObligation evidenceObligation,
             String activeTaskContext,
             String artifactGoal,
-            List<TaskExpectation> taskExpectations
+            List<TaskExpectation> taskExpectations,
+            ActionObligation suppliedActionObligation,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+            List<String> contentMutationPredecessorPaths
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
-        ActionObligation obligation = ActionObligationPolicy.derive(contract, safePhase);
+        ActionObligation obligation = suppliedActionObligation == null
+                ? ActionObligationPolicy.derive(contract, safePhase)
+                : suppliedActionObligation;
         EvidenceObligation evidence = evidenceObligation == null
                 ? EvidenceObligation.NONE
                 : evidenceObligation;
-        boolean mutationAllowed = contract != null && contract.mutationAllowed();
+        boolean mutationAllowed = contract != null
+                && contract.mutationAllowed()
+                && carriesMutationAuthority(obligation);
         boolean verificationRequired = contract != null && contract.verificationRequired();
         String tools = visibleTools == null || visibleTools.isEmpty()
                 ? "(none)"
@@ -79,12 +103,20 @@ public final class CurrentTurnCapabilityFrame {
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
+        appendWorkspaceOperationGuidance(
+                frame,
+                workspaceOperationPlan,
+                contentMutationPredecessorPaths,
+                mutationAllowed);
+        appendTextFormatChangeGuidance(frame, contract, mutationAllowed, visibleTools);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendStaticWebRequirements(frame, contract, mutationAllowed);
         appendStaticWebRewriteGroundingGuidance(frame, contract, mutationAllowed, visibleTools);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
-        appendTaskExpectations(frame, taskExpectations);
+        if (mutationAllowed) {
+            appendTaskExpectations(frame, taskExpectations);
+        }
 
         switch (obligation) {
             case MUTATING_TOOL_REQUIRED -> frame
@@ -97,12 +129,11 @@ public final class CurrentTurnCapabilityFrame {
                     Do not say you lack filesystem or workspace access.
                     Do not provide manual snippets instead of acting unless a narrow clarification is genuinely required.""");
             case WORKSPACE_OPERATION_REQUIRED -> frame.append("""
-                    Use the visible workspace operation tool for this turn.
+                    Use only the exact workspace operation tool named in the typed operation frame for that operation.
                     Do not emulate move, copy, rename, or mkdir by manually writing or editing file contents.
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
-                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.
-                    operations_json example: [{"op":"copy_path","from":"a.md","to":"b.md"},{"op":"mkdir","path":"docs/reports"}]""");
+                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.""");
             case CONDITIONAL_REVIEW_FIX -> frame.append("""
                     This is a conditional review-and-fix turn.
                     Inspect the relevant files first using read-only tools.
@@ -116,18 +147,29 @@ public final class CurrentTurnCapabilityFrame {
             case INSPECT_REQUIRED -> frame.append("""
                     This turn is read-only workspace inspection.
                     Use read-only tools to inspect evidence before answering.
-                    Do not call talos.write_file or talos.edit_file.
+                    Do not call mutating tools.
                     If you identify a possible fix, describe it and wait for an explicit change request before editing.""");
             case VERIFY_FROM_EVIDENCE -> frame.append("""
                     This turn is verify/status-oriented.
                     Use read-only evidence or prior verified outcomes.
-                    Do not call talos.write_file or talos.edit_file.
+                    Do not call mutating tools.
                     If you identify a possible fix, describe it and wait for an explicit change request before editing.""");
-            case DIRECT_ANSWER_ONLY -> frame.append("""
-                    This turn is conversational or capability-oriented.
-                    No workspace tools are visible.
-                    Do not call tools.
-                    Answer directly from Talos product identity/capability only.""");
+            case DIRECT_ANSWER_ONLY -> {
+                frame.append("""
+                        This turn requires a direct answer without workspace inspection.
+                        No workspace tools are visible.
+                        Do not call tools.
+                        Do not claim to have inspected files or performed workspace actions.
+                        """);
+                if (type == TaskType.SMALL_TALK
+                        && (CapabilityAnswerPolicy.looksLikeIdentityTurn(contract.originalUserRequest())
+                        || CapabilityAnswerPolicy.looksLikeCapabilityTurn(contract.originalUserRequest()))) {
+                    frame.append("Answer directly from Talos product identity/capability only.");
+                } else {
+                    frame.append("Answer the user's requested topic directly using general knowledge "
+                            + "and information already provided in the conversation.");
+                }
+            }
             case REPAIR_FROM_VERIFIER_FINDINGS -> frame.append("""
                     Repair must be based on previous verifier findings and remain bounded.
                     Use the visible file tools only if mutation is allowed.""");
@@ -139,7 +181,24 @@ public final class CurrentTurnCapabilityFrame {
         appendReadOnlyProposalGroundingGuidance(frame, contract, mutationAllowed);
         appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
+        var comparison = dev.talos.runtime.task.DocumentComparisonRequest.from(contract);
+        if (comparison.active()) {
+            frame.append("\nEach requested ordered pair must be inspected with talos.compare_documents before finalization. A raw diff does not establish behavioral equivalence. Separately requested reads and results remain required.");
+            for (var requirement : comparison.requirements()) frame.append("\nComparison left ")
+                    .append(requirement.pair().left()).append(", right ").append(requirement.pair().right()).append('.');
+        }
         return frame.toString();
+    }
+
+    private static boolean carriesMutationAuthority(
+            ActionObligation obligation
+    ) {
+        return obligation == ActionObligation.MUTATING_TOOL_REQUIRED
+                || obligation
+                        == ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                || obligation == ActionObligation.CONDITIONAL_REVIEW_FIX
+                || obligation
+                        == ActionObligation.REPAIR_FROM_VERIFIER_FINDINGS;
     }
 
     private static String availableFileMutationTools(List<String> visibleTools) {
@@ -153,6 +212,26 @@ public final class CurrentTurnCapabilityFrame {
             return "(none visible)";
         }
         return String.join(", ", available);
+    }
+
+    private static void appendTextFormatChangeGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed,
+            List<String> visibleTools
+    ) {
+        if (!mutationAllowed
+                || contract == null
+                || !"explicit-text-format-request".equals(contract.classificationReason())
+                || visibleTools == null
+                || !visibleTools.contains("talos.read_file")
+                || !visibleTools.contains("talos.write_file")) {
+            return;
+        }
+        frame.append("[TextFormatChange]\n")
+                .append("Read the exact target first with talos.read_file.\n")
+                .append("Use talos.write_file with the complete text for that same path.\n")
+                .append("Change only the requested text format and preserve the file's text content.\n");
     }
 
     private static void appendDirectoryAwareVerificationGuidance(
@@ -231,12 +310,6 @@ public final class CurrentTurnCapabilityFrame {
         List<String> targets = orderedExpectedTargets(contract);
         frame.append("[ExpectedTargets]\n")
                 .append("requiredTargets: ").append(String.join(", ", targets)).append('\n');
-        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
-            frame.append("Satisfy these exact source/destination target paths with the visible workspace operation tool.\n")
-                    .append("Do not substitute a generic talos.write_file or talos.edit_file call for a move, copy, rename, or mkdir request.\n")
-                    .append("Similar filenames are not substitutes for required target paths.\n");
-            return;
-        }
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             frame.append("Inspect these exact target paths when they are relevant to the review.\n")
                     .append("If evidence shows a repair is needed, write or edit these exact target paths.\n")
@@ -250,6 +323,59 @@ public final class CurrentTurnCapabilityFrame {
                 .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
                 .append("Do not put required root files inside css/, js/, assets/, site/, or other subdirectories unless the required target path explicitly includes that directory.\n")
                 .append("Do not complete this turn by mutating only a similar sibling filename.\n");
+    }
+
+    private static void appendWorkspaceOperationGuidance(
+            StringBuilder frame,
+            WorkspaceOperationAuthorityPlan plan,
+            List<String> contentPredecessors,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed
+                || plan == null
+                || plan.authorizedOperations().size() != 1) {
+            return;
+        }
+        var operation = plan.authorizedOperations().getFirst();
+        List<String> predecessors = contentPredecessors == null
+                ? List.of()
+                : contentPredecessors;
+        frame.append("[TypedWorkspaceOperation]\n")
+                .append("operationKind: ")
+                .append(operation.kind().name())
+                .append('\n')
+                .append("exactTool: ")
+                .append(operation.toolName())
+                .append('\n');
+        for (var operand : operation.operands()) {
+            String label = switch (operand.role()) {
+                case SOURCE -> "sourcePath";
+                case DESTINATION -> "destinationPath";
+                case TARGET -> "targetPath";
+            };
+            frame.append(label)
+                    .append(": ")
+                    .append(operand.effectivePath())
+                    .append('\n');
+        }
+        frame.append("overwritePolicy: ")
+                .append(operation.overwritePolicy().name())
+                .append('\n')
+                .append("recursivePolicy: ")
+                .append(operation.recursivePolicy().name())
+                .append('\n')
+                .append("parentPolicy: ")
+                .append(operation.parentPolicy().name())
+                .append('\n');
+        if (predecessors.isEmpty()) {
+            frame.append("Call the exact tool once with exactly these typed operands.\n");
+            return;
+        }
+        frame.append("contentPredecessors: ")
+                .append(String.join(", ", predecessors))
+                .append('\n')
+                .append("First complete every content predecessor with the visible file tools. Then call the exact workspace operation tool once.\n")
+                .append("Do not call the workspace operation before every predecessor succeeds.\n");
     }
 
     private static List<String> orderedExpectedTargets(TaskContract contract) {
@@ -522,6 +648,7 @@ public final class CurrentTurnCapabilityFrame {
 
     private static String evidenceGuidance(EvidenceObligation evidence) {
         return switch (evidence) {
+            case DOCUMENT_COMPARISON_REQUIRED -> "Evidence: the two requested snapshots must be compared with talos.compare_documents. A model summary is not comparison evidence.";
             case READ_TARGET_REQUIRED -> "Evidence: read the named target before answering.";
             case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
                     "Evidence: verify path existence with talos.list_dir for the parent directory "
@@ -530,6 +657,13 @@ public final class CurrentTurnCapabilityFrame {
                     "Evidence: the named target is protected. "
                             + "Call talos.read_file for the protected target; runtime will request approval. "
                             + "Do not answer from protected content unless the read succeeds.";
+            case FILE_CONTENT_LOOKUP_REQUIRED ->
+                    "Evidence: locate the requested workspace fact with read, grep, or retrieval results "
+                            + "that identify at least one source file before answering.";
+            case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
+                    "Evidence: before making project-level claims, inspect the preferred top-level "
+                            + "README-family file when one is present. Do not infer the whole project "
+                            + "from one unrelated file.";
             case LIST_DIRECTORY_ONLY ->
                     "Evidence: list directory entries only; do not inspect file contents.";
             case WORKSPACE_INSPECTION_REQUIRED ->

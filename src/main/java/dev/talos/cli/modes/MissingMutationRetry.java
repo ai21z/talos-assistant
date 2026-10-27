@@ -1,9 +1,11 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.policy.ActionObligation;
@@ -15,13 +17,14 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.WorkspacePathIdentity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,8 +66,14 @@ final class MissingMutationRetry {
             int mutationsInRetry,
             String extraSummary,
             ToolCallLoop.LoopResult retryLoopResult,
-            boolean actionObligationFailed
+            boolean actionObligationFailed,
+            AnswerOutputLimit outputLimit
     ) {
+        Result(String answer, int mutationsInRetry, String extraSummary,
+               ToolCallLoop.LoopResult retryLoopResult, boolean actionObligationFailed) {
+            this(answer, mutationsInRetry, extraSummary, retryLoopResult, actionObligationFailed,
+                    AnswerOutputLimit.KEEP_ORIGINAL);
+        }
         Result(String answer, int mutationsInRetry, String extraSummary) {
             this(answer, mutationsInRetry, extraSummary, null, false);
         }
@@ -90,11 +99,23 @@ final class MissingMutationRetry {
     ) {
         if (answer == null) answer = "";
         if (loopResult == null) return new Result(answer, 0, null);
-        if (loopResult.mutatingToolSuccesses() > 0) return new Result(answer, 0, null);
+        if (loopResult.mutatingToolSuccesses() > 0
+                && !TurnTaskContractCapture.typedMutationObligationsPending()) {
+            return new Result(answer, 0, null);
+        }
         if (ctx == null || ctx.llm() == null) return new Result(answer, 0, null);
         if (ctx.toolCallLoop() == null || chat == null) return new Result(answer, 0, null);
         if (hasDeniedMutation(loopResult)) return new Result(answer, 0, null);
         if (loopResult.failureDecision().shouldStop()) return new Result(answer, 0, null);
+        if (failedBoundWorkspaceOperationAttempt(safePlan, loopResult)) {
+            LocalTurnTraceCapture.recordActionObligation(
+                    ActionObligation.WORKSPACE_OPERATION_REQUIRED.name(),
+                    "FAILED",
+                    "the exact typed workspace operation already failed and "
+                            + "cannot be rebound to a second call",
+                    "WORKSPACE_OPERATION_RETRY_REQUIRES_TYPED_LIFECYCLE");
+            return new Result(answer, 0, null, null, true);
+        }
         // T743: a mutating call that failed with genuinely invalid parameters
         // now gets one bounded corrected retry with the tool error echoed.
         // Previously the model that ATTEMPTED a call got zero retries while a
@@ -115,14 +136,17 @@ final class MissingMutationRetry {
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
                 .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace, answer);
         if (conditionalNoChange.isPresent()) {
-            return new Result(conditionalNoChange.get(), 0, null);
+            return new Result(selectDeterministicAnswer(conditionalNoChange.get()), 0, null, null, false,
+                    AnswerOutputLimit.CLEAR);
         }
         ActionObligation obligation = safePlan.actionObligation();
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
             return new Result(answer, 0, null);
         }
         String priorMutationRequest = retryShouldReissuePriorMutationRequest(retryContract)
-                ? previousMutationUserRequest(messages, userRequest)
+                ? previousMutationUserRequest(
+                        messages,
+                        capturedCurrentRequestBoundary(retryContract))
                 : null;
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
@@ -138,10 +162,10 @@ final class MissingMutationRetry {
         String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
         List<ToolSpec> retryToolSpecs = toolSpecs(ctx, retryToolNames);
         String retryInstruction = mutationRetryInstruction(
+                safePlan,
                 obligation,
                 userRequest,
-                priorMutationRequest,
-                retryToolNames);
+                priorMutationRequest);
         if (invalidParamsError != null) {
             retryInstruction = retryInstruction
                     + "\nPrevious mutating tool call was rejected with invalid parameters: "
@@ -149,11 +173,21 @@ final class MissingMutationRetry {
                     + "\nRe-issue one corrected tool call with valid parameters.";
         }
         String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs, retryToolNames);
-        messages.add(ChatMessage.assistant(retrySummary));
-        messages.add(ChatMessage.system(retryFrame));
-        messages.add(ChatMessage.user(retryInstruction));
+        List<ChatMessage> retryConversation =
+                new ArrayList<>(messages);
+        retryConversation.add(ChatMessage.assistant(retrySummary));
+        retryConversation.add(ChatMessage.system(retryFrame));
+        retryConversation.add(ChatMessage.user(retryInstruction));
         List<ChatMessage> retryMessages = compactMutationRetryMessages(
-                messages, safePlan, retryInstruction, retryToolSpecs, retryToolNames);
+                retryConversation,
+                safePlan,
+                retryInstruction,
+                retryToolSpecs,
+                retryToolNames);
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint fallbackCheckpoint =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
 
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages, safePlan, retryToolSpecs);
@@ -161,14 +195,22 @@ final class MissingMutationRetry {
 
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                        retryText, retry.toolCalls(), retry.provenance(),
+                        retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
+                AnswerOutputLimit retryOutputLimit = AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached());
                 String summary = retryLoop.summary();
                 boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
                         .anyMatch(ToolCallLoop.ToolOutcome::mutating);
                 if (hasDeniedMutation(retryLoop)) {
-                    mergedAnswer = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
+                    String deniedAnswer = MutationFailureAnswerRenderer
+                            .summarizeDeniedMutationOutcomesIfNeeded(
                             mergedAnswer, safePlan, messages, retryLoop, 0);
+                    if (!Objects.equals(mergedAnswer, deniedAnswer)) {
+                        selectDeterministicAnswer(deniedAnswer);
+                        retryOutputLimit = AnswerOutputLimit.CLEAR;
+                    }
+                    mergedAnswer = deniedAnswer;
                 }
                 if (isStaticRepairWrongToolRetry(retryLoop)) {
                     List<String> targets = staticRepairWrongToolTargets(retryLoop);
@@ -181,25 +223,55 @@ final class MissingMutationRetry {
                                     + targetReason,
                             "STATIC_REPAIR_WRONG_TOOL");
                     return new Result(
-                            ResponseObligationVerifier.deterministicStaticRepairWrongToolAnswer(
-                                    targets, partialMutation),
+                            selectDeterministicAnswer(
+                                    ResponseObligationVerifier
+                                            .deterministicStaticRepairWrongToolAnswer(
+                                                    targets, partialMutation)),
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 } else if (retryLoop.mutatingToolSuccesses() > 0) {
-                    ToolCallLoop.LoopResult continued =
-                            continueRemainingExpectedTargetsAfterPartialRetry(
-                                    safePlan,
-                                    retryLoop,
-                                    workspace,
-                                    ctx,
-                                    chat,
-                                    retryToolNames);
-                    if (continued != retryLoop) {
-                        retryLoop = continued;
-                        mergedAnswer = retryLoop.finalAnswer();
-                        summary = retryLoop.summary();
+                    if (!retryLoop.failureDecision().shouldStop()) {
+                        ToolCallLoop.LoopResult continued =
+                                continueRemainingExpectedTargetsAfterPartialRetry(
+                                        safePlan,
+                                        retryLoop,
+                                        workspace,
+                                        ctx,
+                                        chat,
+                                        retryToolNames);
+                        if (continued != retryLoop) {
+                            retryLoop = continued;
+                            mergedAnswer = retryLoop.finalAnswer();
+                            retryOutputLimit = AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached());
+                            summary = retryLoop.summary();
+                        }
+                    }
+                    if (TurnTaskContractCapture
+                            .typedMutationObligationsPending()) {
+                        List<String> pendingContent =
+                                TurnTaskContractCapture
+                                        .pendingContentMutationPredecessorPaths()
+                                        .stream()
+                                        .sorted()
+                                        .toList();
+                        boolean pendingWorkspace = TurnTaskContractCapture
+                                .workspaceOperationObligationPending();
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                "bounded retry ended with typed mutation obligations still pending");
+                        return new Result(
+                                selectDeterministicAnswer(
+                                        ResponseObligationVerifier
+                                                .deterministicIncompleteTypedWorkspacePlanAnswer(
+                                                        pendingContent,
+                                                        pendingWorkspace)),
+                                retryLoop.mutatingToolSuccesses(),
+                                summary,
+                                retryLoop,
+                                true, AnswerOutputLimit.CLEAR);
                     }
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
@@ -220,11 +292,13 @@ final class MissingMutationRetry {
                                 "retry response issued invalid mutating tool arguments",
                                 "INVALID_MUTATION_AFTER_RETRY");
                         return new Result(
-                                mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                                fallbackAnswerIfBlank(
+                                        mergedAnswer, answer, fallbackCheckpoint),
                                 0,
                                 summary,
                                 retryLoop,
-                                false);
+                                false, mergedAnswer == null || mergedAnswer.isBlank()
+                                        ? AnswerOutputLimit.KEEP_ORIGINAL : retryOutputLimit);
                     }
                     List<String> failedTargets = failedMutatingToolTargets(retryLoop);
                     LocalTurnTraceCapture.recordActionObligation(
@@ -236,11 +310,13 @@ final class MissingMutationRetry {
                                     : " for " + String.join(", ", failedTargets)),
                             "CONDITIONAL_REVIEW_FAILED_MUTATION");
                     return new Result(
-                            ResponseObligationVerifier.deterministicFailedMutationAttemptAnswer(failedTargets),
+                            selectDeterministicAnswer(
+                                    ResponseObligationVerifier
+                                            .deterministicFailedMutationAttemptAnswer(failedTargets)),
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 } else {
                     boolean repairInspectionOnly = isRepairInspectionOnlyRetry(safePlan, retryLoop);
                     String failureReason = repairInspectionOnly
@@ -261,19 +337,23 @@ final class MissingMutationRetry {
                                 failureReason);
                     }
                     return new Result(
-                            repairInspectionOnly
-                                    ? ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer()
-                                    : ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
+                            selectDeterministicAnswer(
+                                    repairInspectionOnly
+                                            ? ResponseObligationVerifier
+                                                    .deterministicRepairInspectionOnlyAnswer()
+                                            : ResponseObligationVerifier
+                                                    .deterministicNoActionAnswer(obligation)),
                             0,
                             summary,
                             retryLoop,
-                            true);
+                            true, AnswerOutputLimit.CLEAR);
                 }
                 return new Result(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        fallbackAnswerIfBlank(mergedAnswer, answer, fallbackCheckpoint),
                         retryLoop.mutatingToolSuccesses(),
                         summary,
-                        retryLoop);
+                        retryLoop, false, mergedAnswer == null || mergedAnswer.isBlank()
+                                ? AnswerOutputLimit.KEEP_ORIGINAL : retryOutputLimit);
             }
 
             if (!retryText.isBlank() && !retryText.equals(answer)) {
@@ -282,9 +362,12 @@ final class MissingMutationRetry {
                         obligation.name(),
                         "FAILED",
                         "retry response still had no " + requiredToolCallLabel(obligation, retryToolNames));
-                return new Result(deterministic, 0, null, null, true);
+                return new Result(
+                        selectDeterministicAnswer(deterministic),
+                        0, null, null, true, AnswerOutputLimit.CLEAR);
             }
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
             LOG.info("Skipping missing-mutation retry because it exceeded the local context budget.");
             LocalTurnTraceCapture.warning("CONTEXT_BUDGET_RETRY_SKIPPED", detail);
@@ -294,13 +377,17 @@ final class MissingMutationRetry {
                     detail,
                     "CONTEXT_BUDGET_RETRY_SKIPPED");
             return new Result(
-                    ResponseObligationVerifier.deterministicContextBudgetRetrySkippedAnswer(
-                            "missing-mutation retry", budget),
+                    selectDeterministicAnswer(
+                            ResponseObligationVerifier
+                                    .deterministicContextBudgetRetrySkippedAnswer(
+                                            "missing-mutation retry", budget)),
                     0,
                     null,
                     null,
-                    true);
+                    true, AnswerOutputLimit.CLEAR);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LOG.warn("Missing-mutation retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         LocalTurnTraceCapture.recordActionObligation(
@@ -308,11 +395,31 @@ final class MissingMutationRetry {
                 "FAILED",
                 "retry failed before " + requiredToolCallLabel(obligation, retryToolNames) + " executed");
         return new Result(
-                ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
+                selectDeterministicAnswer(
+                        ResponseObligationVerifier.deterministicNoActionAnswer(obligation)),
                 0,
                 null,
                 null,
-                true);
+                true, AnswerOutputLimit.CLEAR);
+    }
+
+    private static String fallbackAnswerIfBlank(
+            String selected,
+            String fallback,
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint) {
+        if (selected != null && !selected.isBlank()) return selected;
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                checkpoint,
+                fallback,
+                LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                        .SPECULATIVE_RETRY_EMPTY);
+        return fallback;
+    }
+
+    private static String selectDeterministicAnswer(String answer) {
+        String selected = Objects.toString(answer, "");
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected(selected);
+        return selected;
     }
 
     static List<ToolSpec> toolSpecs(Context ctx, List<String> allowed) {
@@ -458,7 +565,8 @@ final class MissingMutationRetry {
                 original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
                 retry.failureDecision(),
                 mergedOutcomes,
-                mergedReadFileBodies);
+                mergedReadFileBodies, retry.finalAnswerOutputLimitReached(),
+                InspectCompletenessRetry.selectedRetrySynthesisStatus(original, retry));
     }
 
     private static ToolCallLoop.LoopResult continueRemainingExpectedTargetsAfterPartialRetry(
@@ -469,15 +577,40 @@ final class MissingMutationRetry {
             ChatFunction chat,
             List<String> retryToolNames
     ) {
-        List<String> remainingTargets = remainingExpectedTargetsAfterRetry(plan, retryLoop);
-        if (remainingTargets.isEmpty()) return retryLoop;
+        boolean typedWorkspacePlan = plan != null
+                && !plan.workspaceOperationPlan()
+                        .authorizedOperations().isEmpty();
+        List<String> remainingTargets = typedWorkspacePlan
+                ? TurnTaskContractCapture
+                        .pendingContentMutationPredecessorPaths().stream()
+                        .sorted()
+                        .toList()
+                : remainingExpectedTargetsAfterRetry(plan, retryLoop, workspace);
+        boolean workspaceOperationPending = typedWorkspacePlan
+                && TurnTaskContractCapture
+                        .workspaceOperationObligationPending();
+        if (remainingTargets.isEmpty() && !workspaceOperationPending) {
+            return retryLoop;
+        }
         if (ctx == null || ctx.toolCallLoop() == null || chat == null) return retryLoop;
 
-        List<ToolSpec> continuationToolSpecs = toolSpecs(ctx, retryToolNames);
+        List<String> continuationToolNames = typedWorkspacePlan
+                ? toolNames(plan, List.of())
+                : retryToolNames;
+        List<ToolSpec> continuationToolSpecs = toolSpecs(
+                ctx,
+                continuationToolNames);
         if (continuationToolSpecs.isEmpty()) return retryLoop;
-        List<ChatMessage> continuationMessages = remainingExpectedTargetContinuationMessages(
-                plan,
-                remainingTargets);
+        List<ChatMessage> continuationMessages = typedWorkspacePlan
+                ? remainingTypedWorkspacePlanMessages(
+                        plan,
+                        remainingTargets,
+                        workspaceOperationPending)
+                : remainingExpectedTargetContinuationMessages(
+                        plan,
+                        remainingTargets);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult continuation =
                     chat.chat(continuationMessages, plan, continuationToolSpecs);
@@ -488,15 +621,97 @@ final class MissingMutationRetry {
             ToolCallLoop.LoopResult continuationLoop = ctx.toolCallLoop().run(
                     continuationText,
                     continuation.toolCalls(),
+                    continuation.provenance(),
                     new ArrayList<>(continuationMessages),
                     workspace,
                     ctx);
             return mergeEvidence(retryLoop, continuationLoop);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LOG.warn("Remaining expected-target continuation after missing-mutation retry failed: {}",
                     SafeLogFormatter.throwableMessage(e));
             return retryLoop;
         }
+    }
+
+    private static boolean failedBoundWorkspaceOperationAttempt(
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (plan == null
+                || plan.actionObligation()
+                        != ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                || loopResult == null
+                || loopResult.toolOutcomes() == null) {
+            return false;
+        }
+        Optional<WorkspaceOperationPlan> expected =
+                WorkspaceOperationPlanner.authorityPlan(
+                        plan.workspaceOperationPlan());
+        if (expected.isEmpty()) return false;
+        String authorityPlanId = expected.get().authorityPlanId();
+        String operationId = expected.get().operationId();
+        return loopResult.toolOutcomes().stream().anyMatch(outcome -> {
+            if (outcome == null
+                    || outcome.success()
+                    || outcome.denied()
+                    || !outcome.mutating()
+                    || outcome.workspaceOperationPlan() == null) {
+                return false;
+            }
+            WorkspaceOperationPlan observed = outcome.workspaceOperationPlan();
+            return authorityPlanId.equals(observed.authorityPlanId())
+                    && operationId.equals(observed.operationId());
+        });
+    }
+
+    private static List<ChatMessage> remainingTypedWorkspacePlanMessages(
+            CurrentTurnPlan plan,
+            List<String> pendingContentPaths,
+            boolean workspaceOperationPending
+    ) {
+        String request = plan == null || plan.originalUserRequest() == null
+                ? ""
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(plan.originalUserRequest()).strip();
+        String operationTool = plan == null
+                ? ""
+                : String.join(", ", plan.workspaceOperationPlan().toolNames());
+        StringBuilder frame = new StringBuilder();
+        frame.append("[RemainingTypedWorkspaceMutationPlan]\n")
+                .append("The prior bounded retry completed only part of the immutable typed plan.\n");
+        if (!pendingContentPaths.isEmpty()) {
+            frame.append("Pending content predecessor path(s): ")
+                    .append(String.join(", ", pendingContentPaths))
+                    .append('\n')
+                    .append("Complete these exact write/edit mutations first.\n");
+        }
+        if (workspaceOperationPending) {
+            frame.append("Pending exact workspace operation tool: ")
+                    .append(operationTool)
+                    .append('\n')
+                    .append("Call it only after every listed content predecessor succeeds; use the exact stored operands.\n");
+        }
+        if (!request.isBlank()) {
+            frame.append("[CurrentRequest]\n")
+                    .append(request)
+                    .append('\n');
+        }
+        String user = pendingContentPaths.isEmpty()
+                ? "Call the exact pending workspace operation tool now."
+                : workspaceOperationPending
+                        ? "Complete the listed content mutations, then call the exact workspace operation tool."
+                        : "Complete only the listed pending content mutations.";
+        return List.of(
+                ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT),
+                ChatMessage.system(frame.toString()),
+                ChatMessage.user(user));
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     private static List<ChatMessage> remainingExpectedTargetContinuationMessages(
@@ -505,7 +720,7 @@ final class MissingMutationRetry {
     ) {
         String request = plan == null || plan.originalUserRequest() == null
                 ? ""
-                : plan.originalUserRequest().strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(plan.originalUserRequest()).strip();
         String targets = String.join(", ", remainingTargets);
         StringBuilder frame = new StringBuilder();
         frame.append("[RemainingExpectedTargetsAfterMutationRetry]\n")
@@ -529,41 +744,44 @@ final class MissingMutationRetry {
 
     private static List<String> remainingExpectedTargetsAfterRetry(
             CurrentTurnPlan plan,
-            ToolCallLoop.LoopResult retryLoop
+            ToolCallLoop.LoopResult retryLoop,
+            Path workspace
     ) {
         TaskContract contract = plan == null ? null : plan.taskContract();
         if (contract == null || contract.expectedTargets().isEmpty()) return List.of();
         if (retryLoop == null || retryLoop.mutatingToolSuccesses() <= 0) return List.of();
 
         Set<String> satisfied = new LinkedHashSet<>();
+        List<String> mutatedPaths = new java.util.ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : retryLoop.toolOutcomes()) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
             WorkspaceOperationPlan operationPlan = outcome.workspaceOperationPlan();
             if (operationPlan != null && !operationPlan.pathEffects().isEmpty()) {
                 for (WorkspaceOperationPlan.PathEffect effect : operationPlan.pathEffects()) {
                     addSatisfiedExpectedTarget(satisfied, effect.path());
+                    // Path effects are stored normalized, so they reach identity only where that is lossless.
+                    if (WorkspacePathIdentity.normalizedSpellingIsLossless()) mutatedPaths.add(effect.path());
                 }
             } else {
                 addSatisfiedExpectedTarget(satisfied, outcome.pathHint());
+                mutatedPaths.add(outcome.pathHint());
             }
         }
         return orderedExpectedTargets(contract).stream()
-                .filter(target -> !satisfied.contains(expectedTargetKey(target)))
+                .filter(target -> !satisfied.contains(ToolCallSupport.normalizePath(target)))
+                .filter(target -> mutatedPaths.stream()
+                        .noneMatch(path -> WorkspacePathIdentity.matches(workspace, target, path)))
                 .toList();
     }
 
     private static void addSatisfiedExpectedTarget(Set<String> satisfied, String path) {
-        String key = expectedTargetKey(path);
+        String key = ToolCallSupport.normalizePath(path);
         if (key.isBlank()) return;
         satisfied.add(key);
         int slash = key.lastIndexOf('/');
         if (slash >= 0 && slash + 1 < key.length()) {
             satisfied.add(key.substring(slash + 1));
         }
-    }
-
-    private static String expectedTargetKey(String path) {
-        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static List<String> failedMutatingToolTargets(ToolCallLoop.LoopResult retryLoop) {
@@ -583,9 +801,28 @@ final class MissingMutationRetry {
 
     private static List<String> toolNames(CurrentTurnPlan plan, List<ChatMessage> messages) {
         TaskContract contract = plan == null ? null : plan.taskContract();
-        Optional<WorkspaceOperationIntent.Intent> workspaceOperation = WorkspaceOperationIntent.detect(contract);
-        if (workspaceOperation.isPresent()) {
-            return workspaceOperation.get().toolNames();
+        if (plan != null
+                && plan.actionObligation()
+                        == ActionObligation.WORKSPACE_OPERATION_REQUIRED
+                && !plan.workspaceOperationPlan()
+                        .authorizedOperations().isEmpty()) {
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            boolean capturePresent = TurnTaskContractCapture.getResolution()
+                    != null;
+            boolean contentPending = capturePresent
+                    ? !TurnTaskContractCapture
+                            .pendingContentMutationPredecessorPaths().isEmpty()
+                    : !plan.contentMutationPredecessorPaths().isEmpty();
+            if (contentPending) {
+                names.add("talos.write_file");
+                names.add("talos.edit_file");
+            }
+            if (!capturePresent
+                    || TurnTaskContractCapture
+                            .workspaceOperationObligationPending()) {
+                names.addAll(plan.workspaceOperationPlan().toolNames());
+            }
+            return List.copyOf(names);
         }
         if (StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract)) {
             return List.of("talos.write_file");
@@ -629,17 +866,23 @@ final class MissingMutationRetry {
                 .toList();
     }
 
-    private static ToolSpec compactMutationRetryToolSpec(ToolSpec spec) {
+    /**
+     * Compact retry specs stay small for token budget, but must keep the
+     * T1007 grammar floor: llama.cpp compiles minLength into the sampling
+     * grammar, and the retry is exactly where empty old_string failures
+     * concentrate. Package-private for the regression test.
+     */
+    static ToolSpec compactMutationRetryToolSpec(ToolSpec spec) {
         if (spec == null) return null;
         return switch (spec.name()) {
             case "talos.write_file" -> new ToolSpec(
                     "talos.write_file",
                     "Write file.",
-                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
             case "talos.edit_file" -> new ToolSpec(
                     "talos.edit_file",
-                    "Edit exact text.",
-                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_string\":{\"type\":\"string\"},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
+                    "Edit exact text. To append or insert, set old_string to an existing anchor line and new_string to that line plus the added text.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"old_string\":{\"type\":\"string\",\"minLength\":1},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
             default -> spec;
         };
     }
@@ -782,7 +1025,8 @@ final class MissingMutationRetry {
     ) {
         TaskContract contract = plan == null ? TaskContract.unknown("") : plan.taskContract();
         ActionObligation obligation = plan == null ? ActionObligation.UNKNOWN : plan.actionObligation();
-        String request = plan == null ? "" : Objects.toString(plan.originalUserRequest(), "");
+        String request = plan == null ? "" : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(
+                Objects.toString(plan.originalUserRequest(), ""));
         List<String> allowedTools = retryToolSpecs == null || retryToolSpecs.isEmpty()
                 ? (fallbackToolNames == null || fallbackToolNames.isEmpty()
                 ? List.of("talos.write_file", "talos.edit_file")
@@ -887,6 +1131,7 @@ final class MissingMutationRetry {
 
     private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
         return message != null
+                && "system".equals(message.role())
                 && message.content() != null
                 && message.content().startsWith("[Static verification repair context]");
     }
@@ -971,22 +1216,22 @@ final class MissingMutationRetry {
         if (priorMutationRequest != null && !priorMutationRequest.isBlank()
                 && !Objects.equals(priorMutationRequest, userRequest)) {
             return "The current user message is a retry/repair follow-up:\n\n«"
-                    + pinForRetryPrompt(userRequest)
+                    + pinForRetryPrompt(RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest))
                     + "»\n\n"
                     + "The previous mutation request to reissue is:\n\n«"
                     + pinForRetryPrompt(priorMutationRequest)
                     + "»\n\n";
         }
         return "The user's request was:\n\n«"
-                + pinForRetryPrompt(userRequest)
+                + pinForRetryPrompt(RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest))
                 + "»\n\n";
     }
 
     private static String mutationRetryInstruction(
+            CurrentTurnPlan plan,
             ActionObligation obligation,
             String userRequest,
-            String priorMutationRequest,
-            List<String> retryToolNames
+            String priorMutationRequest
     ) {
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             return "Review/fix retry. "
@@ -995,12 +1240,30 @@ final class MissingMutationRetry {
                     + "If none, answer exactly: No file change is required.";
         }
         if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
-            String tools = retryToolNames == null || retryToolNames.isEmpty()
+            List<String> operationTools = plan == null
+                    ? List.of()
+                    : plan.workspaceOperationPlan().toolNames();
+            String tools = operationTools.isEmpty()
                     ? "the visible workspace operation tool"
-                    : String.join(", ", retryToolNames);
-            return "Retry required: the previous model response did not issue the required workspace operation tool call. "
+                    : String.join(", ", operationTools);
+            List<String> pendingContent = plan == null
+                    ? List.of()
+                    : (TurnTaskContractCapture.getResolution() == null
+                            ? plan.contentMutationPredecessorPaths()
+                            : TurnTaskContractCapture
+                                    .pendingContentMutationPredecessorPaths()
+                                    .stream()
+                                    .sorted()
+                                    .toList());
+            String orderedContent = pendingContent.isEmpty()
+                    ? ""
+                    : "First complete the required write/edit mutation for "
+                            + String.join(", ", pendingContent)
+                            + ". Only after those exact mutations succeed, ";
+            return "Retry required: the previous model response did not complete the typed mutation plan. "
                     + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                    + "Call " + tools + ". Do not emulate move, copy, rename, or mkdir by writing/editing file content. "
+                    + orderedContent
+                    + "call " + tools + ". Do not emulate move, copy, rename, mkdir, or delete by writing/editing file content. "
                     + "If impossible, name the operation target and reason in one sentence.";
         }
         return "Retry required: the previous model response did not issue required write/edit tool calls. "
@@ -1014,19 +1277,44 @@ final class MissingMutationRetry {
                 .equals(retryContract.classificationReason());
     }
 
-    private static String previousMutationUserRequest(List<ChatMessage> messages, String latestUserRequest) {
-        if (messages == null || messages.isEmpty()) return null;
-        boolean skippedLatest = false;
-        for (int i = messages.size() - 1; i >= 0; i--) {
+    private static String capturedCurrentRequestBoundary(TaskContract retryContract) {
+        if (retryContract == null
+                || !retryShouldReissuePriorMutationRequest(retryContract)) {
+            return null;
+        }
+        String canonicalRequest = retryContract.originalUserRequest();
+        if (canonicalRequest == null || canonicalRequest.isBlank()) return null;
+        String marker = "\n\nRepair follow-up: ";
+        int markerStart = canonicalRequest.lastIndexOf(marker);
+        if (markerStart < 0) return null;
+        String currentRequest =
+                canonicalRequest.substring(markerStart + marker.length()).strip();
+        return currentRequest.isBlank() ? null : currentRequest;
+    }
+
+    private static String previousMutationUserRequest(
+            List<ChatMessage> messages,
+            String currentUserRequest
+    ) {
+        if (messages == null
+                || messages.isEmpty()
+                || currentUserRequest == null
+                || currentUserRequest.isBlank()) {
+            return null;
+        }
+        int currentRequestIndex =
+                TurnTaskContractCapture.currentUserBoundaryIndex(messages);
+        if (currentRequestIndex < 0) return null;
+        ChatMessage capturedBoundary = messages.get(currentRequestIndex);
+        if (!Objects.equals(capturedBoundary.content(), currentUserRequest)) {
+            return null;
+        }
+        for (int i = currentRequestIndex - 1; i >= 0; i--) {
             ChatMessage message = messages.get(i);
             if (message == null || !"user".equals(message.role())) continue;
             String content = message.content();
             if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
             if (content == null || content.isBlank()) continue;
-            if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
-                skippedLatest = true;
-                continue;
-            }
             TaskContract prior = TaskContractResolver.fromUserRequest(content);
             if (prior.mutationAllowed()) {
                 return content;

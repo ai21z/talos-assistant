@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
+import dev.talos.core.io.AtomicFileWriter;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,11 +9,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.UserDefinedFileAttributeView;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Tests for {@link FileEditTool}.
@@ -55,6 +60,44 @@ class FileEditToolTest {
         assertEquals("talos.edit_file", tool.name());
         assertNotNull(tool.descriptor().parametersSchema());
         assertEquals(ToolRiskLevel.WRITE, tool.descriptor().riskLevel());
+    }
+
+    /**
+     * T1007: llama.cpp compiles tool JSON schemas into the sampling grammar,
+     * including string minLength, so a non-empty floor on old_string and path
+     * makes the observed weak-model failure shape (old_string of 0 bytes)
+     * unproducible at the sampler on the managed backend. new_string stays
+     * unconstrained because an empty replacement is a legitimate deletion.
+     */
+    @Test
+    void schemaForbidsEmptyOldStringAndPathAtTheGrammarLevel() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var schema = mapper.readTree(tool.descriptor().parametersSchema());
+        var props = schema.get("properties");
+
+        assertEquals(1, props.get("old_string").path("minLength").asInt(-1),
+                "old_string must carry minLength 1 so the grammar forbids the empty string");
+        assertEquals(1, props.get("path").path("minLength").asInt(-1),
+                "path must carry minLength 1");
+        assertTrue(props.get("new_string").path("minLength").isMissingNode(),
+                "new_string must stay unconstrained; empty replacement is a legitimate deletion");
+    }
+
+    /**
+     * T1007: an append has no old text to replace, so the tool must teach the
+     * anchor idiom, otherwise weak models encode append as an empty old_string.
+     */
+    @Test
+    void descriptionAndSchemaTeachTheAppendAnchorIdiom() {
+        String description = tool.description().toLowerCase(java.util.Locale.ROOT);
+        String schemaDoc = tool.descriptor().parametersSchema().toLowerCase(java.util.Locale.ROOT);
+
+        assertTrue(description.contains("anchor line"),
+                "description must teach the append anchor idiom: " + tool.description());
+        assertTrue(description.contains("append"),
+                "description must name the append case: " + tool.description());
+        assertTrue(schemaDoc.contains("anchor line"),
+                "old_string schema description must teach the anchor idiom");
     }
 
     // ── Happy paths ─────────────────────────────────────────────────
@@ -122,6 +165,91 @@ class FileEditToolTest {
     }
 
     @Test
+    void replaceMultiLineBlockCopiedFromReadFileOnCrLfFile() throws IOException {
+        Files.writeString(workspace.resolve("windows.txt"),
+                "alpha\r\nbeta\r\ngamma\r\n");
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), "CRLF file should accept LF text shown by read_file: " + r.errorMessage());
+        assertEquals("alpha\r\nBETA\r\ngamma\r\n", Files.readString(workspace.resolve("windows.txt")));
+    }
+
+    @Test
+    void normalizedCrLfMatchRejectsByteIdenticalReplacement() throws IOException {
+        Path file = workspace.resolve("windows-noop.txt");
+        String original = "alpha\r\nbeta\r\ngamma\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-noop.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\r\nbeta"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        assertTrue(r.errorMessage().contains("no change"), r.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
+    void normalizedCrLfMatchesStillRejectAmbiguousOldString() throws IOException {
+        Path file = workspace.resolve("windows-dupes.txt");
+        String original = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-dupes.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        assertTrue(r.errorMessage().contains("2 times"), r.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
+    void mixedRawAndNormalizedEquivalentMatchesAreAmbiguousAndPreserveBytes() throws IOException {
+        Path file = workspace.resolve("mixed-dupes.txt");
+        String original = "alpha\nbeta\n---\nalpha\r\nbeta\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "mixed-dupes.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult result = tool.execute(call, ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("2 times"), result.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
+    void replaceMultiLineBlockCopiedFromReadFileOnCrOnlyFile() throws IOException {
+        Files.writeString(workspace.resolve("classic.txt"),
+                "alpha\rbeta\rgamma\r");
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "classic.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), "CR-only file should preserve CR line endings: " + r.errorMessage());
+        assertEquals("alpha\rBETA\rgamma\r", Files.readString(workspace.resolve("classic.txt")));
+    }
+
+    @Test
     void deleteByReplacingWithEmpty() throws IOException {
         ToolCall call = new ToolCall("talos.edit_file", Map.of(
                 "path", "config.yaml",
@@ -132,6 +260,20 @@ class FileEditToolTest {
         assertTrue(r.success());
         String content = Files.readString(workspace.resolve("config.yaml"));
         assertFalse(content.contains("debug"));
+    }
+
+    @Test
+    void normalizedDeletionEndingAtEofPreservesCrLf() throws IOException {
+        Path file = workspace.resolve("windows-delete.txt");
+        Files.writeString(file, "alpha\r\nbeta\r\n");
+
+        ToolResult result = tool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-delete.txt",
+                "old_string", "beta\n",
+                "new_string", "")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("alpha\r\n", Files.readString(file));
     }
 
     @Test
@@ -338,6 +480,124 @@ class FileEditToolTest {
         assertEquals(ToolError.INTERNAL_ERROR, r.error().code());
     }
 
+    @Test
+    void concurrentChangeBeforePromotionIsPreservedAndReportedAsStale() throws IOException {
+        Path target = workspace.resolve("race.txt");
+        Files.writeString(target, "status=old\n");
+        AtomicFileWriter racingWriter = new AtomicFileWriter((stage, ignoredTarget, ignoredTemp) -> {
+            if (stage == AtomicFileWriter.FaultStage.BEFORE_PREIMAGE_RECHECK) {
+                Files.writeString(target, "status=concurrent\n");
+            }
+        });
+        FileEditTool racingTool = new FileEditTool(racingWriter);
+
+        ToolResult result = racingTool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "race.txt",
+                "old_string", "status=old",
+                "new_string", "status=new")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
+        assertTrue(result.errorMessage().contains("stale preimage"));
+        assertEquals("status=concurrent\n", Files.readString(target));
+        try (var paths = Files.list(workspace)) {
+            assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));
+        }
+    }
+
+    @Test
+    void editPreservesExactUserDefinedAttributeBytes() throws IOException {
+        Path target = workspace.resolve("metadata.txt");
+        Files.writeString(target, "status=old\n");
+        UserDefinedFileAttributeView view = userDefinedView(target);
+        assumeTrue(view != null, "user-defined attributes are unsupported");
+        byte[] binary = { 0, 2, (byte) 0xff, 3 };
+        assertEquals(binary.length, view.write(
+                "talos_edit_metadata_probe",
+                ByteBuffer.wrap(binary)));
+        assertEquals(0, view.write("talos_edit_empty_probe", ByteBuffer.allocate(0)));
+
+        ToolResult result = tool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "metadata.txt",
+                "old_string", "status=old",
+                "new_string", "status=new")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("status=new\n", Files.readString(target));
+        assertArrayEquals(
+                binary,
+                readUserDefinedAttribute(
+                        userDefinedView(target),
+                        "talos_edit_metadata_probe"));
+        assertArrayEquals(
+                new byte[0],
+                readUserDefinedAttribute(
+                        userDefinedView(target),
+                        "talos_edit_empty_probe"));
+    }
+
+    @Test
+    void committedUnverifiedEditIsNotDescribedAsAnUnchangedTarget() throws IOException {
+        Path target = workspace.resolve("post-commit.txt");
+        Files.writeString(target, "status=old\n");
+        AtomicFileWriter failingWriter = new AtomicFileWriter((stage, ignoredTarget, ignoredTemp) -> {
+            if (stage == AtomicFileWriter.FaultStage.AFTER_PROMOTION) {
+                throw new IOException("PRIVATE_POST_COMMIT_EDIT_CANARY");
+            }
+        });
+        FileEditTool failingTool = new FileEditTool(failingWriter);
+
+        ToolResult result = failingTool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "post-commit.txt",
+                "old_string", "status=old",
+                "new_string", "status=new")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
+        assertTrue(result.errorMessage().contains("committed"), result.errorMessage());
+        assertFalse(result.errorMessage().contains("PRIVATE_POST_COMMIT_EDIT_CANARY"));
+        assertEquals(java.util.List.of("post-commit.txt"), result.mutationEffects().appliedPaths());
+        assertTrue(result.mutationEffects().uncertainPaths().isEmpty());
+        assertEquals("status=new\n", Files.readString(target));
+        try (var paths = Files.list(workspace)) {
+            assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));
+        }
+    }
+
+    @Test
+    void malformedUtf8StillFailsWithoutChangingTheOriginalBytes() throws IOException {
+        Path target = workspace.resolve("malformed.txt");
+        byte[] malformed = { (byte) 0xc3, (byte) 0x28 };
+        Files.write(target, malformed);
+
+        ToolResult result = tool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "malformed.txt",
+                "old_string", "(",
+                "new_string", "replacement")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
+        assertArrayEquals(malformed, Files.readAllBytes(target));
+    }
+
+    @Test
+    void unmappableUtf16ReplacementFailsBeforeChangingTheTarget() throws IOException {
+        Path target = workspace.resolve("unmappable.txt");
+        Files.writeString(target, "status=old\n");
+
+        ToolResult result = tool.execute(new ToolCall("talos.edit_file", Map.of(
+                "path", "unmappable.txt",
+                "old_string", "status=old",
+                "new_string", "status=\ud800")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
+        assertEquals("status=old\n", Files.readString(target));
+        try (var paths = Files.list(workspace)) {
+            assertTrue(paths.noneMatch(path -> path.getFileName().toString().startsWith(".talos-atomic-")));
+        }
+    }
+
     // ── countOccurrences unit tests ─────────────────────────────────
 
     @Test
@@ -359,6 +619,29 @@ class FileEditToolTest {
     void countOccurrences_emptyInputs() {
         assertEquals(0, FileEditTool.countOccurrences("", "x"));
         assertEquals(0, FileEditTool.countOccurrences("x", ""));
+    }
+
+    private static UserDefinedFileAttributeView userDefinedView(Path target) {
+        return Files.getFileAttributeView(
+                target,
+                UserDefinedFileAttributeView.class,
+                LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static byte[] readUserDefinedAttribute(
+            UserDefinedFileAttributeView view,
+            String name
+    ) throws IOException {
+        if (view == null) {
+            throw new IOException("user-defined attribute view is unavailable");
+        }
+        int size = view.size(name);
+        ByteBuffer value = ByteBuffer.allocate(size);
+        int read = view.read(name, value);
+        if (read != size || value.position() != size) {
+            throw new IOException("user-defined attribute read was incomplete");
+        }
+        return value.array();
     }
 }
 

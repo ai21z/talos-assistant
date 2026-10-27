@@ -3,9 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
-import dev.talos.runtime.policy.ActionObligation;
-import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
@@ -24,6 +22,8 @@ final class NoToolGroundingRetry {
         LlmClient.StreamResult chat(List<ChatMessage> messages) throws Exception;
     }
 
+    record Result(String answer, AnswerOutputLimit outputLimit) {}
+
     static String retryIfNeeded(
             String answer,
             CurrentTurnPlan plan,
@@ -31,13 +31,14 @@ final class NoToolGroundingRetry {
             Context ctx,
             ChatFunction chat
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (answer.length() < NoToolAnswerTruthfulnessGuard.UNGROUNDED_MIN_CHARS) return answer;
-        if (ctx == null || ctx.llm() == null || chat == null) return answer;
-        if (isDirectAnswerOnlyTurn(plan)) return answer;
+        return selectRetryIfNeeded(answer, plan, messages, ctx, chat).answer();
+    }
 
-        String userRequest = latestUserRequest(plan, messages);
-        if (!NoToolAnswerTruthfulnessGuard.looksLikeEvidenceRequest(userRequest)) return answer;
+    static Result selectRetryIfNeeded(String answer, CurrentTurnPlan plan, List<ChatMessage> messages,
+                                     Context ctx, ChatFunction chat) {
+        if (ctx == null || ctx.llm() == null || chat == null) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (!NoToolAnswerTruthfulnessGuard.shouldAppendStreamingGroundingAnnotation(answer, plan, messages))
+            return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
 
         LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
                 + "user asked for evidence. Re-prompting once.", answer.length());
@@ -45,20 +46,53 @@ final class NoToolGroundingRetry {
         messages.add(ChatMessage.assistant(answer));
         messages.add(ChatMessage.user(correctionPrompt()));
 
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult retry = chat.chat(messages);
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
                 LOG.info("Grounding retry produced a different answer ({} → {} chars)",
                         answer.length(), retryText.length());
-                return retryText;
+                return new Result(retryText, AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    retryText == null || retryText.isBlank()
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
             LOG.warn("Grounding retry did not produce a substantive new answer. "
                     + "Annotating original.");
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_FAILED);
             LOG.warn("Grounding retry failed: {}. Annotating original.", SafeLogFormatter.throwableMessage(e));
         }
-        return NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION + answer;
+        String annotated = NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION + answer;
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                annotated,
+                LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+        return new Result(annotated, AnswerOutputLimit.KEEP_ORIGINAL);
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
+    }
+
+    private static void restoreOriginalCandidate(
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint,
+            String answer,
+            LocalTurnTraceCapture.AnswerCandidateRestorationReason reason) {
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
     }
 
     static String correctionPrompt() {
@@ -69,26 +103,4 @@ final class NoToolGroundingRetry {
                 + "contents. Do not describe files you have not read.";
     }
 
-    private static String latestUserRequest(CurrentTurnPlan plan, List<ChatMessage> messages) {
-        if (plan != null
-                && plan.originalUserRequest() != null
-                && !plan.originalUserRequest().isBlank()) {
-            return plan.originalUserRequest();
-        }
-        if (messages == null || messages.isEmpty()) return null;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if (message == null || !"user".equals(message.role())) continue;
-            String content = message.content();
-            if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
-            return content == null || content.isBlank() ? null : content;
-        }
-        return null;
-    }
-
-    private static boolean isDirectAnswerOnlyTurn(CurrentTurnPlan plan) {
-        if (plan == null) return false;
-        return plan.actionObligation() == ActionObligation.DIRECT_ANSWER_ONLY
-                || plan.taskContract().type() == TaskType.SMALL_TALK;
-    }
 }

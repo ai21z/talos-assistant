@@ -1,5 +1,7 @@
 package dev.talos.runtime;
 
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
+import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRiskLevel;
 
@@ -62,6 +64,15 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
         if (risk == ToolRiskLevel.DESTRUCTIVE) {
             return Decision.ASK; // never auto - invariant
         }
+        // A typed workspace operation binds multiple policy, approval,
+        // checkpoint, execution, verification, and trace facts to one exact
+        // call. Session-wide write memory is intentionally too broad for that
+        // authority unit, so every such operation keeps a once-only gate.
+        // Command execution is a separate capability and must never borrow
+        // this file-write memory through an unused path parameter either.
+        if (requiresOnceOnlyApproval(call)) {
+            return Decision.ASK;
+        }
         // WRITE - consider remember flag only for in-workspace, non-sensitive targets.
         if (rememberInWorkspaceWrites.get()
                 && isInWorkspace(workspace, call)
@@ -78,9 +89,15 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
         // writes for the whole session.
         if (risk == null || risk == ToolRiskLevel.READ_ONLY) return;
         if (risk == ToolRiskLevel.DESTRUCTIVE) return;
+        if (requiresOnceOnlyApproval(call)) return;
         if (!isInWorkspace(workspace, call)) return;
         if (isSensitiveTarget(workspace, call)) return;
         rememberInWorkspaceWrites.set(true);
+    }
+
+    private static boolean requiresOnceOnlyApproval(ToolCall call) {
+        return call != null && (CommandToolPlanner.isRunCommandTool(call.toolName())
+                || WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName()));
     }
 
     /** @return true if the call's target path is non-blank and resolves inside {@code workspace}. */

@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class TalosKnowledgeEnginePrivacyTest {
 
@@ -45,6 +46,39 @@ class TalosKnowledgeEnginePrivacyTest {
                 "TalosKnowledgeEngine.index must route through the RagService private-mode indexing guard");
         assertNull(engine.ragService().getIndexer().getLastRunStats(),
                 "direct Indexer execution would populate run stats even when private-mode RAG is disabled");
+    }
+
+    @Test
+    void fullReindexStillRespectsPrivateModeGuard() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "private workspace note");
+        TalosKnowledgeEngine engine = new TalosKnowledgeEngine(privateRagDisabledConfig());
+        lastIndexDir = engine.ragService().getIndexer().indexDirFor(workspace);
+        engine.reindex(workspace);
+        assertNull(engine.ragService().getIndexer().getLastRunStats());
+        assertFalse(Files.exists(engine.ragService().getIndexer().policyMetadataFile(workspace)));
+    }
+
+    @Test
+    void fullReindexRebuildsUnchangedFileWhileIndexRemainsIncremental() throws Exception {
+        String previousHome = System.getProperty("user.home");
+        Path isolatedHome = Files.createDirectory(workspace.resolve("test-home"));
+        System.setProperty("user.home", isolatedHome.toString());
+        try {
+            Files.writeString(workspace.resolve("notes.md"), "unchanged workspace note");
+            Config cfg = privateRagDisabledConfig();
+            ProtectedReadScopePolicy.setPrivateMode(cfg, false);
+            TalosKnowledgeEngine engine = new TalosKnowledgeEngine(cfg);
+            engine.index(workspace);
+            assertEquals(1, engine.ragService().getIndexer().getLastRunStats().getFilesEmbedded());
+            engine.index(workspace);
+            assertEquals(0, engine.ragService().getIndexer().getLastRunStats().getFilesEmbedded());
+            engine.reindex(workspace);
+            assertEquals(1, engine.ragService().getIndexer().getLastRunStats().getFilesEmbedded());
+            assertEquals(0, engine.ragService().getIndexer().getLastRunStats().getFilesSkipped());
+        } finally {
+            if (previousHome == null) System.clearProperty("user.home");
+            else System.setProperty("user.home", previousHome);
+        }
     }
 
     @SuppressWarnings("unchecked")

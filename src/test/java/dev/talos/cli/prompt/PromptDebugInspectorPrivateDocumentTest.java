@@ -38,7 +38,7 @@ class PromptDebugInspectorPrivateDocumentTest {
     @Test
     void provider_body_json_redacts_private_document_fact_canaries() {
         PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
-                "OLLAMA_HTTP_BODY",
+                "COMPAT_CHAT_HTTP_BODY",
                 "llama_cpp",
                 "gpt-oss:20b",
                 false,

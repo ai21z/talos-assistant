@@ -8,6 +8,7 @@ import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.spi.types.ChatMessage;
@@ -139,13 +140,15 @@ class RolefulIntentRecoveryRegressionTest {
     }
 
     @Test
-    void asNeededTargetIsOptionalAndDoesNotDriveMutationProgress() {
+    void asNeededTargetIsTypedButFailsClosedUntilT1202() {
         String prompt = "Update index.html and scripts.js for the synthwave band site. "
                 + "Adjust styles.css as needed.";
 
-        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TaskResolution resolution =
+                TaskContractResolver.resolveFromUserRequest(prompt);
+        TaskContract contract = resolution.contract();
         TurnPolicyTrace trace = TurnPolicyTrace.from(
-                contract,
+                resolution,
                 "APPLY",
                 ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
                 List.of());
@@ -156,18 +159,37 @@ class RolefulIntentRecoveryRegressionTest {
         assertEquals(Set.of("index.html", "scripts.js"), contract.expectedTargets());
         assertFalse(contract.expectedTargets().contains("styles.css"));
         assertTrue(contract.forbiddenTargets().isEmpty());
-        assertEquals("MAY_MUTATE", roleFor(trace, "styles.css"));
-        assertEquals("optional-mutation-target", reasonFor(trace, "styles.css"));
+        assertEquals("MENTIONED_ONLY", roleFor(trace, "styles.css"));
+        assertEquals(
+                "optional-mutation-target",
+                reasonFor(trace, "styles.css"));
+        var styleDecision = resolution.sequentialMutationPlan()
+                .effectiveDecision("styles.css")
+                .orElseThrow();
+        assertEquals(
+                dev.talos.runtime.intent.SequentialMutationClausePlan
+                        .Authority.OPTIONAL,
+                styleDecision.authority());
+        assertEquals(
+                styleDecision.sourceText(),
+                prompt.substring(
+                        styleDecision.startOffset(),
+                        styleDecision.endOffset()));
+        assertTrue(trace.lexicalDecisions().stream().anyMatch(decision ->
+                "styles.css".equals(decision.path())
+                        && "OPTIONAL".equals(decision.authority())));
         assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
     }
 
     @Test
-    void commaSeparatedAsNeededTargetOnlyOptionalizesQualifiedFile() {
+    void commaSeparatedAsNeededTargetDoesNotGainTransientAuthority() {
         String prompt = "Update index.html and scripts.js, adjust styles.css as needed.";
 
-        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TaskResolution resolution =
+                TaskContractResolver.resolveFromUserRequest(prompt);
+        TaskContract contract = resolution.contract();
         TurnPolicyTrace trace = TurnPolicyTrace.from(
-                contract,
+                resolution,
                 "APPLY",
                 ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
                 List.of());
@@ -175,7 +197,14 @@ class RolefulIntentRecoveryRegressionTest {
         assertEquals(Set.of("index.html", "scripts.js"), contract.expectedTargets());
         assertEquals("MUST_MUTATE", roleFor(trace, "index.html"));
         assertEquals("MUST_MUTATE", roleFor(trace, "scripts.js"));
-        assertEquals("MAY_MUTATE", roleFor(trace, "styles.css"));
+        assertEquals("MENTIONED_ONLY", roleFor(trace, "styles.css"));
+        assertEquals(
+                dev.talos.runtime.intent.SequentialMutationClausePlan
+                        .Authority.OPTIONAL,
+                resolution.sequentialMutationPlan()
+                        .effectiveDecision("styles.css")
+                        .orElseThrow()
+                        .authority());
     }
 
     @Test

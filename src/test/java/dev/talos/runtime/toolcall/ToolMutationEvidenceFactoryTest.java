@@ -6,6 +6,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,9 +41,11 @@ class ToolMutationEvidenceFactoryTest {
     @Test
     void fullWriteCallReturnsFullReplacementEvidenceWhenCompleteReadbackExists() {
         LoopState state = loopState();
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=README.md;",
-                "1 | # Old\n2 | Body\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Old\n2 | Body\n"));
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "README.md",
                 "content", "# New\nBody\n"));
@@ -58,9 +61,11 @@ class ToolMutationEvidenceFactoryTest {
     @Test
     void fullWriteCallWithoutCompleteReadbackReturnsNoEvidence() {
         LoopState state = loopState();
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=README.md;",
-                "1 | # Old\n... (output truncated)\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Old\n... (output truncated)\n"));
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "README.md",
                 "content", "# New\n"));

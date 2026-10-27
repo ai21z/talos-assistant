@@ -24,22 +24,27 @@ public final class ReadEvidenceStateAccounting {
         String output = result.output() == null ? "" : result.output();
         if (isReadFileTool(call) && pathHint != null) {
             recordSuccessfulReadFile(state, pathHint);
-            state.readFileBodiesThisTurn.put(
-                    ToolCallSupport.normalizePath(pathHint),
-                    output);
             TurnSourceEvidenceCapture.recordRead(pathHint);
         }
         if (ToolCallSupport.isReadOnlyTool(call.toolName())) {
-            String readSignature = ToolCallSupport.buildReadCallSignature(call);
-            state.successfulReadCalls.put(readSignature, ToolCallSupport.truncateForLog(result.output()));
-            state.successfulReadCallBodies.put(readSignature, output);
+            // T1013: the ledger is the single evidence store. The effective
+            // pathHint (the path execution actually used) owns identity;
+            // the raw call is preserved on the entry for trace/debug and
+            // identical-call redundancy only.
+            state.readEvidence.record(call, pathHint, output);
+            TurnReadCallRegister.record(call, output);
         }
     }
 
+    /**
+     * Prior read evidence stops being reusable as mutation evidence.
+     * Whole-turn path-keyed views (redaction, read-display containment,
+     * the end-of-turn export) intentionally keep seeing the entries.
+     */
     public static void clearSuccessfulReadCaches(LoopState state) {
         if (state == null) return;
-        state.successfulReadCalls.clear();
-        state.successfulReadCallBodies.clear();
+        state.readEvidence.invalidateReusableEvidence();
+        TurnReadCallRegister.invalidate();
     }
 
     static boolean isReadFileTool(ToolCall call) {

@@ -3,15 +3,19 @@ package dev.talos.runtime.policy;
 import dev.talos.core.Config;
 import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.SessionApprovalPolicy;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRiskLevel;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -19,6 +23,11 @@ class PermissionPolicyTest {
 
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearCurrentTurnAuthority() {
+        TurnTaskContractCapture.clear();
+    }
 
     @Test
     void denyBeatsAskAndAllow() {
@@ -121,6 +130,201 @@ class PermissionPolicyTest {
     }
 
     @Test
+    void explicitDenyRuleMatchesCanonicalReadAlias() {
+        Config cfg = configWithRules(List.of(
+                rule("deny", List.of("talos.read_file"), List.of("READ_ONLY"), List.of("INSPECT"), List.of("README.md"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("file_read", Map.of("path", "README.md")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("CONFIG_DENY", decision.reasonCode());
+    }
+
+    @Test
+    void protectedReadAliasAsksWithoutRemembering() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(new Config(null),
+                new ToolCall("file_read", Map.of("path", ".env")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("PROTECTED_PATH_ASK", decision.reasonCode());
+        assertFalse(decision.rememberEligible());
+    }
+
+    @Test
+    void explicitDenyRuleAppliesToCopyDestinationResource() {
+        Config cfg = configWithRules(List.of(
+                rule("deny", List.of("talos.copy_path"), List.of("WRITE"), List.of("APPLY"), List.of("blocked/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = withWorkspaceAuthority(
+                "Copy README.md to blocked/copy.md.",
+                () -> policy.decide(request(cfg,
+                        new ToolCall("talos.copy_path", Map.of(
+                                "from", "README.md",
+                                "to", "blocked/copy.md")),
+                        ToolRiskLevel.WRITE,
+                        ExecutionPhase.APPLY)));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("CONFIG_DENY", decision.reasonCode());
+        assertEquals("blocked/copy.md", decision.relativePath());
+    }
+
+    @Test
+    void permissionRulesClassifyBatchArgumentsWithoutCreatingTypedAuthority() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.apply_workspace_batch"), List.of("WRITE"), List.of("APPLY"),
+                        List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        ToolCall call = new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"allowed/one"},
+                          {"op":"mkdir","path":"outside/two"}
+                        ]
+                        """));
+        TurnTaskContractCapture.clear();
+        assertEquals(
+                TurnTaskContractCapture.WorkspaceAuthorization.NO_TYPED_AUTHORITY,
+                TurnTaskContractCapture.authorizeWorkspaceOperation(call));
+        PermissionDecision decision = policy.decide(request(cfg,
+                call,
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("DEFAULT_WRITE_ASK", decision.reasonCode());
+        assertEquals("allowed/one", decision.relativePath());
+    }
+
+    @Test
+    void configAllowClassifiesCoveredBatchWithoutCreatingTypedAuthority() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.apply_workspace_batch"), List.of("WRITE"), List.of("APPLY"),
+                        List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        ToolCall call = new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"allowed/one"},
+                          {"op":"mkdir","path":"allowed/two"}
+                        ]
+                        """));
+        TurnTaskContractCapture.clear();
+        assertEquals(
+                TurnTaskContractCapture.WorkspaceAuthorization.NO_TYPED_AUTHORITY,
+                TurnTaskContractCapture.authorizeWorkspaceOperation(call));
+        PermissionDecision decision = policy.decide(request(cfg,
+                call,
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.ALLOW, decision.action());
+        assertEquals("CONFIG_ALLOW", decision.reasonCode());
+        assertEquals("allowed/one", decision.relativePath());
+    }
+
+    @Test
+    void explicitAllowForCopyRequiresDestinationCoverageButNotSourceCoverage() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.copy_path"), List.of("WRITE"), List.of("APPLY"), List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = withWorkspaceAuthority(
+                "Copy README.md to allowed/README.md.",
+                () -> policy.decide(request(cfg,
+                        new ToolCall("talos.copy_path", Map.of(
+                                "from", "README.md",
+                                "to", "allowed/README.md")),
+                        ToolRiskLevel.WRITE,
+                        ExecutionPhase.APPLY)));
+
+        assertEquals(PermissionAction.ALLOW, decision.action());
+        assertEquals("CONFIG_ALLOW", decision.reasonCode());
+        assertEquals("allowed/README.md", decision.relativePath());
+    }
+
+    @Test
+    void moveAndRenameRequireAllowCoverageForBothMutatedPaths() {
+        List<PartialWorkspaceAllowFixture> fixtures = List.of(
+                new PartialWorkspaceAllowFixture(
+                        "Move source.txt to allowed/moved.txt.",
+                        new ToolCall("talos.move_path", Map.of(
+                                "from", "source.txt",
+                                "to", "allowed/moved.txt")),
+                        List.of("source.txt"),
+                        List.of("allowed/**")),
+                new PartialWorkspaceAllowFixture(
+                        "Rename source.txt to renamed.txt.",
+                        new ToolCall("talos.rename_path", Map.of(
+                                "path", "source.txt",
+                                "new_name", "renamed.txt")),
+                        List.of("source.txt"),
+                        List.of("renamed.txt")));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(
+                ApprovalPolicy.ALWAYS_ASK);
+
+        for (PartialWorkspaceAllowFixture fixture : fixtures) {
+            for (List<String> partialPaths : List.of(
+                    fixture.sourceOnlyPaths(),
+                    fixture.destinationOnlyPaths())) {
+                Config cfg = configWithRules(List.of(rule(
+                        "allow",
+                        List.of(fixture.call().toolName()),
+                        List.of("WRITE"),
+                        List.of("APPLY"),
+                        partialPaths)));
+
+                PermissionDecision decision = withWorkspaceAuthority(
+                        fixture.request(),
+                        () -> policy.decide(request(
+                                cfg,
+                                fixture.call(),
+                                ToolRiskLevel.WRITE,
+                                ExecutionPhase.APPLY)));
+
+                assertEquals(PermissionAction.ASK, decision.action(),
+                        fixture.request() + " paths=" + partialPaths);
+                assertEquals("DEFAULT_WRITE_ASK", decision.reasonCode(),
+                        fixture.request() + " paths=" + partialPaths);
+                assertFalse(decision.rememberEligible(), fixture.request());
+            }
+        }
+    }
+
+    @Test
+    void renameComputedProtectedDestinationIsDeniedBeforeApproval() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = withWorkspaceAuthority(
+                "Rename notes.txt to .env.",
+                () -> policy.decide(request(new Config(),
+                        new ToolCall("talos.rename_path", Map.of(
+                                "path", "notes.txt",
+                                "new_name", ".env")),
+                        ToolRiskLevel.WRITE,
+                        ExecutionPhase.APPLY)));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("PROTECTED_PATH_DENY", decision.reasonCode());
+        assertEquals(".env", decision.relativePath());
+        assertTrue(decision.protectedPath());
+    }
+
+    @Test
     void defaultSafeWriteAsksAndCanBeRemembered() {
         PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
 
@@ -173,8 +377,86 @@ class PermissionPolicyTest {
         assertEquals("WORKSPACE_ESCAPE", decision.reasonCode());
     }
 
+    @Test
+    void commandPathAliasesCannotSatisfyFileAllowRulesOrSessionMemory() {
+        SessionApprovalPolicy memory = new SessionApprovalPolicy();
+        memory.rememberApproval(workspace,
+                new ToolCall("talos.write_file", Map.of("path", "src/remembered.txt", "content", "x")),
+                ToolRiskLevel.WRITE);
+        PermissionPolicy policy = new DeclarativePermissionPolicy(memory);
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of(), List.of("WRITE"), List.of("VERIFY"), List.of("src/**"))));
+        assertEquals("CONFIG_ALLOW", policy.decide(request(cfg,
+                new ToolCall("talos.write_file", Map.of("path", "src/remembered.txt", "content", "x")),
+                ToolRiskLevel.WRITE, ExecutionPhase.VERIFY)).reasonCode());
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+            ToolCall command = new ToolCall("talos.run_command", Map.of("profile", "gradle_test", key, "src/remembered.txt"));
+            PermissionDecision decision = policy.decide(request(cfg, command, ToolRiskLevel.WRITE, ExecutionPhase.VERIFY));
+            assertEquals(PermissionAction.ASK, decision.action(), key);
+            assertFalse(decision.rememberEligible(), key);
+            assertFalse(ProtectedPathPolicy.classify(workspace, command).hasPath(), key);
+        }
+    }
+
     private PermissionRequest request(Config cfg, ToolCall call, ToolRiskLevel risk, ExecutionPhase phase) {
         return new PermissionRequest(workspace, cfg, call, risk, phase);
+    }
+
+    @Test
+    void activeApprovalPolicyDenyOutranksTypedWorkspaceOnceOnlyRule() {
+        ApprovalPolicy deny = new ApprovalPolicy() {
+            @Override
+            public Decision decide(
+                    Path ignoredWorkspace,
+                    ToolCall ignoredCall,
+                    ToolRiskLevel ignoredRisk
+            ) {
+                return Decision.DENY;
+            }
+
+            @Override
+            public void rememberApproval(
+                    Path ignoredWorkspace,
+                    ToolCall ignoredCall,
+                    ToolRiskLevel ignoredRisk
+            ) {
+                throw new AssertionError("denied operations must not be remembered");
+            }
+        };
+        PermissionPolicy policy = new DeclarativePermissionPolicy(deny);
+        Map<String, ToolCall> fixtures = Map.of(
+                "Copy source.txt to copied.txt.",
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "source.txt", "to", "copied.txt")),
+                "Create a directory named assets.",
+                new ToolCall("talos.mkdir", Map.of("path", "assets")));
+
+        fixtures.forEach((request, call) -> {
+            PermissionDecision decision = withWorkspaceAuthority(
+                    request,
+                    () -> policy.decide(request(
+                            new Config(),
+                            call,
+                            ToolRiskLevel.WRITE,
+                            ExecutionPhase.APPLY)));
+
+            assertEquals(PermissionAction.DENY, decision.action(), request);
+            assertEquals("APPROVAL_POLICY_DENY", decision.reasonCode(), request);
+            assertFalse(decision.rememberEligible(), request);
+        });
+    }
+
+    private static <T> T withWorkspaceAuthority(
+            String request,
+            Supplier<T> action
+    ) {
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        try {
+            return action.get();
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     private static Config configWithRules(List<Map<String, Object>> rules) {
@@ -198,4 +480,11 @@ class PermissionPolicyTest {
                 "paths", paths,
                 "reason", effect + " test rule");
     }
+
+    private record PartialWorkspaceAllowFixture(
+            String request,
+            ToolCall call,
+            List<String> sourceOnlyPaths,
+            List<String> destinationOnlyPaths
+    ) {}
 }

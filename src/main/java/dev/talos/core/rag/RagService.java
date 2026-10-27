@@ -7,6 +7,7 @@ import dev.talos.core.embed.EmbeddingProfile;
 import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.Indexer;
+import dev.talos.core.index.IndexingStats;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.index.SymbolHit;
 import dev.talos.core.index.SymbolIndexStore;
@@ -17,6 +18,8 @@ import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.privacy.PrivacyConfigFacts;
+import dev.talos.core.privacy.ContextSourcePolicy;
+import dev.talos.safety.ContentRestrictionScope;
 import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
@@ -32,6 +35,7 @@ import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.spi.types.ChunkMetadata;
+import dev.talos.spi.types.ControlFlowFailure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +56,9 @@ public class RagService {
     private final AtomicBoolean indexingNow = new AtomicBoolean(false);
 
 
+    /** What this call did to the workspace index before retrieval. */
+    public enum IndexAction { READY, BUILT, REBUILT, FAILED, DISABLED }
+
     /** Small data holder returned by prepare(). */
     public static final class Prepared {
         private final List<ContextResult.Snippet> snippets;
@@ -59,6 +66,8 @@ public class RagService {
         private final RetrievalTrace trace; // nullable - absent on error path
         private final String errorReason;   // nullable - set when retrieval failed
         private final List<SymbolHit> symbolHits;
+        private final IndexAction indexAction;
+        private final String indexNote;
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
             this(snippets, citations, null, null, List.of());
@@ -79,12 +88,34 @@ public class RagService {
                 String errorReason,
                 List<SymbolHit> symbolHits
         ) {
+            this(snippets, citations, trace, errorReason, symbolHits, IndexAction.READY, "");
+        }
+
+        public Prepared(
+                List<ContextResult.Snippet> snippets,
+                List<String> citations,
+                RetrievalTrace trace,
+                String errorReason,
+                List<SymbolHit> symbolHits,
+                IndexAction indexAction,
+                String indexNote
+        ) {
             this.snippets    = (snippets == null ? List.of() : List.copyOf(snippets));
             this.citations   = (citations == null ? List.of() : List.copyOf(citations));
             this.trace       = trace;
             this.errorReason = errorReason;
             this.symbolHits  = (symbolHits == null ? List.of() : List.copyOf(symbolHits));
+            this.indexAction = indexAction == null ? IndexAction.READY : indexAction;
+            this.indexNote   = indexNote == null ? "" : indexNote;
         }
+
+        /** The same result with the index action of this call attached. */
+        public Prepared withIndex(IndexAction action, String note) {
+            return new Prepared(snippets, citations, trace, errorReason, symbolHits, action, note);
+        }
+        public IndexAction indexAction() { return indexAction; }
+        /** A sentence about the index action, empty when the index was simply ready. */
+        public String indexNote() { return indexNote; }
         /** Typed snippets with structured metadata. */
         public List<ContextResult.Snippet> snippets() { return snippets; }
         /** Legacy accessor: converts typed snippets to Map&lt;"path","text"&gt; for compatibility. */
@@ -133,6 +164,13 @@ public class RagService {
 
     public Indexer getIndexer() { return indexer; }
 
+    /** Recheck retained snippets against this service's current configuration. */
+    public ContextResult.Snippet admitSnippet(Path workspace, ContextResult.Snippet snippet) {
+        return ContextSourcePolicy.admit(cfg, workspace, snippet);
+    }
+
+    protected LlmClient createLlmClient() { return new LlmClient(cfg); }
+
     public record ReindexOutcome(boolean indexed, String message) {}
 
     public Object reindex(Path root) throws Exception {
@@ -172,7 +210,16 @@ public class RagService {
                     "RAG retrieval is disabled in private mode. Enable it explicitly only after confirming protected and unsupported files stay outside the searchable corpus.");
         }
         // Ensure index exists before retrieval (lazy indexing on first query)
-        ensureIndexExists(ws);
+        IndexOutcome index = ensureIndexExists(ws);
+        if (index.action() == IndexAction.FAILED) {
+            return new Prepared(List.of(), List.of(), null, index.note(), List.of(), index.action(), index.note());
+        }
+        // A workspace with no indexable files has nothing to search, and that is not a failure.
+        if ((index.action() == IndexAction.BUILT || index.action() == IndexAction.REBUILT)
+                && !hasSegments(indexer.indexDirFor(ws))) {
+            return new Prepared(List.of(), List.of(), null, null, List.of(), index.action(),
+                    index.note() + " No indexable files were found under the current settings.");
+        }
 
         int defaultTopK = 6;
         try {
@@ -211,6 +258,7 @@ public class RagService {
                              EmbeddingsFactory.forQuery(cfg), cache, "query/" + profile.cacheNamespace())) {
                     qvec = emb.embed(query);
                 } catch (Exception e) {
+                    rethrowControlFlow(e);
                     // If embeddings fail, proceed BM25-only but record why
                     embedFailReason = SafeLogFormatter.throwableMessage(e);
                     LOG.debug("Embedding failed, proceeding BM25-only: {}", embedFailReason);
@@ -257,27 +305,45 @@ public class RagService {
                     continue;
                 }
                 String sanitized = ProtectedContentSanitizer.sanitizeText(text);
-                snippets.add(new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                var snippet = ContextSourcePolicy.admit(cfg, ws,
+                        new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                snippets.add(snippet);
                 ContextLedgerCapture.record(
                         ContextItem.fromText(
                                 ContextItemSource.RAG_SNIPPET,
                                 ExecutionBoundary.RAG_INDEX,
-                                ContextPrivacyClass.NORMAL,
+                                snippet.contentDecision() == null ? ContextPrivacyClass.NORMAL
+                                        : snippet.contentDecision().privateDocumentContent()
+                                        ? ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                                        : ContextPrivacyClass.EXTRACTED_DOCUMENT_TEXT,
                                 c.path(),
                                 sanitized,
                                 0),
-                        ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE"));
+                        snippet.contentRestrictions().modelAllowed()
+                                ? ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE")
+                                : ContextDecision.withheldFromModel("RAG_DOCUMENT_MODEL_HANDOFF_DENIED"));
             }
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
+            rethrowControlFlow(e);
             // Log the failure so it's visible in debug/audit, but don't explode the CLI
             String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Retrieval pipeline failed: {}", reason);
-            return new Prepared(snippets, citations, trace, reason, symbolHits);
+            return new Prepared(snippets, citations, trace, reason, symbolHits, index.action(), index.note());
         }
 
-        return new Prepared(snippets, citations, trace, null, symbolHits);
+        return new Prepared(snippets, citations, trace, null, symbolHits, index.action(), index.note());
+    }
+
+    private record IndexOutcome(IndexAction action, String note) {}
+
+    private static boolean hasSegments(Path indexDir) {
+        try (var entries = Files.list(indexDir)) {
+            return entries.anyMatch(entry -> entry.getFileName().toString().startsWith("segments"));
+        } catch (java.io.IOException unreadable) {
+            return true;
+        }
     }
 
     /**
@@ -340,8 +406,8 @@ public class RagService {
             // packedContext is null because no packing is performed - no model will consume it.
             // Citations come from the pre-packed retrieval set (Prepared).
             // See Javadoc above for full semantics.
-            Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
-            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+            // Same parser as every other reader: absent or unrecognized means off.
+            boolean netEnabled = cfg.view().net().enabled();
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;
@@ -352,7 +418,8 @@ public class RagService {
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()), prepared.snippets());
+            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()),
+                    prepared.snippets().stream().map(snippet -> admitSnippet(ws, snippet)).toList());
 
             // Warn if trimming occurred
             if (packed.wasTrimmed()) {
@@ -360,8 +427,9 @@ public class RagService {
                     packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
             }
 
-            try (LlmClient llm = new LlmClient(cfg)) {
-                String text = llm.chat(sys, question, packed.toSnippetMaps());
+            try (LlmClient llm = createLlmClient()) {
+                String text = ContentRestrictionScope.callWithRestrictions(packed.contentRestrictions(),
+                        () -> llm.chat(sys, question, packed.toSnippetMaps()));
                 if (text == null) text = "";
 
                 // Defensive: strip any tool-call blocks the model may emit.
@@ -380,6 +448,7 @@ public class RagService {
                 return new Answer(text, packed.citations(), prepared, packed);
             }
         } catch (Exception e) {
+            rethrowControlFlow(e);
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());
         }
@@ -389,31 +458,37 @@ public class RagService {
     /**
      * Ensures index exists for the given workspace. If missing or unreadable, performs lazy indexing.
      * Guard with AtomicBoolean to prevent re-entrancy. Falls back to full rebuild on corruption.
+     * The outcome is returned for the caller to state. Nothing is printed by the service.
      */
-    private void ensureIndexExists(Path workspace) {
+    private IndexOutcome ensureIndexExists(Path workspace) {
         if (PrivacyConfigFacts.privateMode(cfg)
                 && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
             LOG.info("RAG indexing skipped because private mode disables retrieval/indexing by default.");
-            return;
+            return new IndexOutcome(IndexAction.DISABLED, "");
         }
         Path indexDir = indexer.indexDirFor(workspace);
+        String rebuildCause = "";
 
-        // Check if index exists and is readable
-        if (Files.exists(indexDir) && Files.isDirectory(indexDir)) {
+        // Check if index exists and is readable. An empty directory is a missing index, not a broken one.
+        if (Files.isDirectory(indexDir) && hasSegments(indexDir)) {
             // Try to verify it's a valid Lucene index by attempting to open it
             try (LuceneStore store = new LuceneStore(indexDir, 0)) {
                 SymbolIndexStore.LoadResult sidecar = SymbolIndexStore.loadDetailed(indexDir);
                 if (indexer.isPolicyMetadataCurrent(workspace)
                         && sidecar.status() == SymbolIndexStore.LoadStatus.LOADED) {
-                    return;
+                    return new IndexOutcome(IndexAction.READY, "");
                 }
                 LOG.warn("RAG index metadata or symbol sidecar is stale/missing/corrupt; rebuilding. sidecarStatus={}",
                         sidecar.status());
+                rebuildCause = indexer.isPolicyMetadataCurrent(workspace)
+                        ? "its symbol sidecar was missing or unreadable" : "its policy metadata was out of date";
                 indexer.invalidateIndex(workspace);
             } catch (Exception e) {
+                rethrowControlFlow(e);
                 // Index exists but is corrupted - log and proceed to rebuild
                 LOG.warn("Index directory exists but appears corrupted, will rebuild: {}",
                         SafeLogFormatter.throwableMessage(e));
+                rebuildCause = "it could not be opened";
                 indexer.invalidateIndex(workspace);
             }
         }
@@ -421,22 +496,25 @@ public class RagService {
         // Index missing or corrupted - attempt lazy indexing
         if (!indexingNow.compareAndSet(false, true)) {
             // Already indexing in another thread/call, skip
-            return;
+            return new IndexOutcome(IndexAction.FAILED,
+                    "The workspace index is being built by another call. Please retry shortly.");
         }
 
         try {
-            System.out.print("\rIndexing workspace (first RAG query)... ");
-            System.out.flush();
-
             // Perform indexing with current config (respects vectors setting)
             indexer.index(workspace, false);
-
-            // Print final summary (Indexer already prints this, but ensure newline)
-            System.out.println();
-
+            IndexingStats stats = indexer.getLastRunStats();
+            int scanned = stats == null ? 0 : stats.getFilesScanned();
+            String count = scanned + (scanned == 1 ? " file scanned" : " files scanned");
+            return rebuildCause.isEmpty()
+                    ? new IndexOutcome(IndexAction.BUILT, "The workspace index was built in this call, " + count + ".")
+                    : new IndexOutcome(IndexAction.REBUILT, "The workspace index was rebuilt in this call because "
+                        + rebuildCause + ", " + count + ".");
         } catch (Exception e) {
+            rethrowControlFlow(e);
             LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e));
-            System.err.println("\rIndexing failed: " + SafeLogFormatter.throwableMessage(e));
+            return new IndexOutcome(IndexAction.FAILED,
+                    "The workspace index could not be built: " + SafeLogFormatter.throwableMessage(e));
         } finally {
             indexingNow.set(false);
         }
@@ -468,5 +546,11 @@ public class RagService {
                     new ChunkMetadata(null, hit.lineStart(), hit.lineEnd(), "Symbol signature match")));
         }
         return snippets;
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!ControlFlowFailure.isCancellation(failure)
+                && !ControlFlowFailure.isInterruption(failure)) return;
+        throw ControlFlowFailure.propagate(failure);
     }
 }

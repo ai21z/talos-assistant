@@ -73,14 +73,30 @@ public final class SetupWizardPlanner {
         var manifest = LlamaCppEngineManifest.select(snapshot);
         if (manifest.isPresent()) {
             var entry = manifest.get();
+            StringBuilder detail = new StringBuilder(
+                    "No compatible llama-server detected; ask whether to install pinned "
+                            + entry.variant() + " llama.cpp " + entry.upstreamTag()
+                            + " from " + entry.assetName()
+                            + " (SHA-256 " + entry.sha256() + ")");
+            if (entry.companion() != null) {
+                detail.append(" plus driver runtime ")
+                        .append(entry.companion().assetName())
+                        .append(" (SHA-256 ")
+                        .append(entry.companion().sha256())
+                        .append(")");
+            }
+            if (!entry.minNvidiaDriver().isBlank()) {
+                detail.append("; requires NVIDIA driver >= ")
+                        .append(entry.minNvidiaDriver())
+                        .append(", detected ")
+                        .append(snapshot.gpuDriverVersion().isBlank() ? "none" : snapshot.gpuDriverVersion());
+            }
+            detail.append(", provide a path, or skip model setup.");
             return new SetupWizardStep(
                     "llama-server",
                     SetupWizardStep.Action.ASK,
                     "llama.cpp server",
-                    "No compatible llama-server detected; ask whether to install pinned "
-                            + entry.variant() + " llama.cpp " + entry.upstreamTag()
-                            + " from " + entry.assetName()
-                            + " (SHA-256 " + entry.sha256() + "), provide a path, or skip model setup.");
+                    detail.toString());
         }
         return new SetupWizardStep(
                 "llama-server",

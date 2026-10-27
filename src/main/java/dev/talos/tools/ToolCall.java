@@ -22,5 +22,21 @@ public record ToolCall(String toolName, Map<String, String> parameters) {
     public String param(String key, String defaultValue) {
         return parameters.getOrDefault(key, defaultValue);
     }
+
+    /** Canonical Talos tool name for policy, evidence, and guard decisions. */
+    public String canonicalToolName() {
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+        if (decision.accepted()
+                && decision.canonicalToolName() != null
+                && !decision.canonicalToolName().isBlank()) {
+            return decision.canonicalToolName();
+        }
+        return toolName;
+    }
+
+    /** Local canonical name without the {@code talos.} prefix, for compact comparisons. */
+    public String localCanonicalToolName() {
+        return ToolAliasPolicy.localCanonicalName(toolName);
+    }
 }
 

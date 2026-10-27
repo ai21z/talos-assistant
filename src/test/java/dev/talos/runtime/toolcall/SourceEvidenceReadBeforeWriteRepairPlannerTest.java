@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** T741: the read-before-write repair pins talos.read_file via NAMED tool choice. */
@@ -45,6 +46,20 @@ class SourceEvidenceReadBeforeWriteRepairPlannerTest {
                 repair.controls().debugTags());
         assertTrue(repair.missingSourceTargets().contains("board-brief.md"),
                 String.join(",", repair.missingSourceTargets()));
+        assertEquals(
+                List.of("talos.read_file", "talos.write_file"),
+                repair.tools().stream().map(ToolSpec::name).toList());
+        assertTrue(
+                schemaFor(repair.tools(), "talos.read_file")
+                        .contains("\"board-brief.md\""),
+                schemaFor(repair.tools(), "talos.read_file"));
+        String writeSchema = schemaFor(repair.tools(), "talos.write_file");
+        assertTrue(writeSchema.contains("\"office-summary.md\""), writeSchema);
+        assertFalse(
+                repair.tools().stream()
+                        .map(ToolSpec::name)
+                        .anyMatch("talos.edit_file"::equals),
+                repair.tools().toString());
     }
 
     private LoopState sourceEvidenceState(String request) {
@@ -93,5 +108,13 @@ class SourceEvidenceReadBeforeWriteRepairPlannerTest {
                 new ToolSpec("talos.read_file", "Read", "{}"),
                 new ToolSpec("talos.write_file", "Write", "{}"),
                 new ToolSpec("talos.edit_file", "Edit", "{}"));
+    }
+
+    private static String schemaFor(List<ToolSpec> tools, String name) {
+        return tools.stream()
+                .filter(tool -> name.equals(tool.name()))
+                .findFirst()
+                .orElseThrow()
+                .parametersSchemaJson();
     }
 }

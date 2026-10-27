@@ -15,7 +15,7 @@ final class VerificationOutcomeGate {
         List<String> facts = merged(baseFacts, report.facts(), report.limitations());
         if (report.hasRequiredFailure()) {
             return Optional.of(TaskVerificationResult.failed(
-                    requiredSummary(report, "Required interaction verification failed."),
+                    requiredSummary(report, "Required verification failed."),
                     facts,
                     report.problems().isEmpty() ? report.limitations() : report.problems()));
         }
@@ -27,11 +27,11 @@ final class VerificationOutcomeGate {
         }
         if (!report.requiredClaimsSatisfied()) {
             return Optional.of(TaskVerificationResult.readbackOnly(
-                    requiredSummary(report, "Required interaction verification was not satisfied."),
+                    requiredSummary(report, "Required verification was not satisfied."),
                     facts));
         }
         return Optional.of(TaskVerificationResult.passed(
-                requiredSummary(report, "Required interaction verification passed."),
+                requiredSummary(report, "Required verification passed."),
                 facts));
     }
 

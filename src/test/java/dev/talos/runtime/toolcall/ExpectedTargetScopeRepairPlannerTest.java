@@ -10,8 +10,10 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -154,7 +156,11 @@ class ExpectedTargetScopeRepairPlannerTest {
                 false,
                 "Read " + path,
                 ""));
-        state.successfulReadCallBodies.put("talos.read_file:path=" + path + ";", readback);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCallLoop.ToolOutcome expectedTargetFailure(String path) {
@@ -213,5 +219,74 @@ class ExpectedTargetScopeRepairPlannerTest {
                 .map(ChatMessage::content)
                 .filter(content -> content != null)
                 .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    @Test
+    void planOmitsNestedTargetAlreadyWrittenThroughItsAbsolutePath() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "a\n");
+        Files.writeString(root.resolve("docs").resolve("b.md"), "b\n");
+        String request = "Create docs/a.md and docs/b.md.";
+        LoopState state = loopState(request, root);
+        state.toolOutcomes.add(successfulWrite(root.resolve("docs").resolve("a.md").toString()));
+        addReadback(state, "docs/b.md", "1 | b\n");
+        state.toolOutcomes.add(expectedTargetFailure("b.md"));
+
+        Optional<ExpectedTargetScopeRepairPlanner.Plan> plan =
+                ExpectedTargetScopeRepairPlanner.nextPlan(state, baseTools(), request);
+
+        assertTrue(plan.isPresent(), "wrong-target scope block should produce expected-target repair");
+        ExpectedTargetScopeRepairPlanner.Plan repair = plan.get();
+        assertEquals(List.of("docs/b.md"), repair.expectedTargets());
+        assertEquals("b.md->docs/b.md", repair.key());
+        String prompt = prompt(repair.messages());
+        assertTrue(prompt.contains("Expected target(s): docs/b.md\n"), prompt);
+    }
+
+    @Test
+    void planKeepsNestedTargetWhenOnlySameNameFileInSubfolderWasWritten() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs").resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("docs").resolve("a.md"), "a\n");
+        Files.writeString(root.resolve("docs").resolve("b.md"), "b\n");
+        String request = "Create docs/a.md and docs/b.md.";
+        LoopState state = loopState(request, root);
+        state.toolOutcomes.add(successfulWrite(
+                root.resolve("docs").resolve("docs").resolve("a.md").toString()));
+        addReadback(state, "docs/b.md", "1 | b\n");
+        state.toolOutcomes.add(expectedTargetFailure("b.md"));
+
+        Optional<ExpectedTargetScopeRepairPlanner.Plan> plan =
+                ExpectedTargetScopeRepairPlanner.nextPlan(state, baseTools(), request);
+
+        assertTrue(plan.isPresent(), "wrong-target scope block should produce expected-target repair");
+        ExpectedTargetScopeRepairPlanner.Plan repair = plan.get();
+        assertEquals(List.of("docs/a.md", "docs/b.md"), repair.expectedTargets());
+        assertEquals("b.md->docs/a.md,docs/b.md", repair.key());
+    }
+
+    private LoopState loopState(String request, Path root) {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys " + "large-system-token ".repeat(100)),
+                ChatMessage.user("Earlier unrelated request that must not enter compact repair."),
+                ChatMessage.user(request)));
+        var llm = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("", List.of())),
+                16_384).client();
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(root, Map.of()))
+                .llm(llm)
+                .nativeToolSpecs(baseTools())
+                .build();
+        return new LoopState(
+                "",
+                List.of(),
+                messages,
+                root,
+                ctx,
+                null,
+                10,
+                0);
     }
 }

@@ -9,6 +9,8 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.safety.ContentRestrictionScope;
+import dev.talos.safety.ContentRestrictions;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
@@ -47,6 +49,24 @@ public final class ToolResultModelContextHandoff {
             ToolResult rawResult,
             ApprovalGate approvalGate
     ) {
+        if (rawResult != null && rawResult.contentMetadata().source()
+                == ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON) {
+            var metadata = rawResult.contentMetadata();
+            var receipt = metadata.documentPairReceipt();
+            boolean included = rawResult.success() && metadata.modelHandoffAllowed()
+                    && TurnAuditCapture.includesCurrentDocumentPair(receipt);
+            if (included) TurnAuditCapture.includeDocumentPair(receipt,
+                    new dev.talos.safety.ContentRestrictions(metadata.modelHandoffAllowed(),
+                            metadata.rawArtifactPersistenceAllowed(), true, metadata.ragIndexAllowed()));
+            ToolResult model = included ? rawResult : rawResult.success() ? ToolResult.ok(
+                    "Document comparison content was withheld because current-turn admission or model permission is absent.")
+                    : ToolResult.fail(new ToolError("DOCUMENT_COMPARISON_FAILED",
+                            "Document comparison failed. Its content was withheld."));
+            return new Decision(rawResult, rawResult, model, false, false, false, false, !included,
+                    included ? "" : model.output(), included
+                    ? ContextDecision.includedInModel("ADMITTED_DOCUMENT_PAIR")
+                    : ContextDecision.withheldFromModel("DOCUMENT_PAIR_NOT_ADMITTED"), included);
+        }
         boolean successfulProtectedRead = isSuccessfulProtectedRead(state, call, pathHint, rawResult);
         ToolResult handoffCandidate = rawResult;
         boolean privateDocumentPerTurnHandoffApproved = false;
@@ -83,6 +103,19 @@ public final class ToolResultModelContextHandoff {
             modelResult = preserveApprovedProtectedReadResult || preservePrivateDocumentModelHandoff
                     ? handoffCandidate
                     : ProtectedContentPolicy.sanitizeToolResult(handoffCandidate);
+        }
+        if (!contentWithheldFromModelContext && handoffCandidate != null && handoffCandidate.success()
+                && modelResult != null && modelResult.success()) {
+            var metadata = handoffCandidate.contentMetadata();
+            if (metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION
+                    || (metadata.source() == ToolContentMetadata.ContentSource.RAG_RETRIEVE
+                    && (metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                    || metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.EXTRACTED_DOCUMENT_TEXT))) {
+                ContentRestrictionScope.restrictIfActive(new ContentRestrictions(
+                        metadata.modelHandoffAllowed(), metadata.rawArtifactPersistenceAllowed(),
+                        metadata.privacyClass() != ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                        metadata.ragIndexAllowed()));
+            }
         }
         ContextDecision contextDecision = contextDecision(
                 handoffCandidate,
@@ -156,12 +189,19 @@ public final class ToolResultModelContextHandoff {
         return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
     }
 
+    /** Opening sentence of the model-facing body when approved protected content is withheld. */
+    public static final String PROTECTED_READ_WITHHELD_NOTICE =
+            "Protected file content was read after approval but withheld from model context by privacy policy.";
+    /** Opening sentence of the model-facing body when private document content is withheld. */
+    public static final String PRIVATE_CONTENT_WITHHELD_NOTICE =
+            "Private document content was read locally but withheld from model context by privacy policy.";
+
     private static ToolResult approvedProtectedReadWithheldResult(LoopState state) {
         String scopeNote = ProtectedReadScopePolicy.approvedProtectedReadModelHandoffNote(
                 state == null || state.ctx == null ? null : state.ctx.cfg());
         return new ToolResult(
                 true,
-                "Protected file content was read after approval but withheld from model context by privacy policy. "
+                PROTECTED_READ_WITHHELD_NOTICE + " "
                         + "Target: " + ProtectedContentPolicy.REDACTED_PATH + ". "
                         + scopeNote,
                 null,
@@ -176,7 +216,7 @@ public final class ToolResultModelContextHandoff {
                 state == null || state.ctx == null ? null : state.ctx.cfg());
         return new ToolResult(
                 true,
-                "Private document content was read locally but withheld from model context by privacy policy. "
+                PRIVATE_CONTENT_WITHHELD_NOTICE + " "
                         + "Target: <private-document>. "
                         + "Reason: " + ProtectedContentPolicy.sanitizeText(reason) + ". "
                         + scopeNote,
@@ -262,6 +302,7 @@ public final class ToolResultModelContextHandoff {
         if (result == null || !result.success() || result.contentMetadata() == null) return false;
         ToolContentMetadata metadata = result.contentMetadata();
         return !metadata.modelHandoffAllowed()
+                && metadata.sourcePaths().size() <= 1
                 && metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
                 && metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION;
     }

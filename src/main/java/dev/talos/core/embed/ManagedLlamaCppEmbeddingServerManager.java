@@ -1,6 +1,7 @@
 package dev.talos.core.embed;
 
 import dev.talos.spi.EngineException;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.spi.types.Health;
 
 import java.io.IOException;
@@ -200,9 +201,14 @@ final class ManagedLlamaCppEmbeddingServerManager implements ManagedEmbeddingEnd
                 return Health.ok("llama_cpp_embedding", true);
             }
             return Health.down("llama.cpp embedding health check failed: HTTP " + response.statusCode());
+        } catch (InterruptedException interrupted) {
+            throw ControlFlowFailure.propagate(interrupted);
         } catch (ConnectException e) {
             return Health.down("llama.cpp embedding health check failed: connection refused");
         } catch (Exception e) {
+            if (ControlFlowFailure.classify(e) != ControlFlowFailure.Kind.NONE) {
+                throw ControlFlowFailure.propagate(e);
+            }
             return Health.down("llama.cpp embedding health check failed: " + e.getMessage());
         }
     }
@@ -213,7 +219,7 @@ final class ManagedLlamaCppEmbeddingServerManager implements ManagedEmbeddingEnd
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             lastLaunchFailure = "interrupted while waiting for llama.cpp embedding readiness";
-            throw new EngineException.ConnectionFailed(lastLaunchFailure, e);
+            throw new RuntimeException(e);
         }
     }
 

@@ -38,7 +38,12 @@ public final class CurrentTurnPromptInstructions {
                 break;
             }
         }
-        messages.add(insertAt, ChatMessage.system(rendered));
+        // T1011: project-memory files live in the workspace, so their
+        // content is untrusted data and rides in USER role right after the
+        // system prompt; the [ProjectMemory] framing travels with it.
+        messages.add(insertAt, ChatMessage.user(rendered));
+        dev.talos.core.context.ContextLedgerCapture.bindPromptMessage("user", rendered,
+                projectMemory.includedSources().stream().map(dev.talos.runtime.context.ProjectMemorySource::contextItem).toList());
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
@@ -75,9 +80,10 @@ public final class CurrentTurnPromptInstructions {
             boolean replaceExisting
     ) {
         if (messages == null || messages.isEmpty()) return;
-        if (replaceExisting) {
-            messages.removeIf(CurrentTurnPromptInstructions::isTaskContractInstruction);
-        } else if (messages.stream().anyMatch(CurrentTurnPromptInstructions::isTaskContractInstruction)) {
+        if (!replaceExisting
+                && messages.stream().anyMatch(
+                        CurrentTurnPromptInstructions
+                                ::isTaskContractInstruction)) {
             return;
         }
 
@@ -97,7 +103,19 @@ public final class CurrentTurnPromptInstructions {
     ) {
         if (messages == null || messages.isEmpty()) return;
         if (replaceExisting) {
-            messages.removeIf(CurrentTurnPromptInstructions::isTaskContractInstruction);
+            int existingIndex = firstTaskContractInstruction(messages);
+            if (existingIndex >= 0) {
+                ChatMessage prior = messages.get(existingIndex);
+                messages.set(existingIndex, new ChatMessage(
+                        prior.role(),
+                        instruction,
+                        prior.toolCalls(),
+                        prior.toolCallId(), prior.contentRestrictions()));
+                removeDuplicateTaskContractInstructions(
+                        messages,
+                        existingIndex);
+                return;
+            }
         } else if (messages.stream().anyMatch(CurrentTurnPromptInstructions::isTaskContractInstruction)) {
             return;
         }
@@ -119,6 +137,29 @@ public final class CurrentTurnPromptInstructions {
             }
         }
         messages.add(insertAt, ChatMessage.system(instruction));
+    }
+
+    private static int firstTaskContractInstruction(
+            List<ChatMessage> messages
+    ) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (isTaskContractInstruction(messages.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void removeDuplicateTaskContractInstructions(
+            List<ChatMessage> messages,
+            int retainedIndex
+    ) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (i != retainedIndex
+                    && isTaskContractInstruction(messages.get(i))) {
+                messages.remove(i);
+            }
+        }
     }
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
@@ -242,8 +283,11 @@ public final class CurrentTurnPromptInstructions {
     }
 
     private static boolean isProjectMemoryInstruction(ChatMessage message) {
+        // Matches both the current user-role block and any legacy
+        // system-role block from a restored older session, so re-injection
+        // always replaces rather than duplicates.
         return message != null
-                && "system".equals(message.role())
+                && ("user".equals(message.role()) || "system".equals(message.role()))
                 && message.content() != null
                 && message.content().startsWith("[ProjectMemory]");
     }

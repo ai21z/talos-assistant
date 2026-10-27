@@ -4,7 +4,11 @@ import dev.talos.tools.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import dev.talos.spi.WorkspaceObservationBoundary;
+import dev.talos.spi.WorkspaceObservationBoundary.Action;
+import dev.talos.spi.WorkspaceObservationBoundary.Publication;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -55,66 +59,111 @@ public final class ListDirTool implements TalosTool {
         if (ctx == null) {
             return ToolResult.fail(ToolError.internal("ListDirTool requires a ToolContext"));
         }
-
-        String pathParam = resolveParam(call, "path", "dir", "directory", "dir_path", "folder");
-        if (pathParam == null || pathParam.isBlank()) {
-            pathParam = "."; // default to workspace root
-        }
-
-        // Resolve and sandbox-check the path
-        Path resolved = ctx.resolve(pathParam);
-        if (!ctx.sandbox().allowedPath(resolved)) {
-            return ToolResult.fail(ToolError.invalidParams(
-                    "Path not allowed: " + ctx.sandbox().explain(resolved)));
-        }
-
-        if (!Files.exists(resolved)) {
-            return ToolResult.fail(ToolError.notFound("Directory not found: " + pathParam));
-        }
-        if (!Files.isDirectory(resolved)) {
-            return ToolResult.fail(ToolError.invalidParams("Path is not a directory: " + pathParam));
-        }
-
-        // Parse optional parameters
-        int maxDepth = Math.clamp(parseIntParam(call, "max_depth", DEFAULT_MAX_DEPTH), 1, 5);
-        int maxEntries = Math.clamp(parseIntParam(call, "max_entries", DEFAULT_MAX_ENTRIES), 1, ABSOLUTE_MAX_ENTRIES);
+        var boundary = ctx.observationBoundary();
+        boolean controlled = boundary.controlled();
 
         try {
+            String pathParam = resolveParam(call, "path", "dir", "directory", "dir_path", "folder");
+            if (pathParam == null || pathParam.isBlank()) {
+                pathParam = "."; // default to workspace root
+            }
+
+            Path resolved = ctx.resolve(pathParam);
+            if (!ctx.sandbox().allowedPath(resolved)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Path not allowed: " + ctx.sandbox().explain(resolved)));
+            }
+
+            if (!boundary.observe(Action.METADATA, resolved, () -> Files.exists(resolved))) {
+                return ToolResult.fail(ToolError.notFound("Directory not found: " + pathParam));
+            }
+            if (!boundary.observe(Action.METADATA, resolved, () -> Files.isDirectory(resolved))) {
+                return ToolResult.fail(ToolError.invalidParams("Path is not a directory: " + pathParam));
+            }
+
+            int maxDepth = Math.clamp(parseIntParam(call, "max_depth", DEFAULT_MAX_DEPTH), 1, 5);
+            int maxEntries = Math.clamp(parseIntParam(call, "max_entries", DEFAULT_MAX_ENTRIES), 1, ABSOLUTE_MAX_ENTRIES);
+
             var sb = new StringBuilder();
             int[] count = {0};
             boolean[] truncated = {false};
+            var fields = boundary.fields();
 
-            try (Stream<Path> stream = Files.walk(resolved, maxDepth)) {
+            // The file entries the listing returned, so a later check can judge coverage from the
+            // outcome rather than from listing text that compaction may have removed.
+            java.util.List<String> listedFiles = new java.util.ArrayList<>();
+            try (Stream<Path> stream = boundary.observe(Action.ENUMERATE, resolved, () -> Files.walk(resolved, maxDepth))) {
                 stream
                     .filter(p -> !p.equals(resolved)) // skip the root itself
                     .sorted()
                     .forEach(p -> {
+                        Path rel = resolved.relativize(p);
+                        if (controlled && !fields.hiddenFactsPublic()
+                                && (rel.getFileName().toString().startsWith(".") || hidden(p, boundary))) return;
                         if (count[0] >= maxEntries) {
                             truncated[0] = true;
                             return;
                         }
                         // Show path relative to the queried directory
-                        Path rel = resolved.relativize(p);
-                        if (Files.isDirectory(p)) {
+                        count[0]++;
+                        if (controlled
+                                && (boundary.publication() == Publication.NO_NAMES
+                                || boundary.publication() == Publication.VISIBLE_NAMES
+                                && (rel.getFileName().toString().startsWith(".") || hidden(p, boundary)))) return;
+                        if ((!controlled || fields.typesPublic()) && directory(p, boundary, controlled)) {
                             sb.append(rel).append("/\n");
                         } else {
                             sb.append(rel).append('\n');
+                            listedFiles.add(rel.toString().replace('\\', '/'));
                         }
-                        count[0]++;
                     });
             }
 
+            ToolContentMetadata metadata = (listedFiles.isEmpty()
+                    ? ToolContentMetadata.normal()
+                    : ToolContentMetadata.workspaceEvidence(
+                            ToolContentMetadata.ContentSource.TOOL_OUTPUT, listedFiles, "directory listing"))
+                    .withDirectoryObservation(
+                    new DirectoryObservation(resolved.toAbsolutePath().normalize().toString(),
+                            maxDepth, count[0], !truncated[0], !controlled || fields.hiddenFactsPublic()));
+            if (controlled && boundary.publication() == Publication.NO_NAMES)
+                return ToolResult.ok("Directory observation recorded without entry names.", metadata);
             if (count[0] == 0) {
-                return ToolResult.ok("(empty directory)");
+                return ToolResult.ok(controlled && (!fields.existencePublic() || !fields.hiddenFactsPublic())
+                        ? "Visible directory observation recorded." : "(empty directory)", metadata);
             }
 
             if (truncated[0]) {
-                sb.append("... (truncated at ").append(maxEntries).append(" entries)\n");
+                if (!controlled || fields.countPublic())
+                    sb.append("... (truncated at ").append(maxEntries).append(" entries)\n");
+                else sb.append("... (observation limited)\n");
             }
 
-            return ToolResult.ok(sb.toString());
-        } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to list directory: " + e.getMessage()));
+            return ToolResult.ok(sb.isEmpty() ? "Directory observation recorded without entry names." : sb.toString(), metadata);
+        } catch (IOException | java.io.UncheckedIOException e) {
+            return ToolResult.fail(ToolError.internal(controlled
+                    ? "The admitted directory observation failed. No complete result was established."
+                    : "Failed to list directory: " + e.getMessage()));
+        }
+    }
+
+    private static boolean directory(Path path, WorkspaceObservationBoundary boundary, boolean controlled) {
+        try {
+            return boundary.observe(Action.METADATA, path, () -> controlled
+                    ? Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) : Files.isDirectory(path));
+        } catch (IOException unavailable) { throw new java.io.UncheckedIOException(unavailable); }
+    }
+
+    private static boolean hidden(Path path, WorkspaceObservationBoundary boundary) {
+        try {
+            return boundary.observe(Action.METADATA, path, () -> {
+                if (path.getFileSystem().supportedFileAttributeViews().contains("dos"))
+                    return Files.readAttributes(path, java.nio.file.attribute.DosFileAttributes.class,
+                            LinkOption.NOFOLLOW_LINKS).isHidden();
+                return path.getFileName().toString().startsWith(".");
+            });
+        } catch (IOException unavailable) {
+            throw new java.io.UncheckedIOException(unavailable);
         }
     }
 

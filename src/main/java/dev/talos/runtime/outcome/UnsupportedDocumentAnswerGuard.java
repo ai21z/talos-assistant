@@ -16,14 +16,26 @@ public final class UnsupportedDocumentAnswerGuard {
             String answer,
             ToolCallLoop.LoopResult loopResult
     ) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return answer;
+        return selectUnsupportedDocumentClaimsIfNeeded(answer, loopResult).answer();
+    }
+
+    public record DocumentAnswer(String answer, boolean inputRetained) {}
+
+    public static DocumentAnswer selectUnsupportedDocumentClaimsIfNeeded(
+            String answer, ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return new DocumentAnswer(answer, true);
         List<String> unsupportedPaths = unsupportedDocumentReadPaths(loopResult);
         String current = answer == null ? "" : answer;
         String searchNote = unsupportedSearchNoteIfNeeded(current, loopResult);
         if (!searchNote.isBlank() && !current.toLowerCase(Locale.ROOT).contains("unsupported")) {
             current = searchNote + "\n\n" + current.strip();
         }
-        if (unsupportedPaths.isEmpty()) return current;
+        if (unsupportedPaths.isEmpty()) return new DocumentAnswer(current, true);
+
+        // Evaluate retained provider fragments separately: an added search note
+        // is runtime prose and cannot by itself retain the input's truncation.
+        boolean inputRetained = !removeUnsupportedDocumentContentClaims(
+                answer, unsupportedPaths, successfulReadPaths(loopResult)).isBlank();
 
         String cleaned = removeUnsupportedDocumentContentClaims(
                 current,
@@ -34,8 +46,8 @@ public final class UnsupportedDocumentAnswerGuard {
             cleaned = "Talos inspected the supported text files it could read, but it did not inspect the "
                     + "unsupported binary document contents.";
         }
-        if (cleaned.startsWith(note)) return cleaned;
-        return note + "\n\n" + cleaned;
+        if (cleaned.startsWith(note)) return new DocumentAnswer(cleaned, inputRetained);
+        return new DocumentAnswer(note + "\n\n" + cleaned, inputRetained);
     }
 
     private static String unsupportedSearchNoteIfNeeded(String answer, ToolCallLoop.LoopResult loopResult) {
@@ -58,7 +70,7 @@ public final class UnsupportedDocumentAnswerGuard {
         List<String> paths = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (outcome.success()) continue;
             if (!ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) continue;
             String path = outcome.pathHint();
@@ -193,7 +205,7 @@ public final class UnsupportedDocumentAnswerGuard {
         List<String> paths = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (!outcome.success()) continue;
             String path = outcome.pathHint();
             if (path == null || path.isBlank()) continue;

@@ -10,6 +10,8 @@ run_command stdout and stderr pass through the model-context handoff boundary. N
 
 Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints are rejected unless the backend is explicitly configured to allow remote use. If remote chat is explicitly allowed, full prompts can leave this machine.
 
+Embeddings are disabled by default and their endpoints are localhost-gated by default. Remote embeddings require explicit opt-in through `embed.allow_remote`. Eligible indexed text and retrieval queries may then leave this machine, even when chat remains local. The index remains local.
+
 Local traces and logs are durable evidence artifacts, but they are not tamper-evident.
 
 On Windows, local secret-store custody uses the current Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect the key.
@@ -17,6 +19,10 @@ On Windows, local secret-store custody uses the current Windows user account. Th
 Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
 ## Practical handling
+
+The following comparison behavior is Unreleased. Model-context permission and raw artifact permission remain separate. When model access is permitted but raw artifacts are denied, managed llama.cpp output is drained without being saved by Talos. Earlier log bytes are not changed by this suppression, but subsequent raw server diagnostics remain unavailable for that manager lifetime, including replacement processes. A later launch still resets its per-port log under the existing lifecycle. Configured native file or prompt-directory logging, unavailable capture control and connect-only llama.cpp prevent that restricted request from being sent. No logging option is silently changed.
+
+This controls Talos-owned capture and projections. External provider retention and arbitrary endpoint ownership are not certified. The restriction must not be treated as permission to send content to a different provider.
 
 - Do not run release audits inside folders containing real secrets.
 - Use fixture secrets and canaries when testing redaction.

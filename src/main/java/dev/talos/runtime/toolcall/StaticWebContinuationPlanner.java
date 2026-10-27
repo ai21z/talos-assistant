@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.intent.TaskIntent;
@@ -20,7 +22,7 @@ import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolAliasPolicy;
 
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -70,18 +72,55 @@ final class StaticWebContinuationPlanner {
 
     static Optional<Plan> directoryOnlyPlan(LoopState state, List<ToolSpec> baseTools) {
         if (!shouldContinueAfterDirectoryOnlyMutation(state)) return Optional.empty();
-        List<ToolSpec> narrowed = filterTools(baseTools, List.of("talos.write_file"));
+        TaskContract contract = taskContract(state);
+        List<String> missingSourceTargets =
+                SourceDerivedEvidenceGuard.missingSourceEvidenceTargets(state, contract);
+        List<String> preferredTools = missingSourceTargets.isEmpty()
+                ? List.of("talos.write_file")
+                : List.of("talos.read_file", "talos.write_file");
+        List<ToolSpec> narrowed = filterTools(baseTools, preferredTools);
         if (narrowed.isEmpty()) {
-            narrowed = filterTools(baseTools, List.of("talos.write_file", "talos.edit_file"));
+            narrowed = filterTools(
+                    baseTools,
+                    missingSourceTargets.isEmpty()
+                            ? List.of("talos.write_file", "talos.edit_file")
+                            : List.of("talos.read_file", "talos.write_file", "talos.edit_file"));
         }
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
+        if (!missingSourceTargets.isEmpty()
+                && (!hasTool(tools, "talos.read_file") || !hasMutatingTool(tools))) {
+            return Optional.empty();
+        }
         return Optional.of(new Plan(
-                staticWebCreationContinuationMessages(state),
+                staticWebCreationContinuationMessages(state, missingSourceTargets),
                 tools,
                 staticWebCreationContinuationControls(state, tools),
                 "static-web-directory-only-continuation",
+                Optional.empty(),
+                List.of()));
+    }
+
+    static Optional<Plan> blockedUnrequestedDirectoryPlan(
+            LoopState state,
+            List<ToolSpec> baseTools
+    ) {
+        if (!shouldContinueAfterBlockedUnrequestedDirectory(state)) {
+            return Optional.empty();
+        }
+        List<ToolSpec> tools = filterTools(baseTools, List.of("talos.write_file"));
+        if (tools.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Plan(
+                staticWebBlockedDirectoryContinuationMessages(state),
+                tools,
+                staticWebCreationContinuationControls(
+                        state,
+                        tools,
+                        "static-web-blocked-directory-continuation"),
+                "static-web-blocked-directory-continuation",
                 Optional.empty(),
                 List.of()));
     }
@@ -90,13 +129,25 @@ final class StaticWebContinuationPlanner {
         Optional<VerificationContinuation> continuation = verificationContinuation(state);
         if (continuation.isEmpty()) return Optional.empty();
         VerificationContinuation value = continuation.get();
-        List<String> allowedTools = value.fullRewriteRepair()
+        List<String> mutationTools = value.fullRewriteRepair()
                 ? List.of("talos.write_file")
                 : List.of("talos.write_file", "talos.edit_file");
+        TaskContract contract = taskContract(state);
+        List<String> missingSourceTargets =
+                SourceDerivedEvidenceGuard.missingSourceEvidenceTargets(state, contract);
+        List<String> allowedTools = new ArrayList<>();
+        if (!missingSourceTargets.isEmpty()) {
+            allowedTools.add("talos.read_file");
+        }
+        allowedTools.addAll(mutationTools);
         List<ToolSpec> narrowed = filterTools(baseTools, allowedTools);
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
+        if (!missingSourceTargets.isEmpty()
+                && (!hasTool(tools, "talos.read_file") || !hasMutatingTool(tools))) {
+            return Optional.empty();
+        }
         Optional<PendingActionObligation> obligation = value.repairTargets().isEmpty()
                 ? Optional.empty()
                 : Optional.of(value.fullRewriteRepair()
@@ -114,7 +165,10 @@ final class StaticWebContinuationPlanner {
                 "STATIC_VERIFICATION_REPAIR: static-web verification continuation targets "
                         + String.join(", ", value.repairTargets()));
         return Optional.of(new Plan(
-                staticWebVerificationContinuationMessages(state, value),
+                staticWebVerificationContinuationMessages(
+                        state,
+                        value,
+                        missingSourceTargets),
                 tools,
                 staticWebCreationContinuationControls(state, tools),
                 "static-web-verification-continuation",
@@ -163,6 +217,30 @@ final class StaticWebContinuationPlanner {
         return hasDirectoryMutation;
     }
 
+    private static boolean shouldContinueAfterBlockedUnrequestedDirectory(
+            LoopState state
+    ) {
+        if (state == null || state.toolOutcomes.isEmpty()
+                || state.mutatingToolSuccesses > 0) {
+            return false;
+        }
+        TaskContract contract = taskContract(state);
+        if (contract == null || !contract.mutationAllowed()
+                || !contract.mutationRequested()
+                || !StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
+            return false;
+        }
+        if (TurnTaskContractCapture.workspaceOperationPlan()
+                .observedWorkspaceOperation()) {
+            return false;
+        }
+        ToolCallLoop.ToolOutcome latest = state.toolOutcomes.getLast();
+        return latest != null
+                && !latest.success()
+                && "talos.mkdir".equals(latest.canonicalToolName())
+                && latest.expectedTargetScopeFailure();
+    }
+
     private static boolean successfulDirectoryMutation(ToolCallLoop.ToolOutcome outcome) {
         if (outcome == null || !outcome.success() || !outcome.mutating()) return false;
         String toolName = canonicalToolName(outcome.toolName());
@@ -179,8 +257,13 @@ final class StaticWebContinuationPlanner {
         return false;
     }
 
-    private static List<ChatMessage> staticWebCreationContinuationMessages(LoopState state) {
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+    private static List<ChatMessage> staticWebCreationContinuationMessages(
+            LoopState state,
+            List<String> missingSourceTargets
+    ) {
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) {
             TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
@@ -197,24 +280,73 @@ final class StaticWebContinuationPlanner {
         if (!directorySummary.isBlank()) {
             frame.append("\nSuccessful directory mutation: ").append(directorySummary);
         }
-        return List.of(
-                ChatMessage.system("""
+        appendReadBeforeWriteRequirement(frame, missingSourceTargets);
+        String systemInstruction = missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? """
                         You are Talos, a local-first workspace assistant.
                         This is a bounded static-web creation continuation after a directory-only mutation.
                         Directory creation alone does not satisfy a website/app creation request.
                         Use the visible write-file tool now to create the actual web files.
-                        """),
+                        """
+                : """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web creation continuation after a directory-only mutation.
+                        Directory creation alone does not satisfy a website/app creation request.
+                        Read every required source target with the visible read-file tool before using a file mutation tool.
+                        """;
+        String toolInstruction = missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? "Call talos.write_file now for the actual static web files."
+                : "Call talos.read_file for "
+                        + String.join(", ", missingSourceTargets)
+                        + " first, then call talos.write_file for the actual static web files.";
+        return List.of(
+                ChatMessage.system(systemInstruction),
                 ChatMessage.system(frame.toString()),
                 ChatMessage.user("Current user request:\n"
-                        + (userTask == null ? "" : userTask.strip())
+                        + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip())
+                        + "\n\n" + toolInstruction));
+    }
+
+    private static List<ChatMessage> staticWebBlockedDirectoryContinuationMessages(
+            LoopState state
+    ) {
+        String userTask = TurnTaskContractCapture.originalUserRequestOrResolve(
+                state.messages);
+        if (userTask == null || userTask.isBlank()) {
+            TaskContract contract = taskContract(state);
+            userTask = contract == null
+                    ? "Create the requested static web artifact."
+                    : contract.originalUserRequest();
+        }
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        An unrequested directory operation was blocked before approval.
+                        Continue the same static-web creation request without creating or using that directory.
+                        Use only the visible write-file tool to create the actual web files in the authorized workspace scope.
+                        """),
+                ChatMessage.system("""
+                        [StaticWebBlockedDirectoryContinuation]
+                        The rejected directory operation has no authority and must not be retried.
+                        Directory creation is not required to satisfy this request.
+                        Write the HTML/CSS/JavaScript surface directly. Prefer index.html, styles.css, and script.js unless the user requested different names.
+                        Do not answer in prose instead of calling the write-file tool.
+                        """),
+                ChatMessage.user("Current user request:\n"
+                        + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip())
                         + "\n\nCall talos.write_file now for the actual static web files."));
     }
 
     private static List<ChatMessage> staticWebVerificationContinuationMessages(
             LoopState state,
-            VerificationContinuation continuation
+            VerificationContinuation continuation,
+            List<String> missingSourceTargets
     ) {
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) {
             TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
@@ -248,20 +380,42 @@ final class StaticWebContinuationPlanner {
             frame.append("Write or repair the missing static web assets now. ")
                     .append("For linked CSS/JavaScript files, create the exact linked filenames.");
         }
+        appendReadBeforeWriteRequirement(frame, missingSourceTargets);
         String toolInstruction = continuation != null && continuation.fullRewriteRepair()
                 ? "Call talos.write_file now for the listed static web repair target files."
                 : "Call talos.write_file or talos.edit_file now for the missing static web target files.";
+        if (missingSourceTargets != null && !missingSourceTargets.isEmpty()) {
+            toolInstruction = "Call talos.read_file for "
+                    + String.join(", ", missingSourceTargets)
+                    + " first. After those reads, "
+                    + Character.toLowerCase(toolInstruction.charAt(0))
+                    + toolInstruction.substring(1);
+        }
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system("""
-                You are Talos, a local-first workspace assistant.
-                This is a bounded static-web verification continuation.
-                The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
-                Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
-                """));
+        messages.add(ChatMessage.system(missingSourceTargets == null
+                || missingSourceTargets.isEmpty()
+                ? """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web verification continuation.
+                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                        Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
+                        """
+                : """
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web verification continuation.
+                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                        Read every required source target with the visible read-file tool before using a file mutation tool.
+                        Do not claim completion until tool-backed changes have executed.
+                        """));
         messages.add(ChatMessage.system(frame.toString().stripTrailing()));
-        StaticRepairReadbackContext.render(state, targets)
-                .ifPresent(readbacks -> messages.add(ChatMessage.system(readbacks)));
-        messages.add(ChatMessage.user(staticWebVerificationUserInstruction(targets, toolInstruction, userTask)));
+        // T1011: workspace bytes are data, not policy. The readbacks travel
+        // inside the user-role instruction as structured JSON, never in a
+        // system-role message.
+        String instruction = staticWebVerificationUserInstruction(targets, toolInstruction, userTask);
+        String readbacks = StaticRepairReadbackContext.render(state, targets).orElse("");
+        messages.add(ChatMessage.user(readbacks.isBlank()
+                ? instruction
+                : instruction + "\n\n" + readbacks));
         return messages;
     }
 
@@ -278,7 +432,7 @@ final class StaticWebContinuationPlanner {
                 + safeToolInstruction + "\n"
                 + "Do not write any other file in this continuation.\n\n"
                 + "Original user request:\n"
-                + (userTask == null ? "" : userTask.strip());
+                + (userTask == null ? "" : dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip());
     }
 
     private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {
@@ -302,9 +456,32 @@ final class StaticWebContinuationPlanner {
         return out.toString();
     }
 
+    private static void appendReadBeforeWriteRequirement(
+            StringBuilder frame,
+            List<String> missingSourceTargets
+    ) {
+        if (frame == null || missingSourceTargets == null || missingSourceTargets.isEmpty()) {
+            return;
+        }
+        frame.append("\nRead these exact source target path(s) before any file mutation: ")
+                .append(String.join(", ", missingSourceTargets))
+                .append(". A write or edit remains blocked until every listed read succeeds.");
+    }
+
     private static ChatRequestControls staticWebCreationContinuationControls(
             LoopState state,
             List<ToolSpec> tools
+    ) {
+        return staticWebCreationContinuationControls(
+                state,
+                tools,
+                "static-web-directory-only-continuation");
+    }
+
+    private static ChatRequestControls staticWebCreationContinuationControls(
+            LoopState state,
+            List<ToolSpec> tools,
+            String debugTag
     ) {
         boolean required = state != null
                 && state.ctx != null
@@ -316,7 +493,7 @@ final class StaticWebContinuationPlanner {
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("static-web-directory-only-continuation"));
+                List.of(debugTag));
     }
 
     private static String successfulDirectoryMutationSummary(LoopState state) {
@@ -398,7 +575,11 @@ final class StaticWebContinuationPlanner {
 
     private static List<String> optionalCssRepairTargets(TaskContract contract) {
         if (contract == null || contract.originalUserRequest().isBlank()) return List.of();
-        TaskIntent intent = TaskContractResolver.intentFromUserRequest(contract.originalUserRequest());
+        TaskIntent intent = TurnTaskContractCapture.getIntent();
+        if (intent == null) {
+            intent = TaskContractResolver.resolveFromUserRequest(
+                    contract.originalUserRequest()).intent();
+        }
         return intent.targets().pathsByRole(TargetRole.MAY_MUTATE).stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())
@@ -476,23 +657,39 @@ final class StaticWebContinuationPlanner {
     private static Set<String> addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
         LinkedHashSet<String> added = new LinkedHashSet<>();
         if (state == null || state.workspace == null || targets == null) return added;
-        Path root = state.workspace.toAbsolutePath().normalize();
+        NoFollowPathPolicy.GuardedRoot workspaceFiles;
+        try {
+            workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(state.workspace);
+        } catch (Exception rejected) {
+            return added;
+        }
+        Path root = workspaceFiles.path();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (!mutatedSmallWebFile(outcome)) continue;
             String htmlPath = ToolCallSupport.normalizePath(outcome.pathHint());
             if (!(htmlPath.endsWith(".html") || htmlPath.endsWith(".htm"))) continue;
             try {
                 Path resolved = root.resolve(htmlPath).toAbsolutePath().normalize();
-                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
-                String html = Files.readString(resolved);
+                if (!resolved.startsWith(root)
+                        || workspaceFiles.inspect(resolved)
+                        != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                    continue;
+                }
+                String html = workspaceFiles.readString(resolved, StandardCharsets.UTF_8);
+                LinkedHashSet<String> pending = new LinkedHashSet<>();
                 for (String linked : linkedStaticWebAssets(html)) {
                     String target = resolveLinkedAssetAgainstHtmlPath(htmlPath, linked);
                     if (target.isBlank()) continue;
                     Path linkedPath = root.resolve(target).toAbsolutePath().normalize();
-                    if (!linkedPath.startsWith(root) || Files.isRegularFile(linkedPath)) continue;
-                    targets.add(target);
-                    added.add(target);
+                    if (!linkedPath.startsWith(root)
+                            || workspaceFiles.inspect(linkedPath)
+                            == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                        continue;
+                    }
+                    pending.add(target);
                 }
+                targets.addAll(pending);
+                added.addAll(pending);
             } catch (Exception ignored) {
                 // Verification already reports the failure; missing target inference is best effort.
             }
@@ -714,6 +911,10 @@ final class StaticWebContinuationPlanner {
 
     private static TaskContract taskContract(LoopState state) {
         if (state == null) return null;
+        TaskContract captured = TurnTaskContractCapture.get();
+        if (captured != null) {
+            return captured;
+        }
         return WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(state.messages),
                 state.workspace);
@@ -741,6 +942,14 @@ final class StaticWebContinuationPlanner {
             }
         }
         return false;
+    }
+
+    private static boolean hasTool(List<ToolSpec> specs, String toolName) {
+        if (specs == null || specs.isEmpty() || toolName == null || toolName.isBlank()) {
+            return false;
+        }
+        return specs.stream()
+                .anyMatch(spec -> spec != null && toolName.equals(spec.name()));
     }
 
     private static String normalizeExpectedTargetKey(String path) {

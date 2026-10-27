@@ -22,8 +22,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ActiveTaskContextUpdateListenerTest {
 
-    @Test
-    void completedTurnUpdatesSessionMemoryActiveContextAndArtifactGoal() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("proposalOutcomes")
+    void onlyCompletedBoundProposalUpdatesSessionMemory(String classification, String request, boolean accepted) {
         SessionMemory memory = new SessionMemory();
         ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
 
@@ -56,16 +57,33 @@ class ActiveTaskContextUpdateListenerTest {
                                         false,
                                         List.of("README.md"),
                                         List.of()))
-                                .outcome("ADVISORY_ONLY", "NOT_RUN", "NONE", "NOT_REQUESTED", "ADVISORY_ONLY")
+                                .verification("NOT_RUN", "", List.of())
+                                .outcome("READ_ONLY_ANSWERED".equals(classification) ? "COMPLETE" : classification,
+                                        "NOT_RUN", "NONE", "NOT_REQUESTED", classification)
                                 .build()));
 
-        listener.onTurnComplete(result, "Propose README.md changes without editing.");
+        listener.onTurnComplete(result, request);
+
+        if (!accepted) {
+            assertEquals(ActiveTaskContext.State.NONE, memory.activeTaskContext().state());
+            assertEquals(ArtifactGoal.none(), memory.artifactGoal());
+            return;
+        }
 
         assertEquals(ActiveTaskContext.State.ACTIVE, memory.activeTaskContext().state());
         assertEquals(ActiveTaskContext.Kind.PROPOSED_CHANGES, memory.activeTaskContext().kind());
         assertEquals(List.of("README.md"), memory.activeTaskContext().targets());
         assertEquals(ArtifactGoal.Source.ACTIVE_CONTEXT, memory.artifactGoal().source());
         assertEquals(ArtifactGoal.ArtifactKind.README, memory.artifactGoal().artifactKind());
+        assertTrue(memory.activeTaskContext().hasBoundProposal());
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> proposalOutcomes() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("READ_ONLY_ANSWERED", "Propose changes to README.md.", true),
+                org.junit.jupiter.params.provider.Arguments.of("ADVISORY_ONLY", "Propose changes to README.md.", false),
+                org.junit.jupiter.params.provider.Arguments.of("READ_ONLY_ANSWERED", "Propose README.md changes without editing.", false),
+                org.junit.jupiter.params.provider.Arguments.of("ADVISORY_ONLY", "Propose README.md changes without editing.", false));
     }
 
     @Test

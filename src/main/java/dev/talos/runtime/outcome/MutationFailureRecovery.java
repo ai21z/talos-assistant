@@ -42,14 +42,41 @@ public final class MutationFailureRecovery {
                 || message.contains("already exists");
     }
 
-    private static boolean sameWorkspaceOperationPlan(
+    static boolean sameWorkspaceOperationPlan(
             WorkspaceOperationPlan left,
             WorkspaceOperationPlan right
     ) {
         if (left == null || right == null) return false;
+        boolean leftBound = !left.authorityPlanId().isBlank();
+        boolean rightBound = !right.authorityPlanId().isBlank();
+        if (leftBound || rightBound) {
+            if (!leftBound
+                    || !rightBound
+                    || !Objects.equals(
+                            left.authorityPlanId(),
+                            right.authorityPlanId())
+                    || !Objects.equals(left.operationId(), right.operationId())) {
+                return false;
+            }
+        } else if (requiresTypedWorkspaceAuthority(left.operationKind())
+                || requiresTypedWorkspaceAuthority(right.operationKind())) {
+            return false;
+        }
         return left.operationKind() == right.operationKind()
                 && Objects.equals(left.pathEffects(), right.pathEffects())
+                && left.riskLevel() == right.riskLevel()
+                && left.requiresCheckpoint() == right.requiresCheckpoint()
                 && left.overwritePolicy() == right.overwritePolicy()
                 && left.recursive() == right.recursive();
+    }
+
+    private static boolean requiresTypedWorkspaceAuthority(
+            WorkspaceOperationPlan.OperationKind kind
+    ) {
+        return kind == WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY
+                || kind == WorkspaceOperationPlan.OperationKind.COPY_PATH
+                || kind == WorkspaceOperationPlan.OperationKind.MOVE_PATH
+                || kind == WorkspaceOperationPlan.OperationKind.RENAME_PATH
+                || kind == WorkspaceOperationPlan.OperationKind.DELETE_PATH;
     }
 }

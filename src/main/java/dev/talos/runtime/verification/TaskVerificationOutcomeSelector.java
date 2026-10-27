@@ -61,6 +61,12 @@ final class TaskVerificationOutcomeSelector {
                     : expectation.appendLineRequired() && safeProblems.stream()
                             .anyMatch(TaskVerificationOutcomeSelector::isAppendLineProblem)
                             ? "Append line verification failed."
+                    : expectation.appendSectionRequired() && safeProblems.stream()
+                            .anyMatch(TaskVerificationOutcomeSelector::isAppendSectionProblem)
+                            ? "Append section verification failed."
+                    : expectation.appendStatementRequired() && safeProblems.stream()
+                            .anyMatch(TaskVerificationOutcomeSelector::isAppendStatementProblem)
+                            ? "Append statement verification failed."
                     : expectation.bulletCountRequired() && safeProblems.stream()
                             .anyMatch(TaskVerificationOutcomeSelector::isBulletCountProblem)
                             ? "Bullet count verification failed."
@@ -85,6 +91,16 @@ final class TaskVerificationOutcomeSelector {
             if (expectation.appendLineRequired()) {
                 return TaskVerificationResult.passed(
                         "Append line verification passed.",
+                        safeFacts);
+            }
+            if (expectation.appendSectionRequired()) {
+                return TaskVerificationResult.passed(
+                        "Append section verification passed.",
+                        safeFacts);
+            }
+            if (expectation.appendStatementRequired()) {
+                return TaskVerificationResult.passed(
+                        "Append statement verification passed.",
                         safeFacts);
             }
             if (expectation.bulletCountRequired()) {
@@ -134,6 +150,21 @@ final class TaskVerificationOutcomeSelector {
         return problem != null
                 && (problem.contains("appended line")
                 || problem.contains("append-only preservation"));
+    }
+
+    private static boolean isAppendSectionProblem(String problem) {
+        return problem != null
+                && (problem.contains("append-section")
+                || problem.contains("append section")
+                || problem.contains("requested Markdown section")
+                || problem.contains("requested section"));
+    }
+
+    private static boolean isAppendStatementProblem(String problem) {
+        return problem != null
+                && (problem.contains("append-statement")
+                || problem.contains("append statement")
+                || problem.contains("appended statement"));
     }
 
     private static boolean isReplacementProblem(String problem) {

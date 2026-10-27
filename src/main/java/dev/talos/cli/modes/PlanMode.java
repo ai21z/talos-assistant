@@ -6,6 +6,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
@@ -16,6 +18,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +69,9 @@ public final class PlanMode implements Mode {
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);
         if (ReadOnlyCommandRefusal.matches(rawContract)) {
-            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+            Result.Ok refusal = ReadOnlyCommandRefusal.resultFor(name());
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(refusal.text);
+            return Optional.of(refusal);
         }
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(CapabilityPosture.PLAN_READ_ONLY, rawContract);
@@ -78,7 +83,11 @@ public final class PlanMode implements Mode {
                 NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry(), ctx.cfg());
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
 
-        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
+        boolean nativeTools = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(rawContract).isEmpty()
+                && ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forPlan()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(plannedNativeToolNames)
@@ -86,12 +95,14 @@ public final class PlanMode implements Mode {
                 .withNativeTools(nativeTools)
                 .withHistory(!history.isEmpty());
         if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(plannedNativeToolNames)) {
-            promptBuilder.withWorkspace(workspace);
+            promptBuilder.withWorkspace(dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent() ? null : workspace);
         }
         String system = promptBuilder.build();
 
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "plan",
                 "plan",
@@ -99,9 +110,10 @@ public final class PlanMode implements Mode {
                 turnCtx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(responseMaxChars)
                 .capabilityPosture(CapabilityPosture.PLAN_READ_ONLY);
@@ -110,6 +122,9 @@ public final class PlanMode implements Mode {
                 AssistantTurnExecutor.execute(messages, workspace, turnCtx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                body,
+                LocalTurnTraceCapture.AnswerTransformationReason.MODE_PRESENTATION_LAYOUT);
 
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(body, ""));

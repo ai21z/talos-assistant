@@ -25,10 +25,13 @@ record LlamaCppConfig(
         boolean jinja,
         String chatTemplate,
         String chatTemplateFile,
-        List<String> serverArgs
+        List<String> serverArgs,
+        boolean verificationLogging,
+        boolean nativeCallingRequested
 ) {
-    static final int DEFAULT_CONTEXT = 8192;
-    static final int MIN_MANAGED_AGENT_CONTEXT = 8192;
+    static final int DEFAULT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
+    static final int MIN_MANAGED_AGENT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
+    static final int MAX_CONTEXT = LlamaCppContextLimits.MAX_CONTEXT;
 
     enum Mode {
         MANAGED,
@@ -49,14 +52,18 @@ record LlamaCppConfig(
         String host = stringAt(block, "host", "http://127.0.0.1");
         int port = CfgUtil.intAt(block, "port", portFromHost(host, 8080));
         int configuredContext = CfgUtil.intAt(block, "context", DEFAULT_CONTEXT);
-        int context = mode == Mode.MANAGED
-                ? Math.max(configuredContext, MIN_MANAGED_AGENT_CONTEXT)
-                : Math.max(256, configuredContext);
+        int context = clampContext(configuredContext, mode);
         boolean allowRemote = CfgUtil.boolAt(block, "allow_remote", false);
         boolean jinja = CfgUtil.boolAt(block, "jinja", true);
         String chatTemplate = stringAt(block, "chat_template", "");
         String chatTemplateFile = stringAt(block, "chat_template_file", "");
         List<String> serverArgs = CfgUtil.strList(block.get("server_args"));
+        // Programmatic marker set by verification runs (doctor --start, tune),
+        // never part of the user's config file; see LlamaCppVerificationLaunch.
+        boolean verificationLogging = CfgUtil.boolAt(
+                block, LlamaCppVerificationLaunch.KEY, false);
+        Map<String, Object> tools = CfgUtil.map(cfg == null ? null : cfg.data().get("tools"));
+        boolean nativeCallingRequested = CfgUtil.boolAt(tools, "native_calling", true);
 
         return new LlamaCppConfig(
                 mode,
@@ -73,7 +80,9 @@ record LlamaCppConfig(
                 jinja,
                 chatTemplate,
                 chatTemplateFile,
-                serverArgs);
+                serverArgs,
+                verificationLogging,
+                nativeCallingRequested);
     }
 
     boolean managed() {
@@ -85,6 +94,18 @@ record LlamaCppConfig(
     }
 
     String baseUrl() {
+        if (managed()) {
+            URI endpoint = managedEndpoint();
+            String endpointHost = endpoint.getHost();
+            if ("localhost".equalsIgnoreCase(endpointHost)) endpointHost = "127.0.0.1";
+            try {
+                return trimTrailingSlash(new URI(endpoint.getScheme(), endpoint.getUserInfo(), endpointHost,
+                        endpoint.getPort() < 0 ? port : endpoint.getPort(), endpoint.getPath(),
+                        endpoint.getQuery(), endpoint.getFragment()).toString());
+            } catch (java.net.URISyntaxException invalid) {
+                throw new IllegalArgumentException("Invalid managed llama.cpp endpoint", invalid);
+            }
+        }
         String h = host == null || host.isBlank() ? "http://127.0.0.1" : host.trim();
         if (h.startsWith("http://") || h.startsWith("https://")) {
             URI uri = URI.create(h);
@@ -97,6 +118,12 @@ record LlamaCppConfig(
     }
 
     String listenHost() {
+        if (managed()) {
+            String endpointHost = Objects.toString(managedEndpoint().getHost(), "");
+            if ("localhost".equalsIgnoreCase(endpointHost)) return "127.0.0.1";
+            return endpointHost.startsWith("[") && endpointHost.endsWith("]")
+                    ? endpointHost.substring(1, endpointHost.length() - 1) : endpointHost;
+        }
         String h = host == null || host.isBlank() ? "127.0.0.1" : host.trim();
         if (h.startsWith("http://") || h.startsWith("https://")) {
             URI uri = URI.create(h);
@@ -104,6 +131,15 @@ record LlamaCppConfig(
         }
         int colon = h.indexOf(':');
         return colon >= 0 ? h.substring(0, colon) : h;
+    }
+
+    private URI managedEndpoint() {
+        String value = host == null || host.isBlank() ? "http://127.0.0.1" : host.trim();
+        if (!value.contains("://")) {
+            if (!value.startsWith("[") && value.indexOf(':') != value.lastIndexOf(':')) value = "[" + value + "]";
+            value = "http://" + value;
+        }
+        return URI.create(value);
     }
 
     String catalogFallbackModel() {
@@ -120,6 +156,21 @@ record LlamaCppConfig(
         return "local-llama-cpp";
     }
 
+    String modelSourceNote() {
+        if (modelPath != null && !modelPath.isBlank()) {
+            try {
+                Path filename = Path.of(modelPath).getFileName();
+                if (filename != null) return "GGUF file: " + filename;
+            } catch (Exception ignored) {
+                return "";
+            }
+        }
+        if (hfFile != null && !hfFile.isBlank()) {
+            return "GGUF file: " + hfFile.trim();
+        }
+        return "";
+    }
+
     private static String hfRepoName(String repo) {
         String value = Objects.toString(repo, "").trim();
         int slash = value.lastIndexOf('/');
@@ -132,6 +183,11 @@ record LlamaCppConfig(
     private static Mode parseMode(String raw) {
         String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT).replace('-', '_');
         return "connect_only".equals(normalized) ? Mode.CONNECT_ONLY : Mode.MANAGED;
+    }
+
+    private static int clampContext(int configuredContext, Mode mode) {
+        int minimum = mode == Mode.MANAGED ? MIN_MANAGED_AGENT_CONTEXT : 256;
+        return Math.min(MAX_CONTEXT, Math.max(minimum, configuredContext));
     }
 
     private static String stringAt(Map<String, Object> block, String key, String fallback) {

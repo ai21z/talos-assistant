@@ -521,7 +521,15 @@ class SimpleCommandsTest {
             assertTrue(text.contains("Model Help"), text);
             assertTrue(text.contains("/models"), text);
             assertTrue(text.contains("/model"), text);
-            assertTrue(text.contains("/set model <backend/model>"), text);
+            assertFalse(text.contains("Other configured backends"), text);
+            assertTrue(text.contains("/models use <alias>"), text);
+            assertTrue(text.contains("/set model <alias>"), text);
+            assertTrue(text.contains("/models add <alias> \"<absolute GGUF path>\""), text);
+            assertTrue(text.contains("for this session without starting it"), text);
+            assertTrue(text.contains("No model is downloaded"), text);
+            assertTrue(text.contains("Connect-only servers are not restarted"), text);
+            assertTrue(text.contains("conversation history, sampling and global tool/privacy policy are preserved"), text);
+            assertTrue(text.contains("do not establish artifact verification, current readiness or qualification"), text);
             assertTrue(text.contains("talos setup models"), text);
             assertTrue(text.contains("qwen2.5-coder-14b"), text);
         }
@@ -532,6 +540,7 @@ class SimpleCommandsTest {
             assertFalse(text.contains("/set model llama_cpp/qwen2.5-coder-14b"),
                     "must not present a specific GGUF as a runnable example (404s unless configured): " + text);
             assertTrue(text.contains("/models"), text);
+            assertFalse(text.contains("exposes only the configured/running GGUF"), text);
         }
 
         @Test void default_help_advertises_the_models_topic() {
@@ -598,53 +607,6 @@ class SimpleCommandsTest {
             assertEquals("help", cmd.spec().name());
             assertTrue(cmd.spec().aliases().contains("h"));
             assertTrue(cmd.spec().aliases().contains("?"));
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  SetCommand
-    // ═══════════════════════════════════════════════════════════════════════
-
-    @Nested
-    @DisplayName("SetCommand")
-    class Set {
-
-        private final SetCommand cmd = new SetCommand();
-
-        @Test void set_model_updates_llm() throws Exception {
-            Result r = cmd.execute("model qwen3:8b", ctx);
-            assertInstanceOf(Result.Info.class, r);
-            assertTrue(r.toString().contains("qwen3:8b"));
-        }
-
-        @Test void set_no_model_name_returns_error() throws Exception {
-            Result r = cmd.execute("model", ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_without_model_returns_usage() throws Exception {
-            Result r = cmd.execute("", ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_null_returns_usage() throws Exception {
-            Result r = cmd.execute(null, ctx);
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void set_model_sanitizes_name() throws Exception {
-            Result r = cmd.execute("model <my-model>", ctx);
-            assertInstanceOf(Result.Info.class, r);
-        }
-
-        @Test void set_model_invalid_chars_rejected() throws Exception {
-            Result r = cmd.execute("model ../../../../etc/passwd", ctx);
-            // Path traversal should be rejected (contains ..)
-            assertInstanceOf(Result.Error.class, r);
-        }
-
-        @Test void spec_name() {
-            assertEquals("set", cmd.spec().name());
         }
     }
 

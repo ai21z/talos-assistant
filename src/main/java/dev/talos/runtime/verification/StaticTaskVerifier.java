@@ -4,10 +4,15 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.toolcall.ReadOnlyFinalizationEvidence;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -31,6 +36,9 @@ import java.util.regex.Pattern;
 public final class StaticTaskVerifier {
 
     private StaticTaskVerifier() {}
+
+    private static final String STATIC_WEB_COHERENCE_NOT_APPLICABLE =
+            "Static web coherence was not checked because ";
 
     public record WebDiagnostics(
             String htmlFile,
@@ -65,11 +73,16 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        TaskResolution resolution =
+                TaskContractResolver.resolveFromUserRequest(userRequest);
         return verifyWithEvidence(
                 workspace,
-                TaskContractResolver.fromUserRequest(userRequest),
+                resolution.contract(),
+                RequestObligationCompiler.compile(resolution.contract()),
                 loopResult,
-                extraMutationSuccesses).compatibilityResult();
+                extraMutationSuccesses,
+                noWorkspaceAuthority(resolution.contract()))
+                .compatibilityResult();
     }
 
     public static TaskVerificationResult verify(
@@ -90,10 +103,50 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
                 loopResult,
                 extraMutationSuccesses,
                 true,
-                StaticWebRenderVerifier.unavailableRunner());
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract));
+    }
+
+    public static TaskVerificationEvidence verifyWithEvidence(
+            Path workspace,
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                requestObligation,
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract));
+    }
+
+    /** Production path: binds post-apply verification to the compiled authority. */
+    public static TaskVerificationEvidence verifyWithEvidence(
+            Path workspace,
+            TaskContract contract,
+            RequestObligation requestObligation,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                requestObligation,
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                StaticWebRenderVerifier.unavailableRunner(),
+                workspaceOperationPlan);
     }
 
     static TaskVerificationEvidence verifyWithEvidence(
@@ -106,10 +159,12 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
                 loopResult,
                 extraMutationSuccesses,
                 true,
-                renderRunner);
+                renderRunner,
+                noWorkspaceAuthority(contract));
     }
 
     public static TaskVerificationResult verifyWithoutTraceEvents(
@@ -121,27 +176,59 @@ public final class StaticTaskVerifier {
         return verifyInternal(
                 workspace,
                 contract,
+                RequestObligationCompiler.compile(contract),
                 loopResult,
                 extraMutationSuccesses,
                 false,
-                StaticWebRenderVerifier.unavailableRunner()).compatibilityResult();
+                StaticWebRenderVerifier.unavailableRunner(),
+                noWorkspaceAuthority(contract)).compatibilityResult();
     }
 
     private static TaskVerificationEvidence verifyInternal(
             Path workspace,
             TaskContract contract,
+            RequestObligation requestObligation,
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses,
             boolean recordExpectationTrace,
-            StaticWebRenderVerifier.RenderRunner renderRunner
+            StaticWebRenderVerifier.RenderRunner renderRunner,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
     ) {
         if (loopResult == null) {
             return TaskVerificationEvidence.postApply(
                     TaskVerificationResult.notRun("No tool-loop result was available."),
                     VerificationReport.empty());
         }
+        RequestObligation compiledObligation =
+                RequestObligationCompiler.compile(contract);
+        if (recordExpectationTrace) {
+            LocalTurnTraceCapture.recordRequestObligation(compiledObligation);
+        }
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
+        List<ToolCallLoop.ToolOutcome> failedWithEffects = outcomes.stream()
+                .filter(outcome -> outcome != null && outcome.mutating() && !outcome.success()
+                        && outcome.mutationEffects().hasEffects()).toList();
+        if (!failedWithEffects.isEmpty()) {
+            List<String> effectFacts = new ArrayList<>();
+            List<String> effectProblems = new ArrayList<>();
+            for (ToolCallLoop.ToolOutcome failed : failedWithEffects) {
+                for (String path : failed.mutationEffects().appliedPaths()) {
+                    effectFacts.add(path + ": mutation was applied before tool failure; completion is unverified.");
+                }
+                for (String path : failed.mutationEffects().uncertainPaths()) {
+                    effectFacts.add(path + ": mutation state is UNKNOWN after tool failure.");
+                }
+                effectProblems.add(failed.toolName() + ": failed with applied or uncertain effects at "
+                        + String.join(", ", failed.mutationEffects().affectedPaths())
+                        + ". Final state requires explicit recovery verification.");
+            }
+            // A successful later call is recorded separately. Its matching path alone
+            // cannot prove that a partial operation or unknown commit was recovered.
+            return TaskVerificationEvidence.postApply(TaskVerificationResult.failed(
+                    "Mutation effects remain after failed execution; no successful completion is certified.",
+                    effectFacts, effectProblems), VerificationReport.empty());
+        }
         List<ToolCallLoop.ToolOutcome> successfulMutations = outcomes.stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(ToolCallLoop.ToolOutcome::success)
@@ -150,6 +237,19 @@ public final class StaticTaskVerifier {
         if (totalMutationSuccesses <= 0) {
             return TaskVerificationEvidence.postApply(
                     TaskVerificationResult.notRun("No successful mutation was available to verify."),
+                    VerificationReport.empty());
+        }
+        if (compiledObligation.derivationStatus()
+                == RequestObligation.DerivationStatus.COMPLETE
+                && extraMutationSuccesses > 0) {
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.unavailable(
+                            "A complete request obligation could not account for "
+                                    + "a successful mutation outside structured evidence.",
+                            List.of(),
+                            List.of(
+                                    "request obligation does not cover every "
+                                            + "successful mutation")),
                     VerificationReport.empty());
         }
         if (workspace == null) {
@@ -175,7 +275,10 @@ public final class StaticTaskVerifier {
         Set<String> mutatedPaths = new LinkedHashSet<>();
         Set<String> expectedTargetExemptions = new LinkedHashSet<>();
         MutationTargetReadbackVerifier.Result mutationReadback =
-                MutationTargetReadbackVerifier.verify(root, successfulMutations);
+                MutationTargetReadbackVerifier.verify(
+                        root,
+                        successfulMutations,
+                        workspaceOperationPlan);
         facts.addAll(mutationReadback.facts());
         problems.addAll(mutationReadback.problems());
         mutatedPaths.addAll(mutationReadback.mutationTargets());
@@ -186,20 +289,31 @@ public final class StaticTaskVerifier {
         mutatedPaths.addAll(workspaceOperationVerification.mutationTargets());
         expectedTargetExemptions.addAll(workspaceOperationVerification.expectedTargetExemptions());
 
-        CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
+        boolean pureTypedWorkspaceOperation = workspaceOperationPlan != null
+                && workspaceOperationPlan.state()
+                        == WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE
+                && contract.expectedTargets().isEmpty();
+        CapabilityProfile profile = pureTypedWorkspaceOperation
+                ? CapabilityProfile.none()
+                : CapabilityProfileRegistry.select(contract, root, mutatedPaths);
         boolean webCoherenceRequired;
 
+        // Scope checks get the tool's own spelling of file writes. Workspace operations act on their planned,
+        // normalized paths, so those paths are the operated paths.
+        Set<String> recordedScopePaths = new LinkedHashSet<>(mutationReadback.recordedMutationTargets());
+        recordedScopePaths.addAll(workspaceOperationVerification.mutationTargets());
         TargetScopeStaticVerifier.Result targetScopeVerification = TargetScopeStaticVerifier.verify(
                 contract,
                 root,
                 profile,
-                mutatedPaths,
+                recordedScopePaths,
                 expectedTargetExemptions,
                 workspaceOperationVerification.expectedTargetAliases());
         facts.addAll(targetScopeVerification.facts());
         problems.addAll(targetScopeVerification.problems());
         TaskExpectationStaticVerifier.Result expectationVerification = TaskExpectationStaticVerifier.verify(
                 contract,
+                requestObligation,
                 root,
                 successfulMutations,
                 recordExpectationTrace);
@@ -234,7 +348,17 @@ public final class StaticTaskVerifier {
                 sourceDerivedVerification,
                 claimReport);
         compatibilityResult = withCommandVerificationUpgrade(compatibilityResult, outcomes);
-        return TaskVerificationEvidence.postApply(compatibilityResult, claimReport);
+        return TaskVerificationEvidence.postApply(
+                compatibilityResult,
+                claimReport,
+                expectationVerification.requestObligationReceipt());
+    }
+
+    private static WorkspaceOperationAuthorityPlan noWorkspaceAuthority(
+            TaskContract contract
+    ) {
+        return WorkspaceOperationAuthorityPlan.none(
+                contract == null ? "" : contract.originalUserRequest());
     }
 
     /**
@@ -358,6 +482,11 @@ public final class StaticTaskVerifier {
                         + String.join(", ", primary) + ".");
                 return VerificationReport.empty();
             }
+            if (staticWebCoherenceNotApplicableIsSafe(profile, primary, mutatedPaths)) {
+                facts.add(STATIC_WEB_COHERENCE_NOT_APPLICABLE
+                        + "the workspace does not expose a small HTML/CSS/JS surface.");
+                return VerificationReport.empty();
+            }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return VerificationReport.empty();
         }
@@ -388,6 +517,11 @@ public final class StaticTaskVerifier {
                 if (!problems.isEmpty()) return VerificationReport.empty();
                 facts.add("Self-contained functional web checks passed for "
                         + String.join(", ", primary) + ".");
+                return VerificationReport.empty();
+            }
+            if (staticWebCoherenceNotApplicableIsSafe(profile, primary, mutatedPaths)) {
+                facts.add(STATIC_WEB_COHERENCE_NOT_APPLICABLE
+                        + "HTML, CSS, and JavaScript primary files were not all present.");
                 return VerificationReport.empty();
             }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
@@ -587,7 +721,8 @@ public final class StaticTaskVerifier {
 
         for (String htmlFile : StaticWebSurfaceDetector.primaryHtmlTargets(primary)) {
             try {
-                String html = Files.readString(root.resolve(htmlFile));
+                String html = StaticWebFileAccess.readString(
+                        root, root.resolve(htmlFile));
                 for (String linked : StaticWebSelectorAnalyzer.linkedJavaScriptOccurrences(html)) {
                     if (pathCollectionContains(mutatedJavaScript, linked)) return true;
                 }
@@ -761,7 +896,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderTargetAwareSelectorInspection(Path workspace, Collection<String> targetHints) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         List<String> primary = obviousPrimaryFiles(workspace);
         if (!hasPrimaryWebSurface(primary)) {
             primary = targetAwarePrimaryFiles(workspace, targetHints);
@@ -775,7 +911,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderStaticSelectorSearch(Path workspace, String userRequest) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         String selector = requestedStaticSelectorLiteral(userRequest);
         if (selector.isBlank()) return null;
 
@@ -800,10 +937,9 @@ public final class StaticTaskVerifier {
             String name = StaticWebSurfaceDetector.visibleFileName(file).replace('\\', '/');
             if (!StaticWebSurfaceDetector.isSmallWorkspaceWebFile(name)) continue;
             int lineNumber = 0;
-            try (var lines = Files.lines(file)) {
-                var it = lines.iterator();
-                while (it.hasNext()) {
-                    String line = it.next();
+            try (var reader = StaticWebFileAccess.newBufferedReader(root, file)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
                     lineNumber++;
                     if (!line.contains(selector)) continue;
                     matches.add(name + ":" + lineNumber + " | " + truncateSelectorSearchLine(line.strip()));
@@ -859,18 +995,141 @@ public final class StaticTaskVerifier {
             Collection<String> readPaths,
             String userRequest
     ) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        return renderReadOnlyWebDiagnostics(workspace, readPaths, userRequest, null);
+    }
+
+    public static String renderReadOnlyWebDiagnostics(
+            Path workspace,
+            Collection<String> readPaths,
+            String userRequest,
+            String modelAnswer
+    ) {
+        return assessReadOnlyWebDiagnostics(workspace, readPaths, userRequest, modelAnswer).answer();
+    }
+
+    /** Eligibility selects an existing bounded verifier, not a completed diagnosis. */
+    public static boolean canSynthesizeObservedReadOnlyDiagnosis(
+            List<ReadOnlyFinalizationEvidence.Source> sources, String userRequest) {
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return false;
+        var selected = ObservedStaticWebSources.select(sources);
+        if (!selected.available()) return false;
+        var diagnostics = observedReadOnlyDiagnostics(selected.facts(), userRequest);
+        return !diagnostics.isEmpty() && diagnostics.stream().allMatch(diagnostic ->
+                diagnostic.kind().supportsAnswerPreservation());
+    }
+
+    private static List<StaticWebDiagnostic> observedReadOnlyDiagnostics(
+            StaticWebSelectorAnalyzer.Facts facts, String userRequest) {
+        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
+        StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), facts.html()).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.contentProblems(!facts.cssFile().isBlank()).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        diagnostics.addAll(facts.selectorDiagnostics());
+        facts.genericButtonResultDiagnosticProblems().forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        facts.buttonResultBehaviorProblems(userRequest).forEach(
+                problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        return List.copyOf(diagnostics);
+    }
+
+    /** Caller-owned evidence binding is required before observations enter this pure assessment. */
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            List<ReadOnlyFinalizationEvidence.Source> sources,
+            String userRequest,
+            String modelAnswer
+    ) {
+        return assessReadOnlyWebDiagnostics(sources, userRequest, modelAnswer,
+                dev.talos.runtime.task.AnswerRequirements.fromRequest(userRequest));
+    }
+
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            List<ReadOnlyFinalizationEvidence.Source> sources,
+            String userRequest,
+            String modelAnswer,
+            dev.talos.runtime.task.AnswerRequirements requirements
+    ) {
+        ObservedStaticWebSources.Selection selected = ObservedStaticWebSources.select(sources);
+        if (!selected.available()) {
+            return limitedObservedWebDiagnostics(selected.reason(), selected.detail(), List.of());
+        }
+        ReadOnlyWebDiagnosticResult derived = RuntimeWebDiagnosticAnswer.assess(requirements, sources, selected);
+        if (derived != null) return derived;
+        StaticWebSelectorAnalyzer.Facts facts = selected.facts();
+        boolean cssInspected = !facts.cssFile().isBlank();
+        List<StaticWebDiagnostic> diagnostics = observedReadOnlyDiagnostics(facts, userRequest);
+        ReadOnlyWebAnswerAssessment assessment = ReadOnlyWebDiagnosticAnswer.assess(
+                modelAnswer, selected.readPaths(), facts, diagnostics);
+        if (assessment.preserved()) {
+            return new ReadOnlyWebDiagnosticResult(modelAnswer, assessment, diagnostics);
+        }
+
+        StringBuilder out = new StringBuilder("The retained source observations were analyzed for literal selector relationships:\n\n");
+        out.append("- HTML: `").append(facts.htmlFile()).append("`\n");
+        out.append("- JavaScript: `").append(facts.jsFile()).append("`\n");
+        if (cssInspected) out.append("- CSS: `").append(facts.cssFile()).append("`\n");
+        if (diagnostics.isEmpty()) {
+            out.append("\nNo literal selector mismatch was identified in the supported source representation. ");
+            out.append("The requested explanation remains unverified.");
+        } else {
+            out.append("\nStatic source findings:\n");
+            for (StaticWebDiagnostic diagnostic : diagnostics)
+                out.append("- ").append(diagnostic.message()).append('\n');
+        }
+        out.append("\nThese findings describe the retained source representation, not browser execution or current disk contents.");
+        if (looksLikePlanRequest(userRequest)) {
+            appendReadOnlyWebPlan(out, facts, cssInspected, true,
+                    diagnostics.stream().map(StaticWebDiagnostic::message).toList());
+        }
+        return limitedObservedWebDiagnostics(assessment.reason(), out.toString(), diagnostics);
+    }
+
+    public static ReadOnlyWebDiagnosticResult limitedReadOnlyWebDiagnostics(
+            ReadOnlyWebAnswerAssessment.Reason reason) {
+        String detail = switch (reason) {
+            case SOURCE_RELATION_UNSUPPORTED -> "The supplied source relationship is outside the supported analysis scope.";
+            case SOURCE_RELATION_AMBIGUOUS -> "The available source observations do not identify one unambiguous relationship.";
+            case LINKED_SOURCE_UNOBSERVED -> "The linked source is not among the available source observations. Its existence on disk was not checked.";
+            default -> "The source observations could not be bound to this answer with complete eligible coverage.";
+        };
+        return limitedObservedWebDiagnostics(reason, detail, List.of());
+    }
+
+    private static ReadOnlyWebDiagnosticResult limitedObservedWebDiagnostics(
+            ReadOnlyWebAnswerAssessment.Reason reason, String detail, List<StaticWebDiagnostic> diagnostics) {
+        return new ReadOnlyWebDiagnosticResult(
+                ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + detail.stripTrailing()
+                        + "\n\nNo files were changed. No browser or tests were run by this static diagnosis.",
+                ReadOnlyWebAnswerAssessment.limited(reason), diagnostics);
+    }
+
+    public static ReadOnlyWebDiagnosticResult assessReadOnlyWebDiagnostics(
+            Path workspace,
+            Collection<String> readPaths,
+            String userRequest,
+            String modelAnswer
+    ) {
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace))
+            return ReadOnlyWebDiagnosticResult.unaffected(null);
         List<String> inspected = inspectedStaticWebReadFiles(workspace, readPaths);
-        if (inspected.isEmpty()) return null;
+        if (inspected.isEmpty()) return ReadOnlyWebDiagnosticResult.unaffected(null);
         Path root = workspace.toAbsolutePath().normalize();
         if (!hasReadFileWithExtension(inspected, ".js", ".jsx", ".ts", ".tsx")) {
-            return renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
+            String diagnostic = renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
+            if (modelAnswer == null || diagnostic == null)
+                return ReadOnlyWebDiagnosticResult.unaffected(diagnostic);
+            return new ReadOnlyWebDiagnosticResult(
+                    ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic,
+                    ReadOnlyWebAnswerAssessment.limited(
+                            ReadOnlyWebAnswerAssessment.Reason.UNSUPPORTED_DIAGNOSTIC),
+                    List.of());
         }
         StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyzeFunctional(
                 root,
                 inspected,
                 inspected);
-        if (facts == null) return null;
+        if (facts == null) return ReadOnlyWebDiagnosticResult.unaffected(null);
 
         boolean cssInspected = !facts.cssFile().isBlank() && containsTarget(inspected, facts.cssFile());
         boolean jsInspected = !facts.jsFile().isBlank() && containsTarget(inspected, facts.jsFile());
@@ -885,10 +1144,17 @@ public final class StaticTaskVerifier {
         }
         out.append('\n');
 
-        List<String> problems = readOnlyWebDiagnosticProblems(facts, cssInspected, jsInspected, userRequest);
+        List<StaticWebDiagnostic> diagnostics = readOnlyWebDiagnostics(
+                facts, cssInspected, jsInspected, userRequest);
+        List<String> problems = diagnostics.stream().map(StaticWebDiagnostic::message).toList();
+        ReadOnlyWebAnswerAssessment assessment = ReadOnlyWebDiagnosticAnswer.assess(
+                modelAnswer, readPaths, facts, diagnostics);
+        if (assessment.preserved()) {
+            return new ReadOnlyWebDiagnosticResult(modelAnswer, assessment, diagnostics);
+        }
         boolean planRequest = looksLikePlanRequest(userRequest);
         if (problems.isEmpty() && !planRequest) {
-            return null;
+            return ReadOnlyWebDiagnosticResult.unaffected(null);
         }
         if (problems.isEmpty()) {
             out.append("Static web diagnostics did not find obvious problems in the inspected evidence.");
@@ -902,7 +1168,11 @@ public final class StaticTaskVerifier {
             appendReadOnlyWebPlan(out, facts, cssInspected, jsInspected, problems);
         }
         out.append("\nNo files were changed.");
-        return out.toString().stripTrailing();
+        String diagnostic = out.toString().stripTrailing();
+        return new ReadOnlyWebDiagnosticResult(
+                modelAnswer == null ? diagnostic : ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX + "\n\n" + diagnostic,
+                modelAnswer == null ? ReadOnlyWebAnswerAssessment.notApplicable() : assessment,
+                diagnostics);
     }
 
     private static String renderHtmlOnlyReadOnlyWebDiagnostics(
@@ -917,7 +1187,7 @@ public final class StaticTaskVerifier {
         if (htmlFile.isBlank()) return null;
         String html;
         try {
-            html = Files.readString(root.resolve(htmlFile));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
         } catch (Exception e) {
             return null;
         }
@@ -953,7 +1223,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderScriptImportInspection(Path workspace, String userRequest) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         if (!StaticWebImportIntent.matches(userRequest)) return null;
         Set<String> extractedTargets = TaskContractResolver.extractExpectedTargets(userRequest);
         List<String> candidateScripts = StaticWebImportIntent.scriptCandidates(extractedTargets);
@@ -980,7 +1251,7 @@ public final class StaticTaskVerifier {
 
         String html;
         try {
-            html = Files.readString(root.resolve(htmlTarget));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlTarget));
         } catch (Exception e) {
             return null;
         }
@@ -1023,7 +1294,8 @@ public final class StaticTaskVerifier {
 
         List<String> problems = new ArrayList<>();
         try {
-            String html = Files.readString(root.resolve(facts.htmlFile()));
+            String html = StaticWebFileAccess.readString(
+                    root, root.resolve(facts.htmlFile()));
             problems.addAll(StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), html));
         } catch (Exception e) {
             problems.add(facts.htmlFile() + ": could not be read for HTML structure checks.");
@@ -1051,7 +1323,8 @@ public final class StaticTaskVerifier {
             if (normalized.isBlank() || !StaticWebSurfaceDetector.isSmallWorkspaceWebFile(normalized)) continue;
             try {
                 Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
-                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
+                if (!resolved.startsWith(root)
+                        || !StaticWebFileAccess.isRegularFile(root, resolved)) continue;
                 String relative = root.relativize(resolved).toString().replace('\\', '/');
                 if (relative.contains("/")) continue;
                 if (!out.contains(relative)) out.add(relative);
@@ -1062,7 +1335,7 @@ public final class StaticTaskVerifier {
         return List.copyOf(out);
     }
 
-    private static List<String> readOnlyWebDiagnosticProblems(
+    private static List<StaticWebDiagnostic> readOnlyWebDiagnostics(
             StaticWebSelectorAnalyzer.Facts facts,
             boolean cssInspected,
             boolean jsInspected,
@@ -1076,12 +1349,20 @@ public final class StaticTaskVerifier {
         }
         problems.addAll(filterReadOnlyLinkageProblems(facts.linkageProblems(), cssInspected, jsInspected));
         problems.addAll(filterReadOnlyContentProblems(facts.contentProblems(), facts, cssInspected, jsInspected));
-        problems.addAll(filterReadOnlySelectorProblems(facts.selectorProblems(), cssInspected, jsInspected));
-        if (jsInspected) {
-            problems.addAll(facts.genericButtonResultDiagnosticProblems());
-            problems.addAll(facts.buttonResultBehaviorProblems(userRequest));
+        List<StaticWebDiagnostic> diagnostics = new ArrayList<>();
+        problems.forEach(problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        for (StaticWebDiagnostic diagnostic : facts.selectorDiagnostics()) {
+            if (!cssInspected && diagnostic.kind().isCss()) continue;
+            if (!jsInspected && diagnostic.kind().isJavaScript()) continue;
+            diagnostics.add(diagnostic);
         }
-        return List.copyOf(problems);
+        if (jsInspected) {
+            facts.genericButtonResultDiagnosticProblems().forEach(
+                    problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+            facts.buttonResultBehaviorProblems(userRequest).forEach(
+                    problem -> diagnostics.add(StaticWebDiagnostic.other(problem)));
+        }
+        return List.copyOf(diagnostics);
     }
 
     private static List<String> filterReadOnlyLinkageProblems(
@@ -1115,22 +1396,6 @@ public final class StaticTaskVerifier {
             if (!jsInspected && lower.contains("javascript")) continue;
             if (!cssInspected && !facts.cssFile().isBlank() && problem.startsWith(facts.cssFile() + ":")) continue;
             if (!jsInspected && !facts.jsFile().isBlank() && problem.startsWith(facts.jsFile() + ":")) continue;
-            out.add(problem);
-        }
-        return List.copyOf(out);
-    }
-
-    private static List<String> filterReadOnlySelectorProblems(
-            List<String> problems,
-            boolean cssInspected,
-            boolean jsInspected
-    ) {
-        if (problems == null || problems.isEmpty()) return List.of();
-        List<String> out = new ArrayList<>();
-        for (String problem : problems) {
-            if (problem == null || problem.isBlank()) continue;
-            if (!cssInspected && problem.startsWith("CSS ")) continue;
-            if (!jsInspected && problem.startsWith("JavaScript ")) continue;
             out.add(problem);
         }
         return List.copyOf(out);
@@ -1202,7 +1467,8 @@ public final class StaticTaskVerifier {
             if (normalized.isBlank()) continue;
             try {
                 Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
-                if (resolved.startsWith(root) && Files.isRegularFile(resolved)) {
+                if (resolved.startsWith(root)
+                        && StaticWebFileAccess.isRegularFile(root, resolved)) {
                     return normalized;
                 }
             } catch (RuntimeException ignored) {
@@ -1270,6 +1536,34 @@ public final class StaticTaskVerifier {
         return values.stream()
                 .map(value -> "`" + value + "`")
                 .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    static boolean addedStaticWebCoherenceNotApplicableFact(List<String> facts, int fromIndex) {
+        if (facts == null || facts.isEmpty()) return false;
+        int start = Math.max(0, fromIndex);
+        for (int i = start; i < facts.size(); i++) {
+            String fact = facts.get(i);
+            if (fact != null && fact.startsWith(STATIC_WEB_COHERENCE_NOT_APPLICABLE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean staticWebCoherenceNotApplicableIsSafe(
+            CapabilityProfile profile,
+            List<String> primary,
+            Set<String> mutatedPaths
+    ) {
+        if (profile == null || !profile.targetSurface().allowsFunctionalPartial()) return false;
+        if (primary != null && !primary.isEmpty()) return true;
+        return singleHtmlMutation(mutatedPaths);
+    }
+
+    private static boolean singleHtmlMutation(Set<String> mutatedPaths) {
+        if (mutatedPaths == null || mutatedPaths.size() != 1) return false;
+        String only = mutatedPaths.iterator().next();
+        return hasExtension(only, ".html", ".htm");
     }
 
     private static boolean hasPrimaryWebSurface(List<String> files) {

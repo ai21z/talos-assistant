@@ -4,6 +4,10 @@ import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.NoOpSessionStore;
 import dev.talos.runtime.SessionData;
+import dev.talos.runtime.SessionWriterLease;
+import dev.talos.runtime.SessionWriterUnavailableException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +33,44 @@ import static org.junit.jupiter.api.Assertions.*;
 class TalosBootstrapTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    @TempDir
+    Path isolatedUserHome;
+
+    private final List<ReplRouter> openedRouters = new ArrayList<>();
+    private String previousUserHome;
+
+    @BeforeEach
+    void isolateUserHome() {
+        previousUserHome = System.getProperty("user.home");
+        System.setProperty("user.home", isolatedUserHome.toString());
+    }
+
+    @AfterEach
+    void closeRoutersAndRestoreUserHome() {
+        try {
+            for (int index = openedRouters.size() - 1; index >= 0; index--) {
+                openedRouters.get(index).getRuntimeSession().close();
+            }
+        } finally {
+            if (previousUserHome == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previousUserHome);
+            }
+        }
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            PrintStream out,
+            Path workspace
+    ) {
+        ReplRouter router = TalosBootstrap.create(session, config, out, workspace);
+        openedRouters.add(router);
+        return router;
+    }
 
     private interface CheckedRunnable {
         void run() throws Exception;
@@ -57,13 +100,31 @@ class TalosBootstrapTest {
     }
 
     private static void saveSession(Path home, Path workspace, String user, String assistant) {
+        saveSession(home, workspace, user, assistant, "llama_cpp/qwen2.5-coder-14b");
+    }
+
+    private static void saveSession(Path home, Path workspace, String user, String assistant, String model) {
         JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
-        store.save(new SessionData(sessionId, workspace.toString(), "", 1, Instant.now(),
-                List.of(
-                        new SessionData.Turn("user", user, ""),
-                        new SessionData.Turn("assistant", assistant, "ok")),
-                "ollama/qwen2.5-coder:14b"));
+        try (var writer = store.acquireSessionWriter(sessionId)) {
+            writer.save(new SessionData(sessionId, workspace.toString(), "", 1, Instant.now(),
+                    List.of(
+                            new SessionData.Turn("user", user, ""),
+                            new SessionData.Turn("assistant", assistant, "ok")),
+                    model));
+        }
+    }
+
+    private static SessionState sessionState() {
+        return new SessionState() {
+            private int k = 6;
+            private boolean debug;
+
+            @Override public int getK() { return k; }
+            @Override public void setK(int value) { k = value; }
+            @Override public boolean isDebug() { return debug; }
+            @Override public void setDebug(boolean enabled) { debug = enabled; }
+        };
     }
 
     @Test
@@ -74,7 +135,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(), System.out, WS);
+        ReplRouter router = createRouter(session, new Config(), System.out, WS);
 
         assertNotNull(router);
         assertNotNull(router.getModes());
@@ -91,7 +152,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, null, null, null);
+        ReplRouter router = createRouter(session, null, null, null);
         assertNotNull(router);
         assertFalse(router.shouldQuit());
     }
@@ -109,7 +170,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(true, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -136,7 +197,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(true, true),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -144,6 +205,69 @@ class TalosBootstrapTest {
             assertTrue(router.context().conversationManager().hasHistory());
             assertTrue(router.context().memory().get().contains("old BMI answer"));
         });
+    }
+
+    @Test
+    void autoLoadKeepsHistoryAndConfiguredModelWhenSessionOnlyAliasIsMissing() throws Exception {
+        Path workspace = isolatedUserHome.resolve("missing-model-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+        saveSession(isolatedUserHome, workspace, "saved request", "saved answer", "llama_cpp/session-only-import");
+        Config cfg = configWithSessionPolicy(true, true);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+
+        ReplRouter router = createRouter(sessionState(), cfg,
+                new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
+
+        assertTrue(router.getStartupNotice().contains("restored 1 prior exchange"));
+        assertTrue(router.getStartupNotice().contains("Saved model was not restored"));
+        assertTrue(router.getStartupNotice().contains("previous model selection was preserved"));
+        assertFalse(router.getStartupNotice().contains("model llama_cpp/session-only-import"));
+        assertEquals("llama_cpp/configured-model", router.context().llm().getModel());
+        assertEquals("configured-model", dev.talos.core.CfgUtil.map(cfg.data.get("llm")).get("model"));
+        assertFalse(router.context().llm().modelSelectionUnavailable());
+        assertTrue(router.context().memory().get().contains("saved answer"));
+        assertEquals(1, router.context().conversationManager().turnCount());
+    }
+
+    @Test
+    void restoringAlreadySelectedModelPreservesLazyStartup() {
+        Config cfg = configWithSessionPolicy(false, false);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+        // No artifact or server path exists. Calling setModel would fail local validation.
+        try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+            assertEquals("", TalosBootstrap.restoreSavedModel(llm, "llama_cpp/configured-model"));
+            assertEquals("llama_cpp/configured-model", llm.getModel());
+            assertFalse(llm.modelSelectionUnavailable());
+        }
+    }
+
+    @Test
+    void failedSavedModelRestoreDoesNotClearExistingUnavailableState() throws Exception {
+        Config cfg = configWithSessionPolicy(false, false);
+        cfg.data.put("llm", Map.of("transport", "engine", "default_backend", "llama_cpp", "model", "configured-model"));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of("mode", "managed", "model", "configured-model")));
+        try (var llm = new dev.talos.core.llm.LlmClient(cfg)) {
+            // Synthetic unsettled-switch state. No provider or model process is started.
+            var resolverField = dev.talos.core.llm.LlmClient.class.getDeclaredField("engineResolver");
+            resolverField.setAccessible(true);
+            Object resolver = resolverField.get(llm);
+            var registryField = resolver.getClass().getDeclaredField("registry");
+            registryField.setAccessible(true);
+            var registry = (dev.talos.core.engine.EngineRegistry) registryField.get(resolver);
+            var unavailableField = dev.talos.core.engine.EngineRegistry.class.getDeclaredField("selectionUnavailable");
+            unavailableField.setAccessible(true);
+            unavailableField.setBoolean(registry, true);
+
+            String notice = TalosBootstrap.restoreSavedModel(llm, "llama_cpp/configured-model");
+
+            assertTrue(notice.contains("No model is available"));
+            assertFalse(notice.contains("selection was preserved"));
+            assertTrue(llm.modelSelectionUnavailable());
+            assertEquals("llama_cpp/configured-model", llm.getModel());
+            assertThrows(IllegalStateException.class, registry::engine);
+        }
     }
 
     @Test
@@ -159,7 +283,7 @@ class TalosBootstrapTest {
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
 
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(false, true),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -167,6 +291,64 @@ class TalosBootstrapTest {
             assertFalse(router.context().conversationManager().hasHistory());
             assertInstanceOf(NoOpSessionStore.class, router.getRuntimeSession().store());
         });
+    }
+
+    @Test
+    void persistenceEnabledBindsOneLeaseAndCloseSnapshotsBeforeReleasingIt(
+            @TempDir Path home
+    ) throws Exception {
+        Path workspace = home.resolve("leased-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = createRouter(
+                    sessionState(),
+                    configWithSessionPolicy(true, false),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+            SessionWriterLease lease = assertInstanceOf(
+                    SessionWriterLease.class, router.getRuntimeSession().store());
+            String sessionId = lease.sessionId();
+            router.context().conversationManager().addTurn("leased user", "leased answer");
+
+            JsonSessionStore contender = new JsonSessionStore(
+                    home.resolve(".talos").resolve("sessions"));
+            SessionWriterUnavailableException busy = assertThrows(
+                    SessionWriterUnavailableException.class,
+                    () -> contender.acquireSessionWriter(sessionId));
+            assertEquals(SessionWriterUnavailableException.Reason.WRITER_BUSY, busy.reason());
+
+            router.getRuntimeSession().close();
+
+            assertFalse(lease.isOpen());
+            assertEquals(
+                    "leased answer",
+                    contender.load(sessionId).orElseThrow().turns().get(1).content());
+            try (SessionWriterLease reopened = contender.acquireSessionWriter(sessionId)) {
+                assertTrue(reopened.isOpen());
+            }
+        });
+    }
+
+    @Test
+    void persistenceDisabledCreatesNoSessionOwnershipArtifacts(@TempDir Path home)
+            throws Exception {
+        Path workspace = home.resolve("ephemeral-workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = createRouter(
+                    sessionState(),
+                    configWithSessionPolicy(false, true),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+            assertInstanceOf(NoOpSessionStore.class, router.getRuntimeSession().store());
+            router.getRuntimeSession().close();
+        });
+
+        assertFalse(java.nio.file.Files.exists(
+                home.resolve(".talos").resolve("sessions").resolve(".ownership"),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS));
     }
 
     @Test
@@ -191,11 +373,9 @@ class TalosBootstrapTest {
     }
 
     @Test
-    void syncActiveManagedModelUpdatesLlmWithoutMutatingLegacyOllamaBlock() throws Exception {
+    void syncActiveManagedModelUpdatesOnlyTheLlmBlock() throws Exception {
         Config cfg = new Config(null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
-        String originalOllamaModel = String.valueOf(ollama.get("model"));
+        java.util.Set<String> sectionsBefore = new java.util.LinkedHashSet<>(cfg.data.keySet());
 
         invokeSyncActiveModelIntoConfig(cfg, "llama_cpp/qwen2.5-coder-14b");
 
@@ -203,23 +383,7 @@ class TalosBootstrapTest {
         Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
         assertEquals("llama_cpp", llm.get("default_backend"));
         assertEquals("qwen2.5-coder-14b", llm.get("model"));
-        assertEquals(originalOllamaModel, ollama.get("model"),
-                "selecting a managed model must not rewrite the legacy Ollama model block");
-    }
-
-    @Test
-    void syncActiveOllamaModelUpdatesLlmAndLegacyOllamaCompatibilityBlock() throws Exception {
-        Config cfg = new Config(null);
-
-        invokeSyncActiveModelIntoConfig(cfg, "ollama/gpt-oss:20b");
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
-        assertEquals("ollama", llm.get("default_backend"));
-        assertEquals("gpt-oss:20b", llm.get("model"));
-        assertEquals("gpt-oss:20b", ollama.get("model"));
+        assertEquals(sectionsBefore, cfg.data.keySet(), "selecting a model must not add config sections");
     }
 
     @Test
@@ -245,7 +409,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(), System.out, WS);
+        ReplRouter router = createRouter(session, new Config(), System.out, WS);
         // SymbolChecker is set during bootstrap
         assertNotNull(router.getModes().getSymbolChecker());
     }
@@ -258,7 +422,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(java.io.OutputStream.nullOutputStream()), WS);
 
         assertTrue(router.getRegistry().has("explain-last-turn"));
@@ -273,7 +437,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
 
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(java.io.OutputStream.nullOutputStream()), WS);
 
         // Known command should be handled
@@ -306,7 +470,7 @@ class TalosBootstrapTest {
                 public int getK() { return k; } public void setK(int v) { k = v; }
                 public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
             };
-            ReplRouter router = TalosBootstrap.create(session,
+            ReplRouter router = createRouter(session,
                     configWithSessionPolicy(false, false),
                     new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
 
@@ -328,7 +492,7 @@ class TalosBootstrapTest {
             public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
         };
         var sink = new ByteArrayOutputStream();
-        ReplRouter router = TalosBootstrap.create(session, new Config(),
+        ReplRouter router = createRouter(session, new Config(),
                 new PrintStream(sink, true, StandardCharsets.UTF_8), WS);
 
         assertTrue(router.tryHandle("/q"));

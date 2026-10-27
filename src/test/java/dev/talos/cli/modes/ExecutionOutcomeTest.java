@@ -1,20 +1,34 @@
 package dev.talos.cli.modes;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
+import dev.talos.runtime.observation.TurnRequestFrame;
+import dev.talos.runtime.intent.RequestedResultInventory;
+import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
+import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.ToolMutationEffects;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,6 +44,34 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionOutcomeTest {
+
+    @AfterEach
+    void clearTurnAuthorityCapture() {
+        TurnTaskContractCapture.clear();
+    }
+
+    @Test
+    void acceptedReadOnlySynthesisCannotOverrideDeniedProtectedReadContainment() {
+        var messages = List.of(ChatMessage.system("sys"),
+                ChatMessage.user("Read .env and tell me what it says."));
+        String candidate = "The file says SECRET=original.";
+        var loop = new ToolCallLoop.LoopResult(candidate, 10, 1,
+                List.of("talos.read_file"), messages, 1, 0, true, 0, List.of(),
+                0, 0, 0, 0, FailureDecision.continueLoop(),
+                List.of(new ToolCallLoop.ToolOutcome("talos.read_file", ".env", false, false, true,
+                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)),
+                Map.of(), false, ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loop, null, 0);
+
+        assertTrue(loop.hitIterLimit());
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("Protected content was not read"));
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
 
     @Test
     void toolLoopDeniedMutationIsClassifiedAsBlocked() {
@@ -91,6 +134,94 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void readOnlyAuthorityRejectionSurvivesMissingEvidenceWithoutUnsupportedProviderClaims() {
+        String request = "Can you diagnose this page without changing files?";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        String candidate = "The inspected page contains UNSUPPORTED_PAGE_FACT and its scripts passed verification.";
+        var loopResult = new ToolCallLoop.LoopResult(
+                candidate, 1, 1, List.of("talos.edit_file"), messages,
+                1, 0, false, 0, List.of(), 0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "", false, true, false, "", "Authority rejected",
+                        null, ToolError.INVALID_AUTHORITY)
+                        .withFailureReason(ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PAGE_FACT"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("scripts passed verification"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("Read-only answer from inspected evidence"), outcome.finalAnswer());
+    }
+
+    @Test
+    void controlledWorkspaceCompositionCannotEraseRuntimeFailedMutationEffects(@TempDir Path workspace) {
+        String request = "Where is this workspace?";
+        var task = TaskContractResolver.resolveFromUserRequest(request);
+        var region = new RequestedResultInventory.SourceRegion(0, request.length());
+        var inventory = new RequestedResultInventory(request, List.of(
+                new RequestedResultInventory.RequestedResult("location", region,
+                        RequestedResultInventory.Kind.WORKSPACE_LOCATION, "active workspace", "current turn",
+                        RequestedResultInventory.EvidenceBasis.TURN_WORKSPACE)), List.of());
+        String providerAnswer = "No files changed. UNSUPPORTED_PROVIDER_FACT.";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        for (var effects : List.of(ToolMutationEffects.applied("changed.txt"),
+                ToolMutationEffects.uncertain("changed.txt"))) {
+            try (var frame = TurnRequestFrame.open(request, workspace, 1,
+                    (current, composed) -> new TurnRequestFrame.Meaning(inventory, Set.of(),
+                            TurnRequestFrame.Publication.NO_NAMES, true, false))) {
+                frame.adopt(task);
+                assertEquals(TurnRequestFrame.State.ADOPTED, frame.state());
+                TurnTaskContractCapture.set(task.contract());
+                var plan = CurrentTurnPlan.create(task.contract(), ExecutionPhase.INSPECT,
+                        List.of(), List.of(), List.of());
+                // Injected outcome evidence challenges composition, not physical execution permission.
+                var failed = new ToolCallLoop.ToolOutcome("talos.write_file", "changed.txt", false, true,
+                        false, "", "The write did not finish.", null, ToolError.TOOL_ERROR)
+                        .withMutationEffects(effects);
+                var loop = new ToolCallLoop.LoopResult(providerAnswer, 1, 1, List.of("talos.write_file"),
+                        messages, 1, 0, false, 0, List.of(), 0, 0, 0, 0, List.of(failed));
+
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        providerAnswer, plan, messages, loop, workspace, 0);
+
+                assertEquals(MutationFailureAnswerRenderer.failedMutationEffectsSummary(loop), outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().contains(effects.appliedPaths().isEmpty()
+                        ? "UNKNOWN; final mutation state is not established" : "APPLIED_UNVERIFIED"));
+                assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PROVIDER_FACT"));
+                assertFalse(outcome.finalAnswer().contains("No files changed"));
+                assertFalse(outcome.finalAnswer().contains("The current workspace is"));
+            }
+        }
+    }
+
+    @Test
+    void providerWrittenAuthorityRejectionPrefixCannotSupplyBlockedExecutionFact() {
+        String request = "Can you diagnose this page without changing files?";
+        var messages = List.of(ChatMessage.system("sys"), ChatMessage.user(request));
+        String candidate = MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT
+                + "\n\nThe inspected page contains UNSUPPORTED_PAGE_FACT.";
+        var loopResult = new ToolCallLoop.LoopResult(
+                candidate, 1, 0, List.of(), messages,
+                0, 0, false, 0, List.of(), 0, 0, 0, 0, List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(candidate, messages, loopResult, null, 0);
+
+        assertFalse(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().contains(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains(
+                MutationFailureAnswerRenderer.READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("UNSUPPORTED_PAGE_FACT"), outcome.finalAnswer());
+    }
+
+    @Test
     void deniedProtectedReadIsClassifiedAsApprovalBlockedAndSanitized() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -118,6 +249,69 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.NOT_REQUESTED, outcome.taskOutcome().mutationOutcome().status());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    /** The status follows the evidence verdict. A denial that left nothing required unread does not block the turn. */
+    @Test
+    void deniedReadAfterAnApprovedReadOfTheSameFileCompletesTheTurn() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file sets MODE to dev.", 1, 2,
+                List.of("talos.read_file", "talos.read_file"), List.of(),
+                2, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", true, false, false,
+                                "MODE=dev", "", null, null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", false, false, true,
+                                "", "User did not approve the talos.read_file call.",
+                                null, ToolError.DENIED
+                        ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file sets MODE to dev.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().completionStatus() != TaskCompletionStatus.BLOCKED_BY_APPROVAL,
+                "a delivered, verified answer is not blocked by approval: " + outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("approval was denied for one read of .env"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("The file sets MODE to dev."), outcome.finalAnswer());
+    }
+
+    @Test
+    void deniedReadOfTheRequiredFileStaysBlockedWhenAnotherProtectedFileWasRead() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file sets MODE to dev.", 1, 2,
+                List.of("talos.read_file", "talos.read_file"), List.of(),
+                2, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "secrets.json", true, false, false,
+                                "{}", "", null, null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", false, false, true,
+                                "", "User did not approve the talos.read_file call.",
+                                null, ToolError.DENIED
+                        ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file sets MODE to dev.", messages, loopResult, null, 0);
+
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("protected content of the denied file(s) was not read"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("returned content from: secrets.json"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("MODE to dev"), outcome.finalAnswer());
     }
 
     @Test
@@ -266,6 +460,135 @@ class ExecutionOutcomeTest {
         assertFalse(lower.contains("all tests passed"), outcome.finalAnswer());
         assertFalse(lower.contains("complete"), outcome.finalAnswer());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.COMMAND_DENIED));
+    }
+
+    @Test
+    void unnamedFileLookupBoundsFieldObservedGrepContradictionToActualSources() {
+        LocalTurnTraceCapture.begin(
+                "trc-file-lookup-bounded",
+                "sid-file-lookup-bounded",
+                1,
+                "2026-07-12T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-8b",
+                "bounded negative lookup");
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Locate the service port, name the file, and quote only the relevant key and value. "
+                        + "Do not edit anything."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The grep search for port in JavaScript files returned no matching lines, "
+                        + "indicating that the service port is not defined in any of those files. "
+                        + "No relevant key\u2011value pair for the port was found.",
+                4, 4,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file"),
+                List.of(),
+                0, 0, false, 0, List.of("src/App.java"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.grep", "", true, false, false,
+                                "No matches found.", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", "src", true, false, false,
+                                "src/App.java", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "src/App.java", true, false, false,
+                                "final class App {}", "")));
+
+        ExecutionOutcome outcome;
+        LocalTurnTrace trace;
+        try {
+            outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertEquals("FILE_CONTENT_LOOKUP_REQUIRED", plan.evidenceObligation());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Grounding scope: the requested file-backed fact was not established.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("src/App.java"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("does not prove"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("returned no matching lines"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("No relevant key\u2011value pair"), outcome.finalAnswer());
+        assertTrue(trace.events().stream().anyMatch(event ->
+                        "PROTOCOL_SANITIZED".equals(event.type())
+                                && dev.talos.runtime.outcome.FileLookupAnswerGuard.TRACE_REASON.equals(
+                                event.data().get("reason"))),
+                trace.events().toString());
+    }
+
+    @Test
+    void sourceScopedNegativeLookupEmitsBoundedEvidenceFact() {
+        LocalTurnTraceCapture.begin(
+                "trc-file-lookup-source-scoped",
+                "sid-file-lookup-source-scoped",
+                1,
+                "2026-07-14T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-4b",
+                "source scoped negative lookup");
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Locate the service port, name the file, and quote only the relevant key and value. "
+                        + "Do not edit anything."));
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The service port is not defined in the provided file. "
+                        + "The file `src/App.java` contains no information about a service port.",
+                2, 2,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of(),
+                0, 0, false, 0, List.of("src/App.java"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", "src", true, false, false,
+                                "src/App.java", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "src/App.java", true, false, false,
+                                "final class App {}", "")));
+
+        ExecutionOutcome outcome;
+        LocalTurnTrace trace;
+        try {
+            outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Grounding scope: the requested file-backed fact was not established.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("src/App.java"), outcome.finalAnswer());
+        assertTrue(trace.events().stream().anyMatch(event ->
+                        "PROTOCOL_SANITIZED".equals(event.type())
+                                && dev.talos.runtime.outcome.FileLookupAnswerGuard.TRACE_REASON.equals(
+                                event.data().get("reason"))),
+                trace.events().toString());
     }
 
     @Test
@@ -442,6 +765,11 @@ class ExecutionOutcomeTest {
         assertFalse(lower.contains("approval was denied"), outcome.finalAnswer());
         assertFalse(lower.contains("approval denied"), outcome.finalAnswer());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+        assertEquals(List.of("A required tool action was not performed."),
+                outcome.taskOutcome().warnings().stream()
+                        .filter(warning -> warning.type() == TruthWarningType.FAILED_ACTION_OBLIGATION)
+                        .map(dev.talos.runtime.outcome.TruthWarning::message)
+                        .toList());
     }
 
     @Test
@@ -1106,7 +1434,7 @@ class ExecutionOutcomeTest {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user(
-                    "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+                    "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files."));
 
             String answer = """
                     [Task incomplete: Static verification failed - HTML references missing JavaScript file: `script.js`]
@@ -1399,6 +1727,8 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
         assertTrue(outcome.partialMutation());
         assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION));
+        assertEquals(AnswerOutputLimit.CLEAR, outcome.outputLimit(),
+                "a deterministic partial-mutation summary does not inherit provider truncation");
         assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.PARTIAL, outcome.taskOutcome().mutationOutcome().status());
         assertEquals(1, outcome.taskOutcome().mutationOutcome().successful().size());
@@ -1456,6 +1786,63 @@ class ExecutionOutcomeTest {
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
             assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
             assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void completedMutationWithFileVerificationWarningIsNotRenderedAsVerifiedSuccess() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-warn-static-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Talos\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create README.md with a short project headline."));
+            var plan = new dev.talos.runtime.turn.CurrentTurnPlan(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    null,
+                    dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                    null,
+                    null,
+                    null,
+                    List.of("talos.write_file"),
+                    List.of("talos.write_file"),
+                    List.of(),
+                    "NONE",
+                    null,
+                    null,
+                    null,
+                    null);
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[ok] Wrote README.md", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "README.md", true, true, false,
+                            "Wrote README.md", "", dev.talos.tools.VerificationStatus.WARN)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Done. I updated README.md and verified it.", plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("file-level verification reported warning"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Static verification: passed"),
+                    outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -1531,7 +1918,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void recoveredEmptyEditArgumentFailureDoesNotPoisonCompletion() throws Exception {
+    void untypedSamePathSuccessCannotEraseAnEarlierEmptyEditFailure() throws Exception {
         Path ws = Files.createTempDirectory("talos-recovered-empty-edit-outcome-");
         try {
             Files.writeString(ws.resolve("index.html"), "<html><body><a class=\"cta-button\">Listen</a></body></html>\n");
@@ -1559,14 +1946,16 @@ class ExecutionOutcomeTest {
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                     "Edited index.html.", messages, loopResult, ws, 0);
 
-            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-            assertFalse(outcome.partialMutation());
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertTrue(outcome.partialMutation());
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."));
-            assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
-            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
-            assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
-            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+            assertTrue(outcome.finalAnswer().startsWith(
+                    MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                    outcome.finalAnswer());
+            assertEquals(MutationOutcomeStatus.PARTIAL, outcome.taskOutcome().mutationOutcome().status());
+            assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
+            assertEquals(1, outcome.taskOutcome().mutationOutcome().failed().size());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -1582,68 +1971,38 @@ class ExecutionOutcomeTest {
         try {
             Files.createDirectories(ws.resolve("archive"));
             Files.createDirectories(ws.resolve("copies"));
-            Files.createDirectories(ws.resolve("scratch/nested/reports"));
             Files.writeString(ws.resolve("archive/source.md"), "# Source\n");
             Files.writeString(ws.resolve("copies/source-final.md"), "# Source\n");
 
+            String request =
+                    "Copy archive/source.md to copies/source-final.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Move source.md to archive/source.md, copy archive/source.md to copies/source-copy.md, "
-                            + "rename copies/source-copy.md to source-final.md, and create directory "
-                            + "scratch/nested/reports."));
-
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "source.md",
-                    "archive/source.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "archive/source.md",
-                    "copies/source-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "copies/source-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "copies/source-final.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename copies/source-copy.md to copies/source-final.md.",
-                    "Rename: copies/source-copy.md -> copies/source-final.md");
-            WorkspaceOperationPlan mkdirPlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
-                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
-                            "scratch/nested/reports", true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
-                    false,
-                    "Create directory scratch/nested/reports.",
-                    "Mkdir: scratch/nested/reports");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Workspace operations applied.", 1, 4,
-                    List.of("talos.move_path", "talos.copy_path", "talos.rename_path", "talos.mkdir"),
-                    List.of(), 4, 0, false, 4, List.of(),
+                    "Workspace operation applied.", 1, 1,
+                    List.of("talos.copy_path"),
+                    List.of(), 1, 0, false, 1, List.of(),
                     0, 0, 0, 0,
-                    List.of(
-                            workspaceOutcome("talos.move_path", "archive/source.md", true,
-                                    "Moved source.md -> archive/source.md", "", "", movePlan),
-                            workspaceOutcome("talos.copy_path", "copies/source-copy.md", true,
-                                    "Copied archive/source.md -> copies/source-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.rename_path", "copies/source-final.md", true,
-                                    "Renamed copies/source-copy.md -> copies/source-final.md", "", "", renamePlan),
-                            workspaceOutcome("talos.mkdir", "scratch/nested/reports", true,
-                                    "Created directory scratch/nested/reports", "", "", mkdirPlan)
-                    ));
+                    List.of(workspaceOutcome(
+                            "talos.copy_path",
+                            "copies/source-final.md",
+                            true,
+                            "Copied archive/source.md -> copies/source-final.md",
+                            "",
+                            "",
+                            fixture.operationPlan())));
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Workspace operations applied.", messages, loopResult, ws, 0);
+                    "Workspace operation applied.",
+                    fixture.turnPlan(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
@@ -1848,68 +2207,38 @@ class ExecutionOutcomeTest {
         Path ws = Files.createTempDirectory("talos-workspace-operation-duplicate-recovery-");
         try {
             Files.createDirectories(ws.resolve("docs/notes"));
-            Files.createDirectories(ws.resolve("scratch"));
             Files.writeString(ws.resolve("README.md"), "# Fixture\n");
             Files.writeString(ws.resolve("docs/notes/README-copy.md"), "# Fixture\n");
-            Files.writeString(ws.resolve("docs/tasks.md"), "todo\n");
 
+            String request =
+                    "Copy README.md to docs/notes/README-copy.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Organize these files using workspace operation tools only: copy README.md to "
-                            + "docs/notes/README-copy.md, move scratch/todo.md to docs/todo.md, "
-                            + "then rename docs/todo.md to tasks.md."));
-
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "README.md",
-                    "docs/notes/README-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "scratch/todo.md",
-                    "docs/todo.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "docs/todo.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "docs/tasks.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename docs/todo.md to docs/tasks.md.",
-                    "Rename: docs/todo.md -> docs/tasks.md");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Organized the workspace.", 2, 6,
-                    List.of(
-                            "talos.copy_path", "talos.move_path", "talos.rename_path",
-                            "talos.copy_path", "talos.move_path", "talos.rename_path"),
-                    List.of(), 3, 0, false, 3, List.of(),
+                    "Copied the file.", 2, 2,
+                    List.of("talos.copy_path", "talos.copy_path"),
+                    List.of(), 1, 0, false, 1, List.of(),
                     0, 0, 0, 0,
                     List.of(
                             workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", true,
-                                    "Copied README.md -> docs/notes/README-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.move_path", "docs/todo.md", true,
-                                    "Moved scratch/todo.md -> docs/todo.md", "", "", movePlan),
-                            workspaceOutcome("talos.rename_path", "docs/tasks.md", true,
-                                    "Renamed docs/todo.md -> docs/tasks.md", "", "", renamePlan),
+                                    "Copied README.md -> docs/notes/README-copy.md", "", "",
+                                    fixture.operationPlan()),
                             workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", false,
                                     "", "Destination already exists: docs/notes/README-copy.md.",
-                                    ToolError.INVALID_PARAMS, copyPlan),
-                            workspaceOutcome("talos.move_path", "docs/todo.md", false,
-                                    "", "Source not found: scratch/todo.md",
-                                    ToolError.NOT_FOUND, movePlan),
-                            workspaceOutcome("talos.rename_path", "docs/tasks.md", false,
-                                    "", "Source not found: docs/todo.md",
-                                    ToolError.NOT_FOUND, renamePlan)
+                                    ToolError.INVALID_PARAMS, fixture.operationPlan())
                     ));
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Organized the workspace.", messages, loopResult, ws, 0);
+                    "Copied the file.",
+                    fixture.turnPlan(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertFalse(outcome.partialMutation());
@@ -1933,61 +2262,46 @@ class ExecutionOutcomeTest {
     void verifiedChangedFilesSummaryUsesWorkspaceOperationDestinationsWhenPathHintsAreSources() throws Exception {
         Path ws = Files.createTempDirectory("talos-workspace-operation-destination-summary-");
         try {
-            Files.createDirectories(ws.resolve("archive"));
             Files.writeString(ws.resolve("notes.md"), "notes\n");
-            Files.writeString(ws.resolve("archive/final-notes.md"), "notes\n");
+            Files.writeString(ws.resolve("notes-copy.md"), "notes\n");
 
+            String request = "Copy notes.md to notes-copy.md.";
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user(
-                    "Copy notes.md to notes-copy.md, move notes-copy.md to archive/notes-copy.md, "
-                            + "then rename archive/notes-copy.md to final-notes.md."));
-
-            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
-                    "notes.md",
-                    "notes-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false);
-            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
-                    "notes-copy.md",
-                    "archive/notes-copy.md",
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
-            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
-                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
-                    List.of(
-                            WorkspaceOperationPlan.PathEffect.source(
-                                    "archive/notes-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
-                            WorkspaceOperationPlan.PathEffect.destination(
-                                    "archive/final-notes.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
-                    dev.talos.tools.ToolRiskLevel.WRITE,
-                    true,
-                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
-                    false,
-                    "Rename archive/notes-copy.md to archive/final-notes.md.",
-                    "Rename: archive/notes-copy.md -> archive/final-notes.md");
+            messages.add(ChatMessage.user(request));
+            BoundWorkspaceFixture fixture =
+                    boundWorkspaceFixture(request, "talos.copy_path");
 
             var loopResult = new ToolCallLoop.LoopResult(
-                    "Done.", 1, 3,
-                    List.of("talos.copy_path", "talos.move_path", "talos.rename_path"),
-                    List.of(), 3, 0, false, 3, List.of(),
+                    "Done.", 1, 1,
+                    List.of("talos.copy_path", "talos.write_file"),
+                    List.of(), 1, 0, false, 2, List.of(),
                     0, 0, 0, 0,
                     List.of(
-                            workspaceOutcome("talos.copy_path", "notes.md", true,
-                                    "Copied notes.md -> notes-copy.md", "", "", copyPlan),
-                            workspaceOutcome("talos.move_path", "notes-copy.md", true,
-                                    "Moved notes-copy.md -> archive/notes-copy.md", "", "", movePlan),
-                            workspaceOutcome("talos.rename_path", "archive/notes-copy.md", true,
-                                    "Renamed archive/notes-copy.md -> archive/final-notes.md", "", "", renamePlan)
-                    ));
+                            workspaceOutcome(
+                                    "talos.copy_path",
+                                    "notes.md",
+                                    true,
+                                    "Copied notes.md -> notes-copy.md",
+                                    "",
+                                    "",
+                                    fixture.operationPlan()),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "index.html",
+                                    true,
+                                    true,
+                                    false,
+                                    "Wrote index.html",
+                                    "")));
 
-            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "Done.", messages, loopResult, ws, 0);
+            String summary = StaticVerificationAnswerRenderer
+                    .changedFilesSummary(loopResult);
 
-            assertTrue(outcome.finalAnswer().contains(
-                            "Updated 3 files: notes-copy.md, archive/notes-copy.md, archive/final-notes.md."),
-                    outcome.finalAnswer());
-            assertFalse(outcome.finalAnswer().contains("Updated 3 files: notes.md"),
-                    outcome.finalAnswer());
+            assertTrue(summary.contains(
+                            "Updated 2 files: notes-copy.md, index.html."),
+                    summary);
+            assertFalse(summary.contains("notes.md"), summary);
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -1998,7 +2312,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void selectorGroundedOverrideIsClassifiedAsGrounded() throws Exception {
+    void unboundSelectorDiagnosticDoesNotClaimSourceFactsOrCompleteAnswerOwnership() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2024,6 +2338,15 @@ class ExecutionOutcomeTest {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
+            var plan = CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                            messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.read_file"),
+                    List.of("talos.read_file"),
+                    List.of());
+            messages.add(ChatMessage.user(
+                    "Synthesis retry: provide a concise final answer."));
 
             var loopResult = new ToolCallLoop.LoopResult(
                     "unused", 4, 4,
@@ -2032,14 +2355,22 @@ class ExecutionOutcomeTest {
                     0, 0, 0, 0);
 
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                    "There are no mismatches.", messages, loopResult, ws, 0);
+                    "There are no mismatches.",
+                    plan,
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
-            assertTrue(outcome.selectorGroundedOverride());
-            assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.finalAnswer().startsWith(
+                    dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertFalse(outcome.finalAnswer().contains(".cta-button"));
             assertFalse(outcome.finalAnswer().contains("#ff4500"));
-            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.SELECTOR_GROUNDED_OVERRIDE));
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -2050,7 +2381,208 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void selectorGroundingStillOverridesAfterGrepOnlyUnderinspection() throws Exception {
+    void syntheticSelectorTailCannotRelabelCapturedNonSelectorOrMutationTask(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(
+                workspace.resolve("index.html"),
+                "<main class=\"real\"></main>\n");
+        Files.writeString(
+                workspace.resolve("style.css"),
+                ".missing {}\n");
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing');\n");
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                3,
+                3,
+                List.of(
+                        "talos.read_file",
+                        "talos.read_file",
+                        "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "style.css", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        for (String original : List.of(
+                "Explain this workspace.",
+                "Fix the selector mismatch in index.html.")) {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(original));
+            var plan = CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                            messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.read_file"),
+                    List.of("talos.read_file"),
+                    List.of());
+            messages.add(ChatMessage.user(
+                    "Check whether this website has selector mismatches."));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "plain answer",
+                    plan,
+                    messages,
+                    loopResult,
+                    workspace,
+                    0);
+
+            assertFalse(outcome.selectorGroundedOverride(), original);
+            assertFalse(
+                    outcome.finalAnswer().contains("Mismatches found:"),
+                    outcome.finalAnswer());
+        }
+    }
+
+    @Test
+    void webDiagnosticFinalizerUsesCapturedPlanAcrossSyntheticTails(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <button class="real-button">Run</button>
+                <script src="script.js"></script>
+                """);
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n");
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                2,
+                2,
+                List.of("talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        var diagnosticMessages = new ArrayList<ChatMessage>();
+        diagnosticMessages.add(ChatMessage.system("sys"));
+        diagnosticMessages.add(ChatMessage.user(
+                "Inspect this static website and identify why it is broken. "
+                        + "Do not change anything."));
+        var diagnosticPlan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                        diagnosticMessages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+        diagnosticMessages.add(ChatMessage.user(
+                "Synthesis retry: provide a concise answer."));
+
+        ExecutionOutcome diagnostic = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                diagnosticPlan,
+                diagnosticMessages,
+                loopResult,
+                workspace,
+                0);
+
+        assertTrue(diagnostic.webDiagnosticGroundedOverride());
+        assertTrue(
+                diagnostic.finalAnswer().contains(
+                        "source observations could not be bound"),
+                diagnostic.finalAnswer());
+        assertFalse(diagnostic.finalAnswer().contains(".missing-button"), diagnostic.finalAnswer());
+
+        var explainMessages = new ArrayList<ChatMessage>();
+        explainMessages.add(ChatMessage.system("sys"));
+        explainMessages.add(ChatMessage.user("Explain this workspace."));
+        var explainPlan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(
+                        explainMessages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+        explainMessages.add(ChatMessage.user(
+                "Inspect this static website and identify why it is broken."));
+
+        ExecutionOutcome explain = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                explainPlan,
+                explainMessages,
+                loopResult,
+                workspace,
+                0);
+
+        assertFalse(explain.webDiagnosticGroundedOverride());
+        assertFalse(
+                explain.finalAnswer().contains(
+                        "Static web diagnostics found:"),
+                explain.finalAnswer());
+    }
+
+    @Test
+    void compatibilityFinalizerFallbackUsesCapturedOriginalRequest(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <button class="real-button">Run</button>
+                <script src="script.js"></script>
+                """);
+        Files.writeString(
+                workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n");
+        var messages = new ArrayList<ChatMessage>();
+        String original =
+                "Inspect this static website and identify why it is broken. "
+                        + "Do not change anything.";
+        messages.add(ChatMessage.user(original));
+        TurnTaskContractCapture.set(
+                dev.talos.runtime.task.TaskContractResolver
+                        .resolveFromUserRequest(original));
+        messages.add(ChatMessage.user(
+                "Synthesis retry: explain this workspace instead."));
+        var loopResult = new ToolCallLoop.LoopResult(
+                "plain answer",
+                2,
+                2,
+                List.of("talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("index.html", "script.js"),
+                0,
+                0,
+                0,
+                0);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "plain answer",
+                messages,
+                loopResult,
+                workspace,
+                0);
+
+        assertTrue(outcome.webDiagnosticGroundedOverride());
+        assertTrue(
+                outcome.finalAnswer().contains("source observations could not be bound"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains(".missing-button"), outcome.finalAnswer());
+    }
+
+    @Test
+    void grepOnlyUnderinspectionCannotSupplySelectorDiagnosisFacts() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-grep-only-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2087,9 +2619,10 @@ class ExecutionOutcomeTest {
                     "Based on the tool results, there are no mismatches.", messages, loopResult, ws, 0);
 
             assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
-            assertTrue(outcome.selectorGroundedOverride());
-            assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
-            assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
+            assertFalse(outcome.selectorGroundedOverride());
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertFalse(outcome.finalAnswer().contains("`.cta-button`"));
             assertFalse(outcome.finalAnswer().contains("There are no mismatches"));
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -2625,6 +3158,287 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void explicitAppendSectionWithPreservationEvidenceCompletesVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-append-section-");
+        try {
+            String before = "# Atlas Notes\n\nExisting text.\n";
+            String after = before + "\n## Contributing\nRun tests before review.\n";
+            Files.writeString(ws.resolve("README.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Append a Contributing section to README.md with one sentence saying "
+                            + "Run tests before review. Preserve all current text."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated README.md.", 2, 2,
+                    List.of("talos.edit_file", "talos.write_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file",
+                                    "README.md",
+                                    false,
+                                    true,
+                                    false,
+                                    "",
+                                    "old_string not found",
+                                    null,
+                                    ToolError.INVALID_PARAMS,
+                                    null,
+                                    ToolMutationEvidence.exactEdit(
+                                            "missing anchor",
+                                            "## Contributing\nRun tests before review."),
+                                    ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                                    List.of(),
+                                    "call-1-1"),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "README.md",
+                                    true,
+                                    true,
+                                    false,
+                                    "wrote README.md",
+                                    "",
+                                    dev.talos.tools.VerificationStatus.PASS,
+                                    "",
+                                    null,
+                                    ToolMutationEvidence.fullWriteReplacement(before, after),
+                                    ToolFailureReason.NONE,
+                                    List.of(),
+                                    "call-1-2")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+            assertFalse(outcome.partialMutation());
+            assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
+            assertTrue(outcome.finalAnswer().contains("Append section verification passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void preserveRestReplacementRecoveryCompletesOnlyAfterExactVerification() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-preserve-rest-recovery-");
+        try {
+            String before = "Status: draft\nKeep this final line unchanged.\n";
+            String after = "Status: final\nKeep this final line unchanged.\n";
+            Files.writeString(ws.resolve("notes.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "In notes.md, change draft to final. If an exact edit fails, "
+                            + "recover without deleting any other line."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated notes.md.",
+                    2,
+                    2,
+                    List.of("talos.edit_file", "talos.write_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    1,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file",
+                                    "notes.md",
+                                    false,
+                                    true,
+                                    false,
+                                    "",
+                                    "old_string not found",
+                                    null,
+                                    ToolError.INVALID_PARAMS,
+                                    null,
+                                    ToolMutationEvidence.exactEdit(
+                                            "Status: pending",
+                                            "Status: final"),
+                                    ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                                    List.of(),
+                                    "call-1-1"),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file",
+                                    "notes.md",
+                                    true,
+                                    true,
+                                    false,
+                                    "wrote notes.md",
+                                    "",
+                                    dev.talos.tools.VerificationStatus.PASS,
+                                    "",
+                                    null,
+                                    ToolMutationEvidence.fullWriteReplacement(before, after),
+                                    ToolFailureReason.NONE,
+                                    List.of(),
+                                    "call-1-2")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(),
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
+
+            assertEquals(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    outcome.completionStatus());
+            assertEquals(
+                    ExecutionOutcome.VerificationStatus.PASSED,
+                    outcome.verificationStatus());
+            assertEquals(
+                    TaskCompletionStatus.COMPLETED_VERIFIED,
+                    outcome.taskOutcome().completionStatus());
+            assertEquals(
+                    MutationOutcomeStatus.SUCCEEDED,
+                    outcome.taskOutcome().mutationOutcome().status());
+            assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
+            assertFalse(outcome.partialMutation());
+            assertTrue(
+                    outcome.finalAnswer().contains("Replacement verification passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void explicitAppendStatementWithPreservationEvidenceCompletesVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-append-statement-");
+        try {
+            String before = "# Decisions\n\n"
+                    + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                    + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+            String after = before + "\nDecision 004: Health checks remain read-only.\n";
+            Files.createDirectories(ws.resolve("docs"));
+            Files.writeString(ws.resolve("docs/decisions.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                            + "Preserve Decisions 001 through 003 and change no code."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated docs/decisions.md.", 2, 2,
+                    List.of("talos.read_file", "talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "docs/decisions.md", true, true, false,
+                            "wrote docs/decisions.md", "", dev.talos.tools.VerificationStatus.PASS, "",
+                            null,
+                            ToolMutationEvidence.fullWriteReplacement(before, after))));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.finalAnswer().contains("Append statement verification passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void singleHtmlPolishEditWithoutFullWebSurfaceIsReadbackOnlyNotFailed() throws Exception {
+        Path ws = Files.createTempDirectory("talos-single-html-polish-readback-");
+        try {
+            Files.createDirectories(ws.resolve("site"));
+            Files.writeString(ws.resolve("site/index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                        <title>RoastRadar</title>
+                    </head>
+                    <body>
+                        <h1>Welcome to RoastRadar</h1>
+                        <p>Track coffee roast experiments.</p>
+                    </body>
+                    </html>
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("make the page a little more polished but keep it simple."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Edited site/index.html.",
+                    2,
+                    2,
+                    List.of("talos.read_file", "talos.edit_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    1,
+                    List.of("site/index.html"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file",
+                            "site/index.html",
+                            true,
+                            true,
+                            false,
+                            "Edited site/index.html: replaced 5 line(s) with 6 line(s)",
+                            "",
+                            dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Edited site/index.html.",
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), outcome.finalAnswer());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus(), outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertFalse(outcome.finalAnswer().contains("Task incomplete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("readback passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMismatchAfterSuccessfulWriteIsIncompleteNotReadbackOnly() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-mismatch-");
         try {
@@ -3137,6 +3951,8 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
         assertTrue(outcome.finalAnswer().contains(limitation));
+        assertEquals(AnswerOutputLimit.KEEP_ORIGINAL, outcome.outputLimit(),
+                "an evidence prefix retains the selected capability-limitation answer and its truncation");
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
@@ -3208,14 +4024,34 @@ class ExecutionOutcomeTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read README.md and summarize it."));
 
-        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
-                "README.md describes the project.", messages, null, true);
+        LocalTurnTraceCapture.begin(
+                "trc-no-tool-missing-evidence-contained",
+                "sid",
+                1,
+                "2026-07-13T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                    "README.md describes the project.", messages, null, true);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
-        assertTrue(outcome.finalAnswer().startsWith(
-                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
-        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith(
+                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "PROTOCOL_SANITIZED".equals(event.type())
+                                    && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
+                                    event.data().get("reason"))),
+                    "qualification needs structural proof for no-tool containment too");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
@@ -3234,7 +4070,8 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertTrue(outcome.finalAnswer().contains("did not inspect"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains(
+                "Current evidence for the required workspace target was not established."), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("Talos is done"), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("Proposed improvements"), outcome.finalAnswer());
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
@@ -3461,7 +4298,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void toolLoopReadTargetNotFoundCountsAsEvidenceAndReadOnlyAnswered() {
+    void toolLoopReadTargetNotFoundDoesNotCountAsGatheredEvidence() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read README.md and summarize it."));
@@ -3475,13 +4312,69 @@ class ExecutionOutcomeTest {
                         "talos.read_file", "README.md", false, false, false,
                         "", "README.md was not found.", null, ToolError.NOT_FOUND)));
 
-        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                "README.md was not found.", messages, loopResult, null, 0);
+        LocalTurnTraceCapture.begin(
+                "trc-missing-evidence-contained",
+                "sid",
+                1,
+                "2026-07-13T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "README.md was not found.", messages, loopResult, null, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
-        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertTrue(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "PROTOCOL_SANITIZED".equals(event.type())
+                                    && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
+                                    event.data().get("reason"))),
+                    "qualification needs structural proof that runtime containment ran");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void toolLoopProjectSummaryWithoutReadmeEvidenceIsContained(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "A small local project.\n");
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("What does this project do?"));
+        var plan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The project is a one-file JavaScript utility.", 2, 2,
+                List.of("talos.list_dir", "talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("script.js"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "README.md\nscript.js\n", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "script.js", true, false, false,
+                                "read script.js", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, workspace, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertTrue(outcome.finalAnswer().startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX));
+        assertFalse(outcome.finalAnswer().contains("one-file JavaScript utility"));
     }
 
     @Test
@@ -3706,6 +4599,101 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void pathExistenceAnswerWithDirectNotFoundEvidencePrependsDeterministicNegativeStatus() throws Exception {
+        Path ws = Files.createTempDirectory("talos-path-existence-not-found-");
+        try {
+            Files.createDirectories(ws.resolve("docs"));
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Check whether docs/target.md exists. Do not change anything."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of());
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "docs/target.md does not exist.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    0,
+                    List.of("docs/target.md"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "docs/target.md", false, false, false,
+                            "", "docs/target.md was not found.", null, ToolError.NOT_FOUND)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Path existence verified]"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("docs/target.md: not found"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void colonDelimitedExactCreateIsVerifiedComplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-colon-literal-");
+        try {
+            Files.writeString(ws.resolve("todo.md"), "Review the local setup.");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create todo.md containing exactly: Review the local setup. "
+                            + "Do not change any other file."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created todo.md.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "todo.md", true, true, false,
+                            "wrote todo.md", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created todo.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void pathExistenceAnswerWithOnlyIrrelevantReadEvidenceRemainsContained() throws Exception {
         Path ws = Files.createTempDirectory("talos-path-existence-irrelevant-read-");
         try {
@@ -3822,7 +4810,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void staticWebDiagnosisWithLinkedScriptButOnlyIndexReadIsEvidenceIncomplete() throws Exception {
+    void unboundHtmlOnlyDiagnosisDoesNotInferLinkedScriptFromDisk() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-linked-script-missing-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -3862,10 +4850,12 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
             assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
             assertTrue(outcome.finalAnswer().startsWith(
-                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+                    dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX));
             assertFalse(outcome.finalAnswer().contains("button markup is present"), outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains("script.js"), outcome.finalAnswer());
-            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertFalse(outcome.finalAnswer().contains("script.js"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("source observations could not be bound"));
+            assertTrue(outcome.webDiagnosticGroundedOverride());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -4033,6 +5023,77 @@ class ExecutionOutcomeTest {
                     .anyMatch(line -> line.contains("did not change")), trace.verification().problems().toString());
             assertTrue(trace.verification().limitations().stream()
                     .anyMatch(line -> line.contains("does not assign visible text")), trace.verification().limitations().toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void staticWebCoherenceDoesNotVerifyIncompleteExplicitContentRequirements() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-explicit-web-content-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <h1>Atlas Control</h1>
+                        <button id="status">Check status</button>
+                        <p id="message">Waiting</p>
+                        <script src="script.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.getElementById('status').addEventListener('click', () => {
+                      document.getElementById('message').textContent = 'Checked';
+                    });
+                    """);
+
+            String request = "Update index.html so the heading is Atlas Control and the status paragraph starts "
+                    + "Offline. Do not touch CSS or JavaScript.";
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(request));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Edited index.html.", 2, 2,
+                    List.of("talos.read_file", "talos.edit_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", true, true, false,
+                            "edited index.html", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-explicit-web-content",
+                    "sid-explicit-web-content",
+                    1,
+                    "2026-07-11T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    request);
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(2, outcome.verificationReport().requiredClaimCount());
+            assertEquals(1, outcome.verificationReport().unsatisfiedRequiredClaimCount());
+            assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("requested status paragraph prefix"), outcome.finalAnswer());
+            assertNotNull(trace);
+            assertEquals(2, trace.verification().requiredClaimCount());
+            assertEquals(1, trace.verification().unsatisfiedRequiredClaimCount());
         } finally {
             LocalTurnTraceCapture.clear();
             try (var walk = Files.walk(ws)) {
@@ -4302,6 +5363,40 @@ class ExecutionOutcomeTest {
                 outcome.verificationReport().limitations().toString());
     }
 
+    private static BoundWorkspaceFixture boundWorkspaceFixture(
+            String request,
+            String toolName
+    ) {
+        var resolution = dev.talos.runtime.task.TaskContractResolver
+                .resolveFromUserRequest(request);
+        assertEquals(
+                dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan
+                        .State.AUTHORIZED_SINGLE,
+                resolution.workspaceOperationPlan().state(),
+                resolution.workspaceOperationPlan().toString());
+        WorkspaceOperationPlan operationPlan =
+                dev.talos.runtime.workspace.WorkspaceOperationPlanner
+                        .authorityPlan(resolution.workspaceOperationPlan())
+                        .orElseThrow();
+        CurrentTurnPlan turnPlan = CurrentTurnPlan.createWithActionObligation(
+                resolution,
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of(toolName),
+                List.of(toolName),
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                new dev.talos.core.Config());
+        return new BoundWorkspaceFixture(turnPlan, operationPlan);
+    }
+
+    private record BoundWorkspaceFixture(
+            CurrentTurnPlan turnPlan,
+            WorkspaceOperationPlan operationPlan
+    ) {}
+
     private static ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,
@@ -4322,5 +5417,43 @@ class ExecutionOutcomeTest {
                 null,
                 errorCode,
                 plan);
+    }
+
+    // Optional boundary test, modeled on preserveRestReplacementRecoveryCompletesOnlyAfterExactVerification (:3170).
+    // Uses package-private ExecutionOutcome.fromToolLoop(String, List, LoopResult, Path, int) (ExecutionOutcome.java:115).
+    // All needed imports are already present. The red cause should be confirmed before relying on it,
+    // because other text-only code in ExecutionOutcome could keep it red after the E2 change.
+
+    @Test
+    void preserveRestRecoveryUnderTheAbsoluteSpellingCompletesAfterExactVerification(@TempDir Path temporary)
+            throws Exception {
+        Path ws = temporary.toRealPath();
+        String before = "Status: draft\nKeep this final line unchanged.\n";
+        String after = "Status: final\nKeep this final line unchanged.\n";
+        Files.writeString(ws.resolve("notes.md"), after);
+        String absolute = ws.resolve("notes.md").toString();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("In notes.md, change draft to final. If an exact edit fails, "
+                + "recover without deleting any other line."));
+        var loopResult = new ToolCallLoop.LoopResult("Updated notes.md.", 2, 2,
+                List.of("talos.edit_file", "talos.write_file"), List.of(), 1, 0, false, 1, List.of(), 0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome("talos.edit_file", absolute, false, true, false, "",
+                                "old_string not found", null, ToolError.INVALID_PARAMS, null,
+                                ToolMutationEvidence.exactEdit("Status: pending", "Status: final"),
+                                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, List.of(), "call-1-1"),
+                        new ToolCallLoop.ToolOutcome("talos.write_file", absolute, true, true, false,
+                                "wrote notes.md", "", dev.talos.tools.VerificationStatus.PASS, "", null,
+                                ToolMutationEvidence.fullWriteReplacement(before, after),
+                                ToolFailureReason.NONE, List.of(), "call-1-2")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+        assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().mutationOutcome().failed().isEmpty());
+        assertFalse(outcome.partialMutation());
     }
 }

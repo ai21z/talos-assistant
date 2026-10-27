@@ -33,7 +33,7 @@ final class ToolRepromptSuccessfulMutationDecision {
         // for all-success iterations; that path still avoids the 5-15
         // minute post-mutation bloviation observed on local 31B Q4 models.
         if (StaticWebContinuationPlanner.staticWebVerificationAlreadyPasses(state)) {
-            state.finishWithAnswer(String.join("\n", outcome.mutationSummaries()));
+            state.finishWithToolAnswer(String.join("\n", outcome.mutationSummaries()));
             state.clearPendingActionObligation();
             LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
             return Optional.of(false);
@@ -54,25 +54,25 @@ final class ToolRepromptSuccessfulMutationDecision {
                     LOG.debug("Continuing static web creation after directory-only mutation.");
                 } else {
                     LOG.debug("Continuing static web creation after verification found missing target(s): {}",
-                            plan.missingTargets());
+                            dev.talos.safety.SafeLogFormatter.value(plan.missingTargets()));
                 }
                 return Optional.of(ToolRepromptChatExecutor.execute(
                         state, plan.messages(), plan.tools(), plan.controls(), plan.retryName()));
             }
         }
         if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
-            state.finishWithAnswer(String.join("\n", outcome.mutationSummaries()));
+            state.finishWithToolAnswer(String.join("\n", outcome.mutationSummaries()));
             LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
                     outcome.mutationsThisIteration());
             return Optional.of(false);
         }
         if (!remainingRepairTargets.isEmpty()) {
             LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
-                    outcome.mutationsThisIteration(), remainingRepairTargets);
+                    outcome.mutationsThisIteration(), dev.talos.safety.SafeLogFormatter.value(remainingRepairTargets));
         }
         if (!remainingExpectedTargets.isEmpty()) {
             LOG.debug("Continuing mutation task after {} successful mutation(s); remaining expected targets: {}",
-                    outcome.mutationsThisIteration(), remainingExpectedTargets);
+                    outcome.mutationsThisIteration(), dev.talos.safety.SafeLogFormatter.value(remainingExpectedTargets));
         }
         return Optional.empty();
     }

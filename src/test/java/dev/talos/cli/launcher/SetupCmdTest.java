@@ -4,9 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import dev.talos.engine.llamacpp.ManagedContextSelector;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +18,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SetupCmdTest {
@@ -24,7 +29,7 @@ class SetupCmdTest {
     void setupCommandDescriptionIsBackendNeutral() {
         CommandLine.Command command = SetupCmd.class.getAnnotation(CommandLine.Command.class);
 
-        assertTrue(command.description()[0].contains("local model"));
+        assertTrue(command.description()[0].contains("llama.cpp"));
         assertFalse(command.description()[0].contains("Install Ollama"));
     }
 
@@ -37,15 +42,78 @@ class SetupCmdTest {
     }
 
     @Test
+    void profileOptionPointsToTheGeneratedCurrentListInsteadOfEmbeddingAliases() throws Exception {
+        CommandLine.Option option = SetupCmd.class
+                .getDeclaredField("profile")
+                .getAnnotation(CommandLine.Option.class);
+        String description = option.description()[0];
+
+        assertTrue(description.contains("Run talos setup models for the current list"), description);
+        assertFalse(description.contains("qwen2.5-coder-14b"), description);
+        assertFalse(description.contains("granite-4.1-3b"), description);
+        assertFalse(description.contains("qwen3-4b"), description);
+    }
+
+    @Test
+    void setupHelpPrintsUsageWithoutUnknownOptionError() {
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        CommandLine command = new CommandLine(new SetupCmd());
+        command.setOut(new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8), true));
+        command.setErr(new PrintWriter(new OutputStreamWriter(stderr, StandardCharsets.UTF_8), true));
+        // Keep help assertions independent of caller terminal ANSI settings. This mirrors
+        // the T865 root-help fix and prevents styled "Usage: setup" from breaking substrings.
+        command.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
+
+        int exit = command.execute("--help");
+
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertEquals(0, exit);
+        assertTrue(text.contains("Usage: setup"), text);
+        assertFalse(text.contains("\u001B["), text);
+        assertFalse(stderr.toString(StandardCharsets.UTF_8).contains("Unknown option"), stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
     void modelsHelpMentionsTestedManagedLlamaCppProfiles() {
         String help = SetupCmd.modelsHelp();
 
         assertTrue(help.contains("Accepted beta stability profiles:"), help);
         assertTrue(help.contains("Experimental selectable profiles:"), help);
         assertTrue(help.contains("qwen2.5-coder-14b"));
+        assertTrue(help.contains("d0a692ef765eefbf2fabb130b3cb2e8917e3d225"), help);
+        assertTrue(help.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"), help);
+        assertTrue(help.contains("legacy:two-model-large-scale-live-audit-0.10.8"), help);
         assertTrue(help.contains("gpt-oss-20b"));
         assertTrue(help.contains("qwen36vf-q6k"));
         assertTrue(help.contains("deepseek-v2lite-q4km"));
+        assertTrue(help.contains("qwen3-8b"), help);
+        assertTrue(help.contains("Qwen3-8B-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("experimental selectable"), help);
+        assertTrue(help.contains("qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712"), help);
+        assertTrue(help.contains("granite-4.1-3b"), help);
+        assertTrue(help.contains("granite-4.1-3b-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713"), help);
+        assertTrue(help.contains("16 of 24 scenario definitions and 47 of 72 trials"), help);
+        assertTrue(help.contains("qwen3-4b"), help);
+        assertTrue(help.contains("qwen3-4b-instruct-2507-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("qwen3-4b-full-p5-f6a2edf6-a8-b9918-cuda13-20260714"), help);
+        assertTrue(help.contains("20 of 24 scenario definitions and 58 of 72 trials"), help);
+        assertTrue(help.contains("47 of 54 required-tool decisions"), help);
+        assertTrue(help.contains("granite-4.1-8b"), help);
+        assertTrue(help.contains("granite-4.1-8b-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("granite-4.1-8b-full-p5-d93e263f-a1-b9918-cuda13-20260714"), help);
+        assertTrue(help.contains("19 of 24 scenario definitions and 57 of 72 trials"), help);
+        assertTrue(help.contains("51 of 54 required-tool decisions"), help);
+        assertTrue(help.contains("qwen3.5-9b"), help);
+        assertTrue(help.contains("Qwen/Qwen3.5-9B"), help);
+        assertTrue(help.contains("Qwen3.5-9B-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("qwen3.5-9b-full-p5-aa4bb8dc-fq2-b9918-cuda13-20260715"), help);
+        assertTrue(help.contains("19 of 24 scenario definitions and 56 of 72 trial outcomes"), help);
+        assertTrue(help.contains("52 of 54 required-tool decisions"), help);
+        assertTrue(help.contains("request layout: single-leading-system"), help);
+        assertTrue(help.contains("applied only after exact qualification"), help);
+        assertTrue(help.contains("win-x64-cuda-13.3:b9918"), help);
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
         assertTrue(help.contains("docs/reference/model-profiles.md"), help);
@@ -150,6 +218,27 @@ class SetupCmdTest {
     }
 
     @Test
+    void generatedProfileConfigIncludesSelectedContextAndReason() {
+        Path server = tempDir.resolve("llama-server.exe");
+        ManagedContextSelector.Decision context = new ManagedContextSelector.Decision(
+                16_384,
+                "estimated 16k context from 1536 MiB at 8192 on CUDA lane");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen2.5-coder-14b",
+                server,
+                null,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115,
+                "",
+                18116,
+                context);
+
+        assertTrue(yaml.contains("context: 16384"), yaml);
+        assertTrue(yaml.contains("context_reason: \"estimated 16k context from 1536 MiB at 8192 on CUDA lane\""), yaml);
+    }
+
+    @Test
     void qwenVibeForgedProfileUsesNativeToolCalling() {
         Path server = tempDir.resolve("llama-server.exe");
 
@@ -184,6 +273,334 @@ class SetupCmdTest {
     }
 
     @Test
+    void qwen3ExperimentalProfileUsesExactLocalArtifactAndNonThinkingRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("Qwen3-8B-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen3-8b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen3-8b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: qwen3-8b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void qwen3SetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("Qwen3-8B-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen3-8b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("does not match the pinned qwen3-8b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void graniteExperimentalProfileUsesExactLocalArtifactAndStandardNativeRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("granite-4.1-3b-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "granite-4.1-3b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"granite-4.1-3b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args: []"), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: granite-4.1-3b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void graniteSetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("granite-4.1-3b-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "granite-4.1-3b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned granite-4.1-3b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void qwen3FourBExperimentalProfileUsesExactLocalArtifactAndNonThinkingRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen3-4b-instruct-2507-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen3-4b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen3-4b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: qwen3-4b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void qwen3FourBSetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("qwen3-4b-instruct-2507-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("qwen3-4b-config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen3-4b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned qwen3-4b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void graniteEightBExperimentalProfileUsesExactLocalArtifactAndStandardNativeRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("granite-4.1-8b-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "granite-4.1-8b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"granite-4.1-8b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args: []"), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: granite-4.1-8b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void graniteEightBSetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("granite-4.1-8b-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("granite-8b-config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "granite-4.1-8b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned granite-4.1-8b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void qwen35ExperimentalProfileUsesExactLocalArtifactAndEvidenceGatedLayout() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("Qwen3.5-9B-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen3.5-9b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen3.5-9b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: qwen3.5-9b experimental selectable"), yaml);
+        assertFalse(yaml.contains("request_layout"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void qwen35SetupRefusesAProfileBoundToTheWrongFilename() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path renamed = tempDir.resolve("models").resolve("renamed-qwen3.5.gguf");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> SetupCmd.renderManagedLlamaCppProfileConfig(
+                        "qwen3.5-9b",
+                        server,
+                        renamed,
+                        tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                        18115));
+
+        assertTrue(error.getMessage().contains("Expected GGUF file Qwen3.5-9B-Q4_K_M.gguf"),
+                error.getMessage());
+    }
+
+    @Test
+    void qwen35SetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("Qwen3.5-9B-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("qwen35-config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen3.5-9b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned qwen3.5-9b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void experimentalLocalOnlyProfilesNeverClaimTheWizardCanDownloadThem() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path home = tempDir.resolve("isolated-home");
+        Path cache = tempDir.resolve("empty-cache");
+        Files.createDirectories(cache);
+
+        for (String alias : java.util.List.of(
+                "qwen3-8b", "granite-4.1-3b", "qwen3-4b", "granite-4.1-8b", "qwen3.5-9b")) {
+            Path config = tempDir.resolve(alias + "-missing.yaml");
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            PrintStream previousErr = System.err;
+            int exit;
+            try {
+                System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+                exit = withUserHome(home, () -> new CommandLine(new SetupCmd()).execute(
+                        "models",
+                        "--profile", alias,
+                        "--server-path", server.toString(),
+                        "--cache-dir", cache.toString(),
+                        "--write",
+                        "--config", config.toString()));
+            } finally {
+                System.setErr(previousErr);
+            }
+
+            String error = stderr.toString(StandardCharsets.UTF_8);
+            assertEquals(2, exit, error);
+            assertFalse(Files.exists(config), "missing local bytes must not produce config for " + alias);
+            assertTrue(error.contains(alias + " requires an exact local GGUF"), error);
+            assertTrue(error.contains("not available as a wizard download"), error);
+            assertTrue(error.contains("docs/reference/model-profiles.md"), error);
+            assertFalse(error.contains("run talos setup wizard to download"), error);
+        }
+    }
+
+    @Test
     void generatedUserOwnedModelConfigUsesModelPathAndDoesNotSetHuggingFaceSource() {
         Path server = tempDir.resolve("llama-server.exe");
         Path model = tempDir.resolve("models").resolve("agent.gguf");
@@ -198,7 +615,45 @@ class SetupCmdTest {
         assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""));
         assertTrue(yaml.contains("hf_repo: \"\""));
         assertTrue(yaml.contains("hf_file: \"\""));
-        assertTrue(yaml.contains("native_calling: true"));
+        assertTrue(yaml.contains("native_calling: false"));
+    }
+
+    @Test
+    void knownProfileRejectsMismatchedExplicitGgufPath() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen2.5-coder-7b-instruct-q4_k_m.gguf");
+
+        IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> SetupCmd.renderManagedLlamaCppProfileConfig(
+                        "qwen2.5-coder-14b",
+                        server,
+                        model,
+                        tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                        18115));
+
+        assertTrue(error.getMessage().contains("does not match profile qwen2.5-coder-14b"), error.getMessage());
+        assertTrue(error.getMessage().contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"), error.getMessage());
+        assertTrue(error.getMessage().contains("use a custom profile name"), error.getMessage());
+    }
+
+    @Test
+    void knownProfileAcceptsMatchingExplicitGgufPathAndKeepsProfileToolMode() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen2.5-coder-14b-instruct-q4_k_m.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen2.5-coder-14b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
     }
 
     @Test
@@ -262,7 +717,7 @@ class SetupCmdTest {
         assertEquals(2, exit);
         assertFalse(Files.exists(config), "unresolved GPT-OSS setup must not write a non-startable config");
         String text = stderr.toString(StandardCharsets.UTF_8);
-        assertTrue(text.contains("gpt-oss-20b requires a local GGUF"), text);
+        assertTrue(text.contains("gpt-oss-20b requires an exact local GGUF"), text);
         assertTrue(text.contains("--model-path"), text);
         assertTrue(text.contains("talos setup wizard"), text);
     }
@@ -362,17 +817,28 @@ class SetupCmdTest {
         Path server = tempDir.resolve("llama-server.exe");
         Files.writeString(server, "fake", StandardCharsets.UTF_8);
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 
-        int exit = new CommandLine(new SetupCmd()).execute(
-                "models",
-                "--profile", "qwen2.5-coder-14b",
-                "--server-path", server.toString(),
-                "--write",
-                "--config", config.toString());
+        int exit;
+        PrintStream previousOut = System.out;
+        try {
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen2.5-coder-14b",
+                    "--server-path", server.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setOut(previousOut);
+        }
 
         assertEquals(0, exit);
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
         assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""));
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Context: "), text);
+        assertTrue(text.contains("selected:"), text);
         assertTrue(yaml.contains("model_path: \"") || yaml.contains("hf_repo: \"Qwen/Qwen2.5-Coder-14B-Instruct-GGUF\""),
                 yaml);
     }

@@ -2,6 +2,8 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
@@ -16,6 +18,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +57,7 @@ public final class AskMode implements Mode {
         Matcher m1 = EXACT_P.matcher(rawLine);
         if (m1.find()) {
             String out = m1.group(1);
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(out);
             return Optional.of(new Result.Ok(out));
         }
         // Fast-path: <think>…</think> stripping + trailing text preserve
@@ -62,6 +66,7 @@ public final class AskMode implements Mode {
             String inner = m2.group(1);
             String tail  = m2.group(2) == null ? "" : m2.group(2);
             String out = (inner + (tail.isBlank() ? "" : " " + tail)).trim();
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(out);
             return Optional.of(new Result.Ok(out));
         }
 
@@ -69,10 +74,14 @@ public final class AskMode implements Mode {
                 TaskContractResolver.fromUserRequest(rawLine),
                 workspace);
         if (ReadOnlyCommandRefusal.matches(askContract)) {
-            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+            Result.Ok refusal = ReadOnlyCommandRefusal.resultFor(name());
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(refusal.text);
+            return Optional.of(refusal);
         }
         if (askContract.mutationRequested()) {
-            return Optional.of(new Result.Ok("\n" + READ_ONLY_MUTATION_NUDGE + "\n\n"));
+            String answer = "\n" + READ_ONLY_MUTATION_NUDGE + "\n\n";
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(answer);
+            return Optional.of(new Result.Ok(answer));
         }
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(CapabilityPosture.ASK_READ_ONLY, askContract);
@@ -90,9 +99,21 @@ public final class AskMode implements Mode {
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
         // System prompt - composed from sections, tool-aware, history-aware
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistoryForAssist();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+        var statusMessages = new ArrayList<>(history);
+        statusMessages.add(ChatMessage.user(rawLine));
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
-        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
+        boolean nativeTools = dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestForMessages(statusMessages).isEmpty()
+                && ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forAsk()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(visibleTools)
@@ -100,22 +121,17 @@ public final class AskMode implements Mode {
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory);
         if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(visibleTools)) {
-            promptBuilder.withWorkspace(workspace);
+            promptBuilder.withWorkspace(dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent() ? null : workspace);
         }
         String system = promptBuilder.build();
 
         // Build conversation history - AskMode uses a larger budget (55% vs 25%)
         // because there are no RAG snippets competing for context space.
         // This is critical for multi-turn creative tasks.
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistoryForAssist();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
-        // Build structured conversation messages for /api/chat
+        // Build structured conversation messages for the chat request
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
+        ModelIdentitySnapshot runtimeIdentity = ctx.llm() == null
+                ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity();
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "ask",
                 "ask",
@@ -123,10 +139,11 @@ public final class AskMode implements Mode {
                 ctx,
                 nativeTools,
                 history.size(),
-                messages));
+                messages, runtimeIdentity));
 
         // Execute LLM turn via shared executor
         var opts = new AssistantTurnExecutor.Options()
+                .runtimeIdentity(runtimeIdentity)
                 .llmTimeoutMs(llmTimeoutMs)
                 .responseMaxChars(responseMaxChars)
                 .capabilityPosture(CapabilityPosture.ASK_READ_ONLY);
@@ -135,6 +152,9 @@ public final class AskMode implements Mode {
                 AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                body,
+                LocalTurnTraceCapture.AnswerTransformationReason.MODE_PRESENTATION_LAYOUT);
 
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(body, ""));
@@ -143,7 +163,7 @@ public final class AskMode implements Mode {
     }
 
     /**
-     * Builds a structured list of ChatMessages for the /api/chat endpoint.
+     * Builds a structured list of ChatMessages for the chat request.
      *
      * <p>Includes: system prompt → pre-built conversation history → current user message.
      * The caller is responsible for building history (and measuring its token cost)

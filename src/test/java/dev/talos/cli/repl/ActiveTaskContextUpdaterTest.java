@@ -23,14 +23,8 @@ class ActiveTaskContextUpdaterTest {
 
     @Test
     void proposalOnlyTurnCreatesProposedChangesContextFromExpectedTargets() {
-        TurnResult result = turn(
-                7,
-                new Result.Ok("I would update the README title and usage section."),
-                policy("READ_ONLY_QA", false, false, List.of("README.md")),
-                trace(7, "trace-proposal", false, false, List.of("README.md"),
-                        "", "", "", "NOT_REQUESTED", ""),
-                List.of(),
-                0);
+        TurnResult result = proposalWithRestrictionEvidence(List.of("README.md"), List.of("README.md"),
+                List.of("README.md"), "I would update the README title and usage section.");
 
         ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
                 result,
@@ -46,8 +40,315 @@ class ActiveTaskContextUpdaterTest {
         assertEquals("trace-proposal", context.sourceTraceId());
         assertEquals(List.of("README.md"), context.targets());
         assertTrue(context.proposalSummary().contains("README title"));
+        assertTrue(context.hasBoundProposal());
         assertEquals(ArtifactGoal.Source.ACTIVE_CONTEXT, update.artifactGoal().source());
         assertEquals(ArtifactGoal.ArtifactKind.README, update.artifactGoal().artifactKind());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Read README.md and diagnose the failure. Do not edit files.",
+            "Do not propose changes to README.md.",
+            "The ticket says 'Propose changes to README.md'. Explain the ticket.",
+            "If asked later, propose changes to README.md.",
+            "Never suggest changes to README.md.",
+            "Print the words `Propose changes to README.md`."
+    })
+    void nonProposalRequestsCannotCreateProposalContext(String request) {
+        var update = updater.updateAfterTurn(completedProposal("A diagnosis was provided.",
+                List.of("README.md")), request, ActiveTaskContext.none(), ArtifactGoal.none());
+        assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "", "PARTIAL", "ADVISORY_ONLY", "FAILED", "ABORTED", "ERROR", "NO_RESULT"
+    })
+    void incompleteProposalCannotCreateProposalOrRepairContext(String classification) {
+        TurnResult result = turn(7, new Result.Ok("Changes were suggested for README.md."),
+                policy("READ_ONLY_QA", false, false, List.of("README.md")),
+                trace(7, "trace-proposal", false, false, List.of("README.md"),
+                        "FAILED".equals(classification) ? "FAILED" : "NOT_RUN",
+                        "", "NONE", "NOT_REQUESTED", classification), List.of(), 0);
+        var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                ActiveTaskContext.none(), ArtifactGoal.none());
+        assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+        for (String followUp : List.of("apply those changes", "fix it")) {
+            var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(followUp,
+                    dev.talos.runtime.task.TaskContract.unknown(followUp),
+                    update.activeTaskContext(), update.artifactGoal(), 8);
+            assertFalse(decision.consumed());
+            assertFalse(decision.taskContract().mutationAllowed());
+        }
+    }
+
+    @Test
+    void errorsEmptyAndInformationalResultsCannotCreateProposalContext() {
+        for (Result output : List.of(new Result.Ok(""), new Result.Ok("   "),
+                new Result.Error("Failed", 1), new Result.Info("No result"))) {
+            TurnResult complete = completedProposal("Replace the title.", List.of("README.md"));
+            TurnResult result = new TurnResult(output, null, 7, Duration.ZERO, complete.audit());
+            var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                    ActiveTaskContext.none(), ArtifactGoal.none());
+            assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+        }
+    }
+
+    @Test
+    void failedReadCannotBecomeProposalEvenWithCompleteOutcome() {
+        TurnResult complete = completedProposal("Replace the title.", List.of("README.md"));
+        var result = turn(7, complete.result(), complete.audit().policyTrace(), complete.audit().localTrace(),
+                List.of(new TurnRecord.ToolCallSummary("talos.read_file", "README.md", false, "unavailable")), 0);
+        var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                ActiveTaskContext.none(), ArtifactGoal.none());
+        assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+    }
+
+    @Test
+    void contradictoryVerificationEvidenceCannotCreateProposalContext() {
+        for (boolean mismatchedStatus : List.of(false, true)) {
+            var trace = LocalTurnTrace.builder("trace-proposal", "session", 7, "2026-09-15T00:00:00Z")
+                    .taskContract(new LocalTurnTrace.TaskContractSummary("READ_ONLY_QA", false, false,
+                            false, List.of("README.md"), List.of()))
+                    .verification("NOT_RUN", "", List.of(), 0, mismatchedStatus ? 0 : 1, List.of(), List.of())
+                    .outcome("COMPLETE", mismatchedStatus ? "FAILED" : "NOT_RUN", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED")
+                    .build();
+            var result = turn(7, new Result.Ok("Replace the title."),
+                    policy("READ_ONLY_QA", false, false, List.of("README.md")), trace, List.of(), 0);
+            var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                    ActiveTaskContext.none(), ArtifactGoal.none());
+            assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+        }
+    }
+
+    @Test
+    void proposalScopeExcludesReadReferencesAndPreviousDurableTargets() {
+        ActiveTaskContext previous = ActiveTaskContext.partialMutation(6, "old",
+                List.of("index.html", "style.css", "script.js"), "PARTIAL", StaticWebRequirements.none());
+        var update = updater.updateAfterTurn(completedProposal("Replace the heading in index.html.",
+                        List.of("notes.md", "index.html", "style.css", "script.js")),
+                "Read notes.md. Propose changes to index.html.", previous, ArtifactGoal.fromActiveContext(previous));
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+        assertTrue(update.activeTaskContext().hasBoundProposal());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Propose changes to README.md or notes.md.",
+            "Propose README.md changes without editing.",
+            "Propose changes to README.md and preserve notes.md."
+    })
+    void proposalWithUnresolvedScopeClearsPreviousProposal(String request) {
+        ActiveTaskContext previous = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
+                6, "old", List.of("README.md"), "Replace title.");
+        var update = updater.updateAfterTurn(completedProposal("Some changes were suggested.",
+                        List.of("README.md", "notes.md")),
+                request, previous, ArtifactGoal.fromActiveContext(previous));
+        assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+    }
+
+    @Test
+    void conflictingMutationContractCannotPreserveAnOlderProposal() {
+        ActiveTaskContext previous = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
+                6, "old", List.of("notes.md"), "Replace title.");
+        var result = turn(7, new Result.Ok("Changes were suggested for README.md."),
+                policy("FILE_EDIT", true, true, List.of("README.md")),
+                trace(7, "trace-proposal", true, true, List.of("README.md"),
+                        "NOT_RUN", "", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED"), List.of(), 0);
+        var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                previous, ArtifactGoal.fromActiveContext(previous));
+        assertEquals(ActiveTaskContext.Kind.NONE, update.activeTaskContext().kind());
+        assertEquals(ArtifactGoal.none(), update.artifactGoal());
+    }
+
+    @Test
+    void proposalWordingDoesNotDiscardRecordedMutationRecovery() {
+        ActiveTaskContext previous = dev.talos.runtime.context.ProposalContextTestSupport.accepted(
+                6, "old", List.of("notes.md"), "Replace title.");
+        var result = turn(7, new Result.Ok("An edit was recorded, verification failed."),
+                policy("FILE_EDIT", true, true, List.of("README.md")),
+                trace(7, "trace-edited", true, true, List.of("README.md"),
+                        "FAILED", "Readback failed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "README.md", true, "")), 0);
+        var update = updater.updateAfterTurn(result, "Propose changes to README.md.",
+                previous, ArtifactGoal.fromActiveContext(previous));
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("README.md"), update.activeTaskContext().targets());
+        assertFalse(update.activeTaskContext().hasBoundProposal());
+    }
+
+    private static TurnResult completedProposal(String answer, List<String> targets) {
+        return turn(7, new Result.Ok(answer), policy("READ_ONLY_QA", false, false, targets),
+                trace(7, "trace-proposal", false, false, targets,
+                        "NOT_RUN", "", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED"), List.of(), 0);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Propose changes to README.md.",
+            "Do not edit README.md yet. Propose the changes first.",
+            "Do not modify README.md yet. Suggest those edits.",
+            "Do not edit README.md yet. Propose changes to README.md."
+    })
+    void supportedProposalUsesTheActualResolvedReadOnlyContract(String request) {
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(request);
+        assertFalse(contract.mutationAllowed(), contract.toString());
+        assertFalse(contract.mutationRequested(), contract.toString());
+        var before = contract.forbiddenTargets();
+        var result = completedResolvedProposal(contract);
+        var update = updater.updateAfterTurn(result, request, ActiveTaskContext.none(), ArtifactGoal.none());
+        assertTrue(update.activeTaskContext().hasBoundProposal(), contract.toString());
+        assertEquals(List.of("README.md"), update.activeTaskContext().targets());
+        assertEquals(before, contract.forbiddenTargets());
+        if (request.startsWith("Do not")) assertTrue(before.contains("README.md"), contract.toString());
+        String followUp = "Apply those changes.";
+        var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(followUp,
+                dev.talos.runtime.task.TaskContractResolver.fromUserRequest(followUp),
+                update.activeTaskContext(), update.artifactGoal(), 8);
+        assertTrue(decision.consumed());
+        assertEquals(java.util.Set.of("README.md"), decision.taskContract().expectedTargets());
+        assertTrue(decision.taskContract().mutationAllowed());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Do not edit README.md yet. Propose changes to README.md. Never edit README.md.",
+            "Do not edit README.md yet. Propose changes to README.md. Keep README.md unchanged.",
+            "Do not edit README.md yet. Propose changes to README.md. Do not edit notes.md.",
+            "Do not edit README.md yet. Propose changes to README.md. Read notes.md.",
+            "Do not edit README.md yet. Propose changes to README.md. Do not run tests.",
+            "Do not edit README.md yet. Propose changes to notes.md."
+    })
+    void unaccountedDeferredRequestsCannotSupplyFollowUpScope(String request) {
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(request);
+        var before = contract.forbiddenTargets();
+        var update = updater.updateAfterTurn(completedResolvedProposal(contract), request,
+                ActiveTaskContext.none(), ArtifactGoal.none());
+        assertEquals(ActiveTaskContext.none(), update.activeTaskContext(), contract.toString());
+        assertEquals(before, contract.forbiddenTargets());
+        String followUp = "Apply those changes.";
+        var raw = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(followUp);
+        var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(
+                followUp, raw, update.activeTaskContext(), update.artifactGoal(), 8);
+        assertFalse(decision.consumed());
+        assertEquals(raw, decision.taskContract());
+    }
+
+    @Test
+    void deferredScopeCannotExplainMissingOrAdditionalForbiddenEvidence() {
+        String request = "Do not edit README.md yet. Propose the changes first.";
+        for (List<String> defect : List.of(List.<String>of(), List.of("README.md", "notes.md"),
+                List.of("readme.md"), List.of("README.md", ""))) {
+            for (boolean policyDefect : List.of(false, true)) {
+                var policyForbidden = policyDefect ? defect : List.of("README.md");
+                var traceForbidden = policyDefect ? List.of("README.md") : defect;
+                var result = proposalWithRestrictionEvidence(policyForbidden, traceForbidden,
+                        List.of("README.md"), "Replace the title.");
+                var update = updater.updateAfterTurn(result, request, ActiveTaskContext.none(), ArtifactGoal.none());
+                assertEquals(ActiveTaskContext.none(), update.activeTaskContext(),
+                        "policy " + policyForbidden + ", trace " + traceForbidden);
+            }
+        }
+    }
+
+    @Test
+    void deferredScopeAcceptsOnlyCasePreservingLexicalNormalization() {
+        String request = "Do not edit docs/README.md yet. Propose the changes first.";
+        var result = proposalWithRestrictionEvidence(List.of("./docs\\README.md"),
+                List.of("docs/README.md"), List.of("./docs/README.md"), "Replace the title.");
+        var update = updater.updateAfterTurn(result, request, ActiveTaskContext.none(), ArtifactGoal.none());
+        assertTrue(update.activeTaskContext().hasBoundProposal());
+        assertEquals(List.of("docs/README.md"), update.activeTaskContext().targets());
+        var caseChanged = proposalWithRestrictionEvidence(List.of("docs/readme.md"),
+                List.of("docs/readme.md"), List.of("docs/README.md"), "Replace the title.");
+        assertEquals(ActiveTaskContext.none(), updater.updateAfterTurn(caseChanged, request,
+                ActiveTaskContext.none(), ArtifactGoal.none()).activeTaskContext());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Propose changes to README.md.",
+            "Do not edit README.md yet. Propose the changes first."
+    })
+    void proposalCannotDiscardRetainedRequirementsOrReactivateThemAfterRestore(
+            String request, @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) {
+        var priorContexts = List.of(
+                ActiveTaskContext.pendingMutation(6, "old", List.of("README.md"), "Pending",
+                        StaticWebRequirements.of(List.of(), java.util.Set.of("README.md"))),
+                ActiveTaskContext.pendingMutation(6, "old", List.of("README.md"), "Pending",
+                        StaticWebRequirements.of(List.of("Required release facts"), java.util.Set.of())),
+                ActiveTaskContext.verifierFindings(6, "old", List.of("README.md"), List.of("Required check"),
+                        "FAILED", List.of(new ActiveTaskContext.RequiredVerificationClaim(
+                                "required-check", "Required check", "STATIC_INTERACTION_GUARD",
+                                "#action", "#result", "click"))));
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(request);
+        var store = new dev.talos.runtime.JsonSessionStore(tempDir);
+        int ordinal = 0;
+        for (var previous : priorContexts) {
+            var update = updater.updateAfterTurn(completedResolvedProposal(contract), request,
+                    previous, ArtifactGoal.fromActiveContext(previous));
+            assertEquals(ActiveTaskContext.State.SUPPRESSED, update.activeTaskContext().state());
+            assertEquals(previous.staticWebRequirements(), update.activeTaskContext().staticWebRequirements());
+            assertEquals(previous.requiredVerificationClaims(), update.activeTaskContext().requiredVerificationClaims());
+            assertEquals(ArtifactGoal.none(), update.artifactGoal());
+            assertEquals(ArtifactGoal.none(), ArtifactGoal.fromActiveContext(update.activeTaskContext()));
+            assertFalse(update.activeTaskContext().activeAt(8));
+            String id = "suppressed-" + ordinal++;
+            var data = new dev.talos.runtime.SessionData(id, tempDir.toString(), "", 7,
+                    java.time.Instant.parse("2026-09-16T00:00:00Z"), List.of(), "test",
+                    update.activeTaskContext(), update.artifactGoal());
+            try (var writer = store.acquireSessionWriter(id)) {
+                writer.save(data);
+            }
+            var restored = store.load(id).orElseThrow();
+            assertEquals(update.activeTaskContext(), restored.activeTaskContext());
+            assertEquals(ArtifactGoal.none(), restored.artifactGoal());
+            for (var context : List.of(update.activeTaskContext(), restored.activeTaskContext())) {
+                String followUp = "Apply those changes.";
+                var raw = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(followUp);
+                var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(
+                        followUp, raw, context, ArtifactGoal.none(), 8);
+                assertFalse(decision.consumed());
+                assertEquals(raw, decision.taskContract());
+                assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+            }
+        }
+    }
+
+    @Test
+    void directProposalCannotDiscardCurrentNamedExclusionsOrRequiredFacts() {
+        for (String request : List.of(
+                "Propose changes to README.md. Do not edit notes.md.",
+                "Propose changes to README.md. Preserve these facts: Required release facts.")) {
+            var contract = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(request);
+            var update = updater.updateAfterTurn(completedResolvedProposal(contract), request,
+                    ActiveTaskContext.none(), ArtifactGoal.none());
+            assertEquals(ActiveTaskContext.none(), update.activeTaskContext(), request);
+        }
+    }
+
+    private static TurnResult proposalWithRestrictionEvidence(
+            List<String> policyForbidden, List<String> traceForbidden, List<String> targets, String answer) {
+        var trace = LocalTurnTrace.builder("trace-proposal", "session", 7, "2026-09-16T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary("READ_ONLY_QA", false, false,
+                        false, targets, traceForbidden))
+                .verification("NOT_RUN", "", List.of(), 0, 0, List.of(), List.of())
+                .outcome("COMPLETE", "NOT_RUN", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED")
+                .build();
+        return turn(7, new Result.Ok(answer), policy("READ_ONLY_QA", false, false, targets, policyForbidden),
+                trace, List.of(), 0);
+    }
+
+    private static TurnResult completedResolvedProposal(dev.talos.runtime.task.TaskContract contract) {
+        var targets = List.copyOf(contract.expectedTargets());
+        var trace = LocalTurnTrace.builder("trace-proposal", "session", 7, "2026-09-16T00:00:00Z")
+                .taskContract(contract)
+                .verification("NOT_RUN", "", List.of(), 0, 0, List.of(), List.of())
+                .outcome("COMPLETE", "NOT_RUN", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED")
+                .build();
+        return turn(7, new Result.Ok("Replace the README title."),
+                policy(contract.type().name(), contract.mutationAllowed(), contract.verificationRequired(),
+                        targets, List.copyOf(contract.forbiddenTargets())), trace, List.of(), 0);
     }
 
     @Test
@@ -599,7 +900,8 @@ class ActiveTaskContextUpdaterTest {
                         unsatisfiedRequiredClaimCount,
                         authoritativeProofKinds,
                         limitations)
-                .outcome(classification, verificationStatus, approvalStatus, mutationStatus, classification)
+                .outcome("READ_ONLY_ANSWERED".equals(classification) ? "COMPLETE" : classification,
+                        verificationStatus, approvalStatus, mutationStatus, classification)
                 .build();
     }
 }

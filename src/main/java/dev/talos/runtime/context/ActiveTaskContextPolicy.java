@@ -1,6 +1,7 @@
 package dev.talos.runtime.context;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.task.TaskType;
 
@@ -69,6 +70,22 @@ public final class ActiveTaskContextPolicy {
             ActiveTaskContext savedContext,
             ArtifactGoal savedGoal,
             int currentUserTurnNumber) {
+        return evaluate(
+                userRequest,
+                rawContract,
+                savedContext,
+                savedGoal,
+                currentUserTurnNumber,
+                true);
+    }
+
+    public static Decision evaluate(
+            String userRequest,
+            TaskContract rawContract,
+            ActiveTaskContext savedContext,
+            ArtifactGoal savedGoal,
+            int currentUserTurnNumber,
+            boolean mutationAuthorityComplete) {
         TaskContract current = rawContract == null ? TaskContract.unknown(userRequest) : rawContract;
 
         if (savedContext == null || savedContext.state() != ActiveTaskContext.State.ACTIVE) {
@@ -101,6 +118,22 @@ public final class ActiveTaskContextPolicy {
                     false);
         }
 
+        if (savedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES
+                && !savedContext.hasBoundProposal()) {
+            return new Decision(current,
+                    savedContext.suppressed("Proposal provenance is unavailable. Explicit edit scope is required."),
+                    ArtifactGoal.none(), savedContext, false);
+        }
+
+        if (!mutationAuthorityComplete) {
+            return new Decision(
+                    current,
+                    ActiveTaskContext.none(),
+                    ArtifactGoal.none(),
+                    savedContext,
+                    false);
+        }
+
         if (explicitTargetsDifferFromSavedTargets(current, savedContext.targets())) {
             return new Decision(
                     current,
@@ -108,6 +141,10 @@ public final class ActiveTaskContextPolicy {
                     ArtifactGoal.none(),
                     ActiveTaskContext.none(),
                     false);
+        }
+
+        if (TaskContractResolver.explicitlyForbidsMutation(userRequest)) {
+            return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), savedContext, false);
         }
 
         if (isRepairContinuation(userRequest)
@@ -145,6 +182,7 @@ public final class ActiveTaskContextPolicy {
     }
 
     private static boolean suppressesContext(String userRequest, TaskContract contract) {
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) return true;
         if (contract != null && contract.type() == TaskType.SMALL_TALK) return true;
         String lower = normalized(userRequest);
         if (lower.startsWith("/")) return true;

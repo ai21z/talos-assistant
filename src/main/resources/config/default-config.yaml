@@ -1,6 +1,8 @@
 # src/main/resources/config/default-config.yaml
 
 rag:
+  # In a Git repository only files Git keeps are indexed, so ignored folders stay out of retrieval.
+  git_exclusions: true
   includes:
     - "**/*.md"
     - "**/*.markdown"
@@ -135,14 +137,6 @@ embed:
   host: ""
   allow_remote: false
 
-# Optional legacy/provider backend. Managed llama.cpp is the default beta path;
-# this block is used only when the active backend/model selects ollama.
-ollama:
-  host: "http://127.0.0.1:11434"
-  model: "qwen2.5-coder:14b"
-  embed: "bge-m3"
-  allow_remote: false  # Set to true to allow non-localhost Ollama hosts
-
 engines:
   llama_cpp:
     mode: "managed"               # managed or connect_only
@@ -183,7 +177,7 @@ limits:
   file_bytes_max: 200000         # 200 KB for realistic docs
   file_lines_max: 8000           # 8000 lines
   dir_entries_max: 1000
-  llm_timeout_ms: 300000         # 5 minutes
+  llm_timeout_ms: 300000         # no-progress budget before first token; streaming progress is governed by llm_idle_ms
   file_timeout_ms: 10000         # 10 seconds
   rate_per_sec: 10
   llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)

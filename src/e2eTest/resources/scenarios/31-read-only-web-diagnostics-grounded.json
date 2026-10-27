@@ -1,9 +1,9 @@
 {
-  "name": "read-only web diagnostics are grounded",
+  "name": "unbound read-only web diagnostics reject unsupported claims",
   "fixture": "broken-bmi-site",
   "v1Pack": true,
   "claims": [
-    "read-only-web-diagnostics-use-static-workspace-facts",
+    "unbound-read-only-web-diagnosis-remains-limited",
     "unsupported-model-diagnosis-is-replaced"
   ],
   "runner": "executor",

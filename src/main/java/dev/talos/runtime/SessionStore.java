@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.trace.LocalTurnTrace;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -13,7 +14,9 @@ import java.util.Optional;
  * not a silent fallback (CCR-016). Constructors that accept a
  * {@code SessionStore} require a non-null value.
  *
- * <p>Save is fire-and-forget (never throws), load returns empty if absent.
+ * <p>The snapshot {@link #save} contract is fire-and-forget; load returns
+ * empty if absent. Per-turn envelope implementations report only the write
+ * observations explicitly represented by their receipt.
  *
  * <p>Alongside the full-session snapshot ({@link #save}/{@link #load}), stores
  * may implement per-turn append-only durability via {@link #appendTurn} and
@@ -52,9 +55,78 @@ public interface SessionStore {
         return List.of();
     }
 
-    /** Persist the redacted local trace artifact for a completed turn. */
+    /**
+     * Fail-closed physical-tail observation for diagnostic selection. Stores
+     * that cannot prove a complete exact append tail must remain unavailable.
+     */
+    default TurnLogTailObservation observeTurnLogTail(String sessionId) {
+        return TurnLogTailObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed physical trace observation for a named turn coordinate.
+     * Stores that cannot validate and hash the exact artifact stay unavailable.
+     */
+    default TraceArtifactObservation observeTraceArtifact(
+            String sessionId,
+            int turnNumber,
+            String traceId
+    ) {
+        return TraceArtifactObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed observation of one exact physical tail/trace pair. Stores
+     * that cannot provide an append-coherent pair remain unavailable.
+     */
+    default TerminalTurnPairObservation observeTerminalTurnPair(
+            String sessionId
+    ) {
+        return TerminalTurnPairObservation.unavailable();
+    }
+
+    /**
+     * Fail-closed physical turn-log inventory for cross-session diagnostics.
+     * Stores that cannot inspect every matching candidate remain unavailable.
+     */
+    default TurnLogInventoryObservation observeTurnLogInventory(
+            String workspaceId
+    ) {
+        return TurnLogInventoryObservation.unavailable();
+    }
+
+    /** Persist the redacted local trace artifact for a terminal turn. */
     default void saveTrace(String sessionId, LocalTurnTrace trace) {
         // no-op by default
+    }
+
+    /**
+     * Persists one row and its optional trace through one typed call. The
+     * default preserves legacy store behavior but cannot observe write health.
+     * File stores may report process-observed write outcomes; this is not a
+     * cross-file transaction guarantee.
+     */
+    default TurnEnvelopePersistenceReceipt persistTurnEnvelope(
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
+        if (trace != null) {
+            try {
+                saveTrace(sessionId, trace);
+            } catch (Exception ignored) {
+                // Legacy stores expose no write-health signal. Preserve their
+                // fire-and-forget behavior while still attempting the row.
+            }
+        }
+        try {
+            appendTurn(sessionId, record);
+        } catch (Exception ignored) {
+            // The default cannot distinguish a failed write from an
+            // unobservable one, so it must not infer a stronger receipt.
+        }
+        return new TurnEnvelopePersistenceReceipt(
+                TurnEnvelopePersistenceReceipt.State.UNOBSERVED);
     }
 
     /** Load one local trace artifact by id, if available. */
@@ -70,11 +142,17 @@ public interface SessionStore {
     /**
      * List stored sessions for a workspace, newest first. Covers the
      * legacy bare-hash file, instance files
-     * ({@code <ws-hash>-<UTC timestamp>}), and orphan per-turn crash
+     * ({@code <ws-hash>-<UTC timestamp>-<32-hex entropy>}, plus legacy
+     * timestamp-only forms), and orphan per-turn crash
      * logs that never got a snapshot. Default implementation returns
      * empty.
      */
     default List<SessionSummary> listSessions(String workspaceId) {
         return List.of();
+    }
+
+    /** Read-only location of a raw turn log when the store is file-backed. */
+    default Optional<Path> rawTurnLogPath(String sessionId) {
+        return Optional.empty();
     }
 }

@@ -121,6 +121,13 @@ final class OutcomeDominancePolicy {
     ) {
     }
 
+    static Decision withReadEvidencePolicyBlock(Decision decision, boolean blocked) {
+        if (!blocked || decision == null
+                || (decision.completionStatus() != ExecutionOutcome.CompletionStatus.COMPLETE
+                && decision.completionStatus() != ExecutionOutcome.CompletionStatus.ADVISORY_ONLY)) return decision;
+        return new Decision(ExecutionOutcome.CompletionStatus.BLOCKED, TaskCompletionStatus.BLOCKED_BY_POLICY, true);
+    }
+
     static Decision decide(Facts facts) {
         if (facts == null) {
             facts = new Facts(

@@ -1,6 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -35,10 +36,10 @@ public final class NoToolAnswerTruthfulnessGuard {
             + "but no file tool was called in this turn. Treat it as unverified.]\n\n";
 
     public static final String STREAMING_NO_TOOL_MUTATION_REPLACEMENT =
-            "[Truth check: no file was changed in this turn. The user asked for a "
+            "[Truth check: no Talos file mutation is recorded for this turn. The user asked for a "
             + "modification, but the assistant did not call any file-editing tool, so "
             + "the prior \"updated file\" narrative was discarded.]\n\n"
-            + "No file changes were applied. Please retry with actual tool-backed edits.";
+            + "The requested Talos file changes remain unperformed. Please retry with actual tool-backed edits.";
 
     public static final String MALFORMED_TOOL_PROTOCOL_REPLACEMENT =
             "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
@@ -105,23 +106,6 @@ public final class NoToolAnswerTruthfulnessGuard {
             "repository",
             "here",
             "this"
-    );
-
-    private static final Set<String> STREAMING_MUTATION_NARRATIVE_MARKERS = Set.of(
-            "updated `index.html`",
-            "updated index.html",
-            "updated `style.css`",
-            "updated style.css",
-            "updated `script.js`",
-            "updated script.js",
-            "here is the updated",
-            "summary of changes",
-            "summary of changes and verifications",
-            "### updated `index.html`",
-            "### updated `style.css`",
-            "### updated `script.js`",
-            "these changes should ensure",
-            "these changes should align"
     );
 
     private static final Set<String> NEGATIVE_WORKSPACE_RESULT_MARKERS = Set.of(
@@ -248,7 +232,13 @@ public final class NoToolAnswerTruthfulnessGuard {
         if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
         CurrentTurnPlan safePlan = safePlan(plan, messages);
         if (isDirectAnswerOnlyTurn(safePlan)) return false;
-        return looksLikeEvidenceRequest(latestUserRequest(safePlan, messages));
+        return switch (EvidenceObligationPolicy.parse(safePlan.evidenceObligation())) {
+            case READ_TARGET_REQUIRED, DOCUMENT_COMPARISON_REQUIRED, PROTECTED_READ_APPROVAL_REQUIRED,
+                    FILE_CONTENT_LOOKUP_REQUIRED, PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                    WORKSPACE_INSPECTION_REQUIRED, STATIC_WEB_DIAGNOSIS_REQUIRED -> true;
+            case NONE, LIST_DIRECTORY_ONLY, PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                    VERIFY_FROM_TRACE_OR_EVIDENCE, UNSUPPORTED_CAPABILITY_CHECK_REQUIRED -> false;
+        };
     }
 
     public static String annotateStreamingNoToolMutationClaim(
@@ -258,18 +248,13 @@ public final class NoToolAnswerTruthfulnessGuard {
     ) {
         if (answer == null || answer.isBlank()) return answer;
         if (!safePlan(plan, messages).taskContract().mutationRequested()) return answer;
-        if (!MutationFailureAnswerRenderer.containsMutationClaim(answer)
-                && !containsStreamingMutationNarrative(answer)) return answer;
+        var claims = MutationClaimAssessment.assess(answer);
+        if (!claims.hasCurrentRuntimeClaim() && !claims.hasCompletedFileNarrative()) return answer;
         return STREAMING_NO_TOOL_MUTATION_ANNOTATION + answer;
     }
 
     public static boolean containsStreamingMutationNarrative(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        for (String marker : STREAMING_MUTATION_NARRATIVE_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return MutationClaimAssessment.assess(answer).hasCompletedFileNarrative();
     }
 
     public static String enforceStreamingNoToolTruthfulness(
@@ -383,8 +368,8 @@ public final class NoToolAnswerTruthfulnessGuard {
     ) {
         if (answer == null || answer.isBlank()) return false;
         if (!safePlan(plan, messages).taskContract().mutationRequested()) return false;
-        return MutationFailureAnswerRenderer.containsMutationClaim(answer)
-                || containsStreamingMutationNarrative(answer);
+        var claims = MutationClaimAssessment.assess(answer);
+        return claims.hasCurrentRuntimeClaim() || claims.hasCompletedFileNarrative();
     }
 
     private static boolean looksLikeLocalWorkspaceTurn(

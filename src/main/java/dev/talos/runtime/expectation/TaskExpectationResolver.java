@@ -1,6 +1,7 @@
 package dev.talos.runtime.expectation;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.intent.RequestQuotedContent;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -35,8 +36,25 @@ public final class TaskExpectationResolver {
                     + "(?:rest|remainder|remaining\\s+content|everything\\s+else|other\\s+content)\\b"
                     + "|\\bdo\\s+not\\s+change\\s+"
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
+                    + "|\\b(?:change|edit|modify|touch)\\s+nothing\\s+else\\b"
                     + "|\\bwithout\\s+changing\\s+"
-                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b");
+                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
+                    + "|\\bwithout\\s+deleting\\s+any\\s+other\\s+lines?\\b");
+    private static final Pattern EXACT_CONTENT_TRAILING_SCOPE = Pattern.compile(
+            "(?is)\\s+(?:"
+                    + "(?:do\\s+not|don'?t)\\s+(?:change|edit|modify|touch)\\s+"
+                    + "(?:anything\\s+else|any\\s+other\\s+files?|the\\s+rest|"
+                    + "everything\\s+else|other\\s+content|other\\s+files?)"
+                    + "|(?:change|edit|modify|touch)\\s+no\\s+other\\s+files?"
+                    + "|only\\s+(?:change|edit|modify|write|create)\\s+"
+                    + "`?[A-Za-z0-9_./\\\\-]+`?"
+                    + "|(?:preserve|keep|leave)\\s+(?:the\\s+)?"
+                    + "(?:rest|remainder|remaining\\s+content|everything\\s+else|"
+                    + "other\\s+content|other\\s+files?)"
+                    + "|without\\s+(?:changing|editing|modifying|touching)\\s+"
+                    + "(?:anything\\s+else|any\\s+other\\s+files?|the\\s+rest|"
+                    + "everything\\s+else|other\\s+content|other\\s+files?)"
+                    + ")\\s*[.!?]?\\s*$");
     private static final Pattern SELECTOR_CHANGE_TO = Pattern.compile(
             "(?is)\\b(?:change|changing|update|updating)\\s+"
                     + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\s+to\\s+"
@@ -47,6 +65,12 @@ public final class TaskExpectationResolver {
             "\\bin\\s+`?[A-Za-z0-9_./\\\\-]+\\.[A-Za-z0-9][A-Za-z0-9_-]*`?";
     private static final String REPLACEMENT_TEXT =
             "(?:(?!(?:" + NEXT_MUTATION_CLAUSE + "|" + TARGET_REFERENCE_CLAUSE + ")).)+?";
+    private static final String QUOTED_REPLACEMENT_TEXT =
+            "(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|`[^`\\r\\n]+`)";
+    private static final String REPLACEMENT_OPERAND =
+            "(?:" + QUOTED_REPLACEMENT_TEXT + "|" + REPLACEMENT_TEXT + ")";
+    private static final String EXACT_REPLACEMENT_DESCRIPTOR =
+            "(?:the\\s+exact\\s+(?:text|string|word|phrase)\\s+)?";
 
     private TaskExpectationResolver() {}
 
@@ -54,6 +78,28 @@ public final class TaskExpectationResolver {
         if (contract == null || contract.expectedTargets().isEmpty()) return List.of();
         String request = contract.originalUserRequest();
         if (request == null || request.isBlank()) return List.of();
+        var save = dev.talos.runtime.intent.ContentSaveRequest.parse(request);
+        String instructions = save.withoutQuotedLiteralPayloads();
+        List<TaskExpectation> expectations = new ArrayList<>(resolveInstructions(contract, instructions));
+        for (var operation : save.operations()) {
+            var content = operation.content();
+            if (operation.authority() != dev.talos.runtime.intent.ContentSaveRequest.Authority.REQUIRED
+                    || !content.resolved() || content.source().start() == content.source().end()
+                    || !instructions.substring(content.source().start(), content.source().end()).isBlank()) continue;
+            String target = operation.destination().resolved() ? operation.destination().value() : null;
+            if (target == null && contract.expectedTargets().size() == 1
+                    && "content-save-filename-clarification".equals(contract.classificationReason())) {
+                target = contract.expectedTargets().iterator().next();
+            }
+            if (target != null && contract.expectedTargets().contains(normalizePath(target))) {
+                expectations.add(new LiteralContentExpectation(target, content.value(),
+                        LiteralContentExpectation.MatchMode.EXACT, "source-owned-save-literal"));
+            }
+        }
+        return List.copyOf(expectations);
+    }
+
+    private static List<TaskExpectation> resolveInstructions(TaskContract contract, String request) {
         if (contract.expectedTargets().size() != 1) {
             return resolveTargetSpecificExpectations(contract, request);
         }
@@ -76,9 +122,10 @@ public final class TaskExpectationResolver {
         LinkedHashSet<String> literals = new LinkedHashSet<>();
         String firstSourcePattern = "";
         for (Candidate candidate : candidates) {
-            String literal = candidate.alreadyExact()
+            String literal = candidate.preserveBytes() ? candidate.literal() : candidate.alreadyExact()
                     ? normalizeExactLiteral(candidate.literal())
                     : normalizeLiteral(candidate.literal());
+            if (literal == null) return structuralExpectations;
             if (literal.isBlank()) continue;
             literals.add(literal);
             if (firstSourcePattern.isBlank()) firstSourcePattern = candidate.sourcePattern();
@@ -110,6 +157,14 @@ public final class TaskExpectationResolver {
         if (appendLine != null) {
             expectations.add(appendLine);
         }
+        AppendSectionExpectation appendSection = appendSectionExpectation(request, normalizedTarget);
+        if (appendSection != null) {
+            expectations.add(appendSection);
+        }
+        AppendStatementExpectation appendStatement = appendStatementExpectation(request, normalizedTarget);
+        if (appendStatement != null) {
+            expectations.add(appendStatement);
+        }
         int bulletCount = exactBulletCount(request);
         if (bulletCount > 0) {
             expectations.add(new BulletListExpectation(
@@ -139,15 +194,17 @@ public final class TaskExpectationResolver {
 
             LinkedHashSet<String> literals = new LinkedHashSet<>();
             String firstSourcePattern = "";
+            boolean invalidCandidate = false;
             for (Candidate candidate : candidates) {
-                String literal = candidate.alreadyExact()
+                String literal = candidate.preserveBytes() ? candidate.literal() : candidate.alreadyExact()
                         ? normalizeExactLiteral(candidate.literal())
                         : normalizeLiteral(candidate.literal());
+                if (literal == null) { invalidCandidate = true; break; }
                 if (literal.isBlank()) continue;
                 literals.add(literal);
                 if (firstSourcePattern.isBlank()) firstSourcePattern = candidate.sourcePattern();
             }
-            if (literals.size() == 1) {
+            if (!invalidCandidate && literals.size() == 1) {
                 expectations.add(new LiteralContentExpectation(
                         normalizedTarget,
                         literals.iterator().next(),
@@ -169,7 +226,9 @@ public final class TaskExpectationResolver {
                         + "`?\\s+(?:with|to)\\s+exactly\\s+(.+)");
         Matcher matcher = overwriteWithExactly.matcher(request);
         while (matcher.find()) {
-            candidates.add(new Candidate(matcher.group(1), "literal-overwrite-exactly"));
+            if (!unquotedInstructionStart(request, matcher)) continue;
+            addLiteralCandidate(request, matcher.start(1), matcher.end(1),
+                    "literal-overwrite-exactly", false, candidates);
         }
     }
 
@@ -179,24 +238,51 @@ public final class TaskExpectationResolver {
             List<Candidate> candidates
     ) {
         String quoted = Pattern.quote(target);
+        Pattern createContainingExactlyColon = Pattern.compile(
+                "(?is)\\b(?:create|write|add)\\s+`?" + quoted
+                        + "`?\\s+(?:with\\s+content\\s+)?containing\\s+exactly\\s*:\\s*");
+        Matcher colonMatcher = createContainingExactlyColon.matcher(request);
+        while (colonMatcher.find()) {
+            if (!unquotedInstructionStart(request, colonMatcher)) continue;
+            addLiteralCandidate(request, colonMatcher.end(), request.length(),
+                    "literal-create-containing-exactly-colon", true, candidates);
+        }
+
         Pattern createContainingExactly = Pattern.compile(
                 "(?is)\\b(?:create|write|add)\\s+`?" + quoted
                         + "`?\\s+(?:with\\s+content\\s+)?containing\\s+exactly\\s+(.+)");
         Matcher matcher = createContainingExactly.matcher(request);
         while (matcher.find()) {
-            candidates.add(new Candidate(matcher.group(1), "literal-create-containing-exactly"));
+            if (!unquotedInstructionStart(request, matcher)) continue;
+            addLiteralCandidate(request, matcher.start(1), matcher.end(1),
+                    "literal-create-containing-exactly", false, candidates);
         }
+    }
+
+    private static String exactLiteralBeforeTrailingScope(String raw) {
+        String literal = raw == null ? "" : raw.strip();
+        Matcher scope = EXACT_CONTENT_TRAILING_SCOPE.matcher(literal);
+        if (scope.find()) {
+            literal = literal.substring(0, scope.start()).stripTrailing();
+        }
+        return literal;
     }
 
     private static void addCompleteFileTwoLineCandidate(String request, List<Candidate> candidates) {
         Matcher matcher = COMPLETE_FILE_TWO_LINES.matcher(request);
         while (matcher.find()) {
+            if (!unquotedInstructionStart(request, matcher)) continue;
             String firstLine = normalizeLineLiteral(matcher.group(1));
             String secondLine = normalizeLineLiteral(matcher.group(2));
+            if (firstLine == null || secondLine == null) {
+                candidates.add(new Candidate(null, "literal-complete-file-two-lines", true, true));
+                continue;
+            }
             if (firstLine.isBlank() && secondLine.isBlank()) continue;
             candidates.add(new Candidate(
                     firstLine + "\n" + secondLine,
                     "literal-complete-file-two-lines",
+                    true,
                     true));
         }
     }
@@ -209,7 +295,43 @@ public final class TaskExpectationResolver {
     ) {
         Matcher matcher = pattern.matcher(request);
         while (matcher.find()) {
-            candidates.add(new Candidate(matcher.group(1), sourcePattern));
+            if (!unquotedInstructionStart(request, matcher)) continue;
+            addLiteralCandidate(request, matcher.start(1), matcher.end(1), sourcePattern, false, candidates);
+        }
+    }
+
+    private static void addLiteralCandidate(String request, int start, int end, String sourcePattern,
+                                           boolean alreadyExact, List<Candidate> candidates) {
+        while (start < end && Character.isWhitespace(request.charAt(start))) start++;
+        String raw = request.substring(start, end);
+        if (!RequestQuotedContent.startsWithDelimiter(raw)) {
+            String literal = alreadyExact ? exactLiteralBeforeTrailingScope(raw) : raw;
+            if (!literal.isBlank()) candidates.add(new Candidate(literal, sourcePattern, alreadyExact));
+            return;
+        }
+        var quoted = RequestQuotedContent.startingAt(request, start, end);
+        if (quoted.isEmpty()) {
+            candidates.add(new Candidate(null, sourcePattern, true, true));
+            return;
+        }
+        var content = quoted.get();
+        int delimiterLength = content.start() - start;
+        int envelopeEnd = content.end() + delimiterLength;
+        String tail = request.substring(Math.min(envelopeEnd, end), end).replaceFirst("^[\\s,;]*", "");
+        // Adjacent operands and alternatives do not identify one complete-file payload.
+        String coordinatedTail = tail.replaceFirst("(?iu)^(?:,\\s*)?and\\s+", "");
+        if (RequestQuotedContent.startsWithDelimiter(tail)
+                || tail.matches("(?isu)^(?:,\\s*)?(?:or|and/or)\\b.*")
+                || !coordinatedTail.equals(tail) && RequestQuotedContent.startsWithDelimiter(coordinatedTail)) {
+            candidates.add(new Candidate(null, sourcePattern, true, true));
+            return;
+        }
+        if (raw.startsWith("```")) {
+            // Fenced blocks retain the established code-fence interpretation.
+            String envelope = request.substring(start, envelopeEnd);
+            candidates.add(new Candidate(envelope, sourcePattern, true));
+        } else {
+            candidates.add(new Candidate(content.text(request), sourcePattern, true, true));
         }
     }
 
@@ -230,7 +352,13 @@ public final class TaskExpectationResolver {
     }
 
     private static String normalizeLineLiteral(String raw) {
-        return stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
+        String literal = raw == null ? "" : raw.strip();
+        if (!RequestQuotedContent.startsWithDelimiter(literal)) return literal;
+        var quoted = RequestQuotedContent.startingAt(literal, 0, literal.length());
+        if (quoted.isEmpty()) return null;
+        var span = quoted.get();
+        if (span.end() + span.start() != literal.length()) return null;
+        return span.text(literal);
     }
 
     private static String firstSentenceOrLine(String raw) {
@@ -279,8 +407,12 @@ public final class TaskExpectationResolver {
     private static int exactBulletCount(String request) {
         if (request == null || request.isBlank()) return 0;
         Matcher matcher = EXACT_BULLET_COUNT.matcher(request);
-        if (!matcher.find()) return 0;
-        return numberToken(matcher.group(1));
+        while (matcher.find()) {
+            if (RequestQuotedContent.isUnquotedRange(request, matcher.start(), matcher.end())) {
+                return numberToken(matcher.group(1));
+            }
+        }
+        return 0;
     }
 
     private static AppendLineExpectation appendLineExpectation(String request, String normalizedTarget) {
@@ -288,21 +420,155 @@ public final class TaskExpectationResolver {
             return null;
         }
         String quoted = Pattern.quote(normalizedTarget);
+        // Natural quantifier forms (T1012): "exactly" composes with every
+        // line noun, so "append exactly the line X to FILE" (the live
+        // reproduction phrasing) resolves like "append the line X to FILE".
+        String lineNoun = "(?:exactly\\s+)?(?:this\\s+line|the\\s+line|one\\s+line|line)";
         Pattern appendLineAfterTarget = Pattern.compile(
-                "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|line)"
+                "(?is)\\bappend\\s+" + lineNoun
                         + "\\s+to\\s+`?" + quoted + "`?\\s*:\\s*(.+)");
         Matcher matcher = appendLineAfterTarget.matcher(request);
-        if (!matcher.find()) {
+        boolean matched = findUnquotedInstruction(request, matcher);
+        if (!matched) {
+            // Scoped-prefix form (T1014): "In FILE, append the line: X".
+            Pattern scopedPrefixAppendLine = Pattern.compile(
+                    "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                            + "`?\\s*[,:]\\s*(?:please\\s+)?append\\s+" + lineNoun
+                            + "\\s*:?\\s*(.+)");
+            matcher = scopedPrefixAppendLine.matcher(request);
+            matched = findUnquotedInstruction(request, matcher);
+        }
+        if (!matched) {
             Pattern appendLineBeforeTarget = Pattern.compile(
-                    "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|the\\s+line|line)"
+                    "(?is)\\bappend\\s+" + lineNoun
                             + "\\s+(.+?)\\s+to\\s+`?" + quoted + "`?"
                             + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
             matcher = appendLineBeforeTarget.matcher(request);
-            if (!matcher.find()) return null;
+            if (!findUnquotedInstruction(request, matcher)) return null;
         }
         String line = normalizeAppendLine(matcher.group(1));
         if (line.isBlank()) return null;
         return new AppendLineExpectation(normalizedTarget, line, "append-line-exact");
+    }
+
+    private static AppendSectionExpectation appendSectionExpectation(
+            String request,
+            String normalizedTarget
+    ) {
+        if (request == null || request.isBlank()
+                || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quotedTarget = Pattern.quote(normalizedTarget);
+        Pattern pattern = Pattern.compile(
+                "(?is)^\\s*(?:please\\s+)?append\\s+(?:a|an|the)\\s+"
+                        + "([A-Za-z][A-Za-z0-9 _-]{0,79}?)\\s+section\\s+to\\s+`?"
+                        + quotedTarget
+                        + "`?\\s+with\\s+(?:exactly\\s+)?(?:one\\s+)?sentence\\s+"
+                        + "(?:saying|that\\s+says)\\s+(.+?)"
+                        + "\\s+preserve\\s+all\\s+current\\s+text\\s*[.!?]?\\s*$");
+        Matcher matcher = pattern.matcher(request);
+        if (!matcher.matches() || !unquotedInstructionStart(request, matcher)) return null;
+
+        String sectionName = normalizeSectionName(matcher.group(1));
+        String sentence = normalizeSectionSentence(matcher.group(2));
+        if (sectionName.isBlank() || sentence.isBlank()) return null;
+        return new AppendSectionExpectation(
+                normalizedTarget,
+                sectionName,
+                sentence,
+                "append-section-exact-sentence");
+    }
+
+    private static String normalizeSectionName(String raw) {
+        String name = raw == null ? "" : raw.strip().replaceAll("\\s+", " ");
+        return name.length() <= 80 ? name : "";
+    }
+
+    private static String normalizeSectionSentence(String raw) {
+        String sentence = stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
+        if (sentence.isBlank() || sentence.length() > 500
+                || sentence.indexOf('\n') >= 0 || sentence.indexOf('\r') >= 0) {
+            return "";
+        }
+        int terminators = 0;
+        for (int i = 0; i < sentence.length(); i++) {
+            char value = sentence.charAt(i);
+            if (value == '.' || value == '!' || value == '?') terminators++;
+        }
+        if (terminators > 1) return "";
+        if (terminators == 1) {
+            char last = sentence.charAt(sentence.length() - 1);
+            if (last != '.' && last != '!' && last != '?') return "";
+        }
+        return sentence;
+    }
+
+    private static AppendStatementExpectation appendStatementExpectation(
+            String request,
+            String normalizedTarget
+    ) {
+        if (request == null || request.isBlank()
+                || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quotedTarget = Pattern.quote(normalizedTarget);
+        Pattern pattern = Pattern.compile(
+                "(?is)^\\s*(?:please\\s+)?append\\s+"
+                        + "([A-Za-z0-9][A-Za-z0-9 _.-]{0,79}?)\\s+to\\s+`?"
+                        + quotedTarget
+                        + "`?\\s+(?:saying|that\\s+says)\\s+(.+?)"
+                        + "\\s*[.!?]?\\s+(?:preserve|keep|leave)\\s+(.+?)"
+                        + "\\s+and\\s+(?:change|edit|modify|touch)\\s+no\\s+code\\s*[.!?]?\\s*$");
+        Matcher matcher = pattern.matcher(request);
+        if (!matcher.matches() || !unquotedInstructionStart(request, matcher)) return null;
+
+        String label = normalizeStatementLabel(matcher.group(1));
+        String statement = normalizeStatementText(matcher.group(2));
+        String preserved = matcher.group(3) == null ? "" : matcher.group(3).strip();
+        if (label.isBlank() || reservedAppendStatementLabel(label)
+                || statement.isBlank() || preserved.isBlank() || preserved.length() > 500) {
+            return null;
+        }
+        return new AppendStatementExpectation(
+                normalizedTarget,
+                label,
+                statement,
+                "append-labeled-statement");
+    }
+
+    private static String normalizeStatementLabel(String raw) {
+        String label = stripWrappingQuotes(raw == null ? "" : raw.strip())
+                .replaceAll("\\s+", " ");
+        return label.length() <= 80 ? label : "";
+    }
+
+    private static String normalizeStatementText(String raw) {
+        String statement = stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
+        if (statement.isBlank() || statement.length() > 500
+                || statement.indexOf('\n') >= 0 || statement.indexOf('\r') >= 0) {
+            return "";
+        }
+        if (isSentenceTerminator(statement.charAt(statement.length() - 1))) {
+            statement = statement.substring(0, statement.length() - 1).stripTrailing();
+        }
+        for (int i = 0; i < statement.length(); i++) {
+            if (isSentenceTerminator(statement.charAt(i))) return "";
+        }
+        return statement.replaceAll("\\s+", " ");
+    }
+
+    private static boolean reservedAppendStatementLabel(String label) {
+        String normalized = label == null ? "" : label.strip().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("line ")
+                || normalized.startsWith("the line ")
+                || normalized.startsWith("this line ")
+                || normalized.startsWith("one line ")
+                || normalized.endsWith(" section");
+    }
+
+    private static boolean isSentenceTerminator(char value) {
+        return value == '.' || value == '!' || value == '?';
     }
 
     private static ReplacementExpectation replacementExpectation(String request, String normalizedTarget) {
@@ -319,12 +585,49 @@ public final class TaskExpectationResolver {
         }
         String quoted = Pattern.quote(normalizedTarget);
         boolean preserveRest = preserveRestRequested(request);
+        Pattern scopedPrefixChangeTo = Pattern.compile(
+                "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                        + "`?\\s*[,:]\\s*(?:please\\s+)?change\\s+"
+                        + EXACT_REPLACEMENT_DESCRIPTOR + "(" + REPLACEMENT_OPERAND
+                        + ")\\s+to\\s+(" + REPLACEMENT_OPERAND
+                        + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
+        Matcher matcher = scopedPrefixChangeTo.matcher(request);
+        if (findUnquotedInstruction(request, matcher)) {
+            String oldText = matcher.group(1);
+            String newText = matcher.group(2);
+            if (findUnquotedInstruction(request, matcher)) return null;
+            return replacementExpectation(
+                    normalizedTarget,
+                    oldText,
+                    newText,
+                    "replacement-scoped-prefix-change-to",
+                    preserveRest);
+        }
+        // Scoped-prefix form (T1014): "In FILE, replace X with Y." carries
+        // the same deterministic expectation as the trailing form, so the
+        // preserve-rest verifier and exact guards engage for both.
+        Pattern scopedPrefixReplaceWith = Pattern.compile(
+                "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                        + "`?\\s*[,:]\\s*(?:please\\s+)?replace\\s+"
+                        + EXACT_REPLACEMENT_DESCRIPTOR + "(" + REPLACEMENT_OPERAND
+                        + ")\\s+with\\s+(" + REPLACEMENT_OPERAND
+                        + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
+        matcher = scopedPrefixReplaceWith.matcher(request);
+        if (findUnquotedInstruction(request, matcher)) {
+            return replacementExpectation(
+                    normalizedTarget,
+                    matcher.group(1),
+                    matcher.group(2),
+                    "replacement-scoped-prefix-replace-with",
+                    preserveRest);
+        }
         Pattern replaceWithInTarget = Pattern.compile(
-                "(?is)\\breplace\\s+(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                "(?is)\\breplace\\s+" + EXACT_REPLACEMENT_DESCRIPTOR
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
-        Matcher matcher = replaceWithInTarget.matcher(request);
-        if (matcher.find()) {
+        matcher = replaceWithInTarget.matcher(request);
+        if (findUnquotedInstruction(request, matcher)) {
             return replacementExpectation(
                     normalizedTarget,
                     matcher.group(1),
@@ -334,11 +637,11 @@ public final class TaskExpectationResolver {
         }
         Pattern continuedReplaceWithInTarget = Pattern.compile(
                 "(?is)\\b(?:and|then|also|next|second|third)\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = continuedReplaceWithInTarget.matcher(request);
-        if (matcher.find()) {
+        if (findUnquotedInstruction(request, matcher)) {
             return replacementExpectation(
                     normalizedTarget,
                     matcher.group(1),
@@ -350,11 +653,11 @@ public final class TaskExpectationResolver {
         Pattern changeFromToInTarget = Pattern.compile(
                 "(?is)\\b(?:change|update|set)\\s+(?:the\\s+)?(?:page\\s+)?"
                         + "(?:title|text|label|string|word|phrase)\\s+from\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+to\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+to\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = changeFromToInTarget.matcher(request);
-        if (matcher.find()) {
+        if (findUnquotedInstruction(request, matcher)) {
             return replacementExpectation(
                     normalizedTarget,
                     matcher.group(1),
@@ -365,7 +668,7 @@ public final class TaskExpectationResolver {
 
         if (!allowTargetAgnosticSelector) return null;
         matcher = SELECTOR_CHANGE_TO.matcher(request);
-        if (!matcher.find()) return null;
+        if (!findUnquotedInstruction(request, matcher)) return null;
         return replacementExpectation(
                 normalizedTarget,
                 matcher.group(1),
@@ -381,6 +684,9 @@ public final class TaskExpectationResolver {
             String sourcePattern,
             boolean preserveRest
     ) {
+        if (hasIncompleteBoundaryQuote(rawOldText) || hasIncompleteBoundaryQuote(rawNewText)) {
+            return null;
+        }
         String oldText = normalizeReplacementText(rawOldText);
         String newText = normalizeReplacementText(rawNewText);
         if (oldText.isBlank() || newText.isBlank()) return null;
@@ -388,7 +694,26 @@ public final class TaskExpectationResolver {
     }
 
     private static boolean preserveRestRequested(String request) {
-        return request != null && PRESERVE_REST.matcher(request).find();
+        if (request == null) return false;
+        Matcher matcher = PRESERVE_REST.matcher(request);
+        while (matcher.find()) {
+            if (RequestQuotedContent.isUnquotedRange(request, matcher.start(), matcher.end())) return true;
+        }
+        return false;
+    }
+
+    private static boolean findUnquotedInstruction(String request, Matcher matcher) {
+        while (matcher.find()) {
+            if (unquotedInstructionStart(request, matcher)) return true;
+        }
+        return false;
+    }
+
+    private static boolean unquotedInstructionStart(String request, Matcher matcher) {
+        int start = matcher.start();
+        while (start < matcher.end() && Character.isWhitespace(request.charAt(start))) start++;
+        // Operands may themselves be quoted. Only the decisive instruction opening is tested here.
+        return start < matcher.end() && RequestQuotedContent.isUnquotedRange(request, start, start + 1);
     }
 
     private static String normalizeReplacementText(String raw) {
@@ -399,6 +724,14 @@ public final class TaskExpectationResolver {
             trimmed = trimmed.substring(0, newline).strip();
         }
         return stripWrappingQuotes(trimmed).strip();
+    }
+
+    private static boolean hasIncompleteBoundaryQuote(String raw) {
+        String trimmed = raw == null ? "" : raw.strip();
+        if (trimmed.isEmpty()) return false;
+        char first = trimmed.charAt(0);
+        if (first != '"' && first != '\'' && first != '`') return false;
+        return trimmed.length() < 2 || trimmed.charAt(trimmed.length() - 1) != first;
     }
 
     private static String normalizeAppendLine(String raw) {
@@ -433,9 +766,12 @@ public final class TaskExpectationResolver {
         };
     }
 
-    private record Candidate(String literal, String sourcePattern, boolean alreadyExact) {
+    private record Candidate(String literal, String sourcePattern, boolean alreadyExact, boolean preserveBytes) {
         private Candidate(String literal, String sourcePattern) {
-            this(literal, sourcePattern, false);
+            this(literal, sourcePattern, false, false);
+        }
+        private Candidate(String literal, String sourcePattern, boolean alreadyExact) {
+            this(literal, sourcePattern, alreadyExact, false);
         }
     }
 }

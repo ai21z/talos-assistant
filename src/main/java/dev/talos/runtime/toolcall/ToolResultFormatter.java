@@ -14,8 +14,17 @@ final class ToolResultFormatter {
     }
 
     static String formatToolResult(ToolCall call, ToolResult result, boolean preserveSuccessOutput) {
+        return formatWithBody(call, result, preserveSuccessOutput).text();
+    }
+
+    /** The formatter owns the exact body interval inside its result envelope. */
+    record ReadBody(String observedBody, String displayedBody, int start, int end) {}
+    record FormattedResult(String text, ReadBody body) {}
+
+    static FormattedResult formatWithBody(ToolCall call, ToolResult result, boolean preserveSuccessOutput) {
         var sb = new StringBuilder();
         sb.append("[tool_result: ").append(call.toolName()).append("]\n");
+        ReadBody body = null;
         if (result.success()) {
             String output = preserveSuccessOutput
                     ? result.output()
@@ -26,7 +35,9 @@ final class ToolResultFormatter {
                 sb.append(output, 0, MAX_TOOL_RESULT_CHARS);
                 sb.append("\n... (output truncated at 32K chars)");
             } else {
+                int start = sb.length();
                 sb.append(output);
+                body = new ReadBody(result.output(), output, start, sb.length());
             }
             if (result.verification() != null) {
                 sb.append("\n[verification_status: ").append(result.verification().name()).append("]");
@@ -38,7 +49,7 @@ final class ToolResultFormatter {
             }
         }
         sb.append("\n[/tool_result]");
-        return sb.toString();
+        return new FormattedResult(sb.toString(), body);
     }
 
     static String extractVerificationSummary(String output) {

@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.Config;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
@@ -14,10 +15,116 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CurrentTurnCapabilityFrameTest {
+
+    @Test
+    void privacyNoWorkspaceAnswersRetainTheirRequestedTopicAndNoToolBoundary() {
+        for (String request : List.of(
+                "Without reading files or using tools, write 200 distinct numbered sentences explaining "
+                        + "different features of the solar system. Use one sentence per number and continue "
+                        + "through number 200.",
+                "Without inspecting or using this workspace, explain entropy in thermodynamics.",
+                "Do not open any workspace files, answer from general knowledge.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+            String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+            assertEquals(ConversationBoundaryPolicy.Classification.PRIVACY_NO_WORKSPACE,
+                    ConversationBoundaryPolicy.classification(request), request);
+            assertEquals(TaskType.SMALL_TALK, contract.type(), request);
+            assertFalse(contract.mutationAllowed(), request);
+            assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+            assertTrue(frame.contains("mutationAllowed: false"), frame);
+            assertTrue(frame.contains("visibleTools: (none)"), frame);
+            assertTrue(frame.contains("evidenceObligation: NONE"), frame);
+            assertTrue(frame.contains("without workspace inspection"), frame);
+            assertTrue(frame.contains("Do not call tools."), frame);
+            assertTrue(frame.contains("Do not claim to have inspected files or performed workspace actions."), frame);
+            assertTrue(frame.contains("Answer the user's requested topic directly using general knowledge"), frame);
+            assertFalse(frame.contains("Talos product identity/capability only"), frame);
+        }
+    }
+
+    @Test
+    void ordinaryConversationDoesNotAssumeAProductIdentityTopic() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("hello");
+
+        String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+        assertEquals(TaskType.SMALL_TALK, contract.type());
+        assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+        assertTrue(frame.contains("Do not call tools."), frame);
+        assertTrue(frame.contains("Answer the user's requested topic directly"), frame);
+        assertFalse(frame.contains("Talos product identity/capability only"), frame);
+    }
+
+    @Test
+    void genuineIdentityAndCapabilityAnswersRetainProductGroundingWithoutTools() {
+        for (String request : List.of(
+                "Who are you?",
+                "What can you do?",
+                "Without reading files, who are you?",
+                "Without reading files, what can you do?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+            String frame = CurrentTurnCapabilityFrame.render(contract, ExecutionPhase.INSPECT, List.of());
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), request);
+            assertFalse(contract.mutationAllowed(), request);
+            assertTrue(frame.contains("obligation: DIRECT_ANSWER_ONLY"), frame);
+            assertTrue(frame.contains("visibleTools: (none)"), frame);
+            assertTrue(frame.contains("Do not call tools."), frame);
+            assertTrue(frame.contains("Do not claim to have inspected files or performed workspace actions."), frame);
+            assertTrue(frame.contains("Answer directly from Talos product identity/capability only."), frame);
+            assertFalse(frame.contains("using general knowledge"), frame);
+        }
+    }
+
+    @Test
+    void textFormatRequestRequiresReadThenCompleteWrite() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Normalize notes.txt line endings to LF. Preserve the text exactly.");
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file"));
+
+        assertTrue(frame.contains("[TextFormatChange]"), frame);
+        assertTrue(frame.contains("Read the exact target first"), frame);
+        assertTrue(frame.contains("Use talos.write_file with the complete text"), frame);
+        assertTrue(frame.contains("Change only the requested text format"), frame);
+        assertFalse(frame.contains("talos.edit_file"), frame);
+    }
+
+    @Test
+    void overlappingRequiredTargetRemainsVisibleAsMutationAndSourceEvidence() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("style.css"),
+                Set.of("style.css"),
+                Set.of(),
+                "Read style.css, then update style.css.",
+                "required-post-read-mutation");
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.edit_file"));
+
+        assertTrue(frame.contains("requiredTargets: style.css"), frame);
+        assertTrue(frame.contains("[SourceEvidenceTargets]"), frame);
+        assertTrue(frame.contains("sourceTargets: style.css"), frame);
+        assertTrue(frame.contains(
+                "Read these exact source target paths before writing or editing"), frame);
+    }
 
     @Test
     void rendersActiveTaskContextGuidanceWhenPresent() {
@@ -250,7 +357,7 @@ class CurrentTurnCapabilityFrameTest {
         String frame = CurrentTurnCapabilityFrame.render(plan);
 
         assertTrue(frame.contains("[ExpectedTargets]"), frame);
-        assertTrue(frame.contains("requiredTargets: workspace-notes, workspace-notes/summary.txt"), frame);
+        assertTrue(frame.contains("requiredTargets: workspace-notes/summary.txt"), frame);
         assertTrue(frame.contains("[ExactFileWrite]"), frame);
         assertTrue(frame.contains("target: workspace-notes/summary.txt"), frame);
         assertTrue(frame.contains("sourcePattern: literal-create-containing-exactly"), frame);
@@ -334,26 +441,119 @@ class CurrentTurnCapabilityFrameTest {
 
     @Test
     void renderUsesWorkspaceOperationGuidanceForMoveTurns() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
-                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.");
-        CurrentTurnPlan plan = CurrentTurnPlan.create(
-                contract,
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md and overwrite it.");
+        TaskContract contract = resolution.contract();
+        CurrentTurnPlan plan = CurrentTurnPlan.createWithActionObligation(
+                resolution,
                 ExecutionPhase.APPLY,
                 List.of("talos.move_path"),
                 List.of("talos.move_path"),
-                List.of());
+                List.of(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.derivedVerifierProfile(contract),
+                ActionObligationPolicy.derive(resolution, ExecutionPhase.APPLY),
+                new Config());
 
         String frame = CurrentTurnCapabilityFrame.render(plan);
 
         assertTrue(frame.contains("obligation: WORKSPACE_OPERATION_REQUIRED"), frame);
-        assertTrue(frame.contains("Use the visible workspace operation tool"), frame);
-        assertTrue(frame.contains("talos.move_path"), frame);
+        assertTrue(frame.contains("[TypedWorkspaceOperation]"), frame);
+        assertTrue(frame.contains("operationKind: MOVE_PATH"), frame);
+        assertTrue(frame.contains("exactTool: talos.move_path"), frame);
+        assertTrue(frame.contains("sourcePath: workspace-notes/readme-renamed.md"), frame);
+        assertTrue(frame.contains("destinationPath: archive/readme-renamed.md"), frame);
+        assertTrue(frame.contains("overwritePolicy: OVERWRITE_EXPLICIT"), frame);
+        assertTrue(frame.contains("recursivePolicy: NOT_APPLICABLE"), frame);
+        assertTrue(frame.contains("parentPolicy: REQUIRE_EXISTING_PARENT"), frame);
+        assertTrue(frame.contains("Call the exact tool once with exactly these typed operands"), frame);
         assertTrue(frame.contains("Do not emulate move, copy, rename, or mkdir"), frame);
-        assertTrue(frame.contains(
-                "operations_json example: [{\"op\":\"copy_path\",\"from\":\"a.md\",\"to\":\"b.md\"},"
-                        + "{\"op\":\"mkdir\",\"path\":\"docs/reports\"}]"), frame);
+        assertFalse(frame.contains("operations_json example:"), frame);
         assertFalse(frame.contains("Available mutating tools: talos.write_file, talos.edit_file"), frame);
         assertFalse(frame.contains("You must write or edit these exact target paths"), frame);
+    }
+
+    @Test
+    void renderIncludesExplicitRecursiveDeletePolicy() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "Delete docs recursively.");
+        TaskContract contract = resolution.contract();
+        CurrentTurnPlan plan = CurrentTurnPlan.createWithActionObligation(
+                resolution,
+                ExecutionPhase.APPLY,
+                List.of("talos.delete_path"),
+                List.of("talos.delete_path"),
+                List.of(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.derivedVerifierProfile(contract),
+                ActionObligationPolicy.derive(resolution, ExecutionPhase.APPLY),
+                new Config());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("operationKind: DELETE_PATH"), frame);
+        assertTrue(frame.contains("targetPath: docs"), frame);
+        assertFalse(frame.contains("sourcePath: docs"), frame);
+        assertTrue(frame.contains("overwritePolicy: NOT_APPLICABLE"), frame);
+        assertTrue(frame.contains("recursivePolicy: RECURSIVE_EXPLICIT"), frame);
+        assertTrue(frame.contains("parentPolicy: NOT_APPLICABLE"), frame);
+    }
+
+    @Test
+    void renderPreservesExactOperandRolesForEveryWorkspaceOperationFamily() {
+        for (WorkspaceFrameFixture fixture : List.of(
+                new WorkspaceFrameFixture(
+                        "Copy source.txt to out/copied.txt.",
+                        List.of("sourcePath: source.txt",
+                                "destinationPath: out/copied.txt")),
+                new WorkspaceFrameFixture(
+                        "Move source.txt to out/moved.txt.",
+                        List.of("sourcePath: source.txt",
+                                "destinationPath: out/moved.txt")),
+                new WorkspaceFrameFixture(
+                        "Rename source.txt to renamed.txt.",
+                        List.of("sourcePath: source.txt",
+                                "destinationPath: renamed.txt")),
+                new WorkspaceFrameFixture(
+                        "Create a directory named assets.",
+                        List.of("targetPath: assets")),
+                new WorkspaceFrameFixture(
+                        "Delete source.txt.",
+                        List.of("targetPath: source.txt")))) {
+            var resolution = TaskContractResolver.resolveFromUserRequest(
+                    fixture.request());
+            List<String> exactTools = resolution.workspaceOperationPlan()
+                    .toolNames();
+            CurrentTurnPlan plan = CurrentTurnPlan.createWithActionObligation(
+                    resolution,
+                    ExecutionPhase.APPLY,
+                    exactTools,
+                    exactTools,
+                    List.of(),
+                    CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                    CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                    CurrentTurnPlan.derivedVerifierProfile(
+                            resolution.contract()),
+                    ActionObligationPolicy.derive(
+                            resolution,
+                            ExecutionPhase.APPLY),
+                    new Config());
+
+            String frame = CurrentTurnCapabilityFrame.render(plan);
+
+            for (String expected : fixture.expectedRoleLines()) {
+                assertTrue(frame.contains(expected),
+                        fixture.request() + "\n" + frame);
+            }
+            assertFalse(frame.contains("destinationOrTargetPath:"), frame);
+            if (fixture.expectedRoleLines().stream()
+                    .anyMatch(line -> line.startsWith("targetPath:"))) {
+                assertFalse(frame.contains("sourcePath:"), frame);
+                assertFalse(frame.contains("destinationPath:"), frame);
+            }
+        }
     }
 
     @Test
@@ -414,6 +614,23 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void projectSummaryFrameRequiresReadmeAnchorWhenPresent() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("What does this project do?");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of("talos.list_dir", "talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("evidenceObligation: PROJECT_SUMMARY_EVIDENCE_REQUIRED"), frame);
+        assertTrue(frame.contains("inspect the preferred top-level README-family file"), frame);
+        assertTrue(frame.contains("Do not infer the whole project from one unrelated file"), frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,
@@ -470,4 +687,9 @@ class CurrentTurnCapabilityFrameTest {
         assertFalse(frame.contains(longBody));
         assertTrue(frame.length() < 4_000, "frame should not include unbounded active context text");
     }
+
+    private record WorkspaceFrameFixture(
+            String request,
+            List<String> expectedRoleLines
+    ) {}
 }

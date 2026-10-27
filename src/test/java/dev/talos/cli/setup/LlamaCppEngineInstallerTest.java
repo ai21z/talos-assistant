@@ -37,6 +37,32 @@ class LlamaCppEngineInstallerTest {
     }
 
     @Test
+    void locateInstalledExecutableFindsNestedFlatAndReportsMissing() throws Exception {
+        Path nestedRoot = tempDir.resolve("nested-install");
+        Path nested = nestedRoot.resolve("build").resolve("bin").resolve("llama-server");
+        Files.createDirectories(nested.getParent());
+        Files.writeString(nested, "exe", StandardCharsets.UTF_8);
+        assertEquals(nested.toAbsolutePath().normalize(),
+                LlamaCppEngineInstaller.locateInstalledExecutable(nestedRoot, "llama-server").orElseThrow(),
+                "the nested Ubuntu tar layout must be recognized");
+
+        Path flatRoot = tempDir.resolve("flat-install");
+        Path flat = flatRoot.resolve("llama-server.exe");
+        Files.createDirectories(flatRoot);
+        Files.writeString(flat, "exe", StandardCharsets.UTF_8);
+        assertEquals(flat.toAbsolutePath().normalize(),
+                LlamaCppEngineInstaller.locateInstalledExecutable(flatRoot, "llama-server.exe").orElseThrow(),
+                "the flat Windows zip layout must be recognized");
+
+        assertTrue(LlamaCppEngineInstaller
+                        .locateInstalledExecutable(tempDir.resolve("absent"), "llama-server").isEmpty(),
+                "a missing install must honestly report empty");
+        assertTrue(LlamaCppEngineInstaller
+                        .locateInstalledExecutable(nestedRoot, "other-binary").isEmpty(),
+                "an unrelated binary name must not count as the lane executable");
+    }
+
+    @Test
     void checksumMismatchFailsClosedAndDoesNotPromoteInstallDir() throws Exception {
         var entry = manifest("mismatch", "0000000000000000000000000000000000000000000000000000000000000000");
         var result = installer(new FakeDownloader("wrong bytes"), extractingServer()).install(entry, tempDir);
@@ -124,6 +150,44 @@ class LlamaCppEngineInstallerTest {
         assertTrue(result.message().contains("llama-server"), result.message());
     }
 
+    @Test
+    void cudaCompanionAssetIsVerifiedAndExtractedBesideServer() throws Exception {
+        byte[] mainBytes = "main cuda archive".getBytes(StandardCharsets.UTF_8);
+        byte[] cudartBytes = "cudart companion archive".getBytes(StandardCharsets.UTF_8);
+        var entry = cudaManifest(
+                "cuda-companion",
+                LlamaCppEngineInstaller.sha256Hex(mainBytes),
+                LlamaCppEngineInstaller.sha256Hex(cudartBytes));
+        var downloader = new PerAssetDownloader(mainBytes, cudartBytes);
+
+        var result = installer(downloader, cudaAwareExtractor()).install(entry, tempDir);
+
+        assertEquals(LlamaCppEngineInstaller.Status.INSTALLED, result.status());
+        assertEquals(2, downloader.calls, "both the engine and cudart archives must be downloaded");
+        Path serverDir = result.serverPath().getParent();
+        assertTrue(Files.isRegularFile(serverDir.resolve("cudart64_13.dll")),
+                "cudart DLLs must land beside llama-server.exe, found: " + serverDir);
+    }
+
+    @Test
+    void cudaCompanionChecksumMismatchFailsClosedWithoutPartialInstall() throws Exception {
+        byte[] mainBytes = "main cuda archive".getBytes(StandardCharsets.UTF_8);
+        byte[] cudartBytes = "cudart companion archive".getBytes(StandardCharsets.UTF_8);
+        var entry = cudaManifest(
+                "cuda-companion-mismatch",
+                LlamaCppEngineInstaller.sha256Hex(mainBytes),
+                "1111111111111111111111111111111111111111111111111111111111111111");
+        var downloader = new PerAssetDownloader(mainBytes, cudartBytes);
+
+        var result = installer(downloader, cudaAwareExtractor()).install(entry, tempDir);
+
+        assertEquals(LlamaCppEngineInstaller.Status.FAILED, result.status());
+        assertFalse(Files.exists(entry.installDir(tempDir)),
+                "companion checksum mismatch must not promote a partial install");
+        assertTrue(result.message().contains("SHA-256 mismatch"), result.message());
+        assertTrue(result.message().contains("cudart"), result.message());
+    }
+
     private LlamaCppEngineInstaller installer(
             LlamaCppEngineInstaller.Downloader downloader,
             LlamaCppEngineInstaller.Extractor extractor) {
@@ -137,6 +201,60 @@ class LlamaCppEngineInstallerTest {
             Files.writeString(server, "server", StandardCharsets.UTF_8);
             server.toFile().setExecutable(true, false);
         };
+    }
+
+    private static LlamaCppEngineInstaller.Extractor cudaAwareExtractor() {
+        return (archive, destination) -> {
+            String name = archive.getFileName().toString();
+            if (name.startsWith("cudart")) {
+                Files.createDirectories(destination);
+                Files.writeString(destination.resolve("cudart64_13.dll"), "cudart", StandardCharsets.UTF_8);
+                return;
+            }
+            Path server = destination.resolve("bin").resolve("llama-server.exe");
+            Files.createDirectories(server.getParent());
+            Files.writeString(server, "server", StandardCharsets.UTF_8);
+        };
+    }
+
+    private LlamaCppEngineManifest.Entry cudaManifest(String variant, String mainSha, String cudartSha) {
+        return new LlamaCppEngineManifest.Entry(
+                variant,
+                "Windows",
+                "",
+                "x64",
+                "cuda-13.3",
+                "b9918",
+                "llama-b9918-bin-win-cuda-13.3-x64.zip",
+                URI.create("https://example.invalid/llama-b9918-bin-win-cuda-13.3-x64.zip"),
+                mainSha,
+                24L,
+                Path.of(".talos", "engines", "llama.cpp", "b9918", variant),
+                "llama-server.exe",
+                "580.00",
+                new LlamaCppEngineManifest.CompanionAsset(
+                        "cudart-llama-bin-win-cuda-13.3-x64.zip",
+                        URI.create("https://example.invalid/cudart-llama-bin-win-cuda-13.3-x64.zip"),
+                        cudartSha,
+                        18L));
+    }
+
+    private static final class PerAssetDownloader implements LlamaCppEngineInstaller.Downloader {
+        private final byte[] mainBytes;
+        private final byte[] cudartBytes;
+        int calls;
+
+        PerAssetDownloader(byte[] mainBytes, byte[] cudartBytes) {
+            this.mainBytes = mainBytes;
+            this.cudartBytes = cudartBytes;
+        }
+
+        @Override
+        public void download(URI uri, Path target) throws Exception {
+            calls++;
+            Files.createDirectories(target.getParent());
+            Files.write(target, uri.toString().contains("cudart") ? cudartBytes : mainBytes);
+        }
     }
 
     private LlamaCppEngineManifest.Entry manifest(String variant, String sha) {

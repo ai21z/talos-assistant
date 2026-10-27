@@ -7,7 +7,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,6 +97,24 @@ class PublicRepositoryMetadataTest {
         String developerSetup = read("docs/development/developer-setup.md");
         String qualityReports = read("docs/development/quality-reports.md");
 
+        String normalizedQodana = qodana.replace("\r\n", "\n");
+        int excludeStart = normalizedQodana.indexOf("exclude:\n");
+        int failureConditionsStart = normalizedQodana.indexOf("failureConditions:\n");
+        int includeStart = normalizedQodana.indexOf("include:\n");
+        assertTrue(excludeStart >= 0 && failureConditionsStart > excludeStart,
+                "public Qodana config must have a bounded exclusion block");
+        assertTrue(includeStart > failureConditionsStart,
+                "public Qodana config must have an include block after failure conditions");
+        String excludeBlock = normalizedQodana.substring(excludeStart, failureConditionsStart);
+        String includeBlock = normalizedQodana.substring(includeStart);
+        String unstableInspection = "  - name: ExtractMethodRecommender";
+        assertTrue(excludeBlock.contains(unstableInspection + "\n\n"),
+                "the unstable optional inspection must be excluded globally");
+        assertTrue(excludeBlock.indexOf(unstableInspection) == excludeBlock.lastIndexOf(unstableInspection),
+                "the unstable optional inspection must have exactly one exclusion");
+        assertFalse(includeBlock.contains("ExtractMethodRecommender"),
+                "the unstable optional inspection must not be explicitly included");
+
         assertTrue(qodana.contains("jetbrains/qodana-jvm-community:2026.1"),
                 "public Qodana config must use the community linter");
         assertFalse(qodana.contains("linter: jetbrains/qodana-jvm:2026.1"),
@@ -109,6 +131,35 @@ class PublicRepositoryMetadataTest {
         assertTrue(publicDocs.contains("Qodana Community"));
         assertTrue(publicDocs.contains("Generated report outputs stay local"));
         assertTrue(publicDocs.contains("reports/"));
+    }
+
+    @Test
+    @DisplayName("quality guidance distinguishes exact accepted provenance from absent native metadata")
+    void qualityGuidanceMatchesExactProvenanceContract() throws Exception {
+        String guidance = read("docs/development/quality-reports.md");
+        assertTrue(guidance.contains("accepts only `qodana-results-match-current-candidate`"));
+        assertTrue(guidance.contains("`qodana-provenance-incomplete` is not an accepted status"));
+        assertTrue(guidance.contains("Explicit native branch/revision conflicts still reject"));
+        assertFalse(guidance.contains("does not reject `qodana-provenance-incomplete`"));
+    }
+
+    @Test
+    @DisplayName("package ownership map covers actual top-level source packages and bounds gate claims")
+    void packageMapCoversCurrentSourcePackagesAndNamesGateLimits() throws Exception {
+        String map = read("docs/architecture/package-map.md");
+        Set<String> actual = new TreeSet<>();
+        try (var packages = Files.list(ROOT.resolve("src/main/java/dev/talos"))) {
+            packages.filter(Files::isDirectory)
+                    .forEach(path -> actual.add("dev.talos." + path.getFileName()));
+        }
+        Set<String> documented = new TreeSet<>();
+        var rows = Pattern.compile("(?m)^\\| `(?<name>dev\\.talos\\.[a-z]+)` \\|").matcher(map);
+        while (rows.find()) documented.add(rows.group("name"));
+        assertEquals(actual, documented, "ownership rows must cover actual packages without stale entries");
+        assertTrue(map.contains("six selected rules"));
+        assertTrue(map.contains("plus five selected rules"));
+        assertTrue(map.contains("not complete architectural correctness"));
+        assertTrue(map.contains("`dev.talos.core.security`"));
     }
 
     private static String read(String relative) throws IOException {

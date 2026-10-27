@@ -7,6 +7,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.GrepTool;
@@ -97,6 +99,13 @@ class PrivateModeScriptedE2eTest {
         messages.add(ChatMessage.system("harness"));
         messages.add(ChatMessage.user("private mode scripted e2e"));
 
-        return loop.run(scriptedToolCall, messages, workspace, ctx);
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        try {
+            return loop.run(scriptedToolCall, messages, workspace, ctx);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 }

@@ -5,8 +5,12 @@ import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.JsonTurnLogAppender;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.SessionApprovalPolicy;
+import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -39,6 +43,69 @@ class TalosBootstrapWiringTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
 
+    @TempDir
+    Path isolatedUserHome;
+
+    private final List<ReplRouter> openedRouters = new ArrayList<>();
+    private String previousUserHome;
+
+    @BeforeEach
+    void isolateUserHome() {
+        previousUserHome = System.getProperty("user.home");
+        System.setProperty("user.home", isolatedUserHome.toString());
+    }
+
+    @AfterEach
+    void closeRoutersAndRestoreUserHome() {
+        try {
+            for (int index = openedRouters.size() - 1; index >= 0; index--) {
+                openedRouters.get(index).getRuntimeSession().close();
+            }
+        } finally {
+            if (previousUserHome == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previousUserHome);
+            }
+        }
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace
+    ) {
+        return remember(TalosBootstrap.create(session, config, out, workspace));
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace,
+            org.jline.reader.LineReader lineReader
+    ) {
+        return remember(TalosBootstrap.create(session, config, out, workspace, lineReader));
+    }
+
+    private ReplRouter createRouter(
+            SessionState session,
+            Config config,
+            java.io.PrintStream out,
+            Path workspace,
+            org.jline.reader.LineReader lineReader,
+            java.util.function.Function<String, String> approvalReader
+    ) {
+        return remember(TalosBootstrap.create(
+                session, config, out, workspace, lineReader, approvalReader));
+    }
+
+    private ReplRouter remember(ReplRouter router) {
+        openedRouters.add(router);
+        return router;
+    }
+
     private static SessionState stubSession() {
         return new SessionState() {
             private int k = 6; private boolean dbg;
@@ -51,7 +118,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapWiresSessionApprovalPolicyIntoTurnProcessor() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);
@@ -69,7 +136,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapRegistersPerTurnListeners() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);
@@ -90,9 +157,8 @@ class TalosBootstrapWiringTest {
     }
 
     /**
-     * Single-writer contract (T774): the bootstrap writes streamed chunks
-     * through the ONE supplied {@code out} stream - there is no second,
-     * terminal-writer side channel. In production RunCmd supplies a
+     * The bootstrap discards provider fragments and renders the final
+     * selected answer through the supplied {@code out} stream. In production RunCmd supplies a
      * terminal-backed stream ({@code TerminalOutput.printStreamFor}), so
      * JLine's cursor/column model sees every character that reaches the
      * terminal; that routing is covered by
@@ -101,7 +167,7 @@ class TalosBootstrapWiringTest {
      * prompt-redraw corruption documented in TalosBootstrap.
      */
     @Test
-    void bootstrapWritesStreamChunksThroughTheSingleSuppliedStream() throws Exception {
+    void bootstrapDiscardsFragmentsAndRendersSelectedAnswerThroughTheSingleSuppliedStream() throws Exception {
         java.io.ByteArrayOutputStream terminalSink = new java.io.ByteArrayOutputStream();
         java.io.ByteArrayOutputStream suppliedSink = new java.io.ByteArrayOutputStream();
 
@@ -113,51 +179,62 @@ class TalosBootstrapWiringTest {
                 .terminal(term)
                 .build();
 
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(suppliedSink),
                 WS, reader);
 
-        // Drive one chunk directly through the wired stream sink - same
-        // path a live streaming turn would exercise, but without depending
-        // on mode/placeholder/turn-executor internals.
         router.context().streamSink().accept("CHUNK-PROBE");
+        assertInstanceOf(
+                ToolCallStreamFilter.class,
+                router.context().streamSink()).flush();
+        assertEquals(0, suppliedSink.size(), "Raw fragments must not reach the supplied stream");
+        assertTrue(router.getModes().setActive("ask"));
+        assertTrue(router.tryHandlePrompt("Respond with exactly: SELECTED-PROBE"));
         term.flush();
 
         String termOut = terminalSink.toString(java.nio.charset.StandardCharsets.UTF_8);
         String supplied = suppliedSink.toString(java.nio.charset.StandardCharsets.UTF_8);
 
-        assertTrue(supplied.contains("CHUNK-PROBE"),
-                "the single supplied stream must receive streamed chunks");
+        assertFalse(supplied.contains("CHUNK-PROBE"));
+        assertTrue(supplied.contains("SELECTED-PROBE"),
+                "The final selected answer must reach the single supplied stream");
         assertFalse(termOut.contains("CHUNK-PROBE"),
                 "no second terminal-writer side channel may exist (single-writer contract)");
+        assertFalse(termOut.contains("SELECTED-PROBE"),
+                "Selected answers must not acquire a second terminal-writer side channel");
     }
 
     /**
      * Back-compat path: when no {@link org.jline.reader.LineReader} is
-     * supplied (headless tests, programmatic API callers), the sink must
-     * fall back to the provided {@link java.io.PrintStream}. Prevents a
-     * silent regression where tightening the JLine path accidentally
-     * drops output for non-interactive invocations.
+     * supplied, provider fragments remain private and the selected answer
+     * is rendered to the provided {@link java.io.PrintStream}.
      */
     @Test
-    void bootstrapFallsBackToStdoutWhenLineReaderAbsent() {
+    void bootstrapRendersSelectedAnswerToStdoutWhenLineReaderAbsent() {
         java.io.ByteArrayOutputStream stdoutSink = new java.io.ByteArrayOutputStream();
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(stdoutSink),
                 WS); // no LineReader
 
         router.context().streamSink().accept("CHUNK-PROBE");
+        assertInstanceOf(
+                ToolCallStreamFilter.class,
+                router.context().streamSink()).flush();
+        assertEquals(0, stdoutSink.size(), "Headless raw fragments must remain private");
+        assertTrue(router.getModes().setActive("ask"));
+        assertTrue(router.tryHandlePrompt("Respond with exactly: SELECTED-PROBE"));
         String stdOut = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
-        assertTrue(stdOut.contains("CHUNK-PROBE"),
-                "with no LineReader, sink must fall back to the passed PrintStream");
+        assertFalse(stdOut.contains("CHUNK-PROBE"));
+        assertTrue(stdOut.contains("SELECTED-PROBE"),
+                "With no LineReader, the selected answer must reach the supplied PrintStream");
     }
 
     @Test
     void bootstrapUsesSuppliedApprovalReaderWhenNoLineReaderIsPresent() {
         List<String> prompts = new ArrayList<>();
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS,
@@ -174,7 +251,7 @@ class TalosBootstrapWiringTest {
 
     @Test
     void bootstrapClosesLlmClientWhenRuntimeSessionCloses() {
-        ReplRouter router = TalosBootstrap.create(
+        ReplRouter router = createRouter(
                 stubSession(), new Config(),
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
                 WS);

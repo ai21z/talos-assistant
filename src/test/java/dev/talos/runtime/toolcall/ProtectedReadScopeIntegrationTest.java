@@ -14,6 +14,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -83,6 +84,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages,
@@ -117,6 +119,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages,
@@ -154,6 +157,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         loop.run("{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages, workspace, ctx);
 
@@ -187,6 +191,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -227,6 +232,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read family-budget.xlsx and tell me the bill amount."));
 
+        captureResolution(messages);
         loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-budget.xlsx\"}}",
                 messages,
@@ -259,6 +265,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read lease.pdf and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"lease.pdf\"}}",
                 messages,
@@ -292,6 +299,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read family-budget.xls and tell me the bill amount."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-budget.xls\"}}",
                 messages,
@@ -539,6 +547,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and tell me the patient name."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -575,6 +584,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -618,6 +628,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
         beginTrace("Read medical-notes.docx and summarize it.");
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -677,6 +688,7 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
 
         beginTrace("Read medical-notes.docx and summarize it.");
+        captureResolution(messages);
         ToolCallLoop.LoopResult result = loop.run(
                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                 messages,
@@ -729,27 +741,30 @@ class ProtectedReadScopeIntegrationTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read .env and tell me the value."));
 
+        captureResolution(messages);
         loop.run("{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                 messages, workspace, ctx);
 
         assertTrue(messages.toString().contains("FILE_DISCOVERED_CANARY_SCOPE_ENV"), messages.toString());
 
         JsonSessionStore store = new JsonSessionStore(workspace.resolve("sessions"));
-        store.appendTurn("sid-scope", new TurnRecord(
-                1,
-                Instant.parse("2026-05-15T00:00:00Z"),
-                100,
-                "Read .env",
-                "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV",
-                List.of(new TurnRecord.ToolCallSummary(
-                        "talos.read_file",
-                        ".env",
-                        true,
-                        "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV")),
-                1,
-                1,
-                0,
-                "trace FILE_DISCOVERED_CANARY_SCOPE_ENV"));
+        try (var writer = store.acquireSessionWriter("sid-scope")) {
+            writer.appendTurn("sid-scope", new TurnRecord(
+                    1,
+                    Instant.parse("2026-05-15T00:00:00Z"),
+                    100,
+                    "Read .env",
+                    "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV",
+                    List.of(new TurnRecord.ToolCallSummary(
+                            "talos.read_file",
+                            ".env",
+                            true,
+                            "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV")),
+                    1,
+                    1,
+                    0,
+                    "trace FILE_DISCOVERED_CANARY_SCOPE_ENV"));
+        }
 
         String jsonl = Files.readString(workspace.resolve("sessions").resolve("sid-scope.turns.jsonl"));
         assertFalse(jsonl.contains("FILE_DISCOVERED_CANARY_SCOPE_ENV"), jsonl);
@@ -826,6 +841,13 @@ class ProtectedReadScopeIntegrationTest {
                 request);
     }
 
+    private static void captureResolution(List<ChatMessage> messages) {
+        TurnTaskContractCapture.clear();
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+    }
+
     private static boolean hasTraceEvent(LocalTurnTrace trace, String eventType) {
         return trace != null
                 && trace.events().stream()
@@ -878,5 +900,38 @@ class ProtectedReadScopeIntegrationTest {
                 doc.write(out);
             }
         }
+    }
+
+    @Test
+    void private_mode_absolute_named_document_target_allows_that_document_under_its_relative_spelling() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        writePdf(root.resolve("docs").resolve("private-report.pdf"), "Named PDF fact");
+        String target = root.resolve("docs").resolve("private-report.pdf").toString().replace('\\', '/');
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
+                .sandbox(new Sandbox(root, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        TurnTaskContractCapture.set(readOnlyContract("Summarize " + target + ".", Set.of(target), Set.of()));
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize " + target + "."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/private-report.pdf\"}}",
+                messages, root, ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("outside the current requested private document target set"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertEquals(1, result.readPaths().size(), result.readPaths().toString());
     }
 }

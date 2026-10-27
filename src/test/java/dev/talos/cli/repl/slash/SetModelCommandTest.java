@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.runtime.Result;
 import dev.talos.spi.types.ModelRef;
 import org.junit.jupiter.api.Test;
@@ -28,9 +28,9 @@ class SetModelCommandTest {
 
     @Test
     void nonLlamaCppMissingModelKeepsGenericModelsHint() {
-        String text = SetModelCommand.modelNotFoundMessage("ollama/gpt-oss:20b");
+        String text = SetModelCommand.modelNotFoundMessage("unsupported/gpt-oss:20b");
 
-        assertTrue(text.contains("Model not found: ollama/gpt-oss:20b"), text);
+        assertTrue(text.contains("Model not found: unsupported/gpt-oss:20b"), text);
         assertTrue(text.contains("Tip: /models"), text);
         assertFalse(text.contains("configured/running GGUF"), text);
     }
@@ -70,7 +70,7 @@ class SetModelCommandTest {
         // concrete hf_repo/hf_file config edit needs no absolute path, so it survives
         // the render layer's privacy path-redaction (a server_path would show as [path]).
         var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"));
-        var profile = LlamaCppModelProfiles.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
+        var profile = LlamaCppModelCatalog.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
 
         String text = SetModelCommand.modelNotFoundMessage(
                 "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded, profile);
@@ -98,6 +98,39 @@ class SetModelCommandTest {
         assertTrue(text.contains("downloaded but not configured"), text);
         assertFalse(text.contains("<name>"), text);
         assertFalse(text.contains("<llama-server>"), text);
+    }
+
+    @Test
+    void qwen3GuidanceRequiresExactLocalArtifactInsteadOfUnpinnedHuggingFaceConfig() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3-8B-Q4_K_M"));
+        var profile = LlamaCppModelCatalog.profileForGgufFile("Qwen3-8B-Q4_K_M").orElseThrow();
+
+        String text = SetModelCommand.modelNotFoundMessage("Qwen3-8B-Q4_K_M", downloaded, profile);
+
+        assertTrue(text.contains("exact local GGUF path"), text);
+        assertTrue(text.contains("--profile qwen3-8b"), text);
+        assertTrue(text.contains("--model-path"), text);
+        assertTrue(text.contains("Qwen3-8B-Q4_K_M.gguf"), text);
+        assertFalse(text.contains("hf_repo:"), text);
+        assertFalse(text.contains("hf_file:"), text);
+    }
+
+    @Test
+    void qwen3FourBGuidanceRequiresTheControlledLocalArtifact() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen3-4b-instruct-2507-Q4_K_M"));
+        var profile = LlamaCppModelCatalog
+                .profileForGgufFile("qwen3-4b-instruct-2507-Q4_K_M")
+                .orElseThrow();
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "qwen3-4b-instruct-2507-Q4_K_M", downloaded, profile);
+
+        assertTrue(text.contains("exact local GGUF path"), text);
+        assertTrue(text.contains("--profile qwen3-4b"), text);
+        assertTrue(text.contains("--model-path"), text);
+        assertTrue(text.contains("qwen3-4b-instruct-2507-Q4_K_M.gguf"), text);
+        assertFalse(text.contains("hf_repo:"), text);
+        assertFalse(text.contains("hf_file:"), text);
     }
 
     @Test

@@ -17,7 +17,6 @@ import java.util.Map;
  * <pre>{@code
  *   ConfigView v = ConfigView.of(cfg);
  *   int topK     = v.rag().topK();
- *   String host  = v.ollama().host();
  *   int timeout  = v.limits().llmTimeoutMs();
  * }</pre>
  */
@@ -40,7 +39,6 @@ public final class ConfigView {
     // ── Section accessors ─────────────────────────────────────────────
 
     public RagConfig rag()       { return new RagConfig(section("rag")); }
-    public OllamaConfig ollama() { return new OllamaConfig(section("ollama")); }
     public LimitsConfig limits() { return new LimitsConfig(section("limits")); }
     public NetConfig net()       { return new NetConfig(section("net")); }
     public UiConfig ui()         { return new UiConfig(section("ui")); }
@@ -62,15 +60,6 @@ public final class ConfigView {
 
     public record VectorsConfig(Map<String, Object> m) {
         public boolean enabled() { return CfgUtil.boolAt(m, "enabled", false); }
-    }
-
-    // ── Ollama ────────────────────────────────────────────────────────
-
-    public record OllamaConfig(Map<String, Object> m) {
-        public String host()  { return strAt(m, "host", "http://127.0.0.1:11434"); }
-        public String model() { return strAt(m, "model", "qwen2.5-coder:14b"); }
-        public String embed() { return strAt(m, "embed", "bge-m3"); }
-        public boolean allowRemote() { return CfgUtil.boolAt(m, "allow_remote", false); }
     }
 
     // ── Limits ────────────────────────────────────────────────────────

@@ -1,17 +1,22 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.toolcall.ToolResultModelContextHandoff;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
-import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolError;
 
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,10 +28,20 @@ import java.util.regex.Pattern;
 public final class ProtectedReadAnswerGuard {
     private static final Pattern ENV_ASSIGNMENT = Pattern.compile(
             "(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,}\\s*=\\s*[^\\s`'\"<>]+)");
+    // A period directly followed by a letter or digit belongs to the asked
+    // phrase (api.stripe.com, notes.txt, 1.5). Other sentence punctuation ends
+    // it. The phrase is bounded, because Java matches a repeated alternation
+    // recursively, and it must end at sentence punctuation or the end of the
+    // prompt, so an overlong phrase is never confirmed from a prefix.
+    private static final String ASKED_PHRASE =
+            "((?:[^?.!]|\\.(?=[\\p{L}\\p{N}])){1,200})(?=[?!]|\\.(?![\\p{L}\\p{N}])|$)";
     private static final Pattern WHETHER_CONTAINS_PROMPT = Pattern.compile(
-            "(?i)\\bwhether\\s+(?:it|the document|the file)\\s+contains\\s+([^?.!]+)");
+            "(?i)\\bwhether\\s+(?:it|the document|the file)\\s+contains\\s+" + ASKED_PHRASE);
     private static final Pattern DOES_CONTAIN_PROMPT = Pattern.compile(
-            "(?i)\\bdoes\\s+(?:it|the document|the file)\\s+contain\\s+([^?.!]+)");
+            "(?i)\\bdoes\\s+(?:it|the document|the file)\\s+contain\\s+" + ASKED_PHRASE);
+    private static final Pattern WORD_SEPARATOR = Pattern.compile("[^\\p{L}\\p{M}\\p{N}]+");
+    private static final Pattern READ_LINE_NUMBER = Pattern.compile("^\\d+ \\| ");
+    private static final String EXTRACTION_HEADER_PREFIX = "Extracted document text from ";
 
     private ProtectedReadAnswerGuard() {
     }
@@ -42,21 +57,111 @@ public final class ProtectedReadAnswerGuard {
 
     public static String summarizeDeniedProtectedReadOutcomesIfNeeded(
             String answer,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
     ) {
         if (loopResult == null) return answer;
         List<ToolCallLoop.ToolOutcome> deniedProtectedReads = loopResult.toolOutcomes().stream()
                 .filter(ProtectedReadAnswerGuard::isDeniedProtectedReadOutcome)
                 .toList();
         if (deniedProtectedReads.isEmpty()) return answer;
+        List<ToolCallLoop.ToolOutcome> deniedAfterApprovedRead = deniedProtectedReads.stream()
+                .filter(denied -> approvedReadOfSameFile(loopResult, denied, workspace))
+                .toList();
+        if (deniedAfterApprovedRead.isEmpty()) {
+            List<String> otherApprovedReads = approvedProtectedReadPaths(loopResult, workspace);
+            if (otherApprovedReads.isEmpty()) {
+                return deniedProtectedReadSummary(deniedProtectedReads);
+            }
+            return deniedProtectedReadSummary(deniedProtectedReads)
+                    .replace("[Approval blocked: protected content was not read]",
+                            "[Approval blocked: protected content of the denied file(s) was not read]")
+                    + "\n\nAn approved read in this turn returned content from: "
+                    + String.join(", ", otherApprovedReads) + ".";
+        }
+        List<ToolCallLoop.ToolOutcome> unread = deniedProtectedReads.stream()
+                .filter(denied -> !deniedAfterApprovedRead.contains(denied))
+                .toList();
+        StringBuilder note = new StringBuilder("[Protected read: approval was denied for one read of ");
+        note.append(String.join(", ", deniedAfterApprovedRead.stream()
+                .map(outcome -> workspaceDisplayPath(outcome, workspace))
+                .distinct()
+                .toList()));
+        note.append(". Another approved read of that file in this turn returned its content.]");
+        if (!unread.isEmpty()) {
+            return note + "\n\n" + deniedProtectedReadSummary(unread);
+        }
+        return note + "\n\n" + (answer == null ? "" : answer);
+    }
+
+    public static String summarizeDeniedProtectedReadOutcomesIfNeeded(
+            String answer,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        return summarizeDeniedProtectedReadOutcomesIfNeeded(answer, loopResult, null);
+    }
+
+    private static boolean approvedReadOfSameFile(
+            ToolCallLoop.LoopResult loopResult,
+            ToolCallLoop.ToolOutcome denied,
+            Path workspace
+    ) {
+        String deniedPath = canonicalDisplayPath(denied.pathHint());
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.success() || outcome.denied()) continue;
+            if (!"read_file".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(outcome.toolName()))) continue;
+            if (!deniedPath.isBlank() && deniedPath.equals(canonicalDisplayPath(outcome.pathHint()))) return true;
+            if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, outcome.pathHint(), denied.pathHint())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> approvedProtectedReadPaths(ToolCallLoop.LoopResult loopResult, Path workspace) {
+        return loopResult.toolOutcomes().stream()
+                .filter(outcome -> outcome != null && outcome.success() && !outcome.denied()
+                        && "read_file".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(outcome.toolName()))
+                        && dev.talos.runtime.policy.ProtectedContentPolicy.looksProtectedPathString(
+                                canonicalDisplayPath(outcome.pathHint())))
+                .map(outcome -> workspaceDisplayPath(outcome, workspace))
+                .distinct()
+                .toList();
+    }
+
+    /** A path inside the workspace is shown relative to it, so an answer does not reveal the home folder. */
+    private static String workspaceDisplayPath(ToolCallLoop.ToolOutcome outcome, Path workspace) {
+        String display = displayPath(outcome);
+        if (workspace == null) return display;
+        try {
+            Path recorded = Path.of(outcome.pathHint().strip());
+            Path root = workspace.toAbsolutePath().normalize();
+            if (recorded.isAbsolute()) {
+                Path normalized = recorded.normalize();
+                if (dev.talos.tools.WorkspacePathIdentity.lexicallyWithin(root, normalized)) {
+                    String relative = root.relativize(normalized).toString().replace('\\', '/');
+                    if (!relative.isBlank()) return relative;
+                }
+            }
+        } catch (RuntimeException unavailable) {
+            return display;
+        }
+        return display;
+    }
+
+    private static String displayPath(ToolCallLoop.ToolOutcome outcome) {
+        String path = canonicalDisplayPath(outcome.pathHint());
+        return path.isBlank() ? outcome.toolName() : path;
+    }
+
+    private static String deniedProtectedReadSummary(List<ToolCallLoop.ToolOutcome> deniedProtectedReads) {
 
         StringBuilder out = new StringBuilder();
         out.append("[Approval blocked: protected content was not read]\n\n")
                 .append("Protected content was not read because approval was denied for:\n");
         for (ToolCallLoop.ToolOutcome outcome : deniedProtectedReads) {
-            String path = canonicalDisplayPath(outcome.pathHint());
             out.append("- ")
-                    .append(path.isBlank() ? outcome.toolName() : path)
+                    .append(displayPath(outcome))
                     .append(": approval denied\n");
         }
         out.append("\nNo protected file content was shown. ")
@@ -118,7 +223,7 @@ public final class ProtectedReadAnswerGuard {
         if ((blankAnswer || isProtectedReadRefusal(current))
                 && !answerContainsCurrentProtectedReadEvidence(current, protectedReads)) {
             String repairedContainmentAnswer =
-                    approvedPrivateDocumentContainmentAnswer(messages, loopResult);
+                    approvedPrivateDocumentContainmentAnswer(messages, loopResult, protectedReads);
             current = repairedContainmentAnswer.isBlank()
                     ? approvedProtectedReadEvidenceAnswer(protectedReads)
                     : repairedContainmentAnswer;
@@ -154,7 +259,7 @@ public final class ProtectedReadAnswerGuard {
         List<ToolCallLoop.ToolOutcome> out = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (!outcome.success() || outcome.denied()) continue;
             if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
                     || looksProtectedPathHint(outcome.pathHint())
@@ -242,22 +347,111 @@ public final class ProtectedReadAnswerGuard {
         return out.toString();
     }
 
+    /**
+     * A "Yes" is synthesized only when the asked phrase occurs, word for word
+     * and in order, in the document content of a current approved protected
+     * read. Only leading articles of the asked phrase are dropped. Extraction
+     * headers, read line numbers, Talos notices and the bodies of ordinary
+     * files read in the same turn are not document content. When nothing
+     * matches, the caller keeps the evidence answer.
+     */
     private static String approvedPrivateDocumentContainmentAnswer(
             List<ChatMessage> messages,
-            ToolCallLoop.LoopResult loopResult
+            ToolCallLoop.LoopResult loopResult,
+            List<ToolCallLoop.ToolOutcome> protectedReads
     ) {
         if (loopResult == null || loopResult.readFileBodies() == null || loopResult.readFileBodies().isEmpty()) {
             return "";
         }
-        String prompt = latestNaturalLanguageUserPrompt(messages);
+        String prompt =
+                TurnTaskContractCapture.originalUserRequestOrResolve(messages);
         String phrase = containmentPhrase(prompt);
         if (phrase.isBlank()) return "";
-        for (String body : loopResult.readFileBodies().values()) {
-            if (documentBodyContainsRequestedPhrase(body, phrase)) {
+        List<String> askedWords = askedPhraseWords(phrase);
+        if (askedWords.isEmpty()) return "";
+        for (String body : protectedReadBodies(loopResult, protectedReads)) {
+            if (Collections.indexOfSubList(words(documentContent(body)), askedWords) >= 0) {
                 return safeContainmentAnswer(phrase);
             }
         }
         return "";
+    }
+
+    private static List<String> protectedReadBodies(
+            ToolCallLoop.LoopResult loopResult,
+            List<ToolCallLoop.ToolOutcome> protectedReads
+    ) {
+        Set<String> keys = new HashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : protectedReads) {
+            String key = readBodyKey(outcome.pathHint());
+            if (!key.isBlank()) keys.add(key);
+        }
+        List<String> bodies = new ArrayList<>();
+        for (Map.Entry<String, String> entry : loopResult.readFileBodies().entrySet()) {
+            if (keys.contains(readBodyKey(entry.getKey()))) {
+                bodies.add(entry.getValue());
+            }
+        }
+        return bodies;
+    }
+
+    private static String readBodyKey(String path) {
+        String key = canonicalDisplayPath(path);
+        while (key.startsWith("./")) {
+            key = key.substring(2);
+        }
+        return key.toLowerCase(Locale.ROOT);
+    }
+
+    private static String documentContent(String body) {
+        if (body == null || body.isBlank()) return "";
+        String text = body.replace("\r\n", "\n");
+        if (text.startsWith(ToolResultModelContextHandoff.PROTECTED_READ_WITHHELD_NOTICE)
+                || text.startsWith(ToolResultModelContextHandoff.PRIVATE_CONTENT_WITHHELD_NOTICE)) {
+            return "";
+        }
+        if (text.startsWith("(file has ") && text.strip().endsWith("is past end)")) return "";
+        boolean extraction = text.startsWith(EXTRACTION_HEADER_PREFIX);
+        if (extraction) {
+            int contentStart = text.indexOf("\n\n");
+            if (contentStart < 0) return "";
+            text = text.substring(contentStart + 2);
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : text.split("\n", -1)) {
+            if (line.startsWith("... [output truncated")) continue;
+            if (line.startsWith("... (") && line.endsWith(" more lines)")) continue;
+            Matcher numbered = READ_LINE_NUMBER.matcher(line);
+            if (!extraction && numbered.lookingAt()) {
+                out.append(line, numbered.end(), line.length());
+            } else {
+                out.append(line);
+            }
+            out.append('\n');
+        }
+        return out.toString();
+    }
+
+    private static List<String> askedPhraseWords(String phrase) {
+        List<String> asked = new ArrayList<>(words(phrase));
+        while (!asked.isEmpty() && isLeadingArticle(asked.get(0))) {
+            asked.remove(0);
+        }
+        return asked;
+    }
+
+    private static boolean isLeadingArticle(String word) {
+        return "a".equals(word) || "an".equals(word) || "the".equals(word);
+    }
+
+    private static List<String> words(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        String normalized = Normalizer.normalize(text, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        for (String piece : WORD_SEPARATOR.split(normalized)) {
+            if (!piece.isEmpty()) out.add(piece);
+        }
+        return out;
     }
 
     private static String canonicalDisplayPath(String pathHint) {
@@ -289,7 +483,7 @@ public final class ProtectedReadAnswerGuard {
         if (outcome == null || outcome.mutating() || outcome.success() || !outcome.denied()) {
             return false;
         }
-        if (!"talos.read_file".equals(outcome.toolName())) return false;
+        if (!"talos.read_file".equals(outcome.canonicalToolName())) return false;
         if (!ToolError.DENIED.equals(outcome.errorCode())) return false;
         return isUserApprovalDeniedOutcome(outcome);
     }
@@ -349,19 +543,6 @@ public final class ProtectedReadAnswerGuard {
         return normalizedSnippet.length() >= 8 && normalizedAnswer.contains(normalizedSnippet);
     }
 
-    private static String latestNaturalLanguageUserPrompt(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return "";
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if (message == null || !"user".equals(message.role())) continue;
-            String content = message.content() == null ? "" : message.content().strip();
-            if (content.isBlank()) continue;
-            if (content.startsWith("[tool_result:")) continue;
-            return content;
-        }
-        return "";
-    }
-
     private static String containmentPhrase(String prompt) {
         if (prompt == null || prompt.isBlank()) return "";
         Matcher whetherMatcher = WHETHER_CONTAINS_PROMPT.matcher(prompt);
@@ -385,38 +566,6 @@ public final class ProtectedReadAnswerGuard {
         return cleaned;
     }
 
-    private static boolean documentBodyContainsRequestedPhrase(String body, String phrase) {
-        if (body == null || body.isBlank() || phrase == null || phrase.isBlank()) return false;
-        String normalizedBody = normalizeSensitiveSnippet(body).toLowerCase(Locale.ROOT);
-        List<String> requiredTokens = significantTokens(phrase);
-        if (requiredTokens.isEmpty()) return false;
-        for (String token : requiredTokens) {
-            if (!normalizedBody.contains(token)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static List<String> significantTokens(String phrase) {
-        String[] pieces = normalizeSensitiveSnippet(phrase).toLowerCase(Locale.ROOT).split("[^a-z0-9]+");
-        List<String> tokens = new ArrayList<>();
-        for (String piece : pieces) {
-            if (piece.isBlank()) continue;
-            if (piece.length() <= 1) continue;
-            if (isContainmentStopWord(piece)) continue;
-            tokens.add(piece);
-        }
-        return tokens;
-    }
-
-    private static boolean isContainmentStopWord(String token) {
-        return switch (token) {
-            case "a", "an", "the", "it", "this", "that", "document", "file", "value", "raw", "contains", "contain" -> true;
-            default -> false;
-        };
-    }
-
     private static String safeContainmentAnswer(String phrase) {
         String normalizedPhrase = cleanContainmentPhrase(phrase);
         if (normalizedPhrase.isBlank()) {
@@ -432,9 +581,14 @@ public final class ProtectedReadAnswerGuard {
         if (loopResult == null || loopResult.readFileBodies() == null || loopResult.readFileBodies().isEmpty()) {
             return "";
         }
-        return loopResult.readFileBodies().getOrDefault(
-                canonicalDisplayPath(pathHint).toLowerCase(Locale.ROOT),
-                loopResult.readFileBodies().getOrDefault(canonicalDisplayPath(pathHint), ""));
+        String key = readBodyKey(pathHint);
+        if (key.isBlank()) return "";
+        for (Map.Entry<String, String> entry : loopResult.readFileBodies().entrySet()) {
+            if (key.equals(readBodyKey(entry.getKey()))) {
+                return entry.getValue();
+            }
+        }
+        return "";
     }
 
     private static String normalizeSensitiveSnippet(String value) {
@@ -452,11 +606,4 @@ public final class ProtectedReadAnswerGuard {
         return line.length() <= 240 ? line : line.substring(0, 237) + "...";
     }
 
-    private static String canonicalToolName(String toolName) {
-        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
-        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
-            return decision.canonicalToolName();
-        }
-        return toolName == null ? "" : toolName;
-    }
 }

@@ -2,6 +2,7 @@ package dev.talos.runtime.command;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
@@ -21,6 +22,7 @@ import java.util.regex.Pattern;
 /** Runs approved, bounded command profiles. V1 exposes Gradle verification only. */
 public final class RunCommandTool implements TalosTool {
     private static final String NAME = CommandToolPlanner.TOOL_NAME;
+    private static final int DIAGNOSTIC_TAIL_CHARS = 2_000;
     private static final Pattern HIGH_ENTROPY_COMMAND_TOKEN = Pattern.compile(
             "(?<![A-Za-z0-9_+/=-])([A-Za-z0-9_+/-]{40,}={0,2})(?![A-Za-z0-9_+/=-])");
 
@@ -121,7 +123,14 @@ public final class RunCommandTool implements TalosTool {
         String prefix;
         if (result.timedOut()) {
             prefix = "Command timed out: " + profile + " after " + result.durationMs() + "ms"
-                    + (result.killed() ? " (process killed)." : ".");
+                    + (result.killed() ? " (termination attempted)." : ".");
+            if (!result.errorMessage().isBlank()) {
+                String diagnostic = SafeLogFormatter.text(result.errorMessage()).strip();
+                if (diagnostic.length() > DIAGNOSTIC_TAIL_CHARS) {
+                    diagnostic = "..." + diagnostic.substring(diagnostic.length() - DIAGNOSTIC_TAIL_CHARS);
+                }
+                prefix += "\ndiagnostic:\n" + diagnostic;
+            }
         } else if (!result.errorMessage().isBlank()) {
             prefix = "Command failed: " + profile + " could not run after " + result.durationMs()
                     + "ms. Reason: " + result.errorMessage();

@@ -1,17 +1,25 @@
 package dev.talos.runtime;
 
+import dev.talos.cli.modes.AskMode;
+import dev.talos.cli.modes.DevMode;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.ActiveToolAuthorityTraceTest;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.phase.ExecutionPhaseState;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -30,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class TurnProcessorTest {
+class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -86,6 +94,64 @@ class TurnProcessorTest {
         assertNotNull(r);
         assertNotNull(r.elapsed());
         assertFalse(r.elapsed().isNegative());
+    }
+
+    @Test
+    void outcomeBackfillsNotRunVerificationInCompletedTrace() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true));
+        var processor = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult result = processor.process(session, "test", ctx);
+        LocalTurnTrace trace = result.audit().localTrace();
+
+        assertEquals("NOT_RUN", trace.outcome().verificationStatus());
+        assertEquals("NOT_RUN", trace.verification().status());
+        assertEquals("Post-apply verification was not applicable.", trace.verification().summary());
+    }
+
+    @Test
+    void successfulReadOnlyFallbackUsesReadOnlyAnsweredTerminalState() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override
+            public Optional<Result> handle(String raw, Path ws, Context ctx) throws Exception {
+                var contract = TaskContractResolver.fromUserRequest(
+                        "List the top-level files and folders in this workspace. Do not modify anything.");
+                TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                        contract, "INSPECT", List.of("talos.list_dir"), List.of("talos.list_dir")));
+                return Optional.of(new Result.Ok("README.md"));
+            }
+        });
+        var processor = new TurnProcessor(modes);
+
+        TurnResult result = processor.process(
+                new Session(WS, new Config()), "list the files", Context.builder(new Config()).build());
+
+        assertEquals("READ_ONLY_ANSWERED", result.audit().localTrace().outcome().classification());
+    }
+
+    @Test
+    void mutationCapableFallbackRemainsConservative() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override
+            public Optional<Result> handle(String raw, Path ws, Context ctx) throws Exception {
+                var contract = TaskContractResolver.fromUserRequest(
+                        "Create todo.md containing exactly: Review the local setup.");
+                TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                        contract, "APPLY", List.of("talos.write_file"), List.of("talos.write_file")));
+                return Optional.of(new Result.Ok("proposal recorded"));
+            }
+        });
+        var processor = new TurnProcessor(modes);
+
+        TurnResult result = processor.process(
+                new Session(WS, new Config()), "create todo.md", Context.builder(new Config()).build());
+
+        assertEquals("TURN_RECORDED", result.audit().localTrace().outcome().classification());
     }
 
     @Test void noModeHandlesReturnsNull() throws Exception {
@@ -147,6 +213,66 @@ class TurnProcessorTest {
         assertEquals("Echo: hello", result.output());
     }
 
+    @Test
+    void successfulInspectionCarriesStructuredResultSourcesIntoLocalTrace(@TempDir Path workspace) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new TalosTool() {
+            @Override public String name() { return "talos.retrieve"; }
+            @Override public String description() { return "retrieve fixture"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor(
+                        name(),
+                        description(),
+                        null,
+                        ToolRiskLevel.READ_ONLY,
+                        ToolOperationMetadata.retrieve(name(), "WORKSPACE_RETRIEVED"));
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok(
+                        "fixture evidence",
+                        ToolContentMetadata.workspaceEvidence(
+                                ToolContentMetadata.ContentSource.RAG_RETRIEVE,
+                                List.of("config.json", "docs/operations.md"),
+                                "test evidence"));
+            }
+        });
+        var processor = new TurnProcessor(
+                ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t1063",
+                "session-t1063",
+                1,
+                "2026-07-12T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-8b",
+                "locate the port");
+        TurnAuditCapture.begin();
+        try {
+            ToolResult result = processor.executeTool(
+                    session,
+                    new ToolCall("talos.retrieve", Map.of("query", "service port")),
+                    ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var executed = trace.events().stream()
+                    .filter(event -> event.type().equals("TOOL_EXECUTED"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(
+                    List.of("config.json", "docs/operations.md"),
+                    executed.data().get("pathHints"));
+        } finally {
+            TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     @Test void executeToolReturnsErrorForUnknownTool() {
         var tp = new TurnProcessor(ModeController.defaultController());
         var session = new Session(WS, new Config());
@@ -157,6 +283,50 @@ class TurnProcessorTest {
 
         assertFalse(result.success());
         assertEquals(ToolError.NOT_FOUND, result.error().code());
+    }
+
+    @Test
+    void comparisonFailureIsWithheldBeforeModelHandoff(@TempDir Path workspace) throws Exception {
+        String privateCode = "The archive committee meets on Tuesday";
+        String privateMessage = "The ceramics workshop meets beside the old observatory on Thursday.";
+        var metadata = new ToolContentMetadata(
+                ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON, "", false, false, false, "");
+        var raw = new ToolResult(false, null, new ToolError(privateCode, privateMessage), null, metadata);
+        var registry = new ToolRegistry();
+        AtomicInteger executions = new AtomicInteger();
+        registry.register(new TalosTool() {
+            @Override public String name() { return "test.echo"; }
+            @Override public String description() { return "synthetic comparison failure"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor(name(), description(), null, ToolRiskLevel.READ_ONLY);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                executions.incrementAndGet();
+                return raw;
+            }
+        });
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        TurnAuditCapture.begin();
+        var result = processor.executeTool(new Session(workspace, new Config()),
+                new ToolCall("test.echo", Map.of()), contextForWorkspace(workspace));
+        var trace = LocalTurnTraceCapture.complete();
+        var audit = TurnAuditCapture.end().withLocalTrace(trace);
+
+        assertSame(raw, result);
+        assertFalse(result.success());
+        assertEquals(1, executions.get());
+        assertEquals(1, audit.toolCalls().size());
+        assertFalse(audit.toolCalls().getFirst().success());
+        assertEquals(TurnRecord.ToolCallDisposition.EXECUTED,
+                audit.toolCalls().getFirst().executionDisposition());
+        assertEquals(raw.mutationEffects(), audit.toolCalls().getFirst().mutationEffects());
+        assertEquals(dev.talos.safety.ContentRestrictions.UNRESTRICTED, audit.contentRestrictions());
+        assertTrue(trace.events().stream().anyMatch(event -> event.type().equals("TOOL_EXECUTED")));
+        String retained = MAPPER.writeValueAsString(audit);
+        assertFalse(retained.contains(privateCode), "Private error code reached the audit before handoff");
+        assertFalse(retained.contains(privateMessage), "Private error message reached the audit before handoff");
+        assertEquals(dev.talos.safety.ContentRestrictions.WITHHELD, audit.toolCalls().getFirst().reason());
     }
 
     @Test
@@ -189,7 +359,9 @@ class TurnProcessorTest {
                     .findFirst()
                     .orElseThrow();
             assertEquals("REJECTED_UNKNOWN_NAMESPACE", aliasEvent.data().get("status"));
-            assertEquals("unknown_provider.write_file", aliasEvent.data().get("rawName"));
+            assertFalse(aliasEvent.data().containsKey("rawName"));
+            assertEquals("unknown_provider.write_file".length(),
+                    aliasEvent.data().get("rawNameChars"));
             assertEquals("talos.write_file", aliasEvent.data().get("canonicalTool"));
         } finally {
             LocalTurnTraceCapture.clear();
@@ -282,21 +454,65 @@ class TurnProcessorTest {
         AtomicInteger approvals = new AtomicInteger();
         var tp = processorWithFileToolsAndApprovalCounter(approvals);
         var session = new Session(workspace, new Config());
-        var ctx = contextForWorkspace(workspace);
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, null))
+                .executionPhaseState(new ExecutionPhaseState())
+                .build();
 
-        ToolResult result = tp.executeTool(session,
-                new ToolCall("talos.edit_file", Map.of(
-                        "path", "style.css",
-                        "old_string", "body { background-color: #121212; }",
-                        "new_string", "body { background-color: #000000; }")), ctx);
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-preapproval",
+                "session-t1120",
+                1,
+                "2026-07-13T17:06:47Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                "Update style.css.");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.edit_file", Map.of(
+                            "path", "style.css",
+                            "old_string", "body { background-color: #121212; }",
+                            "new_string", "body { background-color: #000000; }")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.edit_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+            TurnTraceEvent blocked = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                    .filter(event -> "talos.edit_file".equals(event.toolName()))
+                    .findFirst()
+                    .orElseThrow();
 
-        assertFalse(result.success());
-        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
-        assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Call talos.read_file first"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
-        assertEquals(0, approvals.get());
-        assertTrue(Files.readString(workspace.resolve("style.css")).contains("#2C2C2C"));
+            assertFalse(result.success());
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("Call talos.read_file first"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle,
+                    "one parsed call must have exactly one terminal trace event");
+            assertEquals("APPLY", blocked.phase(), "terminal event must keep the real call phase");
+            assertEquals(List.of("new_string", "old_string", "path"),
+                    blocked.data().get("parameterNames"));
+            assertTrue(blocked.data().containsKey("oldStringHash"), blocked.data().toString());
+            assertTrue(blocked.data().containsKey("newStringHash"), blocked.data().toString());
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertFalse(audit.toolCalls().getFirst().success());
+            assertTrue(audit.toolCalls().getFirst().reason().contains("old_string not found"),
+                    audit.toolCalls().toString());
+            assertTrue(Files.readString(workspace.resolve("style.css")).contains("#2C2C2C"));
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
@@ -321,6 +537,152 @@ class TurnProcessorTest {
         assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
         assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
         assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void editFileCrLfProposalMatchesLfFileBeforeApprovalAndPreservesLf(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\nomega\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\r\nbeta",
+                        "new_string", "alpha\r\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        String detail = approvalDetails.getFirst();
+        int diffStart = detail.indexOf("\n    diff (+1 -1):");
+        assertTrue(diffStart >= 0, detail);
+        String diff = detail.substring(diffStart);
+        assertTrue(diff.contains("\n    -beta"), diff);
+        assertTrue(diff.contains("\n    +BETA"), diff);
+        assertFalse(diff.contains("\r"), diff);
+        assertEquals("alpha\nBETA\nomega\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileLfProposalMatchesCrLfFileBeforeApprovalAndPreservesCrLf(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\r\nbeta\r\nomega\r\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("alpha\r\nBETA\r\nomega\r\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileLfProposalMatchesCrOnlyFileBeforeApprovalAndPreservesCr(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\rbeta\romega\r");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("alpha\rBETA\romega\r", Files.readString(target));
+    }
+
+    @Test
+    void editFileNormalizedOldStringAbsentStillFailsBeforeApproval(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\r\ngamma",
+                        "new_string", "alpha\r\nGAMMA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("alpha\nbeta\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileNormalizedOldStringMultipleMatchesFailBeforeApprovalAsAmbiguous(@TempDir Path workspace)
+            throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        Files.writeString(target, "alpha\nbeta\r\nalpha\r\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\rbeta",
+                        "new_string", "alpha\rBETA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("alpha\nbeta\r\nalpha\r\nbeta\n", Files.readString(target));
+    }
+
+    @Test
+    void editFileRawMatchPlusNormalizedEquivalentFailsBeforeApprovalAsAmbiguous(
+            @TempDir Path workspace
+    ) throws Exception {
+        Path target = workspace.resolve("notes.txt");
+        String original = "alpha\nbeta\n---\nalpha\r\nbeta\r\n";
+        Files.writeString(target, original);
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "notes.txt",
+                        "old_string", "alpha\nbeta",
+                        "new_string", "alpha\nBETA")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS, result.error().reason());
+        assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals(original, Files.readString(target));
     }
 
     @Test
@@ -652,7 +1014,7 @@ class TurnProcessorTest {
     }
 
     @Test
-    void newFileWriteApprovalShowsCountsOnlyDiffNote(@TempDir Path workspace) {
+    void newFileWriteApprovalShowsTheWholeFileAsAddedLines(@TempDir Path workspace) {
         AtomicInteger approvals = new AtomicInteger();
         List<String> approvalDetails = new ArrayList<>();
         var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
@@ -668,6 +1030,8 @@ class TurnProcessorTest {
         String detail = approvalDetails.getFirst();
         assertTrue(detail.contains("\n    diff (+2 -0): new file"), detail);
         assertFalse(detail.contains("@@"), detail);
+        // The whole new file is readable before approval, as added lines.
+        assertTrue(detail.contains("\n    +a { x: 1; }\n    +b { x: 2; }"), detail);
     }
 
     @Test
@@ -887,10 +1251,139 @@ class TurnProcessorTest {
     }
 
     @Test
+    void scopedWebConstraintRejectsSiblingWritesBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1><p>Online</p>\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                + "Do not touch CSS or JavaScript.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        for (String target : List.of("styles.css", "script.js")) {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", target,
+                            "content", "off target mutation\n")), ctx);
+
+            assertFalse(result.success(), target);
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code(), target);
+            assertTrue(result.errorMessage().contains("outside the current expected target set"),
+                    result.errorMessage());
+            assertTrue(result.errorMessage().contains("index.html"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        }
+
+        assertEquals(0, approvals.get());
+        assertEquals("body { color: white; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertEquals("console.log('ready');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
+    void scopedWebConstraintAllowsOnlyRequestedEditWithOneApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1><p>Online</p>\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                + "Do not touch CSS or JavaScript.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "index.html",
+                        "old_string", "<h1>Old</h1><p>Online</p>",
+                        "new_string", "<h1>Atlas Control</h1><p>Offline</p>")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("<h1>Atlas Control</h1><p>Offline</p>\n",
+                Files.readString(workspace.resolve("index.html")));
+        assertEquals("body { color: white; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertEquals("console.log('ready');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
+    void scopedSymbolRenameRejectsUnchangedSiblingBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "export const helpers = ['format'];\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Rename reset to resetAll in script.js only. "
+                + "scripts.js is a different file and must remain unchanged.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "scripts.js",
+                        "old_string", "helpers",
+                        "new_string", "changedHelpers")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("Target forbidden before approval"),
+                result.errorMessage());
+        assertTrue(result.errorMessage().contains("scripts.js"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("export const helpers = ['format'];\n",
+                Files.readString(workspace.resolve("scripts.js")));
+    }
+
+    @Test
+    void scopedSymbolRenameAllowsRequestedEditWithOneApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "export const helpers = ['format'];\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Rename reset to resetAll in script.js only. "
+                + "scripts.js is a different file and must remain unchanged.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "script.js",
+                        "old_string", "function reset()",
+                        "new_string", "function resetAll()")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("export function resetAll() { return 'ready'; }\n",
+                Files.readString(workspace.resolve("script.js")));
+        assertEquals("export const helpers = ['format'];\n",
+                Files.readString(workspace.resolve("scripts.js")));
+        assertFalse(Files.exists(workspace.resolve("resetAll")));
+    }
+
+    @Test
     void directoryListingContractBlocksContentInspectionTools(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742");
         ToolRegistry registry = new ToolRegistry();
-        registry.register(new ReadFileTool());
+        AtomicInteger executions = new AtomicInteger();
+        ReadFileTool delegate = new ReadFileTool();
+        registry.register(new TalosTool() {
+            @Override public String name() { return delegate.name(); }
+            @Override public String description() { return delegate.description(); }
+            @Override public ToolDescriptor descriptor() { return delegate.descriptor(); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                executions.incrementAndGet();
+                return delegate.execute(call, ctx);
+            }
+        });
         var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
         var session = new Session(workspace, new Config());
         var ctx = contextForWorkspace(workspace);
@@ -898,14 +1391,81 @@ class TurnProcessorTest {
         TurnUserRequestCapture.set(request);
         TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
 
-        ToolResult result = tp.executeTool(session,
-                new ToolCall("talos.read_file", Map.of("path", "notes.md")), ctx);
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-directory-listing", "session-t1120", 1,
+                "2026-07-13T00:00:00Z", "workspace-hash", "auto",
+                "llama_cpp", "granite-4.1-3b", request);
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.read_file", Map.of("path", "notes.md")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.read_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
 
-        assertFalse(result.success());
-        assertEquals(ToolError.DENIED, result.error().code());
-        assertTrue(result.errorMessage().contains("directory entries"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
-        assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
+            assertFalse(result.success());
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("directory entries"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
+            assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle);
+            assertEquals(0, executions.get());
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertEquals(TurnRecord.ToolCallDisposition.BLOCKED,
+                    audit.toolCalls().getFirst().executionDisposition());
+            assertFalse(audit.toolCalls().getFirst().mutationEffects().hasEffects());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void currentTurnToolSurfaceBlockHasOneTerminalTraceOwner(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, null))
+                .nativeToolSpecs(List.of(new ToolSpec("talos.edit_file", "Edit", "{}")))
+                .build();
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "index.html", "content", "<h1>blocked</h1>"));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-tool-surface", "session-t1120", 1,
+                "2026-07-13T00:00:00Z", "workspace-hash", "auto",
+                "llama_cpp", "granite-4.1-3b", "Write index.html.");
+        try {
+            ToolResult result = tp.executeTool(session, call, ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.write_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+
+            assertFalse(result.success());
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("Allowed tools: talos.edit_file"),
+                    result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle);
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test void toolReceivesWorkspaceFromSession() {
@@ -1075,11 +1635,29 @@ class TurnProcessorTest {
 
         assertNotNull(result.audit().localTrace());
         LocalTurnTrace trace = result.audit().localTrace();
-        assertEquals(2, trace.schemaVersion());
+        assertEquals(5, trace.schemaVersion());
         assertFalse(trace.traceId().isBlank());
         assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
-        assertTrue(trace.events().stream().anyMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "ROUTED_ANSWER_CAPTURED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "OUTCOME_RENDERED".equals(event.type())));
+        assertEquals(List.of(
+                        "TERMINAL_ANSWER_SELECTED",
+                        "ROUTED_ANSWER_CAPTURED",
+                        "OUTCOME_RENDERED",
+                        "TRACE_COMPLETED"),
+                trace.events().stream()
+                        .map(TurnTraceEvent::type)
+                        .filter(type -> type.equals("TERMINAL_ANSWER_SELECTED")
+                                || type.equals("ROUTED_ANSWER_CAPTURED")
+                                || type.equals("OUTCOME_RENDERED")
+                                || type.equals("TRACE_COMPLETED"))
+                        .toList());
+        assertEquals("NONE", trace.events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow()
+                .data()
+                .get("origin"));
         assertFalse(trace.redaction().promptHash().isBlank());
         assertFalse(trace.redaction().assistantHash().isBlank());
 
@@ -1121,16 +1699,24 @@ class TurnProcessorTest {
                 "2026-04-28T12:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 request);
 
         ToolResult toolResult = tp.executeTool(session, call, ctx);
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        TurnAuditCapture.end();
+        TurnAudit audit = TurnAuditCapture.end();
+        List<String> lifecycle = trace.events().stream()
+                .filter(event -> "talos.write_file".equals(event.toolName()))
+                .map(event -> event.type())
+                .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                        || "TOOL_CALL_BLOCKED".equals(type)
+                        || "TOOL_EXECUTED".equals(type))
+                .toList();
 
         assertTrue(toolResult.success(), toolResult.errorMessage());
-        assertTrue(trace.events().stream().anyMatch(event -> "TOOL_CALL_PARSED".equals(event.type())));
+        assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_EXECUTED"), lifecycle);
+        assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
         assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_REQUIRED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_GRANTED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())));
@@ -1139,6 +1725,265 @@ class TurnProcessorTest {
         assertTrue(json.contains("\"contentHash\""), json);
         assertFalse(json.contains("SECRET=abc"), "write payload must be hashed, not stored raw");
         assertFalse(json.contains("<h1>ok</h1>"), "write payload must be hashed, not stored raw");
+    }
+
+    @Test
+    void runtimeContentRewriteKeepsOneExactToolCallLineage(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "write styles.css";
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "styles.css",
+                "content", "body { color: red; }\n```\n## Summary\n- changed color\n"));
+
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-tool-transform",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-16T12:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                request);
+
+        ToolResult result = processor.executeTool(session, call, ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        TurnAuditCapture.end();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("body { color: red; }\n", Files.readString(workspace.resolve("styles.css")));
+        TurnTraceEvent parsed = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .findFirst().orElseThrow();
+        List<TurnTraceEvent> transformations = trace.events().stream()
+                .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                .toList();
+        TurnTraceEvent sanitized = transformations.stream()
+                .filter(event -> "MARKDOWN_COMMENTARY_SANITIZATION".equals(
+                        event.data().get("reasonCode")))
+                .findFirst().orElseThrow();
+        TurnTraceEvent executed = trace.events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .findFirst().orElseThrow();
+        String callId = (String) parsed.data().get("toolCallId");
+
+        assertEquals(callId, sanitized.data().get("toolCallId"));
+        assertEquals(callId, executed.data().get("toolCallId"));
+        assertNotEquals(parsed.data().get("argumentsHash"), sanitized.data().get("argumentsHash"));
+        TurnTraceEvent terminalIdentity = transformations.getLast();
+        assertEquals(terminalIdentity.data().get("toolNameHash"),
+                executed.data().get("toolNameHash"));
+        assertEquals(terminalIdentity.data().get("argumentsHash"),
+                executed.data().get("argumentsHash"));
+        assertEquals(1, approvals.get());
+    }
+
+    @Test
+    void publicAlreadyParsedEntryCannotExecuteWithoutParseEvidence(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "bypass.txt",
+                "content", "must not be written"));
+
+        TurnUserRequestCapture.set("write bypass.txt");
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest("write bypass.txt"));
+        ToolResult result = processor.executeToolAfterParsed(session, call, ctx, null);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
+        assertFalse(Files.exists(workspace.resolve("bypass.txt")));
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void parsedExecutionPermitCannotAuthorizeADifferentToolCall(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        ToolCall recorded = new ToolCall("talos.read_file", Map.of("path", "source.txt"));
+        ToolCall substituted = new ToolCall("talos.write_file", Map.of(
+                "path", "substituted.txt",
+                "content", "must not be written"));
+
+        TurnUserRequestCapture.set("write substituted.txt");
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest("write substituted.txt"));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-permit-substitution",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-16T12:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "write substituted.txt");
+        LocalTurnTraceCapture.ParsedToolCallPermit permit =
+                LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                        "tool_loop",
+                        recorded,
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .DIRECT_RUNTIME_API)
+                        .permit();
+
+        ToolResult result = processor.executeToolAfterParsed(session, substituted, ctx, permit);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
+        assertFalse(Files.exists(workspace.resolve("substituted.txt")));
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void outerTurnCaptureDoesNotRelabelDeterministicAnswerAsModelAuthored() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                ctx.llm().chatFull(List.of(ChatMessage.user(raw)));
+                LocalTurnTraceCapture.recordDeterministicAnswerSelected("Ready");
+                return Optional.of(new Result.Ok("Ready"));
+            }
+        });
+        try (LlmClient llm = LlmClient.scripted("provider intermediate")) {
+            Context context = Context.builder(new Config()).llm(llm).build();
+            TurnResult result = new TurnProcessor(modes).process(
+                    new Session(WS, new Config()), "review page", context);
+
+            List<String> origins = result.audit().localTrace().events().stream()
+                    .map(TurnTraceEvent::type)
+                    .filter(type -> type.equals("GENERATION_RESPONSE_CAPTURED")
+                            || type.equals("DETERMINISTIC_ANSWER_SELECTED")
+                            || type.equals("ROUTED_ANSWER_CAPTURED"))
+                    .toList();
+            assertEquals(List.of(
+                    "GENERATION_RESPONSE_CAPTURED",
+                    "DETERMINISTIC_ANSWER_SELECTED",
+                    "ROUTED_ANSWER_CAPTURED"), origins);
+            assertTrue(result.audit().localTrace().events().stream()
+                    .noneMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));
+        }
+    }
+
+    @Test
+    void askFastPathsSelectExactRuntimeAnswerBeforeOuterRouting() throws Exception {
+        try (LlmClient llm = LlmClient.scripted("must not be called")) {
+            ModeController modes = new ModeController().add(new AskMode());
+            assertTrue(modes.setActive("ask"));
+            TurnProcessor processor = new TurnProcessor(modes);
+            Session session = new Session(WS, new Config());
+            Context context = Context.builder(new Config()).llm(llm).build();
+
+            for (String request : List.of(
+                    "Respond with exactly: test output",
+                    "Print this without the think tags: <think>reasoning</think> output",
+                    "Run the command Get-ChildItem -Name to list workspace files. "
+                            + "Do not use slash commands.")) {
+                TurnResult result = processor.process(session, request, context);
+                LocalTurnTrace trace = result.audit().localTrace();
+                List<TurnTraceEvent> terminal = trace.events().stream()
+                        .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                        .toList();
+
+                assertEquals(1, terminal.size(), request);
+                assertEquals("RUNTIME_DETERMINISTIC",
+                        terminal.getFirst().data().get("origin"), request);
+                assertTrue(trace.events().stream().noneMatch(event ->
+                        "GENERATION_STARTED".equals(event.type())
+                                || "GENERATION_RESPONSE_CAPTURED".equals(event.type())), request);
+            }
+        }
+    }
+
+    @Test
+    void structuralModeSelectsToolOriginForReadsAndRuntimeOriginForRefusals(
+            @TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "release notes\n");
+        ModeController modes = new ModeController().add(new DevMode());
+        assertTrue(modes.setActive("dev"));
+        TurnProcessor processor = new TurnProcessor(modes);
+        Session session = new Session(workspace, new Config());
+        Context context = contextForWorkspace(workspace);
+
+        for (String request : List.of("ls", "show notes.md")) {
+            TurnResult result = processor.process(session, request, context);
+            TurnTraceEvent terminal = result.audit().localTrace().events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("TOOL_DETERMINISTIC", terminal.data().get("origin"), request);
+        }
+
+        TurnResult refusal = processor.process(session, "show missing.md", context);
+        TurnTraceEvent refusalTerminal = refusal.audit().localTrace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("RUNTIME_DETERMINISTIC", refusalTerminal.data().get("origin"));
+    }
+
+    @Test
+    void localTurnTraceCapturesOneTerminalEventForSuccessfulRead(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "release notes\n");
+        AtomicInteger approvals = new AtomicInteger();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        var tp = new TurnProcessor(
+                ModeController.defaultController(),
+                approvalGate(approvals, new ArrayList<>(), true),
+                registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "read notes.md";
+
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-read",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-13T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                request);
+        try {
+            ToolResult result = tp.executeTool(
+                    session,
+                    new ToolCall("talos.read_file", Map.of("path", "notes.md")),
+                    ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.read_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_EXECUTED"), lifecycle);
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertTrue(audit.toolCalls().getFirst().success());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test void traceIsClearedBetweenTurns() throws Exception {

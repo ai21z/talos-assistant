@@ -11,18 +11,20 @@ import java.util.List;
 
 /**
  * Session listener that appends a structured {@link TurnRecord} to the
- * session's per-turn durability log after every completed turn.
+ * session's per-turn durability log after every terminal settlement.
  *
  * <p>This is the authoritative runtime-truth transcript: turn number,
- * timestamps, duration, user input, chrome-stripped assistant text, and
- * (via {@link TurnAudit}) the tool-call list plus approval counters.
+ * timestamps, duration, and bounded runtime evidence. Ordinary completions
+ * retain user input, chrome-stripped assistant text, and the full redacted
+ * audit. Failed, cancelled, and no-result settlements persist a safe terminal
+ * projection without user text, path-bearing policy/tool rows, or prose.
  * Unlike the full-session snapshot that only flushes on graceful
  * {@code Session.close()}, this listener persists after each turn so a
  * crash between turns does not discard the work already done.
  *
  * <p>The listener is intentionally additive: it does not replace
- * {@link MemoryUpdateListener}, and its failure modes are swallowed so
- * a disk problem never aborts a live turn.
+ * {@link MemoryUpdateListener}. Persistence health is returned as a typed
+ * receipt; a disk problem does not replace the turn's primary result/failure.
  */
 public final class JsonTurnLogAppender implements SessionListener {
 
@@ -38,45 +40,100 @@ public final class JsonTurnLogAppender implements SessionListener {
 
     @Override
     public void onTurnComplete(TurnResult result, String userInput) {
-        if (result == null || store == null || sessionId == null || sessionId.isBlank()) return;
+        if (result == null) return;
+        persist(TurnSettlement.completed(TurnExecutionStage.TURN_FINALIZATION, result), userInput);
+    }
+
+    @Override
+    public TurnPublicationReceipt onTurnSettled(
+            TurnSettlement settlement,
+            String userInput
+    ) {
+        return persist(settlement, userInput);
+    }
+
+    private TurnPublicationReceipt persist(TurnSettlement settlement, String userInput) {
+        if (settlement == null || store == null || sessionId == null || sessionId.isBlank()) {
+            return TurnPublicationReceipt.skipped();
+        }
+        TurnResult result = settlement.result();
 
         // Extract committed-to-history text (chrome-stripped, matching what
         // MemoryUpdateListener persists). Non-text results (Error, Info,
         // streaming lifecycle markers) are not persisted here either.
-        String rawText = MemoryUpdateListener.extractText(result.result());
-        String committed = rawText == null ? "" : MemoryUpdateListener.assistantTextForPersistence(rawText, userInput);
+        String rawText = settlement.ordinaryCompletion()
+                ? MemoryUpdateListener.extractText(result.result())
+                : null;
+        String committed = rawText == null
+                ? ""
+                : result.audit().contentRestrictions().forHistory(
+                        MemoryUpdateListener.assistantTextForPersistence(rawText, userInput));
+        String persistedUserInput = settlement.ordinaryCompletion()
+                ? (userInput == null ? "" : userInput)
+                : "";
 
         TurnAudit audit = result.audit() == null ? TurnAudit.empty() : result.audit();
         long durationMs = result.elapsed() == null ? 0L : result.elapsed().toMillis();
-        if (audit.localTrace() != null) {
-            try {
-                store.saveTrace(sessionId, audit.localTrace());
-            } catch (Exception e) {
-                LOG.warn("Failed to persist local turn trace: {}", SafeLogFormatter.throwableMessage(e));
-            }
+        String retrievalSummary = summarize(result.trace());
+        if (!settlement.ordinaryCompletion()
+                && retrievalSummary.isBlank()
+                && result.trace() != null
+                && !result.trace().evidenceHits().isEmpty()) {
+            retrievalSummary = "0 stages, evidence=" + result.trace().evidenceHits().size();
         }
 
         TurnRecord record = new TurnRecord(
                 result.turnNumber(),
                 Instant.now(),
                 durationMs,
-                userInput == null ? "" : userInput,
+                persistedUserInput,
                 committed,
                 audit.toolCalls(),
                 audit.approvalsRequired(),
                 audit.approvalsGranted(),
                 audit.approvalsDenied(),
-                summarize(result.trace()),
-                statusOf(result.result()),
+                retrievalSummary,
+                statusOf(settlement),
                 audit.policyTrace(),
                 audit.localTrace() == null ? "" : audit.localTrace().traceId()
         );
 
         try {
-            store.appendTurn(sessionId, record);
+            TurnEnvelopePersistenceReceipt receipt = store.persistTurnEnvelope(
+                    sessionId, record, audit.localTrace());
+            return publicationReceipt(receipt);
         } catch (Exception e) {
-            LOG.warn("Failed to append structured turn record: {}", SafeLogFormatter.throwableMessage(e));
+            LOG.warn("Failed to persist structured turn envelope: {}",
+                    SafeLogFormatter.throwableMessage(e));
+            return TurnPublicationReceipt.degraded(
+                    TurnPublicationReceipt.Reason.PERSISTENCE_FAILED);
         }
+    }
+
+    private static String statusOf(TurnSettlement settlement) {
+        return switch (settlement.kind()) {
+            case FAILED -> "failed";
+            case CANCELLED -> "cancelled";
+            case NO_RESULT -> "no_result";
+            case COMPLETED -> statusOf(settlement.result().result());
+        };
+    }
+
+    private static TurnPublicationReceipt publicationReceipt(
+            TurnEnvelopePersistenceReceipt receipt
+    ) {
+        TurnEnvelopePersistenceReceipt.State state = receipt == null
+                ? TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED
+                : receipt.state();
+        return switch (state) {
+            case BOTH_WRITES_OBSERVED -> TurnPublicationReceipt.complete();
+            case UNOBSERVED -> TurnPublicationReceipt.degraded(
+                    TurnPublicationReceipt.Reason.PERSISTENCE_UNOBSERVED);
+            case TRACE_WRITE_ONLY, TURN_WRITE_ONLY -> TurnPublicationReceipt.degraded(
+                    TurnPublicationReceipt.Reason.PERSISTENCE_PARTIAL);
+            case NO_WRITES_OBSERVED -> TurnPublicationReceipt.degraded(
+                    TurnPublicationReceipt.Reason.PERSISTENCE_FAILED);
+        };
     }
 
     /** Build a compact one-line summary of a retrieval trace (blank if null/empty). */
@@ -105,7 +162,9 @@ public final class JsonTurnLogAppender implements SessionListener {
     static String statusOf(Result r) {
         if (r == null) return "";
         return switch (r) {
-            case Result.Ok ignored           -> "ok";
+            // Legacy/direct callers may still supply an abort marker in an Ok
+            // result; it must not be tagged "ok" or replayed as conversation.
+            case Result.Ok ok                -> isAbortMarker(ok.text) ? "aborted" : "ok";
             // A streamed turn whose fullText is (or starts with) the bracketed
             // "[turn aborted" marker is NOT conversational content - it is the
             // sentinel LlmClient.withWallClockBudget emits on wall-clock
@@ -130,16 +189,18 @@ public final class JsonTurnLogAppender implements SessionListener {
     }
 
     /**
-     * True when {@code text} is the bracketed "[turn aborted" sentinel produced
-     * by {@link dev.talos.core.llm.LlmClient} when a call exceeds its
-     * wall-clock budget, hits the idle watchdog, or is interrupted. Kept
-     * lexical (prefix match after trimming) so it never over-fires on real
-     * model prose that happens to contain the word "aborted" mid-sentence.
+     * True when {@code text} carries the bracketed "[turn aborted" sentinel
+     * produced by {@link dev.talos.core.llm.LlmClient} when a call exceeds
+     * its wall-clock budget, hits the idle watchdog, is interrupted, or
+     * loses the transport after partial output. In the partial-output shape
+     * the marker follows the partial text, so detection is line-anchored
+     * anywhere in the body (see {@code UiChrome.containsTurnAbortMarker}) -
+     * a startsWith on the full body tags the turn "ok" and replays the
+     * confabulated partial as authoritative history. Still lexical per
+     * line, so prose mentioning "aborted" mid-sentence never over-fires.
      */
     static boolean isAbortMarker(String text) {
-        if (text == null) return false;
-        String t = text.stripLeading();
-        return t.startsWith(UiChrome.TURN_ABORTED_PREFIX);
+        return UiChrome.containsTurnAbortMarker(text);
     }
 
     static String statusOfStreamed(String text) {

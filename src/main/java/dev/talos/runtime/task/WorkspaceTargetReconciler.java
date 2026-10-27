@@ -1,6 +1,13 @@
 package dev.talos.runtime.task;
 
-import java.nio.file.Files;
+import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
+
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -22,19 +29,52 @@ public final class WorkspaceTargetReconciler {
 
     private WorkspaceTargetReconciler() {}
 
+    public static TaskResolution reconcile(
+            TaskResolution resolution,
+            Path workspace
+    ) {
+        if (resolution == null) return null;
+        TaskContract contract = reconcile(resolution.contract(), workspace);
+        if (contract == null || contract.equals(resolution.contract())) {
+            return resolution;
+        }
+        TaskIntent intent = TaskIntentProjector.project(
+                resolution.intent(),
+                contract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
+        return resolution.projectOnto(contract, intent);
+    }
+
     public static TaskContract reconcile(TaskContract contract, Path workspace) {
+        if (dev.talos.runtime.observation.TurnRequestFrame.preparationSuppressedCurrent()) return contract;
         if (contract == null || workspace == null) {
             return contract;
         }
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) return contract;
+        if (ConversationEvidenceRequest.interpret(contract.originalUserRequest()).source()
+                != ConversationEvidenceRequest.Source.NORMAL) {
+            return contract;
+        }
+        NoFollowPathPolicy.GuardedRoot workspaceFiles;
+        try {
+            workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(workspace);
+        } catch (Exception rejected) {
+            return contract;
+        }
         if (contract.expectedTargets().isEmpty()) {
-            return reconcileWorkspaceStaticWebSurface(contract, workspace);
+            return reconcileWorkspaceStaticWebSurface(contract, workspaceFiles);
         }
         Set<String> expected = new LinkedHashSet<>(contract.expectedTargets());
         boolean changed = false;
-        changed |= reconcileLinkedPair(expected, contract, workspace, "script.js", "scripts.js");
-        changed |= reconcileLinkedPair(expected, contract, workspace, "style.css", "styles.css");
-        changed |= reconcilePair(expected, contract, workspace, "script.js", "scripts.js");
-        changed |= reconcilePair(expected, contract, workspace, "style.css", "styles.css");
+        changed |= reconcileLinkedPair(
+                expected, contract, workspaceFiles, "script.js", "scripts.js");
+        changed |= reconcileLinkedPair(
+                expected, contract, workspaceFiles, "style.css", "styles.css");
+        changed |= reconcilePair(
+                expected, contract, workspaceFiles, "script.js", "scripts.js");
+        changed |= reconcilePair(
+                expected, contract, workspaceFiles, "style.css", "styles.css");
         if (!changed) {
             return contract;
         }
@@ -51,11 +91,13 @@ public final class WorkspaceTargetReconciler {
                 contract.staticWebRequirements());
     }
 
-    private static TaskContract reconcileWorkspaceStaticWebSurface(TaskContract contract, Path workspace) {
-        if (!shouldReconstructStaticWebTargets(contract, workspace)) {
+    private static TaskContract reconcileWorkspaceStaticWebSurface(
+            TaskContract contract,
+            NoFollowPathPolicy.GuardedRoot workspaceFiles) {
+        if (!shouldReconstructStaticWebTargets(contract, workspaceFiles)) {
             return contract;
         }
-        Set<String> expected = workspaceStaticWebTargets(workspace);
+        Set<String> expected = workspaceStaticWebTargets(workspaceFiles);
         if (expected.isEmpty()) {
             return contract;
         }
@@ -73,12 +115,14 @@ public final class WorkspaceTargetReconciler {
                 contract.staticWebRequirements());
     }
 
-    private static boolean shouldReconstructStaticWebTargets(TaskContract contract, Path workspace) {
-        if (contract == null || workspace == null) return false;
+    private static boolean shouldReconstructStaticWebTargets(
+            TaskContract contract,
+            NoFollowPathPolicy.GuardedRoot workspaceFiles) {
+        if (contract == null || workspaceFiles == null) return false;
         if (!contract.mutationAllowed() || !contract.verificationRequired()) return false;
         if (!contract.expectedTargets().isEmpty()) return false;
         if (!looksLikeStaticWebWorkspaceContinuation(contract.originalUserRequest())) return false;
-        return Files.isRegularFile(workspace.resolve("index.html"));
+        return rootFileExists(workspaceFiles, "index.html");
     }
 
     private static boolean looksLikeStaticWebWorkspaceContinuation(String request) {
@@ -123,17 +167,20 @@ public final class WorkspaceTargetReconciler {
         return false;
     }
 
-    private static Set<String> workspaceStaticWebTargets(Path workspace) {
+    private static Set<String> workspaceStaticWebTargets(
+            NoFollowPathPolicy.GuardedRoot workspaceFiles) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        if (!Files.isRegularFile(workspace.resolve("index.html"))) {
+        if (!rootFileExists(workspaceFiles, "index.html")) {
             return Set.of();
         }
         out.add("index.html");
-        Set<String> linked = linkedLocalAssets(workspace);
+        Set<String> linked = linkedLocalAssets(workspaceFiles);
         addLinkedAssetsByExtension(out, linked, ".css");
         addLinkedAssetsByExtension(out, linked, ".js");
-        addExistingPairIfMissing(out, workspace, ".css", "style.css", "styles.css");
-        addExistingPairIfMissing(out, workspace, ".js", "script.js", "scripts.js");
+        addExistingPairIfMissing(
+                out, workspaceFiles, ".css", "style.css", "styles.css");
+        addExistingPairIfMissing(
+                out, workspaceFiles, ".js", "script.js", "scripts.js");
         return Set.copyOf(out);
     }
 
@@ -150,7 +197,7 @@ public final class WorkspaceTargetReconciler {
 
     private static void addExistingPairIfMissing(
             Set<String> out,
-            Path workspace,
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
             String extension,
             String conventional,
             String alternate
@@ -158,8 +205,8 @@ public final class WorkspaceTargetReconciler {
         boolean alreadyHasExtension = out.stream()
                 .anyMatch(target -> target.toLowerCase(Locale.ROOT).endsWith(extension));
         if (alreadyHasExtension) return;
-        boolean conventionalExists = rootFileExists(workspace, conventional);
-        boolean alternateExists = rootFileExists(workspace, alternate);
+        boolean conventionalExists = rootFileExists(workspaceFiles, conventional);
+        boolean alternateExists = rootFileExists(workspaceFiles, alternate);
         if (conventionalExists && !alternateExists) {
             out.add(conventional);
         } else if (alternateExists && !conventionalExists) {
@@ -177,14 +224,16 @@ public final class WorkspaceTargetReconciler {
     private static boolean reconcileLinkedPair(
             Set<String> expected,
             TaskContract contract,
-            Path workspace,
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
             String conventional,
             String observedAlternate
     ) {
+        if (explicitReadOnlyPair(contract, conventional, observedAlternate)) return false;
         if (!containsTarget(expected, conventional) && !containsTarget(expected, observedAlternate)) {
             return false;
         }
-        String linked = linkedPairTarget(workspace, conventional, observedAlternate);
+        String linked = linkedPairTarget(
+                workspaceFiles, conventional, observedAlternate);
         if (linked == null || linked.isBlank()) return false;
         String requestedOther = targetEquals(linked, conventional) ? observedAlternate : conventional;
         if (isForbidden(contract, linked)
@@ -207,14 +256,16 @@ public final class WorkspaceTargetReconciler {
     private static boolean reconcilePair(
             Set<String> expected,
             TaskContract contract,
-            Path workspace,
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
             String conventional,
             String observedAlternate
     ) {
+        if (explicitReadOnlyPair(contract, conventional, observedAlternate)) return false;
         if (!containsTarget(expected, conventional)) {
             return false;
         }
-        String linked = linkedPairTarget(workspace, conventional, observedAlternate);
+        String linked = linkedPairTarget(
+                workspaceFiles, conventional, observedAlternate);
         if (targetEquals(linked, conventional)) {
             return false;
         }
@@ -230,8 +281,8 @@ public final class WorkspaceTargetReconciler {
             return false;
         }
 
-        boolean conventionalExists = rootFileExists(workspace, conventional);
-        boolean alternateExists = rootFileExists(workspace, observedAlternate);
+        boolean conventionalExists = rootFileExists(workspaceFiles, conventional);
+        boolean alternateExists = rootFileExists(workspaceFiles, observedAlternate);
         if (conventionalExists && alternateExists) {
             removeTarget(expected, conventional);
             return true;
@@ -244,8 +295,19 @@ public final class WorkspaceTargetReconciler {
         return false;
     }
 
-    private static String linkedPairTarget(Path workspace, String conventional, String observedAlternate) {
-        Set<String> linked = linkedLocalAssets(workspace);
+    private static boolean explicitReadOnlyPair(TaskContract contract, String first, String second) {
+        // Linkage may select an inferred asset, but is not authority to rename a
+        // user's read target. Mutation-target reconciliation is deliberately unchanged.
+        if (contract == null || contract.mutationRequested() || contract.mutationAllowed()) return false;
+        Set<String> named = TaskContractResolver.extractExpectedTargets(contract.originalUserRequest());
+        return containsTarget(named, first) || containsTarget(named, second);
+    }
+
+    private static String linkedPairTarget(
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
+            String conventional,
+            String observedAlternate) {
+        Set<String> linked = linkedLocalAssets(workspaceFiles);
         boolean conventionalLinked = containsTarget(linked, conventional);
         boolean alternateLinked = containsTarget(linked, observedAlternate);
         if (conventionalLinked && !alternateLinked) return conventional;
@@ -253,11 +315,15 @@ public final class WorkspaceTargetReconciler {
         return null;
     }
 
-    private static Set<String> linkedLocalAssets(Path workspace) {
+    private static Set<String> linkedLocalAssets(
+            NoFollowPathPolicy.GuardedRoot workspaceFiles) {
         try {
-            Path index = workspace.resolve("index.html").normalize();
-            if (!Files.isRegularFile(index)) return Set.of();
-            String html = Files.readString(index);
+            Path index = workspaceFiles.path().resolve("index.html").normalize();
+            if (workspaceFiles.inspect(index)
+                    != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                return Set.of();
+            }
+            String html = workspaceFiles.readString(index, StandardCharsets.UTF_8);
             LinkedHashSet<String> out = new LinkedHashSet<>();
             collectLocalAssets(out, HTML_LINK_HREF.matcher(html));
             collectLocalAssets(out, HTML_SCRIPT_SRC.matcher(html));
@@ -326,10 +392,13 @@ public final class WorkspaceTargetReconciler {
                 || request.contains("make ");
     }
 
-    private static boolean rootFileExists(Path workspace, String filename) {
+    private static boolean rootFileExists(
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
+            String filename) {
         try {
-            return Files.isRegularFile(workspace.resolve(filename));
-        } catch (RuntimeException ex) {
+            return workspaceFiles.inspect(workspaceFiles.path().resolve(filename))
+                    == NoFollowPathPolicy.EntryType.REGULAR_FILE;
+        } catch (Exception ex) {
             return false;
         }
     }

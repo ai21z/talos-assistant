@@ -3,7 +3,9 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -34,23 +36,33 @@ final class PendingActionObligationBreachGuard {
     }
 
     static Decision assess(PendingActionObligation obligation, List<ToolCall> calls) {
+        return assess(obligation, calls, null);
+    }
+
+    /**
+     * The workspace lets a pending target be written under another spelling of the same
+     * workspace file. The static repair content guard checks a write under any spelling, so
+     * identity cannot let a write skip it.
+     */
+    static Decision assess(PendingActionObligation obligation, List<ToolCall> calls, Path workspace) {
         if (obligation == null || calls == null || calls.isEmpty()) {
             return Decision.none();
         }
         return switch (obligation.kind()) {
-            case EXPECTED_TARGETS_REMAINING -> expectedTargetDecision(obligation, calls);
+            case EXPECTED_TARGETS_REMAINING -> expectedTargetDecision(obligation, calls, workspace);
             case OLD_STRING_MISS_TARGET_REPAIR,
                     APPEND_LINE_TARGET_REPAIR,
-                    EXPECTED_TARGET_SCOPE_REPAIR -> targetRepairDecision(obligation, calls);
-            case STATIC_REPAIR_TARGETS_REMAINING -> staticRepairDecision(obligation, calls);
+                    EXPECTED_TARGET_SCOPE_REPAIR -> targetRepairDecision(obligation, calls, workspace);
+            case STATIC_REPAIR_TARGETS_REMAINING -> staticRepairDecision(obligation, calls, workspace);
         };
     }
 
     private static Decision expectedTargetDecision(
             PendingActionObligation obligation,
-            List<ToolCall> calls
+            List<ToolCall> calls,
+            Path workspace
     ) {
-        String detail = invalidExpectedTargetMutationDetail(calls, obligation.targets());
+        String detail = invalidExpectedTargetMutationDetail(calls, obligation.targets(), workspace);
         if (detail == null) {
             return Decision.none();
         }
@@ -62,9 +74,10 @@ final class PendingActionObligationBreachGuard {
 
     private static Decision targetRepairDecision(
             PendingActionObligation obligation,
-            List<ToolCall> calls
+            List<ToolCall> calls,
+            Path workspace
     ) {
-        if (containsMutatingCallForPendingTarget(calls, obligation.targets())) {
+        if (containsMutatingCallForPendingTarget(calls, obligation.targets(), workspace)) {
             return Decision.none();
         }
         String repairName = switch (obligation.kind()) {
@@ -77,12 +90,15 @@ final class PendingActionObligationBreachGuard {
 
     private static Decision staticRepairDecision(
             PendingActionObligation obligation,
-            List<ToolCall> calls
+            List<ToolCall> calls,
+            Path workspace
     ) {
         String invalidWriteDetail = StaticRepairWriteContentGuard.invalidWriteDetail(
                 calls,
-                obligation.targets());
-        if (invalidWriteDetail == null && containsWriteFileForPendingTarget(calls, obligation.targets())) {
+                obligation.targets(),
+                workspace);
+        if (invalidWriteDetail == null
+                && containsWriteFileForPendingTarget(calls, obligation.targets(), workspace)) {
             return Decision.none();
         }
         String detail = invalidWriteDetail == null
@@ -93,7 +109,8 @@ final class PendingActionObligationBreachGuard {
 
     private static String invalidExpectedTargetMutationDetail(
             List<ToolCall> calls,
-            List<String> targets
+            List<String> targets,
+            Path workspace
     ) {
         Set<String> normalizedTargets = normalizedExpectedProgressTargets(targets);
         if (normalizedTargets.isEmpty() || calls == null || calls.isEmpty()) {
@@ -102,8 +119,12 @@ final class PendingActionObligationBreachGuard {
         List<String> rejectedMutations = new ArrayList<>();
         for (ToolCall call : calls) {
             if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) continue;
-            String path = ToolCallSupport.normalizePath(ToolCallSupport.resolvePathHint(call));
-            if (!path.isBlank() && matchesPendingExpectedTarget(call.toolName(), path, normalizedTargets)) {
+            String rawPath = ToolCallSupport.resolvePathHint(call);
+            String path = ToolCallSupport.normalizePath(rawPath);
+            if (!path.isBlank() && (matchesPendingExpectedTarget(call.toolName(), path, normalizedTargets)
+                    || sameWorkspaceFileAsTarget(workspace, targets, rawPath)
+                    || caseVariantOfMissingTarget(workspace, targets, rawPath)
+                    || mkdirOfTargetParent(call.toolName(), workspace, targets, rawPath))) {
                 continue;
             }
             String name = call.toolName() == null || call.toolName().isBlank()
@@ -146,7 +167,7 @@ final class PendingActionObligationBreachGuard {
             String candidatePath,
             Set<String> normalizedTargets
     ) {
-        String candidate = normalizeScopedTarget(candidatePath);
+        String candidate = normalizeScopedTargetPreservingCase(candidatePath);
         if (candidate.isBlank()) return false;
         if (normalizedTargets.contains(candidate)) return true;
         if (!isMkdirTool(toolName)) return false;
@@ -158,18 +179,68 @@ final class PendingActionObligationBreachGuard {
         return false;
     }
 
+    private static boolean sameWorkspaceFileAsTarget(Path workspace, List<String> targets, String path) {
+        if (workspace == null || targets == null) return false;
+        for (String target : targets) {
+            if (WorkspacePathIdentity.matches(workspace, target, path)) return true;
+        }
+        return false;
+    }
+
+    /** T223: a repair write names its target in the requested case, under any other spelling of the path. */
+    private static boolean sameTargetKeepingCase(Path workspace, List<String> targets, String path) {
+        if (workspace == null || targets == null) return false;
+        for (String target : targets) {
+            if (WorkspacePathIdentity.matchesKeepingCase(workspace, target, path)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A case variant of a target that exists under neither spelling is an attempt at the target.
+     * The pre-approval rule still refuses it, and the scope repair then names the exact target,
+     * so no ordinary folder becomes stricter and no case-sensitive folder becomes looser.
+     */
+    private static boolean caseVariantOfMissingTarget(Path workspace, List<String> targets, String path) {
+        if (workspace == null || targets == null) return false;
+        for (String target : targets) {
+            if (WorkspacePathIdentity.missingCaseVariant(workspace, target, path)) return true;
+        }
+        return false;
+    }
+
+    private static boolean mkdirOfTargetParent(
+            String toolName,
+            Path workspace,
+            List<String> targets,
+            String rawPath
+    ) {
+        if (workspace == null || targets == null || !isMkdirTool(toolName)) return false;
+        for (String target : targets) {
+            String parent = normalizeScopedTargetPreservingCase(target);
+            for (int slash = parent.lastIndexOf('/'); slash > 0; slash = parent.lastIndexOf('/')) {
+                parent = parent.substring(0, slash);
+                if (WorkspacePathIdentity.matches(workspace, parent, rawPath)) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean containsMutatingCallForPendingTarget(
             List<ToolCall> calls,
-            List<String> targets
+            List<String> targets,
+            Path workspace
     ) {
         Set<String> normalizedTargets = normalizedTargets(targets);
         if (normalizedTargets.isEmpty()) return false;
         for (ToolCall call : calls) {
             if (call == null) continue;
-            String toolName = call.toolName();
+            String toolName = call.canonicalToolName();
             if (!"talos.write_file".equals(toolName) && !"talos.edit_file".equals(toolName)) continue;
-            String path = ToolCallSupport.normalizePath(call.param("path", ""));
-            if (!path.isBlank() && normalizedTargets.contains(path)) {
+            String rawPath = call.param("path", "");
+            String path = ToolCallSupport.normalizePath(rawPath);
+            if (!path.isBlank() && (normalizedTargets.contains(path)
+                    || sameTargetKeepingCase(workspace, targets, rawPath))) {
                 return true;
             }
         }
@@ -206,14 +277,17 @@ final class PendingActionObligationBreachGuard {
 
     private static boolean containsWriteFileForPendingTarget(
             List<ToolCall> calls,
-            List<String> targets
+            List<String> targets,
+            Path workspace
     ) {
         Set<String> normalizedTargets = normalizedTargets(targets);
         if (normalizedTargets.isEmpty()) return false;
         for (ToolCall call : calls) {
-            if (call == null || !"talos.write_file".equals(call.toolName())) continue;
-            String path = ToolCallSupport.normalizePath(call.param("path", ""));
-            if (!path.isBlank() && normalizedTargets.contains(path)) {
+            if (call == null || !"talos.write_file".equals(call.canonicalToolName())) continue;
+            String rawPath = call.param("path", "");
+            String path = ToolCallSupport.normalizePath(rawPath);
+            if (!path.isBlank() && (normalizedTargets.contains(path)
+                    || sameTargetKeepingCase(workspace, targets, rawPath))) {
                 return true;
             }
         }
@@ -256,13 +330,17 @@ final class PendingActionObligationBreachGuard {
         if (targets == null || targets.isEmpty()) return Set.of();
         Set<String> normalized = new HashSet<>();
         for (String target : targets) {
-            String path = normalizeScopedTarget(target);
+            String path = normalizeScopedTargetPreservingCase(target);
             if (!path.isBlank()) normalized.add(path);
         }
         return normalized;
     }
 
     private static String normalizeScopedTarget(String path) {
+        return normalizeScopedTargetPreservingCase(path).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static String normalizeScopedTargetPreservingCase(String path) {
         if (path == null) return "";
         String normalized = ToolCallSupport.normalizePath(path)
                 .strip()
@@ -273,7 +351,7 @@ final class PendingActionObligationBreachGuard {
         while (normalized.length() > 1 && normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
-        return normalized.toLowerCase(java.util.Locale.ROOT);
+        return normalized;
     }
 
     private static boolean isMkdirTool(String toolName) {

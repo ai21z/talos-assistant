@@ -62,6 +62,9 @@ public final class ProtectedWorkspacePaths {
         if (workspace == null) {
             return new Decision(rawPath, "", true, false, true, false, "");
         }
+        if (hasForeignRootSyntax(rawPath)) {
+            return new Decision(rawPath, "", true, false, true, false, "");
+        }
 
         Path ws;
         Path resolved;
@@ -212,6 +215,27 @@ public final class ProtectedWorkspacePaths {
             }
         }
         return false;
+    }
+
+    /**
+     * Provider path arguments have one portable containment meaning before
+     * they reach the host filesystem. In particular, POSIX must not reinterpret
+     * a Windows-rooted path as an ordinary relative filename.
+     */
+    private static boolean hasForeignRootSyntax(String rawPath) {
+        String value = rawPath == null ? "" : rawPath.stripLeading();
+        if (value.startsWith("\\")) {
+            return true;
+        }
+        return value.length() >= 3
+                && !isWindows()
+                && isAsciiLetter(value.charAt(0))
+                && value.charAt(1) == ':'
+                && (value.charAt(2) == '/' || value.charAt(2) == '\\');
+    }
+
+    private static boolean isAsciiLetter(char value) {
+        return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
     }
 
     private static boolean isWindows() {

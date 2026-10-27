@@ -1,19 +1,31 @@
 package dev.talos.cli.doctor;
 
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.core.CfgUtil;
 import dev.talos.core.engine.EngineRegistry;
+import dev.talos.engine.llamacpp.LlamaCppLogEvidence;
 import dev.talos.engine.llamacpp.LlamaCppPreflight;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 import dev.talos.spi.ChatModelEngine;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.SamplingControls;
 
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Probes the llama.cpp server. Default mode never starts anything: a
@@ -29,11 +41,50 @@ import java.util.Locale;
  */
 public final class ServerProbe implements DoctorProbe {
     static final String MODEL_SMOKE_TOKEN = "TALOS_MODEL_SMOKE_OK";
+    private static final int MODEL_SMOKE_MAX_OUTPUT_TOKENS = 32;
+    private static final ChatRequestControls MODEL_SMOKE_CONTROLS = ChatRequestControls.defaults()
+            .withSampling(new SamplingControls(0.0d, 1.0d, 1, null))
+            .withMaxOutputTokens(MODEL_SMOKE_MAX_OUTPUT_TOKENS);
+    private static final Duration DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD = Duration.ofSeconds(60);
+    private static final long DEFAULT_LLM_TIMEOUT_MS = 300_000L;
+    private static final int REFERENCE_PROMPT_TOKENS = 4_000;
+    private static final int REFERENCE_GENERATED_TOKENS = 700;
+    private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
+    private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
+    private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
+    private static final double PRACTICAL_REFERENCE_TURN_WARNING_SECONDS = 60.0d;
+    private static final int RATE_SAMPLE_CONTEXT_REPETITIONS = 96;
+    private static final String RATE_SAMPLE_CONTEXT_SENTENCE = "Local workspace assistant measurement context. ";
+    private static final String RATE_SAMPLE_PROMPT = """
+            This diagnostic prompt exists only to measure local llama.cpp throughput with a representative prompt size.
+            Read the repeated neutral context below, do not summarize it, and then reply with the word talos repeated
+            exactly 80 times, separated by spaces. No numbering, no punctuation.
+
+            %s
+            """.formatted(RATE_SAMPLE_CONTEXT_SENTENCE.repeat(RATE_SAMPLE_CONTEXT_REPETITIONS));
 
     private final boolean startServer;
+    private final Duration slowSmokeWarningThreshold;
+    private final TimingEvidenceSource timingEvidenceSource;
 
     public ServerProbe(boolean startServer) {
+        this(startServer, DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD);
+    }
+
+    ServerProbe(boolean startServer, Duration slowSmokeWarningThreshold) {
+        this(startServer, slowSmokeWarningThreshold, ServerProbe::readManagedLogEvidence);
+    }
+
+    ServerProbe(boolean startServer,
+                Duration slowSmokeWarningThreshold,
+                TimingEvidenceSource timingEvidenceSource) {
         this.startServer = startServer;
+        this.slowSmokeWarningThreshold = slowSmokeWarningThreshold == null
+                ? DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD
+                : slowSmokeWarningThreshold;
+        this.timingEvidenceSource = timingEvidenceSource == null
+                ? ServerProbe::readManagedLogEvidence
+                : timingEvidenceSource;
     }
 
     @Override
@@ -52,10 +103,10 @@ public final class ServerProbe implements DoctorProbe {
         if (startServer) {
             return startAndChat(ctx, runtime, preflight);
         }
-        return probeHealth(preflight);
+        return probeHealth(ctx, preflight);
     }
 
-    private ProbeResult probeHealth(LlamaCppPreflight.Report preflight) {
+    private ProbeResult probeHealth(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(preflight.baseUrl() + "/health"))
@@ -65,7 +116,12 @@ public final class ServerProbe implements DoctorProbe {
             HttpResponse<String> response = HttpClient.newHttpClient()
                     .send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 == 2) {
-                return ProbeResult.pass(id(), "server responding at " + preflight.baseUrl());
+                ModelIdentitySnapshot identity = LlamaCppProfileIdentity.inspectAvailable(
+                        ctx.cfg(), ctx.talosHome());
+                return withIdentity(
+                        ProbeResult.pass(id(), "server responding at " + preflight.baseUrl()),
+                        ModelIdentityDoctorAssessment.assess(identity),
+                        preflight);
             }
             return ProbeResult.fail(id(),
                     "server at " + preflight.baseUrl() + " returned HTTP " + response.statusCode(),
@@ -100,25 +156,265 @@ public final class ServerProbe implements DoctorProbe {
             if (!(registry.engine() instanceof ChatModelEngine chatEngine)) {
                 return ProbeResult.skip(id(), "engine does not expose a chat interface");
             }
+            long startNanos = System.nanoTime();
             String reply = chatEngine.chat(new ChatRequest(
                     runtime.backend(), runtime.model(), "",
-                    "Reply exactly " + MODEL_SMOKE_TOKEN + " and no other text.", List.of(), null));
+                    "Reply with the smoke token formed by joining TALOS, MODEL, SMOKE, and OK with underscores. "
+                            + "Return only that token.",
+                    List.of(), null, List.of(), List.of(), MODEL_SMOKE_CONTROLS));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
             String normalized = reply == null ? "" : reply.strip();
             int replyChars = normalized.length();
-            if (!normalized.toUpperCase(Locale.ROOT).contains(MODEL_SMOKE_TOKEN)) {
+            String normalizedUpper = normalized.toUpperCase(Locale.ROOT);
+            if (!normalizedUpper.contains(MODEL_SMOKE_TOKEN)) {
                 return ProbeResult.fail(id(),
                         "model smoke reply did not contain " + MODEL_SMOKE_TOKEN
                                 + " (" + replyChars + " reply chars)",
                         "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
                                 + preflight.port() + ".log");
             }
-            return ProbeResult.pass(id(),
+            if (!MODEL_SMOKE_TOKEN.equals(normalizedUpper)) {
+                return ProbeResult.fail(id(),
+                        "model smoke reply did not exactly match " + MODEL_SMOKE_TOKEN
+                                + " (" + replyChars + " reply chars)",
+                        "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
+                                + preflight.port() + ".log");
+            }
+            ModelIdentityDoctorAssessment identity = ModelIdentityDoctorAssessment.assess(
+                    registry.engine().modelIdentity());
+            if (identity.status() == ProbeResult.Status.FAIL) {
+                return withIdentity(
+                        ProbeResult.pass(id(), "model smoke verified (" + replyChars + " reply chars)"),
+                        identity,
+                        preflight);
+            }
+            String completion = completionSuffix(preflight);
+            RateAssessment rates = assessRates(ctx, preflight);
+            RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
+            if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
+                sampleOutcome = runBoundedRateSample(chatEngine, runtime);
+                rates = assessRates(ctx, preflight);
+            }
+            if (sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED) {
+                return withIdentity(ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but the representative rate sample"
+                                + " reached the provider output limit (finish_reason=length); "
+                                + rates.summary() + "; " + completion
+                                + ". Throughput evidence is bounded because the requested diagnostic response did not complete;"
+                                + " rerun doctor or inspect the llama.cpp log before relying on it."), identity, preflight);
+            }
+            if (sampleOutcome == RateSampleOutcome.UNVERIFIED) {
+                return withIdentity(ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but rate sample completion"
+                                + " could not be verified; " + rates.summary() + "; " + completion
+                                + ". The optional diagnostic sample failed or returned no recognized finish reason;"
+                                + " rerun doctor or inspect the llama.cpp log before relying on it."), identity, preflight);
+            }
+            if (rates.warn()) {
+                return withIdentity(ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but measured rates are slow: "
+                                + rates.summary()
+                                + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
+                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it."),
+                        identity, preflight);
+            }
+            if (sampleOutcome == RateSampleOutcome.COMPLETED && !rates.measured()) {
+                return withIdentity(ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but rate sample could not be measured within 60s;"
+                                + " " + completion
+                                + ". This profile may be too slow or the llama.cpp timing log may be incomplete;"
+                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it."),
+                        identity, preflight);
+            }
+            if (elapsed.compareTo(slowSmokeWarningThreshold) > 0) {
+                return withIdentity(ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but slow: "
+                                + elapsedSeconds(elapsed)
+                                + " for startup/smoke on "
+                                + runtime.model()
+                                + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
+                                + " use GPU acceleration or stronger hardware before relying on it."), identity, preflight);
+            }
+            return withIdentity(ProbeResult.pass(id(),
                     "end-to-end model smoke verified (" + replyChars + " reply chars);"
-                            + " managed server released again");
+                            + " " + rates.summary()
+                            + "; " + completion), identity, preflight);
         } catch (Exception e) {
             return ProbeResult.fail(id(),
                     "end-to-end server start failed: " + e.getMessage(),
                     "check ~/.talos/logs/llama_cpp-" + preflight.port() + ".log");
         }
+    }
+
+    private static RateSampleOutcome runBoundedRateSample(ChatModelEngine chatEngine,
+                                                          EngineRuntimeConfig runtime) {
+        try {
+            String finishReason = "";
+            boolean sawEndOfStream = false;
+            try (var chunks = chatEngine.chatStreamNonStreaming(new ChatRequest(
+                    runtime.backend(), runtime.model(), "",
+                    RATE_SAMPLE_PROMPT, List.of(), Duration.ofSeconds(60)))) {
+                var iterator = chunks.iterator();
+                while (iterator.hasNext()) {
+                    var chunk = iterator.next();
+                    if (Boolean.TRUE.equals(chunk.done())) {
+                        sawEndOfStream = true;
+                        finishReason = chunk.finishReason();
+                    }
+                }
+            }
+            if (!sawEndOfStream) {
+                return RateSampleOutcome.UNVERIFIED;
+            }
+            return switch (finishReason.strip().toLowerCase(Locale.ROOT)) {
+                case "stop" -> RateSampleOutcome.COMPLETED;
+                case "length" -> RateSampleOutcome.OUTPUT_CAPPED;
+                default -> RateSampleOutcome.UNVERIFIED;
+            };
+        } catch (Exception ignored) {
+            // Rate sampling is diagnostic. A successful smoke must not become a failure
+            // only because the optional rate sample could not be measured.
+            return RateSampleOutcome.UNVERIFIED;
+        }
+    }
+
+    private ProbeResult withIdentity(
+            ProbeResult base,
+            ModelIdentityDoctorAssessment identity,
+            LlamaCppPreflight.Report preflight) {
+        if (base.status() == ProbeResult.Status.FAIL || base.status() == ProbeResult.Status.SKIP) {
+            return base;
+        }
+        String detail = base.detail() + "; " + identity.detail();
+        if (identity.status() == ProbeResult.Status.FAIL) {
+            return ProbeResult.fail(id(), detail,
+                    "check the configured model, llama.cpp lane, and /props identity; inspect ~/.talos/logs/llama_cpp-"
+                            + preflight.port() + ".log");
+        }
+        if (base.status() == ProbeResult.Status.WARN || identity.status() == ProbeResult.Status.WARN) {
+            return ProbeResult.warn(id(), detail);
+        }
+        return ProbeResult.pass(id(), detail);
+    }
+
+    private RateAssessment assessRates(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
+        LlamaCppLogEvidence evidence = timingEvidenceSource.read(ctx, preflight);
+        if (evidence == null) {
+            return RateAssessment.unmeasured();
+        }
+        Optional<LlamaCppLogEvidence.Timing> prompt =
+                latestTiming(evidence, "prompt_eval", MIN_PROMPT_RATE_SAMPLE_TOKENS);
+        Optional<LlamaCppLogEvidence.Timing> generation =
+                latestTiming(evidence, "eval", MIN_GENERATION_RATE_SAMPLE_TOKENS);
+        if (prompt.isEmpty() || generation.isEmpty()) {
+            return RateAssessment.unmeasured();
+        }
+
+        double promptRate = prompt.orElseThrow().tokensPerSecond();
+        double generationRate = generation.orElseThrow().tokensPerSecond();
+        if (promptRate <= 0.0d || generationRate <= 0.0d) {
+            return RateAssessment.unmeasured();
+        }
+
+        double projectedSeconds = REFERENCE_PROMPT_TOKENS / promptRate
+                + REFERENCE_GENERATED_TOKENS / generationRate;
+        double timeoutSeconds = llmTimeoutMs(ctx) / 1000.0d;
+        double timeoutFractionThreshold = timeoutSeconds * SLOW_PROJECTION_TIMEOUT_FRACTION;
+        boolean aboveTimeoutFraction = projectedSeconds > timeoutFractionThreshold;
+        boolean abovePracticalThreshold = projectedSeconds > PRACTICAL_REFERENCE_TURN_WARNING_SECONDS;
+        boolean warn = aboveTimeoutFraction || abovePracticalThreshold;
+        String summary = "prompt eval " + oneDecimal(promptRate)
+                + " tok/s, generation " + oneDecimal(generationRate)
+                + " tok/s; projected reference turn ("
+                + formatInt(REFERENCE_PROMPT_TOKENS)
+                + " prompt + "
+                + formatInt(REFERENCE_GENERATED_TOKENS)
+                + " generated tokens) about "
+                + oneDecimal(projectedSeconds)
+                + "s"
+                + (aboveTimeoutFraction
+                ? ", above " + percent(SLOW_PROJECTION_TIMEOUT_FRACTION)
+                + " of limits.llm_timeout_ms (" + oneDecimal(timeoutSeconds) + "s)"
+                : ", within " + percent(SLOW_PROJECTION_TIMEOUT_FRACTION)
+                + " of limits.llm_timeout_ms (" + oneDecimal(timeoutSeconds) + "s)")
+                + (abovePracticalThreshold
+                ? ", above " + oneDecimal(PRACTICAL_REFERENCE_TURN_WARNING_SECONDS)
+                + "s practical edit work threshold"
+                : "");
+        return new RateAssessment(true, warn, summary);
+    }
+
+    private static Optional<LlamaCppLogEvidence.Timing> latestTiming(LlamaCppLogEvidence evidence,
+                                                                     String kind,
+                                                                     int minimumTokens) {
+        return evidence.timings().stream()
+                .filter(timing -> kind.equals(timing.kind()))
+                .filter(timing -> timing.tokens() >= minimumTokens)
+                .max(Comparator.comparingInt(LlamaCppLogEvidence.Timing::taskId));
+    }
+
+    private static long llmTimeoutMs(DoctorContext ctx) {
+        Map<String, Object> limits = CfgUtil.map(ctx.cfg().data.get("limits"));
+        return Math.max(1L, CfgUtil.longAt(limits, "llm_timeout_ms", DEFAULT_LLM_TIMEOUT_MS));
+    }
+
+    static LlamaCppLogEvidence readManagedLogEvidence(DoctorContext ctx,
+                                                       LlamaCppPreflight.Report preflight) {
+        if (preflight == null || !preflight.managed()) {
+            return LlamaCppLogEvidence.parse("");
+        }
+        Path logPath = ctx.talosHome().resolve("logs").resolve("llama_cpp-" + preflight.port() + ".log");
+        if (!Files.isRegularFile(logPath)) {
+            return LlamaCppLogEvidence.parse("");
+        }
+        try {
+            return LlamaCppLogEvidence.parse(new String(Files.readAllBytes(logPath), StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
+            return LlamaCppLogEvidence.parse("");
+        }
+    }
+
+    private static String completionSuffix(LlamaCppPreflight.Report preflight) {
+        return preflight != null && preflight.managed()
+                ? "managed server released again"
+                : "external server left running";
+    }
+
+    private static String elapsedSeconds(Duration elapsed) {
+        return String.format(Locale.ROOT, "%.1fs", elapsed.toMillis() / 1000.0);
+    }
+
+    private static String oneDecimal(double value) {
+        return String.format(Locale.ROOT, "%.1f", value);
+    }
+
+    private static String formatInt(int value) {
+        return String.format(Locale.ROOT, "%,d", value);
+    }
+
+    private static String percent(double fraction) {
+        return String.format(Locale.ROOT, "%.0f%%", fraction * 100.0d);
+    }
+
+    @FunctionalInterface
+    interface TimingEvidenceSource {
+        LlamaCppLogEvidence read(DoctorContext ctx, LlamaCppPreflight.Report preflight);
+
+        default boolean canImproveAfterSample(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
+            return preflight != null && preflight.managed();
+        }
+    }
+
+    private record RateAssessment(boolean measured, boolean warn, String summary) {
+        private static RateAssessment unmeasured() {
+            return new RateAssessment(false, false, "rates unmeasured");
+        }
+    }
+
+    private enum RateSampleOutcome {
+        NOT_ATTEMPTED,
+        COMPLETED,
+        OUTPUT_CAPPED,
+        UNVERIFIED
     }
 }

@@ -5,6 +5,11 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.engine.EngineRegistry;
+import dev.talos.engine.llamacpp.LlamaCppContextArgs;
+import dev.talos.engine.llamacpp.LlamaCppContextLimits;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
+import dev.talos.cli.ui.ModelIdentityPresentation;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.Health;
 import org.apache.lucene.index.DirectoryReader;
@@ -15,6 +20,7 @@ import picocli.CommandLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.OptionalInt;
 
 @CommandLine.Command(name = "status", description = "Show current configuration and workspace status")
 public class TopLevelStatusCmd implements Runnable {
@@ -124,14 +130,23 @@ public class TopLevelStatusCmd implements Runnable {
 
     static String renderEngineStatus(Config cfg) {
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+        ModelIdentitySnapshot identity = "llama_cpp".equals(runtime.backend())
+                ? LlamaCppProfileIdentity.inspectAvailable(cfg, defaultTalosHome())
+                : ModelIdentitySnapshot.empty();
+        return renderEngineStatus(cfg, identity);
+    }
+
+    static String renderEngineStatus(Config cfg, ModelIdentitySnapshot identity) {
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
         StringBuilder out = new StringBuilder();
         out.append("  Backend     : ").append(runtime.backend()).append("\n");
-        if ("ollama".equals(runtime.backend())) {
-            out.append("  Ollama host : ").append(runtime.hostLabel()).append("\n");
-        } else {
-            out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
-        }
+        out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
         out.append("  Chat model  : ").append(runtime.model()).append("\n");
+        if (!runtime.modelSourceLabel().isBlank()) {
+            out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");
+        }
+        appendModelIdentity(out, identity);
+        appendLlamaCppContext(out, cfg, runtime.backend());
         out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
 
         try (EngineRegistry registry = new EngineRegistry(cfg)) {
@@ -142,16 +157,85 @@ public class TopLevelStatusCmd implements Runnable {
                     .append(health.ok() ? "OK" : "DOWN")
                     .append(health.message().isBlank() ? "" : " - " + health.message())
                     .append("\n");
+            boolean identityControlsTools = identity != null
+                    && "llama_cpp".equals(runtime.backend())
+                    && identity.available();
+            boolean nativeTools = identityControlsTools
+                    ? identity.qualified() && "NATIVE".equals(identity.effectiveToolMode())
+                    : caps.nativeTools();
             out.append("  Capabilities: chat=")
                     .append(caps.chat())
                     .append(", stream=").append(caps.stream())
-                    .append(", tools=").append(caps.nativeTools())
-                    .append(", required_tool=").append(caps.requiredToolChoice())
+                    .append(", tools=").append(nativeTools)
+                    .append(", required_tool=").append(identityControlsTools
+                            ? nativeTools
+                            : caps.requiredToolChoice())
                     .append("\n");
         } catch (Exception e) {
             out.append("  Health      : DOWN - ").append(e.getMessage()).append("\n");
         }
         return out.toString();
+    }
+
+    private static void appendModelIdentity(StringBuilder out, ModelIdentitySnapshot identity) {
+        for (ModelIdentityPresentation.Row row : ModelIdentityPresentation.statusRows(identity)) {
+            out.append("  ").append(String.format("%-12s", row.label()))
+                    .append(": ").append(row.value()).append("\n");
+        }
+    }
+
+    private static Path defaultTalosHome() {
+        return Path.of(System.getProperty("user.home", "."), ".talos")
+                .toAbsolutePath().normalize();
+    }
+
+    private static void appendLlamaCppContext(StringBuilder out, Config cfg, String backend) {
+        if (!"llama_cpp".equals(backend)) return;
+        Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data.get("engines"));
+        Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
+        int configured = CfgUtil.intAt(llama, "context",
+                dev.talos.engine.llamacpp.ManagedContextSelector.DEFAULT_CONTEXT);
+        String mode = String.valueOf(llama.getOrDefault("mode", "managed"))
+                .trim().toLowerCase(java.util.Locale.ROOT).replace('-', '_');
+        // Report the context the server actually launches with: managed mode
+        // floors at the selector default, connect-only floors at 256
+        // (mirrors LlamaCppConfig.from).
+        int floored = clampContext("connect_only".equals(mode)
+                ? Math.max(256, configured)
+                : Math.max(configured, dev.talos.engine.llamacpp.ManagedContextSelector.DEFAULT_CONTEXT));
+        OptionalInt serverArgsOverride = "connect_only".equals(mode)
+                ? OptionalInt.empty()
+                : LlamaCppContextArgs.contextOverride(CfgUtil.strList(llama.get("server_args")));
+        int effective = serverArgsOverride.orElse(floored);
+        String reason = safeReason(llama.get("context_reason"));
+        out.append("  Context     : ").append(effective);
+        if (serverArgsOverride.isPresent()) {
+            out.append(" (server_args override; configured ").append(configured);
+            if (floored != configured) {
+                out.append(", engine floor would use ").append(floored);
+            }
+            out.append(")");
+        } else if (effective != configured) {
+            out.append(" (configured ").append(configured).append(", raised by the engine floor)");
+        }
+        if (!reason.isBlank()) {
+            out.append(" - ").append(reason);
+        }
+        out.append("\n");
+    }
+
+    private static int clampContext(int context) {
+        return Math.min(context, LlamaCppContextLimits.MAX_CONTEXT);
+    }
+
+    private static String safeReason(Object raw) {
+        String value = raw == null ? "" : String.valueOf(raw).trim();
+        if (value.isBlank()) return "";
+        value = value.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
+        while (value.contains("  ")) {
+            value = value.replace("  ", " ");
+        }
+        return value.length() <= 200 ? value : value.substring(0, 197) + "...";
     }
 
     private int getDocCount(Path indexDir) {

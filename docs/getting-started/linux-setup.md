@@ -21,7 +21,7 @@ If you skipped it during install, run:
 talos setup wizard
 ```
 
-For the first beta lane, accept the pinned llama.cpp CPU engine and choose `qwen2.5-coder-14b`.
+For the first beta lane, accept the pinned llama.cpp CPU engine and choose `qwen2.5-coder-14b`. This is a large CPU model, not a low-resource default.
 
 The pinned engine source is:
 
@@ -40,7 +40,7 @@ talos status --verbose
 talos doctor --start
 ```
 
-Do not treat the model as ready until `talos doctor --start` completes the end-to-end model smoke.
+Do not treat the model as ready until `talos doctor --start` completes the end-to-end model smoke. If doctor reports a slow smoke warning, Talos is configured, but normal edit turns may be too slow on that machine.
 
 ## 4. Re-run setup later
 

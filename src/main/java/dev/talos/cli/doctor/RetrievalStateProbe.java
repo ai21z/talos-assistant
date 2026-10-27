@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.safety.ProtectedContentSanitizer;
 import org.apache.lucene.index.DirectoryReader;
@@ -34,7 +35,7 @@ public final class RetrievalStateProbe implements DoctorProbe {
         Map<String, Object> embed = CfgUtil.map(cfg.data.get("embed"));
         String provider = stringAt(embed, "provider", runtime.embeddingProvider());
         String model = stringAt(embed, "model", runtime.embeddingModel());
-        String host = embeddingHost(cfg, runtime, provider, embed);
+        String host = embeddingHost(cfg, runtime, embed);
         boolean allowRemote = CfgUtil.boolAt(embed, "allow_remote", false);
         String locality = locality(host, allowRemote);
         String mode = mode(vectorsEnabled, provider, locality);
@@ -54,21 +55,18 @@ public final class RetrievalStateProbe implements DoctorProbe {
                 + " locality=" + locality
                 + " mode=" + mode
                 + " embedding dimension not probed by doctor"
-                + " GPU/VRAM not probed by Talos";
+                + " GPU facts reported by runtime-env probe";
 
-        return "remote-rejected".equals(locality)
+        return "remote-rejected".equals(locality) || !EmbeddingsFactory.isSupportedProvider(provider)
                 ? ProbeResult.warn(id(), detail)
                 : ProbeResult.pass(id(), detail);
     }
 
-    private static String embeddingHost(Config cfg, EngineRuntimeConfig runtime, String provider, Map<String, Object> embed) {
+    private static String embeddingHost(Config cfg, EngineRuntimeConfig runtime, Map<String, Object> embed) {
         String configured = stringAt(embed, "host", "");
         if (!configured.isBlank()) return configured;
         ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
         if (managed.enabled()) return managed.baseUrl();
-        if ("ollama".equals(provider)) {
-            return stringAt(CfgUtil.map(cfg.data.get("ollama")), "host", "http://127.0.0.1:11434");
-        }
         return runtime.hostLabel();
     }
 
@@ -78,6 +76,9 @@ public final class RetrievalStateProbe implements DoctorProbe {
     }
 
     private static String mode(boolean vectorsEnabled, String provider, String locality) {
+        if (!EmbeddingsFactory.isSupportedProvider(provider)) {
+            return "BM25-only (embedding provider '" + provider + "' is not supported)";
+        }
         if (!vectorsEnabled) return "BM25-only (vectors disabled)";
         if ("disabled".equals(provider)) return "BM25-only (embedding provider disabled)";
         if ("remote-rejected".equals(locality)) return "BM25-only fallback likely (embedding host rejected)";

@@ -41,15 +41,75 @@ public final class CheckpointService {
             String traceId,
             int turnNumber
     ) {
+        if (plan == null
+                || plan.authorityPlanId().isBlank()
+                || plan.operationId().isBlank()) {
+            return CheckpointCaptureResult.failure(
+                    "Workspace-operation checkpoint requires typed authority identities.");
+        }
         CheckpointConfig cfg = CheckpointConfig.from(config);
         if (!cfg.enabled()) {
-            return CheckpointCaptureResult.skipped("Checkpointing is disabled.");
+            return CheckpointCaptureResult.skipped(
+                    "Checkpointing is disabled.",
+                    plan.authorityPlanId(),
+                    plan.operationId());
         }
-        return store.captureBeforeOperation(workspace, config, plan, traceId, turnNumber);
+        CheckpointCaptureResult result = store.captureBeforeOperation(
+                workspace,
+                config,
+                plan,
+                traceId,
+                turnNumber);
+        if (result == null
+                || !plan.authorityPlanId().equals(result.authorityPlanId())
+                || !plan.operationId().equals(result.operationId())) {
+            String detail = result == null || result.message().isBlank()
+                    ? "checkpoint store omitted the typed authority binding"
+                    : result.message();
+            return CheckpointCaptureResult.failure(
+                    "Checkpoint result did not retain the typed workspace-operation identity: "
+                            + detail,
+                    plan.authorityPlanId(),
+                    plan.operationId());
+        }
+        return result;
     }
 
     public CheckpointRestoreResult restore(Path workspace, String checkpointId) {
         return store.restore(workspace, checkpointId);
+    }
+
+    public CheckpointRestoreResult restore(
+            Path workspace,
+            String checkpointId,
+            String authorityPlanId,
+            String operationId
+    ) {
+        if (!isSha256Identity(authorityPlanId)
+                || !isSha256Identity(operationId)) {
+            return CheckpointRestoreResult.failure(
+                    checkpointId,
+                    "Workspace-operation checkpoint restore requires exact typed authority identities.");
+        }
+        CheckpointRestoreResult result = store.restore(
+                workspace,
+                checkpointId,
+                authorityPlanId,
+                operationId);
+        if (result == null
+                || !authorityPlanId.equals(result.authorityPlanId())
+                || !operationId.equals(result.operationId())) {
+            return CheckpointRestoreResult.failure(
+                    checkpointId,
+                    "Checkpoint restore result did not retain the expected typed workspace-operation identity.",
+                    authorityPlanId,
+                    operationId);
+        }
+        return result;
+    }
+
+    private static boolean isSha256Identity(String value) {
+        return value != null && value.matches("[0-9a-f]{64}");
     }
 
     public List<String> listIds(Path workspace) {

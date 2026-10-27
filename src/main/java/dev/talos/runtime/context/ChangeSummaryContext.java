@@ -1,9 +1,11 @@
 package dev.talos.runtime.context;
 
+import dev.talos.core.util.Hash;
 import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -12,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Compact runtime-owned ledger for "what files changed?" follow-ups.
@@ -65,13 +68,23 @@ public record ChangeSummaryContext(
             String traceId,
             String toolOutcome,
             String verificationStatus,
-            String completionStatus
+            String completionStatus,
+            String pathIdentity
     ) {
         public FileChange(String path, String toolName, int turnNumber, String traceId) {
             this(path, toolName, turnNumber, traceId, "", "", "");
         }
 
+        public FileChange(String path, String toolName, int turnNumber, String traceId,
+                          String toolOutcome, String verificationStatus, String completionStatus) {
+            this(path, toolName, turnNumber, traceId, toolOutcome, verificationStatus,
+                    completionStatus, exactPathIdentity(path));
+        }
+
         public FileChange {
+            // Display labels are redacted/truncated and must not serve as file identity.
+            pathIdentity = pathIdentity == null || pathIdentity.isBlank()
+                    ? exactPathIdentity(path) : pathIdentity;
             path = normalizePath(path);
             toolName = normalizeText(toolName, MAX_FIELD_CHARS);
             traceId = normalizeText(traceId, MAX_FIELD_CHARS);
@@ -120,7 +133,7 @@ public record ChangeSummaryContext(
         TurnAudit audit = result.audit();
         List<TurnRecord.ToolCallSummary> calls = audit.toolCalls() == null ? List.of() : audit.toolCalls();
         List<TurnRecord.ToolCallSummary> successfulMutations = calls.stream()
-                .filter(call -> call != null && call.success())
+                .filter(call -> call != null && (call.success() || call.mutationEffects().hasEffects()))
                 .filter(call -> ToolCallSupport.isMutatingTool(call.name()))
                 .filter(call -> !changedPathHints(call).isEmpty())
                 .toList();
@@ -135,23 +148,54 @@ public record ChangeSummaryContext(
         LinkedHashMap<String, FileChange> changes = new LinkedHashMap<>();
         for (FileChange change : current.changedFiles()) {
             if (change == null || change.path().isBlank()) continue;
-            changes.put(change.path(), change);
+            changes.put(change.pathIdentity(), change);
         }
 
         LinkedHashSet<String> changedThisTurn = new LinkedHashSet<>();
+        LinkedHashSet<String> knownChangedThisTurn = new LinkedHashSet<>();
+        LinkedHashSet<String> knownIdentitiesThisTurn = new LinkedHashSet<>();
         String traceId = traceId(audit.localTrace());
         for (TurnRecord.ToolCallSummary call : successfulMutations) {
-            for (String path : changedPathHints(call)) {
-                changes.remove(path);
-                changes.put(path, new FileChange(
-                        path,
+            for (String rawPath : changedPathHints(call)) {
+                String path = normalizePath(rawPath);
+                String identity = exactPathIdentity(rawPath);
+                boolean uncertain = call.mutationEffects().uncertainPaths().stream()
+                        .anyMatch(candidate -> exactPathIdentity(candidate).equals(identity));
+                boolean redactedIdentity = containsRedactedPathLabel(rawPath);
+                FileChange prior = changes.get(identity);
+                // Durable privacy redaction can merge distinct original paths.
+                // A later success for that label cannot settle an earlier UNKNOWN.
+                if (redactedIdentity && !uncertain && prior != null
+                        && "UNKNOWN".equals(prior.toolOutcome())) {
+                    changedThisTurn.add(path);
+                    knownChangedThisTurn.remove(path);
+                    knownIdentitiesThisTurn.remove(identity);
+                    continue;
+                }
+                changes.remove(identity);
+                changes.put(identity, new FileChange(
+                        rawPath,
                         call.name(),
                         result.turnNumber(),
                         traceId,
-                        "SUCCEEDED",
+                        uncertain ? "UNKNOWN"
+                                : call.success() ? "SUCCEEDED" : "APPLIED_UNVERIFIED",
                         verificationStatus,
                         completionStatus));
                 changedThisTurn.add(path);
+                if (uncertain || redactedIdentity) knownIdentitiesThisTurn.remove(identity);
+                else {
+                    knownChangedThisTurn.add(path);
+                    knownIdentitiesThisTurn.add(identity);
+                }
+            }
+        }
+        // Older verification-failure summaries retain only presentation labels.
+        // An uncertain or colliding label cannot prove that a failure was resolved.
+        for (FileChange change : changes.values()) {
+            if ("UNKNOWN".equals(change.toolOutcome()) || containsRedactedPathLabel(change.path())
+                    || changes.values().stream().filter(candidate -> candidate.path().equals(change.path())).count() > 1) {
+                knownChangedThisTurn.remove(change.path());
             }
         }
         while (changes.size() > MAX_CHANGED_FILES) {
@@ -159,10 +203,11 @@ public record ChangeSummaryContext(
             changes.remove(first);
         }
 
-        List<String> unresolved = unresolvedTargets(audit.policyTrace(), audit.localTrace(), changedThisTurn);
+        List<String> unresolved = unresolvedTargets(audit.policyTrace(), audit.localTrace(), knownIdentitiesThisTurn);
         List<VerificationFailure> unresolvedFailures = updateVerificationFailures(
                 current.unresolvedVerificationFailures(),
                 changedThisTurn,
+                knownChangedThisTurn,
                 result.turnNumber(),
                 traceId,
                 verificationStatus,
@@ -176,6 +221,22 @@ public record ChangeSummaryContext(
                 completionStatus,
                 findings,
                 unresolvedFailures);
+    }
+
+    /** Restore runtime effect facts without replaying failed/aborted assistant prose.
+     * Legacy rows have no effect detail; they cannot establish effects of failed calls.
+     */
+    public static ChangeSummaryContext fromTurnRecords(List<TurnRecord> records) {
+        ChangeSummaryContext context = none();
+        if (records == null) return context;
+        for (TurnRecord record : records) {
+            if (record == null) continue;
+            TurnAudit audit = new TurnAudit(record.toolCalls(), record.approvalsRequired(),
+                    record.approvalsGranted(), record.approvalsDenied(), record.policyTrace());
+            context = updateAfterTurn(context, new TurnResult(null, null,
+                    record.turnNumber(), java.time.Duration.ZERO, audit));
+        }
+        return context;
     }
 
     public boolean hasRecordedChanges() {
@@ -195,6 +256,12 @@ public record ChangeSummaryContext(
 
         StringBuilder out = new StringBuilder();
         out.append("Recorded file changes in this session/audit:\n");
+        if (changedFiles.stream().anyMatch(change -> "UNKNOWN".equals(change.toolOutcome()))) {
+            out.append("UNKNOWN entries are possible effects; Talos has not established their final state.\n");
+        }
+        if (changedFiles.stream().map(FileChange::path).distinct().count() < changedFiles.size()) {
+            out.append("Distinct paths can share the same shortened or redacted display label below.\n");
+        }
         for (FileChange change : changedFiles) {
             out.append("- ").append(change.path());
             if (change.turnNumber() > 0) out.append(" (turn ").append(change.turnNumber()).append(')');
@@ -298,11 +365,14 @@ public record ChangeSummaryContext(
 
     private static boolean fileChangeVerified(FileChange change) {
         if (change == null) return false;
+        if ("APPLIED_UNVERIFIED".equals(change.toolOutcome()) || "UNKNOWN".equals(change.toolOutcome())) return false;
         return "PASSED".equalsIgnoreCase(change.verificationStatus())
                 || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
     }
 
     private static boolean fileChangeUnverified(FileChange change) {
+        if (change != null && ("APPLIED_UNVERIFIED".equals(change.toolOutcome())
+                || "UNKNOWN".equals(change.toolOutcome()))) return true;
         if (!hasFileVerificationState(change)) return false;
         return !fileChangeVerified(change);
     }
@@ -312,8 +382,8 @@ public record ChangeSummaryContext(
         LinkedHashMap<String, FileChange> out = new LinkedHashMap<>();
         for (FileChange change : rawChanges) {
             if (change == null || change.path().isBlank()) continue;
-            out.remove(change.path());
-            out.put(change.path(), change);
+            out.remove(change.pathIdentity());
+            out.put(change.pathIdentity(), change);
             while (out.size() > MAX_CHANGED_FILES) {
                 String first = out.keySet().iterator().next();
                 out.remove(first);
@@ -325,6 +395,7 @@ public record ChangeSummaryContext(
     private static List<VerificationFailure> updateVerificationFailures(
             List<VerificationFailure> previous,
             LinkedHashSet<String> changedThisTurn,
+            LinkedHashSet<String> knownUnambiguousChanges,
             int turnNumber,
             String traceId,
             String verificationStatus,
@@ -344,7 +415,7 @@ public record ChangeSummaryContext(
         List<VerificationFailure> updated = new ArrayList<>();
         for (VerificationFailure failure : normalizeVerificationFailures(previous)) {
             List<String> remainingPaths = failure.paths().stream()
-                    .filter(path -> !changedThisTurn.contains(path))
+                    .filter(path -> !knownUnambiguousChanges.contains(path))
                     .toList();
             if (!remainingPaths.isEmpty()) {
                 updated.add(failure.withPaths(remainingPaths));
@@ -402,14 +473,14 @@ public record ChangeSummaryContext(
     private static List<String> unresolvedTargets(
             TurnPolicyTrace policyTrace,
             LocalTurnTrace localTrace,
-            LinkedHashSet<String> changedThisTurn) {
-        if (changedThisTurn == null || changedThisTurn.isEmpty()) return List.of();
+            LinkedHashSet<String> knownIdentitiesThisTurn) {
+        if (knownIdentitiesThisTurn == null) return List.of();
         LinkedHashSet<String> expected = new LinkedHashSet<>();
         if (localTrace != null) addAll(expected, localTrace.taskContract().expectedTargets());
         if (policyTrace != null) addAll(expected, policyTrace.expectedTargets());
         if (expected.isEmpty()) return List.of();
-        expected.removeAll(changedThisTurn);
-        return normalizeStrings(List.copyOf(expected), MAX_UNRESOLVED_TARGETS);
+        expected.removeIf(path -> knownIdentitiesThisTurn.contains(exactPathIdentity(path)));
+        return normalizePaths(List.copyOf(expected), MAX_UNRESOLVED_TARGETS);
     }
 
     private static List<String> verifierFindings(LocalTurnTrace localTrace) {
@@ -445,23 +516,37 @@ public record ChangeSummaryContext(
     private static void addAll(LinkedHashSet<String> out, List<String> values) {
         if (values == null) return;
         for (String value : values) {
-            String normalized = normalizePath(value);
-            if (!normalized.isBlank()) out.add(normalized);
+            if (!normalizePath(value).isBlank()) out.add(value);
         }
     }
 
     private static List<String> changedPathHints(TurnRecord.ToolCallSummary call) {
         if (call == null) return List.of();
+        if (call.mutationEffects().hasEffects()) {
+            return call.mutationEffects().affectedPaths().stream()
+                    .filter(path -> !normalizePath(path).isBlank()).limit(MAX_CHANGED_FILES).toList();
+        }
         LinkedHashSet<String> paths = new LinkedHashSet<>();
         if (call.pathHints() != null) {
             for (String path : call.pathHints()) {
-                String normalized = normalizePath(path);
-                if (!normalized.isBlank()) paths.add(normalized);
+                if (!normalizePath(path).isBlank()) paths.add(path);
             }
         }
-        String primary = normalizePath(call.pathHint());
-        if (!primary.isBlank()) paths.add(primary);
+        if (!normalizePath(call.pathHint()).isBlank()) paths.add(call.pathHint());
         return List.copyOf(paths);
+    }
+
+    private static String exactPathIdentity(String path) {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        while (normalized.startsWith("./")) normalized = normalized.substring(2);
+        return Hash.sha256Hex(normalized.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean containsRedactedPathLabel(String path) {
+        return path != null && (path.contains(ProtectedContentPolicy.REDACTED_VALUE)
+                || path.contains(ProtectedContentPolicy.REDACTED_PATH)
+                || path.contains(ProtectedContentPolicy.REDACTED_CANARY)
+                || path.contains(ProtectedContentPolicy.REDACTED_PRIVATE_DOCUMENT_CANARY));
     }
 
     private static List<String> normalizeStrings(List<String> raw, int maxItems) {

@@ -1,5 +1,13 @@
 package dev.talos.runtime.task;
 
+import dev.talos.core.Config;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.DeletePathTool;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -7,11 +15,86 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspaceTargetReconcilerTest {
+
+    @Test
+    void explicitReadOnlyPairsKeepBothIdentitiesRegardlessOfLinkage(@TempDir Path workspace) throws Exception {
+        for (String linked : Set.of("script.js", "scripts.js", "style.css", "styles.css")) {
+            Files.writeString(workspace.resolve("index.html"),
+                    "<script src=\"" + linked + "\"></script><link rel=\"stylesheet\" href=\"" + linked + "\">\n");
+            for (String name : Set.of("script.js", "scripts.js", "style.css", "styles.css")) {
+                Files.writeString(workspace.resolve(name), "sentinel " + name + "\n");
+            }
+            var contract = TaskContractResolver.fromUserRequest(
+                    "Read index.html, script.js, scripts.js, style.css and styles.css and explain this website. Do not edit files.");
+            var reconciled = WorkspaceTargetReconciler.reconcile(contract, workspace);
+
+            assertEquals(contract.expectedTargets(), reconciled.expectedTargets(), linked);
+            assertTrue(reconciled.expectedTargets().containsAll(
+                    Set.of("script.js", "scripts.js", "style.css", "styles.css")), linked);
+            assertFalse(reconciled.mutationAllowed());
+        }
+    }
+
+    @Test
+    void explicitUnlinkedReadOnlySiblingIsNotReplaced(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<script src=\"script.js\"></script>\n");
+        Files.writeString(workspace.resolve("script.js"), "linked\n");
+        Files.writeString(workspace.resolve("scripts.js"), "unlinked\n");
+        var contract = TaskContractResolver.fromUserRequest("Read scripts.js and explain it. Do not edit files.");
+
+        var reconciled = WorkspaceTargetReconciler.reconcile(contract, workspace);
+
+        assertEquals(contract.expectedTargets(), reconciled.expectedTargets());
+        assertTrue(reconciled.expectedTargets().contains("scripts.js"));
+        assertFalse(reconciled.expectedTargets().contains("script.js"));
+    }
+
+    @Test
+    void aliasProjectionRetainsIndependentBlockedWorkspaceObservation(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(
+                workspace.resolve("index.html"),
+                "<link rel=\"stylesheet\" href=\"styles.css\">\n");
+        Files.writeString(workspace.resolve("styles.css"), "body {}\n");
+        Files.writeString(workspace.resolve("script.js"), "keep\n");
+        String request =
+                "Edit index.html so it works, and update style.css too, "
+                        + "then delete script.js.";
+        TaskResolution resolution = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.resolveFromUserRequest(request),
+                workspace);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new DeletePathTool());
+
+        assertEquals(
+                Set.of("index.html", "styles.css"),
+                resolution.contract().expectedTargets());
+        assertTrue(resolution.blocksWorkspaceOperations());
+        assertTrue(
+                resolution.mutationTailPlan()
+                        .workspaceOperationObservations()
+                        .stream()
+                        .anyMatch(observation ->
+                                "script.js".equals(observation.path())));
+        assertFalse(
+                NativeToolSpecPolicy.names(
+                                NativeToolSpecPolicy.select(
+                                        resolution,
+                                        ExecutionPhase.APPLY,
+                                        registry,
+                                        new Config()))
+                        .contains("talos.delete_path"));
+    }
 
     @Test
     void existingPluralScriptWinsOverUnmentionedConventionalSingular(@TempDir Path workspace)
@@ -202,6 +285,34 @@ class WorkspaceTargetReconcilerTest {
     }
 
     @Test
+    void linkedExternalIndexCannotReconstructProviderTaskTargets(@TempDir Path workspace)
+            throws Exception {
+        Path external = Files.createTempFile(
+                "talos-t1170-reconciler-external-",
+                ".html");
+        try {
+            Files.writeString(
+                    external,
+                    "<script src=\"T1170_EXTERNAL_RECONCILER_CANARY.js\"></script>");
+            createSymbolicLinkOrAbort(workspace.resolve("index.html"), external);
+            TaskContract raw =
+                    TaskContractResolver.fromUserRequest("Make this website better.");
+
+            TaskContract reconciled =
+                    WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+            assertEquals(raw.expectedTargets(), reconciled.expectedTargets());
+            assertFalse(reconciled.expectedTargets().stream()
+                    .anyMatch(target -> target.contains(
+                            "T1170_EXTERNAL_RECONCILER_CANARY")));
+            assertFalse(reconciled.classificationReason().contains(
+                    "workspace-static-web-surface"));
+        } finally {
+            Files.deleteIfExists(external);
+        }
+    }
+
+    @Test
     void statusQuestionOverExistingWebSurfaceDoesNotBecomeMutationTargetBinding(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
@@ -219,9 +330,46 @@ class WorkspaceTargetReconcilerTest {
         assertEquals(Set.of(), contract.expectedTargets());
     }
 
+    @Test
+    void workspaceEvidenceCannotReopenAnIncompleteTargetScan(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><link rel="stylesheet" href="style.css"></head>
+                <body><script src="script.js"></script></body></html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body {}\n");
+        Files.writeString(workspace.resolve("script.js"), "void 0;\n");
+        String request = "Make this website better. "
+                + "a.txt ".repeat(8_193);
+        TaskResolution raw =
+                TaskContractResolver.resolveFromUserRequest(request);
+
+        TaskResolution reconciled =
+                WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+        assertEquals(raw, reconciled);
+        assertTrue(reconciled.sequentialMutationPlan()
+                .targetIndexLimitExceeded());
+        assertFalse(reconciled.contract().mutationAllowed());
+        assertEquals(Set.of(), reconciled.contract().expectedTargets());
+        assertTrue(reconciled.blocksUnscopedMutation());
+    }
+
     private static TaskContract reconciledStaticWebContract(Path workspace) {
         TaskContract raw = TaskContractResolver.fromUserRequest(
                 "Create a modern synthwave website here with CSS styling and JavaScript interaction.");
         return WorkspaceTargetReconciler.reconcile(raw, workspace);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

@@ -4,17 +4,29 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ActiveTaskContextPolicy;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
+import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.policy.ProviderPromptSurfaceReconciler;
 import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ToolSpec;
 
 import java.nio.file.Path;
@@ -22,6 +34,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 public final class PromptInspector {
     public static final String DEFAULT_INPUT_PLACEHOLDER = "<next user message>";
@@ -42,17 +55,34 @@ public final class PromptInspector {
         String input = userInput == null || userInput.isBlank()
                 ? DEFAULT_INPUT_PLACEHOLDER
                 : userInput;
-        TaskContract rawContract = usesAssistantTaskContract(resolvedMode)
+        List<ChatMessage> contractMessages =
+                new ArrayList<>(history);
+        contractMessages.add(ChatMessage.user(input));
+        TaskResolution rawResolution = usesAssistantTaskContract(resolvedMode)
                 ? WorkspaceTargetReconciler.reconcile(
-                        TaskContractResolver.fromUserRequest(input),
+                        TaskContractResolver.resolveFromMessages(
+                                contractMessages),
                         workspace)
-                : TaskContract.unknown(input);
+                : TaskResolution.contractOnly(TaskContract.unknown(input));
+        TaskContract rawContract = rawResolution.contract();
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(resolvedMode, rawContract);
         TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
+        TaskIntent effectiveIntent = TaskIntentProjector.project(
+                rawResolution.intent(),
+                contract,
+                TargetSource.RUNTIME_DEFAULT,
+                "prompt-inspector-capability-projection");
+        TaskResolution resolution = rawResolution.projectOnto(
+                contract,
+                effectiveIntent);
         ExecutionPhase initialPhase = effectiveTurn.phase();
         boolean directoryListing = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
-        List<ToolSpec> effectiveSpecs = effectiveToolSpecs(resolvedMode, contract, initialPhase, ctx);
+        List<ToolSpec> effectiveSpecs = effectiveToolSpecs(
+                resolvedMode,
+                resolution,
+                initialPhase,
+                ctx);
         List<String> effectiveTools = NativeToolSpecPolicy.names(effectiveSpecs);
         boolean includeWorkspaceContext =
                 PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
@@ -84,14 +114,39 @@ public final class PromptInspector {
         messages.addAll(history);
         messages.add(ChatMessage.user(input));
         if (usesAssistantTaskContract(resolvedMode)) {
+            PreviewTurn preview = previewTurn(
+                    contractMessages,
+                    input,
+                    workspace,
+                    ctx,
+                    postureFor(resolvedMode),
+                    nativeTools);
+            resolution = preview.resolution();
+            contract = resolution.contract();
+            initialPhase = preview.phase();
+            effectiveSpecs = preview.specs();
+            effectiveTools = NativeToolSpecPolicy.names(effectiveSpecs);
+            includeWorkspaceContext =
+                    PromptWorkspaceContextPolicy.includeWorkspaceManifest(
+                            effectiveTools);
+            CurrentTurnPlan plan = preview.plan();
             CurrentTurnPromptInstructions.injectTaskContractInstruction(
                     messages,
-                    contract,
-                    initialPhase,
-                    effectiveTools);
+                    plan);
+            CurrentTurnPromptInstructions
+                    .injectStaticVerificationRepairInstruction(
+                            messages,
+                            contract,
+                            workspace);
         }
 
         List<String> registryTools = registryToolNames(ctx);
+        RuntimeModelIdentityAnswerPolicy.project(messages,
+                ctx == null || ctx.llm() == null ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity());
+        RuntimeModelIdentityAnswerPolicy.projectProviderTask(messages, messages.size() - 1, input);
+        messages = new ArrayList<>(
+                ProviderPromptSurfaceReconciler
+                        .canonicalizeNormalizedLf(messages));
 
         return new PromptRender(
                 mode,
@@ -126,14 +181,61 @@ public final class PromptInspector {
             int historyMessages,
             List<ChatMessage> messages
     ) {
+        return fromMessages(requestedMode, resolvedMode, workspace, ctx, nativeTools, historyMessages,
+                messages, ctx == null || ctx.llm() == null ? ModelIdentitySnapshot.empty() : ctx.llm().modelIdentity());
+    }
+
+    public static PromptRender fromMessages(
+            String requestedMode,
+            String resolvedMode,
+            Path workspace,
+            Context ctx,
+            boolean nativeTools,
+            int historyMessages,
+            List<ChatMessage> messages,
+            ModelIdentitySnapshot runtimeIdentity
+    ) {
+        List<ChatMessage> canonicalMessages = new ArrayList<>(messages);
+        String currentRequest = "";
+        int currentTaskIndex = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message != null && "user".equals(message.role())
+                    && !dev.talos.runtime.toolcall.ToolCallSupport.isSyntheticToolResultContent(message.content())) {
+                currentRequest = message.content();
+                currentTaskIndex = i;
+                break;
+            }
+        }
+        RuntimeModelIdentityAnswerPolicy.projectProviderTask(canonicalMessages, currentTaskIndex, currentRequest);
+        RuntimeModelIdentityAnswerPolicy.project(canonicalMessages, runtimeIdentity, currentRequest);
+        canonicalMessages = new ArrayList<>(ProviderPromptSurfaceReconciler.canonicalizeNormalizedLf(canonicalMessages));
         String canonicalMode = resolvePromptMode(resolvedMode);
-        TaskContract rawContract = WorkspaceTargetReconciler.reconcile(
-                TaskContractResolver.fromMessages(messages),
+        // Resolve authority from the original runtime bytes. The canonical
+        // copy below is presentation/provider transport only; reparsing it
+        // could erase CRLF/control offsets or turn a split connector into a
+        // different instruction.
+        TaskResolution rawResolution = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.resolveFromMessages(
+                        messages),
                 workspace);
+        TaskContract rawContract = rawResolution.contract();
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(canonicalMode, rawContract);
         TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
+        TaskIntent effectiveIntent = TaskIntentProjector.project(
+                rawResolution.intent(),
+                contract,
+                TargetSource.RUNTIME_DEFAULT,
+                "prompt-inspector-capability-projection");
+        TaskResolution resolution = rawResolution.projectOnto(
+                contract,
+                effectiveIntent);
         List<String> effectiveTools = NativeToolSpecPolicy.names(
-                effectiveToolSpecs(canonicalMode, contract, effectiveTurn.phase(), ctx));
+                effectiveToolSpecs(
+                        canonicalMode,
+                        resolution,
+                        effectiveTurn.phase(),
+                        ctx));
         boolean includeWorkspaceContext =
                 PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
         return new PromptRender(
@@ -155,7 +257,7 @@ public final class PromptInspector {
                         nativeTools,
                         effectiveTools,
                         includeWorkspaceContext),
-                messages,
+                canonicalMessages,
                 Instant.now()
         );
     }
@@ -231,8 +333,8 @@ public final class PromptInspector {
     }
 
     private static boolean nativeTools(Context ctx) {
-        if (ctx == null || ctx.cfg() == null) return true;
-        return CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        if (ctx == null || ctx.llm() == null) return true;
+        return ctx.llm().nativeToolsCurrentlyEnabled();
     }
 
     private static boolean hasHistory(Context ctx) {
@@ -259,16 +361,24 @@ public final class PromptInspector {
 
     private static List<ToolSpec> effectiveToolSpecs(
             String resolvedMode,
-            TaskContract contract,
+            TaskResolution resolution,
             ExecutionPhase phase,
             Context ctx
     ) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
-        if (ctx.hasNativeToolSpecOverride()) {
+        if (ctx.hasNativeToolSpecOverride()
+                && (resolution == null
+                        || !resolution.blocksUnscopedMutation()
+                                && !resolution.blocksWorkspaceOperations())) {
             return ctx.nativeToolSpecs();
         }
-        if (usesAssistantTaskContract(resolvePromptMode(resolvedMode)) && contract != null) {
-            return NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry(), ctx.cfg());
+        if (usesAssistantTaskContract(resolvePromptMode(resolvedMode))
+                && resolution != null) {
+            return NativeToolSpecPolicy.select(
+                    resolution,
+                    phase,
+                    ctx.toolRegistry(),
+                    ctx.cfg());
         }
         return ctx.toolRegistry().descriptors().stream()
                 .map(descriptor -> new ToolSpec(
@@ -276,6 +386,159 @@ public final class PromptInspector {
                         descriptor.description(),
                         descriptor.parametersSchema()))
                 .toList();
+    }
+
+    private static PreviewTurn previewTurn(
+            List<ChatMessage> contractMessages,
+            String userRequest,
+            Path workspace,
+            Context ctx,
+            CapabilityPosture posture,
+            boolean nativeTools
+    ) {
+        TaskResolution initial =
+                TaskContractResolver.resolveFromMessages(contractMessages);
+        TaskContract rawContract = WorkspaceTargetReconciler.reconcile(
+                initial.contract(),
+                workspace);
+        TaskIntent rawIntent = TaskIntentProjector.project(
+                initial.intent(),
+                rawContract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
+        ActiveTaskContext savedContext =
+                ctx == null || ctx.memory() == null
+                        ? ActiveTaskContext.none()
+                        : ctx.memory().activeTaskContext();
+        ArtifactGoal savedGoal =
+                ctx == null || ctx.memory() == null
+                        ? ArtifactGoal.none()
+                        : ctx.memory().artifactGoal();
+        ActiveTaskContextPolicy.Decision activeDecision =
+                ActiveTaskContextPolicy.evaluate(
+                        userRequest,
+                        rawContract,
+                        savedContext,
+                        savedGoal,
+                        currentUserTurnNumber(ctx),
+                        !initial.sequentialMutationPlan()
+                                .authorityLimitExceeded());
+        TaskContract activeContract = WorkspaceTargetReconciler.reconcile(
+                activeDecision.taskContract(),
+                workspace);
+        TaskIntent activeIntent = TaskIntentProjector.project(
+                rawIntent,
+                activeContract,
+                TargetSource.REPAIR_CONTEXT,
+                "active-task-context-projection");
+        CapabilityPosturePolicy.EffectiveTurn effective =
+                CapabilityPosturePolicy.apply(posture, activeContract);
+        TaskContract finalContract = WorkspaceTargetReconciler.reconcile(
+                effective.taskContract(),
+                workspace);
+        TaskIntent finalIntent = TaskIntentProjector.project(
+                activeIntent,
+                effective.taskContract(),
+                TargetSource.RUNTIME_DEFAULT,
+                "capability-posture-projection");
+        finalIntent = TaskIntentProjector.project(
+                finalIntent,
+                finalContract,
+                TargetSource.WORKSPACE_EVIDENCE,
+                "workspace-target-reconciliation");
+        TaskResolution finalResolution = initial.projectOnto(
+                finalContract,
+                finalIntent);
+        ExecutionPhase authoritativePhase = finalResolution
+                .blocksUnscopedMutation()
+                ? ExecutionPhase.INSPECT
+                : effective.phase();
+        List<ToolSpec> specs = effectiveToolSpecs(
+                "agent",
+                finalResolution,
+                authoritativePhase,
+                ctx);
+        List<String> toolNames = NativeToolSpecPolicy.names(specs);
+        CurrentTurnPlan plan =
+                CurrentTurnPlan.createWithActionObligation(
+                        finalResolution,
+                        authoritativePhase,
+                        nativeTools ? toolNames : List.of(),
+                        toolNames,
+                        List.of(),
+                        renderActiveTaskContext(activeDecision),
+                        renderArtifactGoal(activeDecision),
+                        CurrentTurnPlan.derivedVerifierProfile(
+                                finalResolution.contract()),
+                        ActionObligationPolicy.derive(
+                                finalResolution,
+                                authoritativePhase),
+                        ctx == null ? null : ctx.cfg(),
+                        workspace);
+        return new PreviewTurn(
+                finalResolution,
+                authoritativePhase,
+                specs,
+                plan);
+    }
+
+    private static int currentUserTurnNumber(Context ctx) {
+        if (ctx == null || ctx.memory() == null) return 1;
+        int completedUserTurns = 0;
+        for (ChatMessage message : ctx.memory().getTurns()) {
+            if (message != null && "user".equals(message.role())) {
+                completedUserTurns++;
+            }
+        }
+        return completedUserTurns + 1;
+    }
+
+    private static String renderActiveTaskContext(
+            ActiveTaskContextPolicy.Decision decision
+    ) {
+        if (decision == null || decision.planContext() == null) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        ActiveTaskContext context = decision.planContext();
+        if (context.state() == ActiveTaskContext.State.NONE) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        return context.state() == ActiveTaskContext.State.ACTIVE
+                ? context.renderForPlan()
+                : "activeTaskContext{state=" + context.state() + "}";
+    }
+
+    private static String renderArtifactGoal(
+            ActiveTaskContextPolicy.Decision decision
+    ) {
+        if (decision == null
+                || decision.planContext() == null
+                || decision.planContext().state()
+                        != ActiveTaskContext.State.ACTIVE) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        return decision.artifactGoal().renderForPlan();
+    }
+
+    private record PreviewTurn(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            List<ToolSpec> specs,
+            CurrentTurnPlan plan
+    ) {
+        private PreviewTurn {
+            Objects.requireNonNull(resolution, "resolution");
+            Objects.requireNonNull(phase, "phase");
+            specs = specs == null ? List.of() : List.copyOf(specs);
+            Objects.requireNonNull(plan, "plan");
+            if (!plan.taskContract().equals(resolution.contract())
+                    || plan.phaseInitial() != phase
+                    || !NativeToolSpecPolicy.names(specs)
+                            .equals(plan.promptTools())) {
+                throw new IllegalArgumentException(
+                        "prompt preview must share one authoritative turn surface");
+            }
+        }
     }
 
     private static CapabilityPosturePolicy.EffectiveTurn effectiveTurn(

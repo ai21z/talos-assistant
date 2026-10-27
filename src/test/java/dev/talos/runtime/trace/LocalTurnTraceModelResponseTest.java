@@ -20,19 +20,19 @@ class LocalTurnTraceModelResponseTest {
     }
 
     @Test
-    void recordsModelResponseSummaryAndEventWithoutRawAssistantText() throws Exception {
+    void recordsRoutedAnswerSummaryWithoutClaimingModelAuthorship() throws Exception {
         beginTrace();
 
-        LocalTurnTraceCapture.recordModelResponseReceived("Answer mentions SECRET=abc.");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured("Answer mentions SECRET=abc.");
 
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
         TurnTraceEvent event = trace.events().stream()
-                .filter(candidate -> "MODEL_RESPONSE_RECEIVED".equals(candidate.type()))
+                .filter(candidate -> "ROUTED_ANSWER_CAPTURED".equals(candidate.type()))
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals(TraceRedactor.hash("Answer mentions SECRET=abc."), event.data().get("assistantHash"));
-        assertEquals("Answer mentions SECRET=abc.".length(), event.data().get("assistantChars"));
+        assertEquals(TraceRedactor.hash("Answer mentions SECRET=abc."), event.data().get("answerHash"));
+        assertEquals("Answer mentions SECRET=abc.".length(), event.data().get("answerChars"));
         assertEquals(TraceRedactor.hash("Answer mentions SECRET=abc."), trace.redaction().assistantHash());
 
         String json = MAPPER.writeValueAsString(trace);
@@ -40,27 +40,27 @@ class LocalTurnTraceModelResponseTest {
     }
 
     @Test
-    void modelResponseTraceRecordingHasDedicatedRecorderOwner() throws Exception {
+    void routedAnswerTraceRecordingHasDedicatedRecorderOwner() throws Exception {
         Path capturePath = Path.of("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java");
-        Path recorderPath = Path.of("src/main/java/dev/talos/runtime/trace/ModelResponseTraceRecorder.java");
+        Path recorderPath = Path.of("src/main/java/dev/talos/runtime/trace/RoutedAnswerTraceRecorder.java");
 
         assertTrue(Files.exists(recorderPath),
-                "model response trace summary and event recording should have a dedicated owner");
+                "routed answer trace summary and event recording should have a dedicated owner");
 
         String captureSource = Files.readString(capturePath);
-        String methodBody = methodBody(captureSource, "recordModelResponseReceived");
+        String methodBody = methodBody(captureSource, "recordRoutedAnswerCaptured");
         String recorderSource = Files.readString(recorderPath);
 
-        assertTrue(captureSource.contains("ModelResponseTraceRecorder."), captureSource);
+        assertTrue(captureSource.contains("RoutedAnswerTraceRecorder."), captureSource);
         assertFalse(methodBody.contains("assistantSummary("), methodBody);
-        assertFalse(methodBody.contains("\"MODEL_RESPONSE_RECEIVED\""), methodBody);
-        assertFalse(methodBody.contains("\"assistantHash\""), methodBody);
-        assertFalse(methodBody.contains("\"assistantChars\""), methodBody);
+        assertFalse(methodBody.contains("\"ROUTED_ANSWER_CAPTURED\""), methodBody);
+        assertFalse(methodBody.contains("\"answerHash\""), methodBody);
+        assertFalse(methodBody.contains("\"answerChars\""), methodBody);
 
         assertTrue(recorderSource.contains("assistantSummary("), recorderSource);
-        assertTrue(recorderSource.contains("MODEL_RESPONSE_RECEIVED"), recorderSource);
-        assertTrue(recorderSource.contains("\"assistantHash\""), recorderSource);
-        assertTrue(recorderSource.contains("\"assistantChars\""), recorderSource);
+        assertTrue(recorderSource.contains("ROUTED_ANSWER_CAPTURED"), recorderSource);
+        assertTrue(recorderSource.contains("\"answerHash\""), recorderSource);
+        assertTrue(recorderSource.contains("\"answerChars\""), recorderSource);
     }
 
     private static String methodBody(String source, String methodName) {

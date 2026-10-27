@@ -13,8 +13,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -130,6 +132,109 @@ class RetrieveToolTest {
     }
 
     @Test
+    void directCancellationFromRetrievalPropagates(@TempDir Path workspace) {
+        CancellationException cancellation = new CancellationException("stop retrieval");
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                throw cancellation;
+            }
+        });
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> tool.execute(
+                        new ToolCall("talos.retrieve", Map.of("query", "test")),
+                        testContext(workspace)));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void wrappedInterruptionFromRetrievalPropagatesAndRestoresFlag(@TempDir Path workspace) {
+        RuntimeException wrapper = new RuntimeException(new InterruptedException("stop retrieval"));
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                throw wrapper;
+            }
+        });
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> tool.execute(
+                            new ToolCall("talos.retrieve", Map.of("query", "test")),
+                            testContext(workspace)));
+
+            assertSame(wrapper, thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void boundedWrapperDepthInterruptionStillPropagates(@TempDir Path workspace) {
+        RuntimeException wrapper = boundedDepthWrapper(new InterruptedException("stop retrieval"));
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                throw wrapper;
+            }
+        });
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> tool.execute(
+                            new ToolCall("talos.retrieve", Map.of("query", "test")),
+                            testContext(workspace)));
+
+            assertSame(wrapper, thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void typedValidationBarrierDoesNotBecomeInterruption(@TempDir Path workspace) {
+        RuntimeException wrapper = new RuntimeException(
+                new IllegalArgumentException(new InterruptedException("not caller interruption")));
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                throw wrapper;
+            }
+        });
+
+        ToolResult result = tool.execute(
+                new ToolCall("talos.retrieve", Map.of("query", "test")),
+                testContext(workspace));
+
+        assertFalse(result.success());
+        assertFalse(Thread.currentThread().isInterrupted());
+    }
+
+    @Test
+    void ordinaryRetrievalFailureRemainsStructuredToolFailure(@TempDir Path workspace) {
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                throw new IllegalStateException("ordinary retrieval failure");
+            }
+        });
+
+        ToolResult result = tool.execute(
+                new ToolCall("talos.retrieve", Map.of("query", "test")),
+                testContext(workspace));
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INTERNAL_ERROR, result.error().code());
+    }
+
+    @Test
     void retrieve_does_not_leak_dirty_index_canary(@TempDir Path workspace) {
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
             @Override
@@ -211,8 +316,77 @@ class RetrieveToolTest {
         assertTrue(r.output().contains("CLASS"));
         assertTrue(r.output().contains("src/RetrocatsService.java:1"));
         assertTrue(r.output().indexOf("Symbol signature matches") < r.output().indexOf("Found 1 snippet result"));
+        assertEquals(List.of("src/RetrocatsService.java"), sourcePaths(r));
+    }
+
+    private static List<String> sourcePaths(ToolResult result) {
+        try {
+            Method method = result.contentMetadata().getClass().getMethod("sourcePaths");
+            @SuppressWarnings("unchecked")
+            List<String> paths = (List<String>) method.invoke(result.contentMetadata());
+            return paths;
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Tool content metadata must expose structured source paths", e);
+        }
+    }
+
+    private static RuntimeException boundedDepthWrapper(Throwable leaf) {
+        Throwable current = leaf;
+        for (int i = 0; i < 64; i++) current = new RuntimeException(current);
+        return (RuntimeException) current;
+    }
+
+    // Index actions and failures are stated rather than reported as empty results.
+    private static final ToolCall CALL = new ToolCall("talos.retrieve", Map.of("query", "loom"));
+
+    @Test
+    void aFailureWithNoResultsIsAFailedToolResult() {
+        ToolResult result = tool(new RagService.Prepared(List.of(), List.of(), null, "Index corrupted")).execute(CALL, null);
+        assertFalse(result.success(), result.toString());
+        assertTrue(result.errorMessage().contains("Retrieval failed: Index corrupted"), result.errorMessage());
+        assertFalse(result.toString().contains("No results found"), result.toString());
+    }
+
+    @Test
+    void aFailureWithResultsIsReportedAsPartial() {
+        var snippet = new ContextResult.Snippet("README.md#0", "The loom catalog.");
+        ToolResult result = tool(new RagService.Prepared(List.of(snippet), List.of(), null, "vector stage failed"))
+                .execute(CALL, null);
+        assertTrue(result.success(), result.toString());
+        assertTrue(result.output().contains("README.md"), result.output());
+        assertTrue(result.output().contains("Retrieval was partial: vector stage failed"), result.output());
+    }
+
+    @Test
+    void anIndexBuiltInThisCallIsStated() {
+        var snippet = new ContextResult.Snippet("README.md#0", "The loom catalog.");
+        var prepared = new RagService.Prepared(List.of(snippet), List.of(), null, null, List.of(),
+                RagService.IndexAction.BUILT, "The workspace index was built in this call, 1 file scanned.");
+        ToolResult result = tool(prepared).execute(CALL, null);
+        assertTrue(result.success());
+        assertTrue(result.output().startsWith("The workspace index was built in this call, 1 file scanned."), result.output());
+    }
+
+    @Test
+    void aFailedIndexBuildIsAFailedToolResult() {
+        var prepared = new RagService.Prepared(List.of(), List.of(), null,
+                "The workspace index could not be built: disk full", List.of(),
+                RagService.IndexAction.FAILED, "The workspace index could not be built: disk full");
+        ToolResult result = tool(prepared).execute(CALL, null);
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("could not be built: disk full"), result.errorMessage());
+    }
+
+    @Test
+    void aGenuinelyEmptyResultKeepsItsWording() {
+        ToolResult result = tool(new RagService.Prepared(List.of(), List.of())).execute(CALL, null);
+        assertTrue(result.success());
+        assertEquals("No results found for: loom", result.output());
+    }
+
+    private static RetrieveTool tool(RagService.Prepared prepared) {
+        return new RetrieveTool(new RagService(new Config(null)) {
+            @Override public Prepared prepare(Path ws, String query, Integer topK) { return prepared; }
+        });
     }
 }
-
-
-

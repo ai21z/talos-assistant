@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -409,5 +412,46 @@ class CommandOutputTruthfulnessGuardTest {
                 0,
                 0,
                 List.of(outcomes));
+    }
+
+    @Test
+    void fileReadUnderItsAbsoluteSpellingGroundsTheFileContentClaim(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.writeString(root.resolve("README.md"), "# Demo\n");
+        String answer = """
+                README.md contains:
+                # Demo
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("What does README.md contain?"),
+                        loopResult(new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", root.resolve("README.md").toString(), true, false, false,
+                                "# Demo", "")),
+                        root);
+
+        assertFalse(result.unsupportedCommandOutputClaim(), result.answer());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void readOfAFileWithTheSameNameElsewhereDoesNotGroundTheClaim(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("README.md"), "# Demo\n");
+        Files.writeString(root.resolve("docs").resolve("README.md"), "# Other\n");
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        "README.md contains:\n# Demo\n",
+                        plan("What does README.md contain?"),
+                        loopResult(new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", root.resolve("docs").resolve("README.md").toString(), true, false,
+                                false, "# Other", "")),
+                        root);
+
+        assertTrue(result.unsupportedCommandOutputClaim(), result.answer());
     }
 }

@@ -10,7 +10,8 @@ import java.time.Instant;
  * sort oldest instead of newest.
  *
  * @param sessionId   full storage id ({@code <ws-hash>} for legacy files,
- *                    {@code <ws-hash>-<UTC timestamp>} for instance files)
+ *                    {@code <ws-hash>-<UTC timestamp>-<entropy>} for current
+ *                    instance files, with legacy forms retained)
  * @param createdAt   snapshot creation time, or the first turn-log
  *                    timestamp for crash logs; EPOCH when unknown
  * @param turnCount   snapshot turn count, or turn-log row count

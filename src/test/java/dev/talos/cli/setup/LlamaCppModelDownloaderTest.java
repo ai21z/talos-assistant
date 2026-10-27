@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -47,6 +48,43 @@ class LlamaCppModelDownloaderTest {
         assertEquals(target, result.modelPath());
         assertEquals("verified-model", Files.readString(target, StandardCharsets.UTF_8));
         assertFalse(Files.exists(part(target)), "verified download must not leave a .part file");
+    }
+
+    @Test
+    void passesVerifiedHashToEvidenceRecorderWithoutReadingModelAgain() throws Exception {
+        byte[] model = "verified-model".getBytes(StandardCharsets.UTF_8);
+        String expectedSha = sha256(model);
+        var entry = entry("agent", "agent.gguf", expectedSha);
+        AtomicReference<String> recordedSha = new AtomicReference<>();
+        AtomicReference<Path> recordedPath = new AtomicReference<>();
+        var downloader = new LlamaCppModelDownloader(
+                new RecordingDownloader(model),
+                (manifest, path, userHome, sha256) -> {
+                    recordedPath.set(path);
+                    recordedSha.set(sha256);
+                });
+
+        var result = downloader.download(entry, tempDir);
+
+        assertEquals(LlamaCppModelDownloader.Status.DOWNLOADED, result.status());
+        assertEquals(entry.modelPath(tempDir), recordedPath.get());
+        assertEquals(expectedSha, recordedSha.get());
+    }
+
+    @Test
+    void failsClosedWhenVerifiedEvidenceCannotBePersisted() throws Exception {
+        byte[] model = "verified-model".getBytes(StandardCharsets.UTF_8);
+        var entry = entry("agent", "agent.gguf", sha256(model));
+        var downloader = new LlamaCppModelDownloader(
+                new RecordingDownloader(model),
+                (manifest, path, userHome, sha256) -> {
+                    throw new IOException("evidence store unavailable");
+                });
+
+        var result = downloader.download(entry, tempDir);
+
+        assertEquals(LlamaCppModelDownloader.Status.FAILED, result.status());
+        assertTrue(result.message().contains("evidence store unavailable"), result.message());
     }
 
     @Test
@@ -98,11 +136,12 @@ class LlamaCppModelDownloaderTest {
         return new LlamaCppModelManifest.Entry(
                 alias,
                 "owner/repo",
+                "0123456789abcdef0123456789abcdef01234567",
                 file,
                 sha256,
                 123L,
                 "accepted beta",
-                "16 GB RAM minimum; 24 GB+ comfortable for CPU-only");
+                "16 GB RAM minimum; 24 GB+ for CPU-only; large CPU model, not the low-resource lane");
     }
 
     private static Path part(Path target) {

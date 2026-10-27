@@ -250,7 +250,8 @@ public final class StartupBannerRenderer {
         }
         appendLine(out, "+" + repeat("-", w - 2) + "+");
         Hint hint = hint(s);
-        appendAsciiRow(out, "[ok] " + hint.state() + " - " + hint.rest().replace(" · ", " - "), contentWidth);
+        String marker = "ready".equals(hint.state()) ? "[ok] " : "[!] ";
+        appendAsciiRow(out, marker + hint.state() + " - " + hint.rest().replace(" · ", " - "), contentWidth);
         appendLine(out, "+" + repeat("-", w - 2) + "+");
         return out.toString();
     }
@@ -354,6 +355,10 @@ public final class StartupBannerRenderer {
     }
 
     private static Hint hint(CliStatusDashboard.Snapshot s) {
+        Hint explicit = explicitNonReadyHint(s.next());
+        if (explicit != null) {
+            return explicit;
+        }
         String mode = lower(s.mode());
         if (mode.equals("debug")) {
             return new Hint("debug on", "use /last trace or /prompt-debug last");
@@ -365,6 +370,23 @@ public final class StartupBannerRenderer {
             return new Hint("governed edits", "writes require approval");
         }
         return new Hint("ready", "type /help, /status, /tools · or ask a question");
+    }
+
+    private static Hint explicitNonReadyHint(String next) {
+        String value = Objects.toString(next, "").trim();
+        if (value.isBlank()) return null;
+        int split = value.indexOf(" · ");
+        int delimiterLength = 3;
+        if (split < 0) {
+            split = value.indexOf(" - ");
+        }
+        if (split < 0) return null;
+        String state = value.substring(0, split).trim();
+        String rest = value.substring(split + delimiterLength).trim();
+        if (state.isBlank() || rest.isBlank() || "ready".equals(lower(state))) {
+            return null;
+        }
+        return new Hint(state, rest);
     }
 
     private static String compactHint(CliStatusDashboard.Snapshot s) {

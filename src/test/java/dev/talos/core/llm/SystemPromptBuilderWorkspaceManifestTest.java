@@ -59,11 +59,13 @@ class SystemPromptBuilderWorkspaceManifestTest {
         assertTrue(prompt.contains("README.md"),
                 "Prompt must list README.md. Prompt was:\n" + prompt);
 
-        // README excerpt is included - but this is a *grounding aid*, not a
-        // substitute for reading files. The excerpt header is required; the
-        // contents are allowed but bounded elsewhere.
-        assertTrue(prompt.contains("README (excerpt):"),
-                "Prompt must include README excerpt section header.");
+        // T1011: README CONTENT is workspace data and must never ride in
+        // the system prompt; the path listing above is the bounded
+        // metadata. The model reads the README on demand instead.
+        assertFalse(prompt.contains("README (excerpt):"),
+                "System prompt must not include a README excerpt section.");
+        assertFalse(prompt.contains("This is a small demo"),
+                "System prompt must not include README file content.");
     }
 
     @Test

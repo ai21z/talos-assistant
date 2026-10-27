@@ -1,6 +1,10 @@
 package dev.talos.engine.compat;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.safety.SafeLogFormatter;
@@ -10,7 +14,12 @@ import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ProviderTransportAttempt;
+import dev.talos.spi.types.ProviderTransportTokenStream;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -19,7 +28,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -46,8 +57,16 @@ import java.util.stream.StreamSupport;
 public final class CompatChatClient {
     static final String PROVIDER_BODY_STAGE = "COMPAT_CHAT_HTTP_BODY";
 
+    /** Provider-local compatibility selected from the prepared engine identity, never model output. */
+    public enum NativeToolPrefill { NONE, QWEN25_REQUIRED }
+
     private static final Logger LOG = LoggerFactory.getLogger(CompatChatClient.class);
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
+    static final int MAX_RESPONSE_SCHEMA_CHARS = 64_000;
+    private static final ObjectMapper RESPONSE_SCHEMA_MAPPER = new ObjectMapper(JsonFactory.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(32)
+                    .maxStringLength(MAX_RESPONSE_SCHEMA_CHARS).maxNumberLength(128).build()).build());
     private static final Pattern CONTEXT_SIZE_PATTERN = Pattern.compile(
             "request\\s*\\((\\d+)\\s+tokens\\)\\s+exceeds\\s+the\\s+available\\s+context\\s+size\\s*\\((\\d+)\\s+tokens\\)",
             Pattern.CASE_INSENSITIVE);
@@ -65,10 +84,32 @@ public final class CompatChatClient {
     }
 
     public String chat(ChatRequest request) throws Exception {
+        return chat(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
+    }
+
+    public String chat(ChatRequest request, RequestMessageLayout layout) throws Exception {
+        return chat(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public String chat(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
+        return chat(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public String chat(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, false));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, false, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, false, selected, prefill));
+        recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
@@ -76,7 +117,19 @@ public final class CompatChatClient {
 
         HttpResponse<String> resp;
         try {
-            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            ProviderTransportAttempt transport = ProviderTransportHandoff.admit(
+                    handoff, json, req.tools, req);
+            resp = transport.invokeSend(() -> http.send(
+                    httpReq,
+                    observeHeaders(
+                            transport,
+                            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))));
+            transport.responseBodyOpened(() -> { });
+            if (resp.statusCode() / 100 == 2
+                    && hasExactNonStreamingTerminal(resp.body())) {
+                transport.providerTerminalObserved();
+            }
+            transport.responseBodyCompleted();
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
         } catch (HttpTimeoutException te) {
@@ -88,18 +141,47 @@ public final class CompatChatClient {
     }
 
     public Stream<TokenChunk> chatStream(ChatRequest request) throws Exception {
+        return chatStream(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout) throws Exception {
+        return chatStream(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
+        return chatStream(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, true));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, true, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, true, selected, prefill));
+        recordProviderBody(req, true, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, true)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<java.io.InputStream> resp;
+        ProviderTransportAttempt transport;
         try {
-            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+            transport = ProviderTransportHandoff.admit(handoff, json, req.tools, req);
+            resp = transport.invokeSend(() -> http.send(
+                    httpReq,
+                    observeHeaders(transport, HttpResponse.BodyHandlers.ofInputStream())));
+            transport.responseBodyOpened(resp.body());
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
         } catch (HttpTimeoutException te) {
@@ -107,31 +189,76 @@ public final class CompatChatClient {
         }
 
         if (resp.statusCode() / 100 != 2) {
-            checkStatus(resp.statusCode(), req.model, readErrorBody(resp.body()));
+            checkStatus(resp.statusCode(), req.model, readErrorBody(resp.body(), transport));
         }
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         Iterator<TokenChunk> iterator = new SseIterator(reader, mapper);
-        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+        Stream<TokenChunk> body = StreamSupport.stream(
+                        Spliterators.spliteratorUnknownSize(iterator, 0), false)
                 .onClose(() -> {
-                    try { reader.close(); } catch (Exception ignored) {}
+                    try {
+                        reader.close();
+                    } catch (IOException failure) {
+                        throw new UncheckedIOException(failure);
+                    }
                 });
+        return ProviderTransportTokenStream.track(
+                body,
+                transport,
+                ProviderTransportTokenStream.Exhaustion.LOGICAL_PROTOCOL_END);
     }
 
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
+        return chatStreamNonStreaming(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout) throws Exception {
+        return chatStreamNonStreaming(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
+        return chatStreamNonStreaming(request, layout, NativeToolPrefill.NONE, handoff);
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, false));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, false, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, false, selected, prefill));
+        recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<String> resp;
+        ProviderTransportAttempt transport;
         try {
-            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            transport = ProviderTransportHandoff.admit(handoff, json, req.tools, req);
+            resp = transport.invokeSend(() -> http.send(
+                    httpReq,
+                    observeHeaders(
+                            transport,
+                            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))));
+            transport.responseBodyOpened(() -> { });
+            if (resp.statusCode() / 100 == 2
+                    && hasExactNonStreamingTerminal(resp.body())) {
+                transport.providerTerminalObserved();
+            }
+            transport.responseBodyCompleted();
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
         } catch (HttpTimeoutException te) {
@@ -143,11 +270,35 @@ public final class CompatChatClient {
     }
 
     Map<String, Object> buildBody(ChatRequest req, boolean stream) {
+        return buildBody(req, stream, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+    }
+
+    Map<String, Object> buildBody(
+            ChatRequest req,
+            boolean stream,
+            RequestMessageLayout layout) {
+        return buildBody(req, stream, layout, NativeToolPrefill.NONE);
+    }
+
+    Map<String, Object> buildBody(
+            ChatRequest req,
+            boolean stream,
+            RequestMessageLayout layout,
+            NativeToolPrefill prefill) {
         String model = req.model == null || req.model.isBlank() ? defaultModel : req.model;
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", serializeMessages(req));
+        List<Map<String, Object>> messages = serializeMessages(req, safeLayout(layout));
+        body.put("messages", messages);
         body.put("stream", stream);
+
+        if (shouldPrefillNativeToolCall(req, messages, prefill)) {
+            // Only the serialized provider body gains a format prefix. Logical history,
+            // tool names, arguments and execution authority are not supplied or changed.
+            messages.add(serializeMessage(ChatMessage.assistant("<tool_call>\n")));
+            body.put("continue_final_message", "content");
+            body.put("add_generation_prompt", false);
+        }
 
         List<Map<String, Object>> tools = convertToolSpecs(req.tools);
         if (!tools.isEmpty()) {
@@ -164,6 +315,10 @@ public final class CompatChatClient {
             body.put("response_format", responseFormat);
         }
 
+        if (req.controls != null && req.controls.maxOutputTokens() > 0) {
+            body.put("max_tokens", req.controls.maxOutputTokens());
+        }
+
         SamplingControls sampling = req.controls == null ? null : req.controls.sampling();
         if (sampling != null) {
             if (sampling.temperature() != null) body.put("temperature", sampling.temperature());
@@ -173,6 +328,35 @@ public final class CompatChatClient {
         }
 
         return body;
+    }
+
+    private static boolean shouldPrefillNativeToolCall(
+            ChatRequest req,
+            List<Map<String, Object>> messages,
+            NativeToolPrefill prefill) {
+        if (prefill != NativeToolPrefill.QWEN25_REQUIRED
+                || req.tools.isEmpty()
+                || req.controls.toolAuthorityMode() != ToolAuthorityMode.PROVIDER_NATIVE
+                || req.controls.responseFormat() != ResponseFormatMode.TEXT
+                || messages.isEmpty()) {
+            return false;
+        }
+        ToolChoiceMode choice = req.controls.toolChoice();
+        if (choice != ToolChoiceMode.REQUIRED && choice != ToolChoiceMode.NAMED) {
+            return false;
+        }
+        if (choice == ToolChoiceMode.NAMED
+                && (req.tools.size() != 1
+                || !req.controls.namedTool().equals(req.tools.getFirst().name()))) {
+            return false;
+        }
+        Map<String, Object> last = messages.getLast();
+        if (last.containsKey("tool_calls")) {
+            return false;
+        }
+        return "user".equals(last.get("role"))
+                || "tool".equals(last.get("role"))
+                && last.get("tool_call_id") instanceof String id && !id.isBlank();
     }
 
     List<Map<String, Object>> convertToolSpecs(List<ToolSpec> specs) {
@@ -200,7 +384,9 @@ public final class CompatChatClient {
                 .header("Content-Type", "application/json");
     }
 
-    private List<Map<String, Object>> serializeMessages(ChatRequest req) {
+    private List<Map<String, Object>> serializeMessages(
+            ChatRequest req,
+            RequestMessageLayout layout) {
         List<ChatMessage> source = req.messages;
         if (source == null || source.isEmpty()) {
             List<ChatMessage> fallback = new ArrayList<>();
@@ -214,11 +400,26 @@ public final class CompatChatClient {
             source = fallback;
         }
 
-        List<Map<String, Object>> messages = new ArrayList<>(source.size());
-        for (ChatMessage message : source) {
+        List<ChatMessage> providerMessages = ProviderMessageLayoutAdapter.apply(source, layout);
+        List<Map<String, Object>> messages = new ArrayList<>(providerMessages.size());
+        for (ChatMessage message : providerMessages) {
             messages.add(serializeMessage(message));
         }
         return messages;
+    }
+
+    private void recordProviderBody(
+            ChatRequest request,
+            boolean stream,
+            String json,
+            RequestMessageLayout layout) {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                        request, stream, json, PROVIDER_BODY_STAGE)
+                .withDiagnostics(Map.of("provider.requestLayout", layout.name())));
+    }
+
+    private static RequestMessageLayout safeLayout(RequestMessageLayout layout) {
+        return layout == null ? RequestMessageLayout.PRESERVE_AS_WRITTEN : layout;
     }
 
     private Map<String, Object> serializeMessage(ChatMessage message) {
@@ -260,14 +461,17 @@ public final class CompatChatClient {
             case AUTO -> null;
             case NONE -> "none";
             case REQUIRED -> "required";
-            case NAMED -> {
-                Map<String, Object> fn = new LinkedHashMap<>();
-                fn.put("name", req.controls.namedTool());
-                Map<String, Object> choice = new LinkedHashMap<>();
-                choice.put("type", "function");
-                choice.put("function", fn);
-                yield choice;
-            }
+            // T1008: llama-server (pinned b9918) parses tool_choice as a
+            // string only (auto, none, required). The OpenAI named-function
+            // object form hits a type mismatch in the server's json_value
+            // helper and silently degrades to "auto", so the named
+            // enforcement never happened on the managed backend. Talos only
+            // selects NAMED when the visible surface exposes exactly one
+            // tool (ProviderRequestControlPolicy and the write-repair
+            // planners), so the string "required" is an equivalent
+            // constraint that the server actually enforces, and it makes
+            // the tool grammar non-lazy from the first token.
+            case NAMED -> "required";
         };
     }
 
@@ -279,10 +483,25 @@ public final class CompatChatClient {
             case JSON_SCHEMA -> {
                 Map<String, Object> rf = new LinkedHashMap<>();
                 rf.put("type", "json_schema");
-                rf.put("schema", parseSchemaOrDefault(req.controls.jsonSchema()));
+                rf.put("json_schema", Map.of("schema", parseResponseSchema(req.controls.jsonSchema())));
                 yield rf;
             }
         };
+    }
+
+    private static JsonNode parseResponseSchema(String schemaJson) {
+        if (schemaJson == null || schemaJson.isBlank() || schemaJson.length() > MAX_RESPONSE_SCHEMA_CHARS) {
+            throw new IllegalArgumentException("Invalid JSON response schema");
+        }
+        try {
+            JsonNode schema = readExactJson(RESPONSE_SCHEMA_MAPPER, schemaJson);
+            if (schema == null || !schema.isObject() || schema.isEmpty()) {
+                throw new IllegalArgumentException("Invalid JSON response schema");
+            }
+            return schema;
+        } catch (IOException failure) {
+            throw new IllegalArgumentException("Invalid JSON response schema", failure);
+        }
     }
 
     private Object parseSchemaOrDefault(String schemaJson) {
@@ -328,7 +547,12 @@ public final class CompatChatClient {
                 chunks.add(TokenChunk.ofToolCalls(calls));
             }
 
-            chunks.add(TokenChunk.eos());
+            JsonNode finish = firstChoice(json).get("finish_reason");
+            if (finish != null && finish.isTextual() && !finish.asText().isBlank()) {
+                chunks.add(TokenChunk.eos(finish.asText("")));
+            } else {
+                chunks.add(TokenChunk.transportEof(""));
+            }
             return List.copyOf(chunks);
         } catch (EngineException e) {
             throw e;
@@ -370,7 +594,7 @@ public final class CompatChatClient {
             if (arguments.isTextual()) {
                 String raw = arguments.asText("");
                 if (raw.isBlank()) return Map.of();
-                JsonNode node = mapper.readTree(raw);
+                JsonNode node = readExactJson(mapper, raw);
                 if (node.isObject()) {
                     return mapper.convertValue(node, MAP_REF);
                 }
@@ -387,7 +611,7 @@ public final class CompatChatClient {
 
     private JsonNode firstChoice(String json) {
         try {
-            JsonNode root = mapper.readTree(json);
+            JsonNode root = readExactJson(mapper, json);
             JsonNode choices = root.path("choices");
             if (choices.isArray() && !choices.isEmpty()) {
                 return choices.get(0);
@@ -413,13 +637,43 @@ public final class CompatChatClient {
         throw new EngineException.ResponseError(status, body);
     }
 
-    private static String readErrorBody(java.io.InputStream body) {
+    private static String readErrorBody(
+            java.io.InputStream body,
+            ProviderTransportAttempt transport) {
         if (body == null) return null;
+        String text;
         try (body) {
-            return new String(body.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (Exception ignored) {
+            text = new String(body.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception failure) {
+            transport.responseBodyFailed(failure);
             return null;
         }
+        transport.responseBodyCompleted();
+        return text;
+    }
+
+    private boolean hasExactNonStreamingTerminal(String json) {
+        try {
+            JsonNode finish = firstChoice(json).get("finish_reason");
+            return finish != null && finish.isTextual() && !finish.asText().isBlank();
+        } catch (EngineException malformed) {
+            return false;
+        }
+    }
+
+    private static <T> HttpResponse.BodyHandler<T> observeHeaders(
+            ProviderTransportAttempt transport,
+            HttpResponse.BodyHandler<T> delegate) {
+        return responseInfo -> {
+            transport.responseHeadersObserved();
+            return delegate.apply(responseInfo);
+        };
+    }
+
+    private static JsonNode readExactJson(ObjectMapper mapper, String json) throws IOException {
+        return mapper.readerFor(JsonNode.class)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .readValue(json);
     }
 
     private static boolean looksLikeContextBudgetError(int status, String body) {
@@ -464,6 +718,7 @@ public final class CompatChatClient {
         private final ObjectMapper mapper;
         private final Deque<TokenChunk> pending = new ArrayDeque<>();
         private final Map<Integer, PartialToolCall> partialToolCalls = new LinkedHashMap<>();
+        private String finishReason = "";
         private boolean finished;
 
         private SseIterator(BufferedReader reader, ObjectMapper mapper) {
@@ -488,13 +743,18 @@ public final class CompatChatClient {
                 String line;
                 try {
                     line = reader.readLine();
-                } catch (Exception e) {
-                    throw new EngineException.MalformedResponse("compat chat stream", "", e);
+                } catch (IOException e) {
+                    throw new EngineException.Transient(
+                            "Stream read aborted during generation",
+                            e,
+                            408,
+                            "Local model generation stopped before Talos received a complete stream. "
+                                    + "Try a smaller model, shorten the prompt, or raise limits.llm_timeout_ms in config.");
                 }
 
                 if (line == null) {
                     flushToolCallsIfAny();
-                    pending.add(TokenChunk.eos());
+                    pending.add(TokenChunk.transportEof(finishReason));
                     finished = true;
                     return;
                 }
@@ -506,7 +766,7 @@ public final class CompatChatClient {
                 String data = line.substring("data:".length()).trim();
                 if ("[DONE]".equals(data)) {
                     flushToolCallsIfAny();
-                    pending.add(TokenChunk.eos());
+                    pending.add(TokenChunk.eos(finishReason));
                     finished = true;
                     return;
                 }
@@ -517,7 +777,7 @@ public final class CompatChatClient {
 
         private void parseDataLine(String data) {
             try {
-                JsonNode root = mapper.readTree(data);
+                JsonNode root = readExactJson(mapper, data);
                 JsonNode choices = root.path("choices");
                 if (!choices.isArray() || choices.isEmpty()) {
                     throw new EngineException.MalformedResponse("compat chat stream", data);
@@ -536,6 +796,9 @@ public final class CompatChatClient {
                 }
 
                 String finishReason = choice.path("finish_reason").asText("");
+                if (!finishReason.isBlank()) {
+                    this.finishReason = finishReason;
+                }
                 if ("tool_calls".equals(finishReason)) {
                     flushToolCallsIfAny();
                 }
@@ -608,7 +871,7 @@ public final class CompatChatClient {
         private Map<String, Object> parseArguments(String raw) {
             if (raw == null || raw.isBlank()) return Map.of();
             try {
-                JsonNode node = mapper.readTree(raw);
+                JsonNode node = readExactJson(mapper, raw);
                 if (node.isObject()) {
                     return mapper.convertValue(node, MAP_REF);
                 }

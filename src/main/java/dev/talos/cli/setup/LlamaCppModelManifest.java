@@ -1,5 +1,7 @@
 package dev.talos.cli.setup;
 
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
@@ -12,23 +14,10 @@ import java.util.stream.Collectors;
 public final class LlamaCppModelManifest {
     private static final long GIB = 1024L * 1024L * 1024L;
 
-    private static final List<Entry> ACCEPTED_BETA = List.of(
-            new Entry(
-                    "qwen2.5-coder-14b",
-                    "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
-                    "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
-                    "c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940",
-                    8_988_110_272L,
-                    "accepted beta",
-                    "16 GB RAM minimum; 24 GB+ comfortable for CPU-only"),
-            new Entry(
-                    "gpt-oss-20b",
-                    "ggml-org/gpt-oss-20b-GGUF",
-                    "gpt-oss-20b-mxfp4.gguf",
-                    "be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935",
-                    12_109_566_560L,
-                    "accepted beta",
-                    "24 GB RAM minimum; 32 GB+ comfortable for CPU-only"));
+    private static final List<Entry> ACCEPTED_BETA = LlamaCppModelCatalog.selectableProfiles().stream()
+            .filter(LlamaCppModelCatalog.Profile::wizardDownload)
+            .map(Entry::from)
+            .toList();
 
     private static final Map<String, Entry> BY_ALIAS = ACCEPTED_BETA.stream()
             .collect(Collectors.toUnmodifiableMap(
@@ -52,6 +41,7 @@ public final class LlamaCppModelManifest {
     public record Entry(
             String alias,
             String hfRepo,
+            String revision,
             String hfFile,
             String sha256,
             long sizeBytes,
@@ -59,7 +49,7 @@ public final class LlamaCppModelManifest {
             String ramGuidance) {
 
         public URI url() {
-            return URI.create("https://huggingface.co/" + hfRepo + "/resolve/main/" + hfFile);
+            return URI.create("https://huggingface.co/" + hfRepo + "/resolve/" + revision + "/" + hfFile);
         }
 
         public Path modelPath(Path userHome) {
@@ -89,6 +79,18 @@ public final class LlamaCppModelManifest {
 
         private static String gib(long bytes) {
             return String.format(Locale.ROOT, "%.2f", bytes / (double) GIB);
+        }
+
+        private static Entry from(LlamaCppModelCatalog.Profile profile) {
+            return new Entry(
+                    profile.alias(),
+                    profile.repository(),
+                    profile.revision(),
+                    profile.artifactFile(),
+                    profile.artifactSha256(),
+                    profile.artifactSizeBytes(),
+                    profile.disposition().label(),
+                    profile.ramGuidance());
         }
     }
 }

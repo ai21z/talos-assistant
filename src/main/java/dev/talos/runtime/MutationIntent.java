@@ -1,9 +1,12 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.intent.MutationActionEvidence;
+import dev.talos.runtime.intent.CurrentRequestClauses;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -107,8 +110,7 @@ public final class MutationIntent {
             "apply the", "apply these", "apply those",
             "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
-            "refactor ",
-            "darker and more minimal"
+            "refactor the ", "refactor this ", "refactor it"
     );
 
     private static final Set<String> READ_ONLY_NEGATIONS = Set.of(
@@ -127,50 +129,179 @@ public final class MutationIntent {
             "extra", "new", "separate", "unlinked"
     );
 
+    private static final String SCOPED_WEB_RESOURCE =
+            "(?:stylesheets?|style\\s+sheets?|styles?|javascript|java\\s+script|scripts?|css|js|html)"
+                    + "(?:\\s+(?:files?|assets?))?";
+
+    private static final Pattern SCOPED_WEB_RESOURCE_LIST = Pattern.compile(
+            "^(?:(?:any|the|a|an)\\s+)?" + SCOPED_WEB_RESOURCE
+                    + "(?:(?:\\s*,\\s*|\\s+(?:and|or)\\s+)"
+                    + "(?:(?:any|the|a|an)\\s+)?" + SCOPED_WEB_RESOURCE + ")*\\b");
+
+    /**
+     * The single file-target extension inventory every target pattern
+     * below composes from. It previously existed as four hand-copied
+     * variants that drifted (one carried "py", the others did not, so
+     * "Edit app.py ... show me only the code" routed inline while the
+     * same request against App.java routed as a mutation). Longer
+     * alternatives sit before their prefixes so the trailing boundary
+     * lookahead matches without backtracking. Single-letter {@code .c}
+     * targets are handled by a stricter file-name pattern below so state
+     * abbreviations such as "D.C." do not look like files.
+     */
+    private static final String FILE_TARGET_EXTENSIONS =
+            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp";
+
+    private static final String NAMED_FILE_TARGET_EXTENSIONS =
+            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp";
+
+    private static final String NAMED_C_SOURCE_FILE_TARGET =
+            "(?:(?:[A-Za-z0-9_.-]+[\\\\/])+)?[A-Za-z0-9_-][A-Za-z0-9_.-]*[A-Za-z0-9_-]\\.c";
+
+    private static final String C_SOURCE_FILE_TARGET =
+            "(?:(?:[a-z0-9_.-]+[\\\\/])+)?[a-z0-9_-][a-z0-9_.-]*[a-z0-9_-]\\.c";
+
+    private static final String FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS =
+            FILE_TARGET_EXTENSIONS + "|pdf|doc|docx|xls|xlsx|ppt|pptx";
+
+    private static final String FILE_TARGET_WITH_EXTENSION =
+            "(?:" + C_SOURCE_FILE_TARGET + ")"
+                    + "|(?:[a-z0-9_.\\\\/-]+\\.(?:"
+                    + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))";
+
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp))"
+            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + NAMED_C_SOURCE_FILE_TARGET + ")"
+                    + "|(?:[A-Za-z0-9_.\\\\/-]+\\.(?:" + NAMED_FILE_TARGET_EXTENSIONS + ")))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
+    /**
+     * T1009/T1014: request-shaped mid-sentence rename recognition.
+     * Sentence-initial and please/can-you forms are already covered by
+     * REQUEST_PATTERNS because rename is a CORE_MUTATION_VERB, and the
+     * comma-scoped form ("In src/app.js, rename reset to resetAll.") is
+     * covered by SCOPED_PREFIX_MUTATION_REQUEST. This pattern adds the
+     * remaining clause starts with an explicit "rename X to Y"
+     * relationship: after sentence punctuation, after an assistant-directed
+     * filler ("then rename reset to resetAll"), or after a comma-less
+     * file-shaped anchor ("in src/app.js rename reset to resetAll"). The
+     * sentence-punctuation branch requires whitespace so API identifiers
+     * like os.rename never qualify through their own dot, and the object
+     * is at most an article plus one typed noun before the X-to-Y pair.
+     *
+     * <p>The structural shape alone is not enough: generic advice ("In
+     * general, rename variables to improve readability.") builds the same
+     * shape from plain prose words. A match classifies as mutation only
+     * with a concrete file/scope anchor (group 1) or an identifier-shaped X
+     * or Y (mixed case, separators, digits, or an extension), checked
+     * against the original casing.
+     */
+    private static final String RENAME_TARGET_TOKEN = "[a-z0-9_.$\\\\/-]+";
+
+    private static final String RENAME_FILE_SCOPE_TOKEN =
+            "(?:[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
+                    + "|[a-z0-9_$-]+\\.(?:" + FILE_TARGET_EXTENSIONS + "))";
+
+    // Clause starts admit sentence boundaries ([.!?]), assistant-directed
+    // fillers, and a concrete file-scope anchor. Bare commas, colons, and
+    // semicolons are NOT clause starts: they introduce reported speech
+    // ("the guide says,") and advisory framing ("For readability,"), which
+    // stay read-only no matter how identifier-shaped the operands are.
+    private static final Pattern MID_SENTENCE_RENAME_REQUEST = Pattern.compile(
+            "(?:[.!?]\\s+|\\b(?:please|then|and|now|just)\\s+"
+                    + "|\\b(?:in|inside|within)\\s+(" + RENAME_FILE_SCOPE_TOKEN + ")\\s+)"
+                    + "(?:please\\s+)?rename\\s+(?:(?:the|a|an)\\s+)?"
+                    + "(?:(?:function|method|file|variable|class|constant|field|folder"
+                    + "|directory|module|component|script|page)\\s+)?"
+                    + "(" + RENAME_TARGET_TOKEN + ")\\s+to\\s+(" + RENAME_TARGET_TOKEN + ")",
+            Pattern.CASE_INSENSITIVE);
+
     private static final String EXPLICIT_FILE_TARGET =
-            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+            "(?:`?(?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
-    private static final String FIX_PROBLEM_FILE_TARGET =
-            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
-                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
-                    + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
-                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
+    private static final String TEXT_FORMAT_MUTATION_VERBS = "(?:normali[sz]e|convert)";
+
+    private static final String TEXT_FORMAT_TARGET_REQUEST =
+            TEXT_FORMAT_MUTATION_VERBS + "\\s+(?:the\\s+)?(?:file\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))";
+
+    /**
+     * Text-format operations are deliberately request-shaped rather than
+     * added to the unanchored mutation-mention inventory. This recognizes
+     * direct and assistant-directed commands without granting mutation
+     * authority to documentation such as "the guide says to normalize...".
+     */
+    private static final List<Pattern> TEXT_FORMAT_REQUEST_PATTERNS = List.of(
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:can|could|would|will)\\s+you\\s+"
+                    + "(?:please\\s+)?" + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+"
+                    + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+"
+                    + TEXT_FORMAT_TARGET_REQUEST));
 
     private static final String CAPTURED_FILE_TARGET =
-            "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+            "`?((?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
 
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
-            "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+            "\\b(?:" + CORE_MUTATION_VERBS + "|improve|adjust|tweak|polish)"
+                    + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+    private static final Pattern CONTRASTIVE_MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
+            "(?:^|[.!?;]\\s+|\\b(?:but|however)\\s+)"
+                    + "(?:please\\s+)?\\b" + CORE_MUTATION_VERBS
+                    + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
+    /**
+     * Scoped-prefix imperative: "In SCOPE, VERB ..." (also inside/within,
+     * sentence-initial or after a sentence boundary). The comma after the
+     * scope is the imperative signal here because the clause OPENS with a
+     * concrete scope - a file path or a DEFINITE typed scope noun ("the
+     * tracker module"; indefinite scopes like "a large module" are
+     * generic guidance) - and the verb must head an imperative clause: a
+     * verb used as a noun or in the passive ("replace is called twice",
+     * "copy of the header", "move semantics") is descriptive prose, and a
+     * sentence that ends in a question mark is a question about the file,
+     * not an instruction to change it.
+     */
+    private static final String TYPED_SCOPE_NOUN_PHRASE =
+            "(?:the|this|that)\\s+[a-z0-9_.$-]+\\s+"
+                    + "(?:module|file|class|component|package|folder|directory|script|page|section)";
+
+    private static final String NON_IMPERATIVE_VERB_CONTINUATION =
+            "(?!\\s+(?:is|are|was|were|has|have|had|does|did|will|would|can|could|"
+                    + "may|might|should|must|of|seems?|appears?|happens?|means?|matters?|"
+                    + "semantics|operations?|instructions?|frequency|behaviou?rs?|detection|calls?)\\b)";
+
+    private static final Pattern SCOPED_PREFIX_MUTATION_REQUEST = Pattern.compile(
+            "(?:^|[.!?]\\s+)(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + "(?:" + EXPLICIT_FILE_TARGET + "|[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
+                    + "|" + TYPED_SCOPE_NOUN_PHRASE + ")"
+                    + "\\s*[,:]\\s*(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b"
+                    + NON_IMPERATIVE_VERB_CONTINUATION);
+
+    private static final Pattern SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION = Pattern.compile(
+            "\\b(?i:" + CORE_MUTATION_VERBS + ")\\s+(?i:only\\s+)?[A-Za-z0-9_-]\\.c"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern FIX_PROBLEM_IN_FILE_TARGET = Pattern.compile(
             "\\bfix\\s+(?:(?:the|a|an)\\s+)?(?:[a-z0-9_#$./\\\\-]+\\s+){1,8}"
                     + "(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
-                    + FIX_PROBLEM_FILE_TARGET
+                    + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern FILE_SCOPED_DEFECT_MENTION = Pattern.compile(
             "\\b(?:bug|defect|issue|problem|error|failure|failing|broken)\\b.{0,120}"
                     + "\\b(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
-                    + FIX_PROBLEM_FILE_TARGET
+                    + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
             Pattern.DOTALL);
 
@@ -259,9 +390,39 @@ public final class MutationIntent {
                     + CORE_MUTATION_VERBS + "\\s+(?:it|this|that|them)\\s*\\?");
 
     private static final Pattern INSTRUCTIONAL_MUTATION_QUESTION = Pattern.compile(
-            "\\b(?:how\\s+to|how\\s+(?:can|could|should)\\s+(?:i|we)|"
+            "\\b(?:how\\s+to|how\\s+(?:can|could|should|do|would)\\s+(?:i|we)|"
                     + "(?:explain|show|tell)\\s+(?:me\\s+)?how\\s+to)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
+
+    /**
+     * Explicit inline-output phrases (T1000): the user is asking for chat
+     * codegen, not a workspace artifact. Deliberately phrase-anchored, no
+     * fuzzy intent inference, and overridden whenever a target file is
+     * actually named.
+     */
+    private static final List<String> INLINE_OUTPUT_PHRASES = List.of(
+            "output only the code",
+            "only output the code",
+            "output just the code",
+            "just show the code",
+            "just show me the code",
+            "show only the code",
+            "show me only the code",
+            "answer inline",
+            "inline answer",
+            "in your answer only",
+            "do not create a file",
+            "don't create a file",
+            "do not create any files",
+            "don't create any files",
+            "do not create files",
+            "don't create files",
+            "do not write a file",
+            "don't write a file",
+            "do not write any files",
+            "don't write any files",
+            "do not write files",
+            "don't write files");
 
     private MutationIntent() {}
 
@@ -273,39 +434,335 @@ public final class MutationIntent {
     }
 
     public static boolean looksExplicitMutationRequest(String userRequest) {
-        return isExplicitMutationClassificationReason(classificationReason(userRequest));
+        return classifyShape(userRequest).decision() == Decision.EXECUTE_MUTATION;
+    }
+
+    /** Typed request-shape decision for the current turn (T1014). */
+    public enum Decision { EXECUTE_MUTATION, READ_ONLY, AMBIGUOUS }
+
+    /**
+     * Typed classification: the decision, the stable reason string the
+     * runtime already stores on the task contract, and the matched
+     * evidence span for trace/debug (best-effort empty for default
+     * routes). AMBIGUOUS marks a mutation-shaped request under an explicit
+     * global read-only negation; it removes the workspace tool surface, and
+     * the runtime's deterministic denial asks the user for an explicit change
+     * request rather than inspecting, mutating, or silently dropping the edit.
+     * The decision reflects this classifier only: TaskContractResolver may
+     * layer its own reason overrides (session-meta, command-verification)
+     * on top of the stored reason string, so the effective contract is
+     * always the resolver's output, with this shape as its input.
+     */
+    public record RequestShape(Decision decision, String reason, String evidenceSpan) {}
+
+    public static RequestShape classifyShape(String userRequest) {
+        String reason = classificationReason(userRequest);
+        String original = userRequest == null ? "" : userRequest.trim();
+        String lower = original.toLowerCase(Locale.ROOT);
+        Decision decision;
+        if (isExplicitMutationClassificationReason(reason)) {
+            decision = Decision.EXECUTE_MUTATION;
+        } else if ("global-read-only-negation".equals(reason)
+                && hasDirectMutationRequestShape(userRequest, original, lower)) {
+            decision = Decision.AMBIGUOUS;
+        } else {
+            decision = Decision.READ_ONLY;
+        }
+        return new RequestShape(decision, reason, evidenceSpanFor(reason, original, lower));
+    }
+
+    private static boolean hasDirectMutationRequestShape(
+            String userRequest,
+            String original,
+            String lower
+    ) {
+        return looksSentenceInitialMutationImperative(lower)
+                || looksScopedPrefixMutationRequest(lower)
+                || looksMidSentenceRenameRequest(original)
+                || looksReviewThenMutationRequest(lower)
+                || looksReadThenMutationRequest(lower)
+                || looksExplicitBatchWorkspaceApplyRequest(lower)
+                || sourceToTargetArtifact(userRequest).isPresent()
+                || looksTextFormatMutationRequest(lower)
+                || looksTerminalBuildArtifactRequest(lower)
+                || looksNaturalMakeItArtifactRequest(lower)
+                || CONTRASTIVE_MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
     }
 
     public static String classificationReason(String userRequest) {
+        String reason = classificationReason(userRequest, true);
+        return "non-mutating".equals(reason) && independentMutationClause(userRequest).isPresent()
+                ? "explicit-current-clause-request" : reason;
+    }
+
+    /** Existing imperative rules are applied to independently stated current sentences. */
+    public static Optional<CurrentRequestClauses.Clause> independentMutationClause(String userRequest) {
+        List<CurrentRequestClauses.Clause> clauses = CurrentRequestClauses.sentences(userRequest);
+        if (clauses.size() < 2) return Optional.empty();
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(userRequest);
+        for (CurrentRequestClauses.Clause clause : clauses) {
+            if (clause.start() == 0) continue;
+            if (!hasBoundedOutcomePrelude(clauses, clause)) continue;
+            String lower = clause.text().toLowerCase(Locale.ROOT);
+            boolean authorizedAction = false;
+            for (Pattern pattern : REQUEST_PATTERNS) {
+                Matcher action = pattern.matcher(lower);
+                if (action.lookingAt() && action.groupCount() >= 1
+                        && evidence.permits(clause.start() + action.start(1), clause.start() + action.end(1))) {
+                    authorizedAction = true;
+                    break;
+                }
+            }
+            if (!authorizedAction) continue;
+            if (isExplicitMutationClassificationReason(classificationReason(clause.text(), true))) {
+                return Optional.of(clause);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean hasBoundedOutcomePrelude(List<CurrentRequestClauses.Clause> clauses,
+            CurrentRequestClauses.Clause current) {
+        Pattern outcome = Pattern.compile("^(?:(?:those|these|the|our|my|your) "
+                + "(?:(?:previous|prior|last|requested|earlier) )?"
+                + "(?:changes?|edits?|updates?|fixes?|writes?|attempts?)|no (?:changes|edits)|nothing) "
+                + "(?:(?:were|was|are|is|remain|remained|have been|has been) )?"
+                + "(?:(?:not|never|still|already) )*"
+                + "(?:approved|denied|rejected|blocked|applied|saved|changed|completed|verified|"
+                + "failed|incomplete|unchanged|pending)"
+                + "(?: (?:before|earlier|previously|yet|now|in (?:this|the previous) (?:turn|session))){0,2}$");
+        for (CurrentRequestClauses.Clause prior : clauses) {
+            if (prior.start() >= current.start()) break;
+            String text = prior.text().toLowerCase(Locale.ROOT).strip()
+                    .replaceFirst("[.!?]+$", "").strip().replaceAll("\\s+", " ");
+            if (!outcome.matcher(text).matches()) return false;
+        }
+        return true;
+    }
+
+    public record UserMutationReference(CurrentRequestClauses.Clause clause, boolean ambiguous, int statedCount) {}
+
+    /** A reference supplies no targets or authority without a separately resolved user scope. */
+    public static Optional<UserMutationReference> currentMutationReference(String request) {
+        if (!looksExplicitMutationRequest(request)) return Optional.empty();
+        Pattern reference = Pattern.compile("^(?:(?:those|these|the)(?:\\s+same)?|the\\s+same)"
+                + "(?:\\s+(one|two|three|four|five|six|seven|eight|[1-8]))?"
+                + "\\s+(?:changes|edits|improvements|updates|fixes)\\b");
+        UserMutationReference found = null;
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(request);
+        List<CurrentRequestClauses.Clause> clauses = CurrentRequestClauses.sentences(request);
+        for (CurrentRequestClauses.Clause clause : clauses) {
+            String lower = clause.text().toLowerCase(Locale.ROOT);
+            for (Pattern pattern : REQUEST_PATTERNS) {
+                Matcher action = pattern.matcher(lower);
+                if (!action.lookingAt() || action.groupCount() < 1) continue;
+                Matcher object = reference.matcher(lower.substring(action.end()).stripLeading());
+                if (!object.find()) continue;
+                if (found != null && !found.clause().equals(clause)) {
+                    return Optional.of(new UserMutationReference(found.clause(), true, found.statedCount()));
+                }
+                int count = switch (object.group(1) == null ? "" : object.group(1)) {
+                    case "one", "1" -> 1;
+                    case "two", "2" -> 2;
+                    case "three", "3" -> 3;
+                    case "four", "4" -> 4;
+                    case "five", "5" -> 5;
+                    case "six", "6" -> 6;
+                    case "seven", "7" -> 7;
+                    case "eight", "8" -> 8;
+                    default -> 0;
+                };
+                boolean admitted = evidence.permits(clause.start() + action.start(1),
+                        clause.start() + action.end(1));
+                found = new UserMutationReference(clause, !admitted || !hasBoundedOutcomePrelude(clauses, clause), count);
+            }
+        }
+        return Optional.ofNullable(found);
+    }
+
+    private static String classificationReason(String userRequest, boolean honorGlobalNegation) {
         if (userRequest == null || userRequest.isBlank()) return "empty-user-request";
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return "synthetic-tool-result";
-        String lower = userRequest.toLowerCase().trim();
-        if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
+        String original = userRequest.trim();
+        String lower = original.toLowerCase(Locale.ROOT);
+        if (honorGlobalNegation && containsGlobalReadOnlyNegation(lower)) {
+            return "global-read-only-negation";
+        }
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
-        if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
+        // A sentence-initial imperative mutation request outranks a trailing
+        // instructional question ("Update README.md ... Also, how do I
+        // create a release tag?" stays a mutation turn); pure how-to
+        // questions have no initial imperative and keep the guard.
+        if (!looksSentenceInitialMutationImperative(lower)
+                && looksInstructionalMutationQuestion(lower)) {
+            return "instructional-mutation-question";
+        }
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
+        if (looksInlineOutputOnlyRequest(original, lower)) return "inline-output-request";
         if (looksFileScopedDefectFixRequest(lower)) return "explicit-file-scoped-defect-fix-request";
         if (looksFixProblemInFileTarget(lower)) return "explicit-fix-problem-in-file-target";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
         if (looksReadThenMutationRequest(lower)) return "explicit-read-then-mutation-request";
+        if (looksTextFormatMutationRequest(lower)) return "explicit-text-format-request";
+        if (looksScopedPrefixMutationRequest(lower)) {
+            return "explicit-scoped-mutation-request";
+        }
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
         if (looksTerminalBuildArtifactRequest(lower)) return "explicit-terminal-build-artifact-request";
         if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
-        if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
-        for (String marker : MARKERS) {
-            if (lower.contains(marker)) return "explicit-mutation-marker";
+        FallbackEvidence fallback = fallbackMutationEvidence(original);
+        if ("explicit-mutation-verb-with-file-target".equals(fallback.reason())) return fallback.reason();
+        if (looksMidSentenceRenameRequest(original)) return "explicit-rename-request";
+        return fallback.reason().isEmpty() ? "non-mutating" : fallback.reason();
+    }
+
+    private static boolean looksInlineOutputOnlyRequest(String original, String lower) {
+        boolean inlinePhrase = false;
+        for (String phrase : INLINE_OUTPUT_PHRASES) {
+            if (lower.contains(phrase)) {
+                inlinePhrase = true;
+                break;
+            }
         }
-        return "non-mutating";
+        if (!inlinePhrase) {
+            return false;
+        }
+        // Naming a target file wins over the inline phrasing: "write twoSum
+        // to Solution.java, output only the code" still routes to mutation.
+        return !NAMED_FILE_TARGET.matcher(lower).find()
+                && !looksSingleLetterCSourceFileInlineOverride(original);
+    }
+
+    private static boolean looksSingleLetterCSourceFileInlineOverride(String original) {
+        Matcher matcher = SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION.matcher(original);
+        while (matcher.find()) {
+            String tail = stripSingleLetterCInlineFiller(original.substring(matcher.end()));
+            String lowerTail = tail.toLowerCase(Locale.ROOT);
+            for (String phrase : INLINE_OUTPUT_PHRASES) {
+                if (lowerTail.startsWith(phrase)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String stripSingleLetterCInlineFiller(String tail) {
+        String value = tail == null ? "" : tail.stripLeading();
+        for (int i = 0; i < 4; i++) {
+            value = value.replaceFirst("^[\\p{Punct}\\s]+", "").stripLeading();
+            String lower = value.toLowerCase(Locale.ROOT);
+            String next = stripLeadingFillerToken(value, lower, "please");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "then");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "now");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "and");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "just");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "for me");
+            if (next == null) return value;
+            value = next.stripLeading();
+        }
+        return value;
+    }
+
+    private static String stripLeadingFillerToken(String value, String lower, String token) {
+        if (!lower.startsWith(token)) return null;
+        int end = token.length();
+        if (lower.length() > end && Character.isLetterOrDigit(lower.charAt(end))) {
+            return null;
+        }
+        return value.substring(end);
     }
 
     public static boolean isExplicitMutationClassificationReason(String reason) {
         if (reason == null || reason.isBlank()) return false;
         return reason.startsWith("explicit-") || "natural-artifact-request".equals(reason);
+    }
+
+    /**
+     * A scoped-prefix match classifies as mutation only when its sentence
+     * is not a question: "In app.js, replace is called twice, is that a
+     * problem?" is a question about the file. The sentence is the span
+     * from the match start to the next terminal punctuation.
+     */
+    private static boolean looksScopedPrefixMutationRequest(String lower) {
+        Matcher matcher = SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower);
+        while (matcher.find()) {
+            boolean question = false;
+            for (int i = matcher.end(); i < lower.length(); i++) {
+                char c = lower.charAt(i);
+                if (c == '.' || c == '!') {
+                    break;
+                }
+                if (c == '?') {
+                    question = true;
+                    break;
+                }
+            }
+            if (!question) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Best-effort matched span for trace/debug. The span re-derives from
+     * the same deterministic patterns that produced the reason; routes
+     * decided by structural predicates rather than a single regex return
+     * an empty span.
+     */
+    private static String evidenceSpanFor(String reason, String original, String lower) {
+        try {
+            switch (reason == null ? "" : reason) {
+                case "explicit-scoped-mutation-request" -> {
+                    Matcher m = SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower);
+                    if (m.find()) return m.group().strip();
+                }
+                case "explicit-request-pattern" -> {
+                    for (Pattern pattern : REQUEST_PATTERNS) {
+                        Matcher m = pattern.matcher(lower);
+                        if (m.find()) return m.group().strip();
+                    }
+                }
+                case "explicit-current-clause-request" -> {
+                    return independentMutationClause(original).map(CurrentRequestClauses.Clause::text).orElse("");
+                }
+                case "explicit-rename-request" -> {
+                    Matcher m = MID_SENTENCE_RENAME_REQUEST.matcher(original);
+                    if (m.find()) return m.group().strip();
+                }
+                case "explicit-mutation-verb-with-file-target", "explicit-mutation-marker" -> {
+                    FallbackEvidence fallback = fallbackMutationEvidence(original);
+                    return reason.equals(fallback.reason()) ? fallback.span() : "";
+                }
+                case "explicit-text-format-request" -> {
+                    for (Pattern pattern : TEXT_FORMAT_REQUEST_PATTERNS) {
+                        Matcher m = pattern.matcher(lower);
+                        if (m.find()) return m.group().strip();
+                    }
+                }
+                case "global-read-only-negation" -> {
+                    for (String marker : READ_ONLY_NEGATIONS) {
+                        int start = lower.indexOf(marker);
+                        while (start >= 0) {
+                            if (!isScopedLimiter(lower, start, marker)) return marker;
+                            start = lower.indexOf(marker, start + marker.length());
+                        }
+                    }
+                }
+                default -> {
+                    return "";
+                }
+            }
+        } catch (RuntimeException e) {
+            return "";
+        }
+        return "";
     }
 
     public static Optional<SourceToTargetArtifact> sourceToTargetArtifact(String userRequest) {
@@ -324,7 +781,7 @@ public final class MutationIntent {
     public static boolean looksPriorChangeStatusQuestion(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
-        String lower = userRequest.toLowerCase().trim();
+        String lower = userRequest.toLowerCase(Locale.ROOT).trim();
         if (containsConditionalApplyClause(lower)) return false;
         for (Pattern pattern : PRIOR_CHANGE_STATUS_PATTERNS) {
             if (pattern.matcher(lower).find()) return true;
@@ -372,8 +829,42 @@ public final class MutationIntent {
                 || lower.contains("websites"));
     }
 
-    private static boolean looksExplicitFileTargetMutation(String lower) {
-        return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    private record FallbackEvidence(String reason, String span) {}
+
+    private static FallbackEvidence fallbackMutationEvidence(String original) {
+        MutationActionEvidence evidence = MutationActionEvidence.fromRequest(original);
+        String folded = evidence.foldedRequest();
+        Matcher files = MUTATION_VERB_WITH_FILE_TARGET.matcher(folded);
+        while (files.find()) {
+            if (evidence.permitsLegacyFallback(files.start(), files.end())) {
+                return new FallbackEvidence("explicit-mutation-verb-with-file-target",
+                        original.substring(files.start(), files.end()).strip());
+            }
+        }
+        int selectedStart = Integer.MAX_VALUE;
+        String selectedSpan = "";
+        for (String marker : MARKERS) {
+            String completeMarker = marker.stripTrailing();
+            int start = folded.indexOf(completeMarker);
+            while (start >= 0) {
+                int end = start + completeMarker.length();
+                if (start < selectedStart && evidence.permitsLegacyFallbackMarker(start, end)) {
+                    selectedStart = start;
+                    selectedSpan = original.substring(start, end).strip();
+                }
+                start = folded.indexOf(completeMarker, end);
+            }
+        }
+        return selectedSpan.isEmpty() ? new FallbackEvidence("", "")
+                : new FallbackEvidence("explicit-mutation-marker", selectedSpan);
+    }
+
+    private static boolean looksTextFormatMutationRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        for (Pattern pattern : TEXT_FORMAT_REQUEST_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
     }
 
     private static boolean looksFixProblemInFileTarget(String lower) {
@@ -512,6 +1003,58 @@ public final class MutationIntent {
         return lower != null && INSTRUCTIONAL_MUTATION_QUESTION.matcher(lower).find();
     }
 
+    private static boolean looksSentenceInitialMutationImperative(String lower) {
+        if (lower == null) return false;
+        for (Pattern pattern : REQUEST_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Matched against the ORIGINAL request so identifier casing survives:
+     * the structural "rename X to Y" shape counts as a request only with a
+     * concrete file/scope anchor or an identifier-shaped X or Y.
+     */
+    private static boolean looksMidSentenceRenameRequest(String original) {
+        if (original == null || original.isBlank()) return false;
+        Matcher matcher = MID_SENTENCE_RENAME_REQUEST.matcher(original);
+        while (matcher.find()) {
+            if (matcher.group(1) != null) return true;
+            if (looksRenameIdentifier(matcher.group(2))
+                    || looksRenameIdentifier(matcher.group(3))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Identifier-shaped: mixed case, separators, digits, or an extension.
+     * Plain prose words ("variables", "improve") never qualify. Trailing
+     * sentence punctuation is stripped first so a clause-final word does
+     * not qualify through its own full stop.
+     */
+    private static boolean looksRenameIdentifier(String token) {
+        if (token == null) return false;
+        String stripped = token;
+        while (!stripped.isEmpty()
+                && ".,;:!?".indexOf(stripped.charAt(stripped.length() - 1)) >= 0) {
+            stripped = stripped.substring(0, stripped.length() - 1);
+        }
+        if (stripped.isBlank()) return false;
+        boolean upper = false;
+        boolean lower = false;
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (c == '_' || c == '.' || c == '/' || c == '\\' || c == '$') return true;
+            if (Character.isDigit(c)) return true;
+            if (Character.isUpperCase(c)) upper = true;
+            if (Character.isLowerCase(c)) lower = true;
+        }
+        return upper && lower;
+    }
+
     private static boolean containsGlobalReadOnlyNegation(String lower) {
         for (String marker : READ_ONLY_NEGATIONS) {
             int start = lower.indexOf(marker);
@@ -538,6 +1081,7 @@ public final class MutationIntent {
         tail = tail.replaceFirst("^[\\p{Punct}\\s]+", "").stripLeading();
         return tail.startsWith("anything else")
                 || tail.startsWith("everything else")
+                || tail.matches("^(?:any\\s+)?extra\\s+files?\\b.*")
                 || tail.startsWith("anything outside")
                 || tail.startsWith("anything beyond")
                 || tail.startsWith("any other")
@@ -556,6 +1100,8 @@ public final class MutationIntent {
                 || tail.startsWith("else")
                 || startsWithNamedFileTarget(tail)
                 || startsWithQualifiedNamedFileTarget(tail)
+                || startsWithScopedDesignTarget(tail)
+                || startsWithScopedWebResourceTarget(tail)
                 || startsWithTailwindArtifactReference(tail);
     }
 
@@ -582,6 +1128,28 @@ public final class MutationIntent {
     private static String stripLeadingArticle(String value) {
         if (value == null || value.isBlank()) return "";
         return value.replaceFirst("^(?:a|an|the)\\s+", "");
+    }
+
+    private static boolean startsWithScopedDesignTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        String candidate = stripLeadingArticle(tail.stripLeading());
+        return candidate.startsWith("color scheme")
+                || candidate.startsWith("colour scheme")
+                || candidate.startsWith("palette")
+                || candidate.startsWith("colors")
+                || candidate.startsWith("colours")
+                || candidate.startsWith("footer")
+                || candidate.startsWith("header")
+                || candidate.startsWith("hero")
+                || candidate.startsWith("navbar")
+                || candidate.startsWith("nav ")
+                || candidate.startsWith("navigation")
+                || candidate.startsWith("sidebar");
+    }
+
+    private static boolean startsWithScopedWebResourceTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        return SCOPED_WEB_RESOURCE_LIST.matcher(tail.stripLeading()).find();
     }
 
     private static boolean startsWithTailwindArtifactReference(String tail) {

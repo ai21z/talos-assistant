@@ -2,6 +2,11 @@ package dev.talos.cli.prompt;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.CfgUtil;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.SessionMemory;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.impl.FileEditTool;
@@ -252,6 +257,52 @@ class PromptInspectorTest {
     }
 
     @Test
+    void renderNextDoesNotAdvertiseMutationForNonAuthoritativeTail() {
+        for (String request : List.of(
+                "Review index.html so maybe update style.css.",
+                "Inspect index.html so should I update style.css?",
+                "Review index.html so the guide says update style.css.")) {
+            PromptRender render = PromptInspector.renderNext(
+                    "auto",
+                    request,
+                    Path.of(".").toAbsolutePath().normalize(),
+                    fullToolContext(new Config()));
+
+            assertFalse(
+                    render.tools().contains("talos.write_file"),
+                    request + " " + render.tools());
+            assertFalse(
+                    render.tools().contains("talos.edit_file"),
+                    request + " " + render.tools());
+            assertFalse(
+                    render.tools().contains("talos.delete_path"),
+                    request + " " + render.tools());
+            String frame = render.messages().stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(content -> content.startsWith(
+                            "[CurrentTurnCapability]"))
+                    .findFirst()
+                    .orElseThrow();
+            assertTrue(
+                    frame.contains("obligation: NONE"),
+                    request + "\n" + frame);
+        }
+
+        String mixed =
+                "Edit index.html so it works, then rm style.css.";
+        PromptRender mixedRender = PromptInspector.renderNext(
+                "auto",
+                mixed,
+                Path.of(".").toAbsolutePath().normalize(),
+                fullToolContext(new Config()));
+        assertFalse(
+                mixedRender.tools().contains("talos.delete_path"),
+                mixed + " " + mixedRender.tools());
+    }
+
+    @Test
     void renderNextAskMutationPreviewShowsReadOnlyToolSurface() {
         PromptRender render = PromptInspector.renderNext(
                 "ask",
@@ -370,10 +421,72 @@ class PromptInspectorTest {
         assertFalse(render.sections().contains("tools:native"));
     }
 
+    @Test
+    void incompleteTargetScanCannotReuseAStaleMutationOverride(
+            @TempDir Path workspace
+    ) {
+        ActiveTaskContext saved = ActiveTaskContext.verifierFindings(
+                1,
+                "trace-preview-overflow-context",
+                List.of("saved.txt"),
+                List.of("saved-marker-still-needs-repair"),
+                "FAILED");
+        SessionMemory memory = new SessionMemory();
+        memory.setActiveTaskContext(saved);
+        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(saved));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        Context ctx = Context.builder(new Config())
+                .memory(memory)
+                .toolRegistry(registry)
+                .build()
+                .withNativeToolSpecs(List.of(
+                new ToolSpec("talos.write_file", "stale writer", "{}"),
+                new ToolSpec("talos.edit_file", "stale editor", "{}")));
+        String request = "Repair it. " + "a.txt ".repeat(8_193);
+
+        PromptRender render = PromptInspector.renderNext(
+                "auto",
+                request,
+                workspace,
+                ctx);
+
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.read_file"));
+        assertFalse(render.tools().contains("talos.write_file"));
+        assertFalse(render.tools().contains("talos.edit_file"));
+        assertNoWriteCapabilityAdvertisement(render.systemPrompt());
+        assertTrue(render.messages().stream()
+                .map(ChatMessage::content)
+                .filter(java.util.Objects::nonNull)
+                .noneMatch(content -> content.contains("saved-marker")
+                        || content.contains("saved.txt")));
+        String frame = render.messages().stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(ChatMessage::content)
+                .filter(java.util.Objects::nonNull)
+                .filter(content -> content.startsWith(
+                        "[CurrentTurnCapability]"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(frame.contains("mutationAllowed: false"), frame);
+        assertTrue(frame.contains("phase: INSPECT"), frame);
+        assertTrue(frame.contains("obligation: NONE"), frame);
+        assertTrue(frame.contains(
+                "visibleTools: " + String.join(", ", render.tools())), frame);
+        assertEquals(saved, memory.activeTaskContext());
+    }
+
     private static Context context(Config cfg) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }
@@ -389,7 +502,11 @@ class PromptInspectorTest {
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }
@@ -402,7 +519,11 @@ class PromptInspectorTest {
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new RetrieveTool(null));
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }

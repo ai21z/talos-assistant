@@ -2,7 +2,6 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -182,17 +181,18 @@ final class StaticWebTailwindCoherenceVerifier {
 
     private static boolean hasTailwindBuild(Path root) {
         try {
-            if (Files.isRegularFile(root.resolve("tailwind.config.js"))
-                    || Files.isRegularFile(root.resolve("tailwind.config.cjs"))
-                    || Files.isRegularFile(root.resolve("tailwind.config.mjs"))
-                    || Files.isRegularFile(root.resolve("tailwind.config.ts"))
-                    || Files.isRegularFile(root.resolve("postcss.config.js"))
-                    || Files.isRegularFile(root.resolve("postcss.config.cjs"))) {
+            if (StaticWebFileAccess.isRegularFile(root, root.resolve("tailwind.config.js"))
+                    || StaticWebFileAccess.isRegularFile(root, root.resolve("tailwind.config.cjs"))
+                    || StaticWebFileAccess.isRegularFile(root, root.resolve("tailwind.config.mjs"))
+                    || StaticWebFileAccess.isRegularFile(root, root.resolve("tailwind.config.ts"))
+                    || StaticWebFileAccess.isRegularFile(root, root.resolve("postcss.config.js"))
+                    || StaticWebFileAccess.isRegularFile(root, root.resolve("postcss.config.cjs"))) {
                 return true;
             }
             Path packageJson = root.resolve("package.json");
-            return Files.isRegularFile(packageJson)
-                    && Files.readString(packageJson).toLowerCase(Locale.ROOT).contains("tailwindcss");
+            return StaticWebFileAccess.isRegularFile(root, packageJson)
+                    && StaticWebFileAccess.readString(root, packageJson)
+                            .toLowerCase(Locale.ROOT).contains("tailwindcss");
         } catch (Exception e) {
             return false;
         }
@@ -284,8 +284,9 @@ final class StaticWebTailwindCoherenceVerifier {
     private static String read(Path root, String relative) {
         try {
             Path resolved = root.resolve(relative).normalize();
-            if (!resolved.startsWith(root.normalize()) || !Files.isRegularFile(resolved)) return "";
-            return Files.readString(resolved);
+            if (!resolved.startsWith(root.normalize())
+                    || !StaticWebFileAccess.isRegularFile(root, resolved)) return "";
+            return StaticWebFileAccess.readString(root, resolved);
         } catch (Exception e) {
             return "";
         }

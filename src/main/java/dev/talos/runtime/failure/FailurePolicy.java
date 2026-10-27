@@ -1,5 +1,7 @@
 package dev.talos.runtime.failure;
 
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 
@@ -78,7 +80,13 @@ public record FailurePolicy(
             LoopState state,
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
-        if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0) {
+        var contract = TurnTaskContractCapture.get();
+        boolean readOnlyAcquisition = contract != null
+                && !contract.mutationAllowed() && !contract.mutationRequested()
+                && (contract.type() == TaskType.DIAGNOSE_ONLY || contract.type() == TaskType.READ_ONLY_QA);
+        int progressSuccesses = readOnlyAcquisition
+                ? outcome.progressSuccessesThisIteration() : outcome.successesThisIteration();
+        if (progressSuccesses > 0 || outcome.mutationsThisIteration() > 0) {
             state.noProgressIterations = 0;
         } else if (outcome.failuresThisIteration() > 0) {
             state.noProgressIterations++;
@@ -112,6 +120,14 @@ public record FailurePolicy(
         if (state.emptyEditArgumentFailuresByPath.isEmpty()) {
             return FailureDecision.continueLoop();
         }
+        // T1003: while ANY planned recovery is still unprompted, the whole
+        // empty-edit stop defers for this pass so the bounded write_file
+        // recovery generation can run (an ineligible sibling path must not
+        // consume the eligible path's only shot). Once every planned
+        // recovery has been prompted, the stop applies again.
+        if (hasAnyPendingUnpromptedRecovery(state)) {
+            return FailureDecision.continueLoop();
+        }
         return state.emptyEditArgumentFailuresByPath.entrySet().stream()
                 .filter(entry -> entry.getValue() >= 2)
                 .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
@@ -125,6 +141,13 @@ public record FailurePolicy(
                                 + "` after the file had already been read. "
                         + "No approval was requested and no file was changed."))
                 .orElseGet(() -> repeatedEmptyEditArgumentAcrossPathsDecision(state));
+    }
+
+    private static boolean hasAnyPendingUnpromptedRecovery(LoopState state) {
+        for (String path : state.editRecoveryFullRewriteTargets) {
+            if (!state.editRecoveryPromptedPaths.contains(path)) return true;
+        }
+        return false;
     }
 
     private static FailureDecision repeatedEmptyEditArgumentAcrossPathsDecision(LoopState state) {

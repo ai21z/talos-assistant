@@ -8,6 +8,7 @@ import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.ToolMutationEffects;
 import dev.talos.tools.ToolRiskLevel;
 import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.DeletePathTool;
@@ -84,9 +85,18 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
 
         List<String> applied = new ArrayList<>();
         List<String> summaries = new ArrayList<>();
+        ToolMutationEffects effects = ToolMutationEffects.none();
         for (WorkspaceBatchOperation operation : plan.operations()) {
             ToolResult result = applyOne(operation, ctx);
+            effects = effects.plus(result.mutationEffects());
             if (!result.success()) {
+                // An I/O failure in one recursive operation may itself be partial.
+                // Preserve earlier applied paths and distinguish the failing operation's
+                // uncertain paths from known effects; never report unattempted operations.
+                if (result.error() != null && ToolError.INTERNAL_ERROR.equals(result.error().code())
+                        && !result.mutationEffects().hasEffects()) {
+                    effects = effects.plus(new ToolMutationEffects(List.of(), mutationPaths(operation)));
+                }
                 String failed = operation.appliedPathSummary();
                 String message = (applied.isEmpty()
                         ? "Batch workspace operation failed."
@@ -94,14 +104,23 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
                         + " Applied: " + (applied.isEmpty() ? "(none)" : String.join(", ", applied))
                         + ". Failed: " + failed
                         + ". Reason: " + result.errorMessage();
-                return ToolResult.fail(ToolError.internal(message));
+                return ToolResult.fail(ToolError.internal(message)).withMutationEffects(effects);
             }
+            effects = effects.plus(new ToolMutationEffects(mutationPaths(operation), List.of()));
             applied.add(operation.appliedPathSummary());
             summaries.add(firstLine(result.output()));
         }
 
         return ToolResult.ok("Applied batch workspace operation: " + plan.previewSummary()
-                + "\n" + String.join("\n", summaries));
+                + "\n" + String.join("\n", summaries)).withMutationEffects(effects);
+    }
+
+    private static List<String> mutationPaths(WorkspaceBatchOperation operation) {
+        return switch (operation.kind()) {
+            case COPY_PATH -> List.of(operation.destinationPath());
+            case MKDIR, DELETE_PATH -> List.of(operation.targetPath());
+            case MOVE_PATH, RENAME_PATH -> List.of(operation.sourcePath(), operation.destinationPath());
+        };
     }
 
     private static ToolResult validateSandbox(ToolContext ctx, WorkspaceBatchPlan plan) {

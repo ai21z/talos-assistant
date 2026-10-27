@@ -31,9 +31,35 @@ class ArtifactTargetSetTest {
         assertEquals(TargetSource.USER_REQUEST, stored.derivation().source());
         assertEquals("explicit mutation target", stored.derivation().reason());
         assertEquals(13, stored.derivation().startOffset());
+        assertEquals(
+                IntentDerivation.UNKNOWN_OFFSET,
+                stored.derivation().authorityEndOffset());
         assertEquals(30, stored.derivation().endOffset());
         assertEquals("styles\\main.css", stored.derivation().sourceText());
         assertEquals(0.91, stored.derivation().confidence());
+    }
+
+    @Test
+    void preservesIndependentAuthorityEndInsideTheExactSourceSpan() {
+        IntentDerivation derivation = new IntentDerivation(
+                TargetSource.USER_REQUEST,
+                "coordinated mutation tail",
+                13,
+                13 + "update style.css".length(),
+                30,
+                "update style.css.",
+                1.0);
+
+        TargetRef stored = ArtifactTargetSet.of(
+                        new TargetRef("style.css", TargetRole.MUST_MUTATE, derivation))
+                .find("style.css")
+                .orElseThrow();
+
+        assertEquals(13, stored.derivation().startOffset());
+        assertEquals(
+                13 + "update style.css".length(),
+                stored.derivation().authorityEndOffset());
+        assertEquals(30, stored.derivation().endOffset());
     }
 
     @Test
@@ -58,6 +84,91 @@ class ArtifactTargetSetTest {
     }
 
     @Test
+    void explicitRequiredPostReadMutationRoleDominatesEachConstituentInEitherOrder() {
+        IntentDerivation mutation = new IntentDerivation(
+                TargetSource.USER_REQUEST,
+                "explicit-mutation-target",
+                20,
+                36,
+                "update styles.css",
+                1.0);
+        IntentDerivation source = new IntentDerivation(
+                TargetSource.USER_REQUEST,
+                "source-evidence-target",
+                0,
+                15,
+                "read styles.css",
+                1.0);
+        TargetRole compositeRole =
+                TargetRole.valueOf("MUST_MUTATE_AFTER_SOURCE_EVIDENCE");
+        TargetRef composite = new TargetRef("styles.css", compositeRole, mutation);
+
+        for (TargetRole constituent : List.of(
+                TargetRole.MUST_MUTATE,
+                TargetRole.OUTPUT_DESTINATION,
+                TargetRole.MUST_READ,
+                TargetRole.SOURCE_EVIDENCE,
+                TargetRole.VERIFY_ONLY,
+                TargetRole.MAY_MUTATE,
+                TargetRole.MENTIONED_ONLY)) {
+            TargetRef constituentRef = new TargetRef("styles.css", constituent, source);
+            for (ArtifactTargetSet targets : List.of(
+                    ArtifactTargetSet.of(composite, constituentRef),
+                    ArtifactTargetSet.of(constituentRef, composite),
+                    ArtifactTargetSet.of(composite).with(constituentRef),
+                    ArtifactTargetSet.of(constituentRef).with(composite))) {
+                TargetRef stored = targets.find("styles.css").orElseThrow();
+                assertEquals(compositeRole, stored.role());
+                assertEquals(mutation, stored.derivation());
+            }
+        }
+
+        TargetRef forbidden = new TargetRef(
+                "styles.css",
+                TargetRole.FORBIDDEN,
+                new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "forbidden-target",
+                        40,
+                        50,
+                        "keep styles.css",
+                        1.0));
+        for (ArtifactTargetSet targets : List.of(
+                ArtifactTargetSet.of(composite, forbidden),
+                ArtifactTargetSet.of(forbidden, composite))) {
+            assertEquals(forbidden, targets.find("styles.css").orElseThrow());
+        }
+
+        for (ArtifactTargetSet noHiddenJoin : List.of(
+                ArtifactTargetSet.of(
+                        new TargetRef("styles.css", TargetRole.SOURCE_EVIDENCE, source),
+                        new TargetRef("styles.css", TargetRole.MUST_MUTATE, mutation)),
+                ArtifactTargetSet.of(
+                        new TargetRef("styles.css", TargetRole.MUST_MUTATE, mutation),
+                        new TargetRef("styles.css", TargetRole.SOURCE_EVIDENCE, source)))) {
+            assertEquals(
+                    TargetRole.MUST_MUTATE,
+                    noHiddenJoin.find("styles.css").orElseThrow().role());
+        }
+    }
+
+    @Test
+    void equalRoleAndConfidenceKeepTheFirstDerivationByDesign() {
+        IntentDerivation first = new IntentDerivation(
+                TargetSource.USER_REQUEST, "first", 0, 10, "styles.css", 0.8);
+        IntentDerivation second = new IntentDerivation(
+                TargetSource.MESSAGE_HISTORY, "second", 11, 21, "styles.css", 0.8);
+
+        TargetRef stored = ArtifactTargetSet.of(
+                        new TargetRef("styles.css", TargetRole.MUST_MUTATE, first),
+                        new TargetRef("styles.css", TargetRole.MUST_MUTATE, second))
+                .find("styles.css")
+                .orElseThrow();
+
+        assertEquals(first, stored.derivation());
+    }
+
+    @Test
     void filtersPathsByRole() {
         ArtifactTargetSet targets = ArtifactTargetSet.of(
                 TargetRef.of("styles.css", TargetRole.MUST_MUTATE),
@@ -76,6 +187,36 @@ class ArtifactTargetSetTest {
                 () -> TargetRef.of("   ", TargetRole.MENTIONED_ONLY));
         assertThrows(IllegalArgumentException.class,
                 () -> new IntentDerivation(TargetSource.USER_REQUEST, "bad", 0, 3, "bad", 1.2));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "authority without span",
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        3,
+                        IntentDerivation.UNKNOWN_OFFSET,
+                        "bad",
+                        1.0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "empty authority",
+                        3,
+                        3,
+                        8,
+                        "bad",
+                        1.0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new IntentDerivation(
+                        TargetSource.USER_REQUEST,
+                        "authority beyond span",
+                        3,
+                        9,
+                        8,
+                        "bad",
+                        1.0));
     }
 
     @Test

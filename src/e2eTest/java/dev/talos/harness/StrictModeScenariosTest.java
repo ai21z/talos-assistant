@@ -104,9 +104,10 @@ class StrictModeScenariosTest {
         // Two fenced blocks describing the SAME read_file call. The JSON text
         // differs (key order is swapped) so ToolCallParser's text-level dedup
         // does NOT collapse them - both reach the loop. At the loop level,
-        // buildReadCallSignature normalizes on (tool, params) and treats them
-        // as identical, which is what trips the redundant-read cushion in
-        // normal mode and must NOT trip in strict mode.
+        // the read-evidence ledger's identical-call lookup compares (tool,
+        // raw params) with map equality and treats them as identical, which
+        // is what trips the redundant-read cushion in normal mode and must
+        // NOT trip in strict mode.
         String scripted = """
                 I'll check the file twice.
                 ```json

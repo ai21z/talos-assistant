@@ -5,6 +5,7 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolRiskLevel;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,59 @@ class ToolOutcomeFactoryTest {
     }
 
     @Test
+    void executedAliasOutcomePreservesRawNameAndExposesCanonicalName() {
+        ToolCall writeAlias = new ToolCall("file_utils:write_file", Map.of(
+                "path", "README.md",
+                "content", "new"));
+        ToolResult result = ToolResult.ok("Wrote README.md successfully.", VerificationStatus.PASS);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(writeAlias, result, "README.md");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(writeAlias, "README.md", result, classification, null, null);
+
+        assertEquals("file_utils:write_file", outcome.toolName());
+        assertEquals("talos.write_file", outcome.canonicalToolName());
+        assertEquals("write_file", outcome.localCanonicalToolName());
+        assertTrue(outcome.mutating());
+    }
+
+    @Test
+    void executedSearchOutcomeKeepsStructuredEvidenceSourcePaths() throws Exception {
+        ToolCall grep = new ToolCall("talos.grep", Map.of(
+                "pattern", "port",
+                "include", "*.json"));
+        ToolResult result = ToolResult.ok(
+                "Found 1 match: config.json:3",
+                ToolContentMetadata.workspaceEvidence(
+                        ToolContentMetadata.ContentSource.GREP,
+                        List.of("config.json"),
+                        "grep match source paths"));
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(grep, result, "");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(grep, "", result, classification, null, null);
+
+        var method = outcome.getClass().getMethod("sourcePaths");
+        assertEquals(List.of("config.json"), method.invoke(outcome));
+    }
+
+    @Test
+    void executedDirectReadUsesSuccessfulPathHintAsEvidenceSource() throws Exception {
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "src/App.java"));
+        ToolResult result = ToolResult.ok("final class App {}");
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(read, result, "src/App.java");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(read, "src/App.java", result, classification, null, null);
+
+        var method = outcome.getClass().getMethod("sourcePaths");
+        assertEquals(List.of("src/App.java"), method.invoke(outcome));
+    }
+
+    @Test
     void executedFailurePreservesDeniedAndErrorDetails() {
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "README.md",
@@ -141,6 +195,46 @@ class ToolOutcomeFactoryTest {
     @Test
     void listDirSuccessSummaryPreservesExistingLargeOutputTruncation() {
         ToolCall listDir = new ToolCall("talos.list_dir", Map.of("path", "."));
+        String output = "x".repeat(4_001);
+        ToolResult result = ToolResult.ok(output);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(listDir, result, ".");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(listDir, ".", result, classification, null, null);
+
+        assertEquals(4_000 + "\n... (tool outcome summary truncated)".length(), outcome.summary().length());
+        assertTrue(outcome.summary().endsWith("\n... (tool outcome summary truncated)"));
+    }
+
+    /**
+     * The evidence-summary decision must run on the canonical tool name:
+     * downstream evidence consumers canonicalize, so an accepted list_dir
+     * alias that fell back to the first-sentence summary would truncate
+     * the directory evidence and cause a false evidence refusal.
+     */
+    @Test
+    void listDirAliasSuccessKeepsEvidenceSummaryNotFirstSentence() {
+        String output = "docs\nsrc\nbuild.gradle. and more entries\nREADME.md";
+        for (String alias : List.of("ls", "list_dir", "list_directory")) {
+            ToolCall listDir = new ToolCall(alias, Map.of("path", "."));
+            ToolResult result = ToolResult.ok(output);
+            ToolExecutionFailureClassifier.Classification classification =
+                    ToolExecutionFailureClassifier.classify(listDir, result, ".");
+
+            ToolCallLoop.ToolOutcome outcome =
+                    ToolOutcomeFactory.executed(listDir, ".", result, classification, null, null);
+
+            assertEquals(alias, outcome.toolName(), "the outcome keeps the raw tool name");
+            assertEquals("talos.list_dir", outcome.canonicalToolName());
+            assertEquals(output, outcome.summary(),
+                    alias + " must carry the full list_dir evidence summary");
+        }
+    }
+
+    @Test
+    void listDirAliasLargeOutputGetsEvidenceTruncationMarker() {
+        ToolCall listDir = new ToolCall("ls", Map.of("path", "."));
         String output = "x".repeat(4_001);
         ToolResult result = ToolResult.ok(output);
         ToolExecutionFailureClassifier.Classification classification =

@@ -71,6 +71,22 @@ class ProtectedPathPolicyTest {
     }
 
     @Test
+    void rejectsPortableRootSyntaxBeforeProtectedPathApproval() throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SECRET=redacted\n");
+
+        for (String rawPath : java.util.List.of(
+                "\\.env",
+                "\\\\server\\share\\.env",
+                "C:\\outside\\.env")) {
+            ResourceDecision decision = ProtectedPathPolicy.classify(workspace, rawPath);
+
+            assertFalse(decision.insideWorkspace(), rawPath);
+            assertTrue(decision.workspaceEscape(), rawPath);
+            assertFalse(decision.protectedPath(), rawPath);
+        }
+    }
+
+    @Test
     void classifiesTrimmedProtectedPathWhenRawWhitespacePathDoesNotExist() throws Exception {
         Files.writeString(workspace.resolve(".env"), "SECRET=redacted\n");
 

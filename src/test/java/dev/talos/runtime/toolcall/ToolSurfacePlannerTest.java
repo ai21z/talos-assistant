@@ -53,6 +53,35 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void contradictionClarificationExposesNoWorkspaceTools() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                contract,
+                ExecutionPhase.INSPECT,
+                registry());
+
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertEquals(List.of(), plan.nativeToolSpecs());
+        assertEquals("ambiguous mutation clarification", plan.reason());
+    }
+
+    @Test
+    void explicitInspectionUnderNoChangeConstraintKeepsReadTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Do not change any files. Read notes.md and explain what it currently says."),
+                ExecutionPhase.INSPECT,
+                registry());
+
+        assertTrue(plan.nativeToolNames().contains("talos.read_file"), plan.nativeToolNames().toString());
+        assertFalse(plan.nativeToolNames().stream().anyMatch(dev.talos.tools.ToolAliasPolicy::isMutating),
+                plan.nativeToolNames().toString());
+    }
+
+    @Test
     void unsupportedNaturalShellCommandRequestExposesNoFallbackTools() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(
@@ -125,7 +154,7 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
-    void mutationApplySurfaceIncludesReadOnlyAndMutationOperations() {
+    void genericMutationApplySurfaceExcludesWorkspaceOperationTools() {
         ToolRegistry registry = registry();
         registry.register(new MetadataOnlyDestructiveTool());
 
@@ -141,15 +170,15 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.retrieve"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
-        assertTrue(names.contains("talos.apply_workspace_batch"));
-        assertTrue(names.contains("talos.mkdir"));
-        assertTrue(names.contains("talos.move_path"));
-        assertTrue(names.contains("talos.copy_path"));
-        assertTrue(names.contains("talos.rename_path"));
+        assertFalse(names.contains("talos.apply_workspace_batch"));
+        assertFalse(names.contains("talos.mkdir"));
+        assertFalse(names.contains("talos.move_path"));
+        assertFalse(names.contains("talos.copy_path"));
+        assertFalse(names.contains("talos.rename_path"));
         assertFalse(names.contains("talos.delete_path"));
         assertFalse(names.contains("talos.run_command"), names.toString());
         assertFalse(names.contains("talos.metadata_delete"));
-        assertEquals("mutation apply surface", plan.reason());
+        assertEquals("typed-authority-free mutation apply surface", plan.reason());
     }
 
     @Test
@@ -251,70 +280,69 @@ class ToolSurfacePlannerTest {
         assertWorkspaceOperationSurface(
                 "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.",
                 List.of("talos.move_path"),
-                "workspace move operation surface");
+                "exact typed workspace-operation authority");
         assertWorkspaceOperationSurface(
                 "Copy docs/plan.md to docs/archive/plan.md.",
                 List.of("talos.copy_path"),
-                "workspace copy operation surface");
+                "exact typed workspace-operation authority");
         assertWorkspaceOperationSurface(
                 "Rename old.txt to new.txt.",
                 List.of("talos.rename_path"),
-                "workspace rename operation surface");
+                "exact typed workspace-operation authority");
         assertWorkspaceOperationSurface(
                 "Mkdir docs/reports.",
                 List.of("talos.mkdir"),
-                "workspace mkdir operation surface");
+                "exact typed workspace-operation authority");
         assertWorkspaceOperationSurface(
                 "Delete docs/old-plan.md please.",
                 List.of("talos.delete_path"),
-                "workspace delete operation surface");
+                "exact typed workspace-operation authority");
     }
 
     @Test
-    void compoundWorkspaceOperationRequestsExposeBatchAndRequiredOperationTools() {
+    void compoundWorkspaceOperationRequestsReceiveNoWorkspaceAuthority() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "Create folders assets and drafts, copy docs/summary.md to drafts/summary-copy.md, "
+                        + "rename it to summary-renamed.md, then move it to assets/summary-renamed.md.");
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromUserRequest(
-                        "Create folders assets and drafts, copy docs/summary.md to drafts/summary-copy.md, "
-                                + "rename it to summary-renamed.md, then move it to assets/summary-renamed.md."),
+                resolution,
                 ExecutionPhase.APPLY,
-                registry());
+                registry(),
+                ToolCapabilityAvailability.allEnabled());
 
-        assertEquals(
-                List.of(
-                        "talos.apply_workspace_batch",
-                        "talos.copy_path",
-                        "talos.mkdir",
-                        "talos.move_path",
-                        "talos.rename_path"),
-                plan.nativeToolNames());
-        assertEquals("compound workspace operation surface", plan.reason());
+        assertTrue(resolution.blocksWorkspaceOperations());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertNoWorkspaceOperationTools(plan.nativeToolNames());
     }
 
     @Test
-    void naturalBatchDirectoryAndCopyPromptExposesCompoundWorkspaceSurface() {
+    void naturalBatchDirectoryAndCopyPromptReceivesNoWorkspaceAuthority() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css.");
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromUserRequest(
-                        "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css."),
+                resolution,
                 ExecutionPhase.APPLY,
-                registry());
+                registry(),
+                ToolCapabilityAvailability.allEnabled());
 
-        assertEquals(
-                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.mkdir"),
-                plan.nativeToolNames());
-        assertEquals("compound workspace operation surface", plan.reason());
+        assertTrue(resolution.blocksWorkspaceOperations());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertNoWorkspaceOperationTools(plan.nativeToolNames());
     }
 
     @Test
-    void explicitBatchWorkspaceCopyPromptKeepsBatchSurfaceForFileTargets() {
+    void operationsJsonPromptReceivesNoWorkspaceAuthority() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
+                        + "copy source.md to source-copy.md. Perform only that workspace operation.");
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromUserRequest(
-                        "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
-                                + "copy source.md to source-copy.md. Perform only that workspace operation."),
+                resolution,
                 ExecutionPhase.APPLY,
-                registry());
+                registry(),
+                ToolCapabilityAvailability.allEnabled());
 
-        assertEquals(List.of("talos.apply_workspace_batch"), plan.nativeToolNames());
-        assertEquals("compound workspace operation surface", plan.reason());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertNoWorkspaceOperationTools(plan.nativeToolNames());
     }
 
     @Test
@@ -327,25 +355,27 @@ class ToolSurfacePlannerTest {
             assertWorkspaceOperationSurface(
                     request,
                     List.of("talos.mkdir"),
-                    "workspace mkdir operation surface");
+                    "exact typed workspace-operation authority");
         }
     }
 
     @Test
     void mixedDirectoryAndExactFileCreateKeepsFileWriteSurface() {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                        + "containing exactly created by audit.");
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromUserRequest(
-                        "Create a directory named workspace-notes and create workspace-notes/summary.txt "
-                                + "containing exactly created by audit."),
+                resolution,
                 ExecutionPhase.APPLY,
-                registry());
+                registry(),
+                ToolCapabilityAvailability.allEnabled());
 
         List<String> names = plan.nativeToolNames();
-        assertTrue(names.contains("talos.mkdir"), names.toString());
+        assertTrue(resolution.blocksWorkspaceOperations());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
         assertTrue(names.contains("talos.write_file"), names.toString());
-        assertFalse(
-                names.equals(List.of("talos.mkdir")),
-                "mixed directory+file creation must not be narrowed to mkdir-only");
+        assertNoWorkspaceOperationTools(names);
     }
 
     @Test
@@ -536,6 +566,60 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.read_file"), names.toString());
         assertFalse(names.contains("talos.mkdir"), names.toString());
         assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void scopedWebResourceConstraintKeepsNarrowFileEditSurfaceVisible() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.delete_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void scopedSymbolRenameUsesFileEditSurfaceNotFilesystemRename() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Rename reset to resetAll in script.js only. "
+                                + "scripts.js is a different file and must remain unchanged."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void explicitTextFormatRequestExposesReadAndWholeFileWriteOnly() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Normalize notes.txt line endings to LF. Preserve the text exactly."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals("text format apply surface", plan.reason());
+        assertEquals(List.of("talos.read_file", "talos.write_file"), plan.nativeToolNames());
+        assertFalse(plan.nativeToolNames().contains("talos.edit_file"), plan.nativeToolNames().toString());
     }
 
     @Test
@@ -788,22 +872,23 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.INSPECT));
 
         assertEquals(
-                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.retrieve",
+                List.of("talos.edit_file", "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve",
                         "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("create a README.md file"),
                         ExecutionPhase.APPLY));
 
         assertEquals(
-                List.of("talos.move_path"),
+                List.of("talos.edit_file", "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve",
+                        "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest(
                                 "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md."),
                         ExecutionPhase.APPLY));
 
         assertEquals(
-                List.of("talos.delete_path"),
+                List.of("talos.edit_file", "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve",
+                        "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("Delete docs/old-plan.md please."),
                         ExecutionPhase.APPLY));
@@ -849,12 +934,21 @@ class ToolSurfacePlannerTest {
             String expectedReason
     ) {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromUserRequest(request),
+                TaskContractResolver.resolveFromUserRequest(request),
                 ExecutionPhase.APPLY,
-                registry());
+                registry(),
+                ToolCapabilityAvailability.allEnabled());
 
         assertEquals(expectedTools, plan.nativeToolNames(), request);
         assertEquals(expectedReason, plan.reason(), request);
+    }
+
+    private static void assertNoWorkspaceOperationTools(List<String> names) {
+        assertFalse(
+                names.stream().anyMatch(
+                        dev.talos.runtime.workspace.WorkspaceOperationPlanner
+                                ::isWorkspaceOperationTool),
+                names.toString());
     }
 
     private static ToolRegistry registry() {

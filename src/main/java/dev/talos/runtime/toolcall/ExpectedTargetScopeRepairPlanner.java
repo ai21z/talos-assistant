@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
@@ -78,7 +80,8 @@ final class ExpectedTargetScopeRepairPlanner {
             return Optional.empty();
         }
         String failureReason = state.failureDecision == null ? "" : state.failureDecision.reason();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         List<String> remainingExpectedTargets = expectedMutationTargetsForScopeRepair(state);
         if (remainingExpectedTargets.isEmpty() && looksLikeExpectedTargetScopeFailure(failureReason)) {
             remainingExpectedTargets = expectedTargetsFromScopeFailureReason(failureReason);
@@ -165,22 +168,30 @@ final class ExpectedTargetScopeRepairPlanner {
 
     private static List<String> expectedMutationTargetsForScopeRepair(LoopState state) {
         if (state == null || state.messages == null) return List.of();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || !contract.mutationAllowed()) return List.of();
         Set<String> expectedTargets = contract.expectedTargets().isEmpty()
-                ? TaskContractResolver.extractExpectedTargets(ToolCallSupport.latestUserRequestIn(state.messages))
+                && TurnTaskContractCapture.getResolution() == null
+                ? TaskContractResolver.extractExpectedTargets(
+                        TurnTaskContractCapture.originalUserRequestOrResolve(
+                                state.messages))
                 : contract.expectedTargets();
         if (expectedTargets == null || expectedTargets.isEmpty()) return List.of();
         Set<String> successfullyMutated = new java.util.HashSet<>();
+        List<String> mutatedPaths = new java.util.ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            addSatisfiedExpectedTargetKeys(successfullyMutated, outcome);
+            ExpectedTargetProgressAccounting.addExactMutationKeys(successfullyMutated, outcome);
+            mutatedPaths.addAll(ExpectedTargetProgressAccounting.mutatedPaths(outcome));
         }
         return expectedTargets.stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())
                 .distinct()
-                .filter(path -> !successfullyMutated.contains(normalizeExpectedTargetKey(path)))
+                .filter(path -> !successfullyMutated.contains(path))
+                .filter(path -> !ExpectedTargetProgressAccounting.mutatedUnderAnotherSpelling(
+                        state.workspace, path, mutatedPaths))
                 .sorted()
                 .toList();
     }
@@ -352,7 +363,7 @@ final class ExpectedTargetScopeRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Apply the requested file change to the expected target."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
@@ -406,35 +417,6 @@ final class ExpectedTargetScopeRepairPlanner {
         }
         return readback.substring(0, COMPACT_READBACK_REPAIR_MAX_CHARS)
                 + "\n... [readback truncated for compact old-string repair]";
-    }
-
-    private static void addSatisfiedExpectedTargetKeys(
-            Set<String> satisfiedTargets,
-            ToolCallLoop.ToolOutcome outcome
-    ) {
-        if (satisfiedTargets == null || outcome == null) return;
-        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
-        if (plan != null && !plan.pathEffects().isEmpty()) {
-            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
-                addExpectedTargetPathKeys(satisfiedTargets, effect.path());
-            }
-            return;
-        }
-        addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
-    }
-
-    private static void addExpectedTargetPathKeys(Set<String> satisfiedTargets, String path) {
-        String normalized = normalizeExpectedTargetKey(path);
-        if (normalized.isBlank()) return;
-        satisfiedTargets.add(normalized);
-        int slash = normalized.lastIndexOf('/');
-        if (slash >= 0 && slash + 1 < normalized.length()) {
-            satisfiedTargets.add(normalized.substring(slash + 1));
-        }
-    }
-
-    private static String normalizeExpectedTargetKey(String path) {
-        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static List<ToolSpec> filterTools(List<ToolSpec> specs, List<String> allowedNames) {

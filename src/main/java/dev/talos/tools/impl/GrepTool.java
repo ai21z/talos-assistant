@@ -13,9 +13,13 @@ import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.*;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -55,7 +59,7 @@ public final class GrepTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "pattern":{"type":"string","description":"Text or regex pattern to search for"},
-                  "include":{"type":"string","description":"Single glob for filenames, e.g. *.java or *.{js,css} (optional). Do not pass comma-separated globs."},
+                  "include":{"type":"string","description":"Single filename-only glob, e.g. *.java or *.{js,css} (optional). Do not pass path separators or comma-separated globs."},
                   "max_results":{"type":"integer","description":"Max matching lines (default 50)"},
                   "regex":{"type":"string","description":"'true' to use regex (default plain text)"}
                 },"required":["pattern"]}""",
@@ -93,6 +97,11 @@ public final class GrepTool implements TalosTool {
         // Optional filename glob matcher
         PathMatcher globMatcher = null;
         if (includeGlob != null && !includeGlob.isBlank()) {
+            if (hasPathSeparator(includeGlob)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid include glob: include accepts a filename glob only and cannot contain path separators. "
+                                + "Use *.json instead of /*.json or src/*.json."));
+            }
             if (hasTopLevelComma(includeGlob)) {
                 return ToolResult.fail(ToolError.invalidParams(
                         "Invalid include glob: comma-separated include values are not supported. "
@@ -108,14 +117,19 @@ public final class GrepTool implements TalosTool {
         Path root = ctx.workspace();
         boolean privateMode = PrivacyConfigFacts.privateMode(ctx.config());
         List<String> matches = new ArrayList<>();
+        LinkedHashSet<String> matchedPaths = new LinkedHashSet<>();
         List<String> skippedUnsupportedDocuments = new ArrayList<>();
         int[] skippedProtected = {0};
         final PathMatcher matcher = globMatcher;
+        List<SearchCandidate> candidates = new ArrayList<>();
 
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (!attrs.isDirectory() || attrs.isSymbolicLink() || attrs.isOther()) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
                     String dirName = dir.getFileName() == null ? "" : dir.getFileName().toString();
                     if (SKIP_DIRS.contains(dirName)) {
                         return FileVisitResult.SKIP_SUBTREE;
@@ -128,50 +142,25 @@ public final class GrepTool implements TalosTool {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (matches.size() >= maxResults) return FileVisitResult.TERMINATE;
-                    if (attrs.size() > MAX_FILE_SIZE) return FileVisitResult.CONTINUE;
-                    if (!attrs.isRegularFile()) return FileVisitResult.CONTINUE;
-
-                    // Sandbox check
-                    if (!ctx.sandbox().allowedPath(file)) return FileVisitResult.CONTINUE;
-
-                    if (ProtectedWorkspacePaths.isProtectedPath(root, file)) {
-                        skippedProtected[0]++;
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    // Glob filter
-                    if (matcher != null) {
-                        Path fileName = file.getFileName();
-                        if (fileName == null || !matcher.matches(fileName)) {
+                    try {
+                        BasicFileAttributes noFollowAttributes = Files.readAttributes(
+                                file,
+                                BasicFileAttributes.class,
+                                LinkOption.NOFOLLOW_LINKS);
+                        if (!isOrdinaryRegularFile(noFollowAttributes)
+                                || noFollowAttributes.size() > MAX_FILE_SIZE
+                                || !ctx.sandbox().allowedPath(file)) {
                             return FileVisitResult.CONTINUE;
                         }
+                        SearchCandidate candidate = normalizeCandidate(root, file);
+                        if (candidate == null) {
+                            return FileVisitResult.CONTINUE;
+                        }
+                        candidates.add(candidate);
+                    } catch (IOException | SecurityException ignored) {
+                        // Entries that cannot be authenticated without following links are skipped.
                     }
-
-                    FileCapabilityPolicy.FormatInfo capability =
-                            FileCapabilityPolicy.describe(file, ctx.config()).orElse(null);
-                    if (capability != null && capability.enabled()) {
-                        searchExtractedFile(file, root, ctx, pattern, matches, maxResults, skippedUnsupportedDocuments);
-                        return matches.size() >= maxResults
-                                ? FileVisitResult.TERMINATE
-                                : FileVisitResult.CONTINUE;
-                    }
-
-                    if (UnsupportedDocumentFormats.isUnsupported(file)) {
-                        skippedUnsupportedDocuments.add(root.relativize(file).toString().replace('\\', '/'));
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    // Skip binary-looking files (quick heuristic: check first bytes)
-                    if (looksLikeBinary(file)) {
-                        skippedUnsupportedDocuments.add(root.relativize(file).toString().replace('\\', '/'));
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    searchFile(file, root, pattern, matches, maxResults, privateMode);
-                    return matches.size() >= maxResults
-                            ? FileVisitResult.TERMINATE
-                            : FileVisitResult.CONTINUE;
+                    return FileVisitResult.CONTINUE;
                 }
 
                 @Override
@@ -183,11 +172,64 @@ public final class GrepTool implements TalosTool {
             return ToolResult.fail(ToolError.internal("Search failed: " + e.getMessage()));
         }
 
+        candidates.sort(GrepTool::compareCandidatesByRelativeSegments);
+        for (SearchCandidate candidate : candidates) {
+            if (matches.size() >= maxResults) break;
+
+            CandidateAccess access = revalidateCandidate(candidate, root, ctx);
+            if (access == CandidateAccess.SKIP) continue;
+            if (access == CandidateAccess.PROTECTED) {
+                skippedProtected[0]++;
+                continue;
+            }
+            if (matcher != null) {
+                Path fileName = candidate.path().getFileName();
+                if (fileName == null || !matcher.matches(fileName)) {
+                    continue;
+                }
+            }
+
+            Path file = candidate.path();
+            FileCapabilityPolicy.FormatInfo capability =
+                    FileCapabilityPolicy.describe(file, ctx.config()).orElse(null);
+            if (capability != null && capability.enabled()) {
+                if (revalidateCandidate(candidate, root, ctx) == CandidateAccess.SEARCHABLE) {
+                    searchExtractedFile(file, candidate.displayPath(), root, ctx, pattern,
+                            matches, matchedPaths, maxResults, skippedUnsupportedDocuments);
+                }
+                continue;
+            }
+
+            if (UnsupportedDocumentFormats.isUnsupported(file)) {
+                skippedUnsupportedDocuments.add(candidate.displayPath());
+                continue;
+            }
+
+            if (revalidateCandidate(candidate, root, ctx) != CandidateAccess.SEARCHABLE) {
+                continue;
+            }
+            // Skip binary-looking files (quick heuristic: check first bytes).
+            if (looksLikeBinary(file)) {
+                skippedUnsupportedDocuments.add(candidate.displayPath());
+                continue;
+            }
+
+            if (revalidateCandidate(candidate, root, ctx) == CandidateAccess.SEARCHABLE) {
+                searchFile(file, candidate.displayPath(), pattern, matches, matchedPaths,
+                        maxResults, privateMode);
+            }
+        }
+
         if (matches.isEmpty()) {
             String safePattern = ProtectedContentSanitizer.sanitizeText(patternStr);
-            return ToolResult.ok("No matches found in searchable non-protected text files for: " + safePattern
-                    + ProtectedContentMessages.protectedContentNote(skippedProtected[0])
-                    + unsupportedDocumentNote(skippedUnsupportedDocuments));
+            return ToolResult.ok(
+                    "No matches found in searchable non-protected text files for: " + safePattern
+                            + ProtectedContentMessages.protectedContentNote(skippedProtected[0])
+                            + unsupportedDocumentNote(skippedUnsupportedDocuments),
+                    ToolContentMetadata.workspaceEvidence(
+                            ToolContentMetadata.ContentSource.GREP,
+                            List.of(),
+                            "grep returned no source paths"));
         }
 
         var sb = new StringBuilder();
@@ -200,7 +242,12 @@ public final class GrepTool implements TalosTool {
         }
         sb.append(ProtectedContentMessages.protectedContentNote(skippedProtected[0]));
         sb.append(unsupportedDocumentNote(skippedUnsupportedDocuments));
-        return ToolResult.ok(sb.toString());
+        return ToolResult.ok(
+                sb.toString(),
+                ToolContentMetadata.workspaceEvidence(
+                        ToolContentMetadata.ContentSource.GREP,
+                        List.copyOf(matchedPaths),
+                        "grep match source paths"));
     }
 
     private static boolean hasTopLevelComma(String glob) {
@@ -219,30 +266,51 @@ public final class GrepTool implements TalosTool {
         return false;
     }
 
+    private static boolean hasPathSeparator(String glob) {
+        return glob != null && (glob.indexOf('/') >= 0 || glob.indexOf('\\') >= 0);
+    }
+
     private static String unsupportedDocumentNote(List<String> skippedUnsupportedDocuments) {
         if (skippedUnsupportedDocuments == null || skippedUnsupportedDocuments.isEmpty()) return "";
+        // Entries are appended only while iterating the segment-sorted candidate snapshot.
+        List<String> orderedDocuments = List.copyOf(skippedUnsupportedDocuments);
         StringBuilder out = new StringBuilder();
         out.append("\n\nSearch was limited to searchable text files. Skipped unsupported binary document(s): ");
-        int limit = Math.min(5, skippedUnsupportedDocuments.size());
-        out.append(String.join(", ", skippedUnsupportedDocuments.subList(0, limit)));
-        if (skippedUnsupportedDocuments.size() > limit) {
-            out.append(", ... ").append(skippedUnsupportedDocuments.size() - limit).append(" more");
+        int limit = Math.min(5, orderedDocuments.size());
+        out.append(String.join(", ", orderedDocuments.subList(0, limit)));
+        if (orderedDocuments.size() > limit) {
+            out.append(", ... ").append(orderedDocuments.size() - limit).append(" more");
         }
         out.append(". Talos grep cannot extract PDF/Office binary contents or other unsupported/binary files with the current local text-tool surface.");
         return out.toString();
     }
 
-    private static void searchFile(Path file, Path root, Pattern pattern,
-                                   List<String> matches, int maxResults, boolean privateMode) {
-        try {
-            String relPath = root.relativize(file).toString().replace('\\', '/');
-            List<String> lines = Files.readAllLines(file);
-            for (int i = 0; i < lines.size() && matches.size() < maxResults; i++) {
+    private static void searchFile(Path file, String relPath, Pattern pattern,
+                                   List<String> matches, LinkedHashSet<String> matchedPaths,
+                                   int maxResults, boolean privateMode) {
+        try (var input = Files.newInputStream(
+                file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+            byte[] bytes = input.readNBytes(Math.toIntExact(MAX_FILE_SIZE + 1L));
+            if (bytes.length > MAX_FILE_SIZE) return;
+            String text = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+            List<String> lines = text.lines().toList();
+            int remaining = Math.max(0, maxResults - matches.size());
+            List<String> fileMatches = new ArrayList<>(Math.min(lines.size(), remaining));
+            for (int i = 0; i < lines.size() && fileMatches.size() < remaining; i++) {
                 String line = lines.get(i);
                 if (pattern.matcher(line).find()) {
                     String safeLine = safeSearchLine(line.stripTrailing(), privateMode);
-                    matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
+                    fileMatches.add(
+                            relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
                 }
+            }
+            if (!fileMatches.isEmpty()) {
+                matches.addAll(fileMatches);
+                matchedPaths.add(relPath);
             }
         } catch (IOException ignored) {
             // skip files that can't be read as text
@@ -251,13 +319,14 @@ public final class GrepTool implements TalosTool {
 
     private static void searchExtractedFile(
             Path file,
+            String relPath,
             Path root,
             ToolContext ctx,
             Pattern pattern,
             List<String> matches,
+            LinkedHashSet<String> matchedPaths,
             int maxResults,
             List<String> skippedUnsupportedDocuments) {
-        String relPath = root.relativize(file).toString().replace('\\', '/');
         boolean privateMode = PrivacyConfigFacts.privateMode(ctx.config());
         DocumentExtractionResult extraction = new DocumentExtractionService(ctx.config())
                 .extract(DocumentExtractionRequest.search(file, root));
@@ -272,12 +341,14 @@ public final class GrepTool implements TalosTool {
             if (pattern.matcher(line).find()) {
                 String safeLine = safeExtractedSearchLine(line.stripTrailing(), privateMode, extraction);
                 matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
+                matchedPaths.add(relPath);
             }
         }
     }
 
     private static boolean looksLikeBinary(Path file) {
-        try (var is = Files.newInputStream(file)) {
+        try (var is = Files.newInputStream(
+                file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
             byte[] head = is.readNBytes(512);
             int nullCount = 0;
             for (byte b : head) {
@@ -288,6 +359,78 @@ public final class GrepTool implements TalosTool {
             return true; // can't read → skip
         }
     }
+
+    private static SearchCandidate normalizeCandidate(Path root, Path file) {
+        if (root == null || file == null) return null;
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalizedFile = file.toAbsolutePath().normalize();
+        if (!normalizedFile.startsWith(normalizedRoot)) return null;
+        Path relative = normalizedRoot.relativize(normalizedFile).normalize();
+        if (relative.isAbsolute() || relative.getNameCount() == 0
+                || "..".equals(relative.getName(0).toString())) {
+            return null;
+        }
+        return new SearchCandidate(normalizedFile, relative, displayPath(relative));
+    }
+
+    private static String displayPath(Path relative) {
+        List<String> segments = new ArrayList<>(relative.getNameCount());
+        for (Path segment : relative) {
+            segments.add(segment.toString());
+        }
+        return String.join("/", segments);
+    }
+
+    private static int compareCandidatesByRelativeSegments(
+            SearchCandidate left, SearchCandidate right) {
+        int commonSegments = Math.min(
+                left.relativePath().getNameCount(),
+                right.relativePath().getNameCount());
+        for (int i = 0; i < commonSegments; i++) {
+            int compared = left.relativePath().getName(i).toString()
+                    .compareTo(right.relativePath().getName(i).toString());
+            if (compared != 0) return compared;
+        }
+        return Integer.compare(
+                left.relativePath().getNameCount(),
+                right.relativePath().getNameCount());
+    }
+
+    private static CandidateAccess revalidateCandidate(
+            SearchCandidate candidate, Path root, ToolContext ctx) {
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(
+                    candidate.path(),
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!isOrdinaryRegularFile(attributes)
+                    || attributes.size() > MAX_FILE_SIZE
+                    || !ctx.sandbox().allowedPath(candidate.path())) {
+                return CandidateAccess.SKIP;
+            }
+            if (ProtectedWorkspacePaths.isProtectedPath(root, candidate.path())) {
+                return CandidateAccess.PROTECTED;
+            }
+            return CandidateAccess.SEARCHABLE;
+        } catch (IOException | SecurityException ignored) {
+            return CandidateAccess.SKIP;
+        }
+    }
+
+    private static boolean isOrdinaryRegularFile(BasicFileAttributes attributes) {
+        return attributes != null
+                && attributes.isRegularFile()
+                && !attributes.isSymbolicLink()
+                && !attributes.isOther();
+    }
+
+    private enum CandidateAccess {
+        SEARCHABLE,
+        PROTECTED,
+        SKIP
+    }
+
+    private record SearchCandidate(Path path, Path relativePath, String displayPath) {}
 
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max) + "...";

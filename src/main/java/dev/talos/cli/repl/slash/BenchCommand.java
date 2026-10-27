@@ -198,7 +198,7 @@ public final class BenchCommand implements Command {
         json.append("{\n");
         json.append("  \"benchmark_config\": {\n");
         json.append("    \"timestamp\": \"").append(Instant.now()).append("\",\n");
-        json.append("    \"workspace\": \"").append(workspace.getFileName()).append("\",\n");
+        json.append("    \"workspace\": \"").append(dev.talos.cli.CliUtil.folderName(workspace)).append("\",\n");
         json.append("    \"runs\": ").append(config.runs).append(",\n");
         json.append("    \"models\": ").append(config.models).append(",\n");
         json.append("    \"concurrencies\": ").append(Arrays.toString(config.concurrencies)).append("\n");

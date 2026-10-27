@@ -23,9 +23,10 @@ public record ActiveTaskContext(
         List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaims,
         StaticWebRequirements staticWebRequirements,
         String blockedReason,
-        String suppressionReason) {
+        String suppressionReason,
+        ProposalProvenance proposalProvenance) {
 
-    public static final int SCHEMA_VERSION = 3;
+    public static final int SCHEMA_VERSION = 4;
     public static final int MAX_TARGETS = 5;
     public static final int MAX_PROPOSAL_CHARS = 600;
     public static final int MAX_FINDINGS = 5;
@@ -35,6 +36,21 @@ public record ActiveTaskContext(
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
 
     private static final Pattern API_KEY_TOKEN = Pattern.compile("(?i)\\bsk-[a-z0-9_-]{8,}\\b");
+
+    public ActiveTaskContext(
+            int schemaVersion, State state, Kind kind, int sourceTurnNumber,
+            String sourceTraceId, int updatedTurnNumber, int expiresAfterTurnNumber,
+            List<String> targets, Operation operation, String proposalSummary,
+            String previousOutcomeStatus, List<String> verifierFindings,
+            List<RequiredVerificationClaim> requiredVerificationClaims,
+            StaticWebRequirements staticWebRequirements, String blockedReason,
+            String suppressionReason) {
+        this(schemaVersion, state, kind, sourceTurnNumber, sourceTraceId,
+                updatedTurnNumber, expiresAfterTurnNumber, targets, operation,
+                proposalSummary, previousOutcomeStatus, verifierFindings,
+                requiredVerificationClaims, staticWebRequirements, blockedReason,
+                suppressionReason, ProposalProvenance.none());
+    }
 
     public ActiveTaskContext(
             int schemaVersion,
@@ -84,6 +100,8 @@ public record ActiveTaskContext(
         staticWebRequirements = staticWebRequirements == null ? StaticWebRequirements.none() : staticWebRequirements;
         blockedReason = normalizeText(blockedReason, MAX_PROPOSAL_CHARS);
         suppressionReason = normalizeText(suppressionReason, MAX_PROPOSAL_CHARS);
+        proposalProvenance = proposalProvenance == null
+                ? ProposalProvenance.none() : proposalProvenance;
     }
 
     public record RequiredVerificationClaim(
@@ -177,6 +195,20 @@ public record ActiveTaskContext(
                 StaticWebRequirements.none(),
                 "",
                 "");
+    }
+
+    public ActiveTaskContext withProposalProvenance(ProposalProvenance provenance) {
+        return new ActiveTaskContext(schemaVersion, state, kind, sourceTurnNumber,
+                sourceTraceId, updatedTurnNumber, expiresAfterTurnNumber, targets,
+                operation, proposalSummary, previousOutcomeStatus, verifierFindings,
+                requiredVerificationClaims, staticWebRequirements, blockedReason,
+                suppressionReason, provenance);
+    }
+
+    public boolean hasBoundProposal() {
+        return kind == Kind.PROPOSED_CHANGES
+                && operation == Operation.APPLY_EDIT
+                && proposalProvenance.matches(this);
     }
 
     public static ActiveTaskContext verifierFindings(
@@ -445,7 +477,8 @@ public record ActiveTaskContext(
                 requiredVerificationClaims,
                 staticWebRequirements,
                 blockedReason,
-                reason);
+                reason,
+                proposalProvenance);
     }
 
     private static List<String> normalizeTargets(List<String> rawTargets) {

@@ -1,23 +1,33 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
-import dev.talos.core.util.UiChrome;
-import dev.talos.safety.SafeLogFormatter;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 
 final class ToolRepromptChatExecutor {
-    private static final Logger LOG = LoggerFactory.getLogger(ToolRepromptChatExecutor.class);
     private static final String NO_ANSWER_AFTER_TOOL_EXECUTION = "(no answer from model after tool execution)";
 
     private ToolRepromptChatExecutor() {
+    }
+
+    private enum RequestPurpose { EVIDENCE_CONTINUATION, TOOL_ARGUMENT_SELECTION }
+
+    /** Argument selection is bounded by its caller and cannot itself finalize an answer. */
+    static boolean executeToolSelectionResult(LoopState state, List<ChatMessage> requestMessages,
+                                             List<ToolSpec> tools, ChatRequestControls controls,
+                                             String noAnswerFallback) {
+        if (tools == null || tools.isEmpty() || controls == null || !controls.singleAttempt()
+                || controls.toolChoice() != dev.talos.spi.types.ToolChoiceMode.REQUIRED)
+            throw new IllegalArgumentException("Tool selection requires one bounded required-tool request.");
+        return executeResult(state, requestMessages, tools, controls, noAnswerFallback, true,
+                RequestPurpose.TOOL_ARGUMENT_SELECTION);
     }
 
     static boolean execute(
@@ -27,6 +37,7 @@ final class ToolRepromptChatExecutor {
             ChatRequestControls controls,
             String retryName
     ) {
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try {
             return executeResult(
                     state,
@@ -35,28 +46,20 @@ final class ToolRepromptChatExecutor {
                     controls,
                     NO_ANSWER_AFTER_TOOL_EXECUTION);
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             return ToolRepromptContextBudgetHandler.handle(state, budget, retryName);
-        } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer("[Ollama not reachable - tool loop aborted. " + cf.guidance() + "]");
-            return false;
-        } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
-            state.finishWithAnswer(UiChrome.MODEL_NOT_FOUND_OPEN + mnf.model() + UiChrome.MODEL_NOT_FOUND_MARKER
-                    + " - tool loop aborted. " + mnf.guidance() + "]");
-            return false;
-        } catch (EngineException ee) {
-            LOG.warn("Engine error during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
-            state.finishWithAnswer(UiChrome.ENGINE_ERROR_PREFIX + " during tool loop: " + ee.getMessage() + "]");
-            return false;
+        } catch (RuntimeException failure) {
+            if (TurnFailureClassifier.isCancellation(failure)
+                    || TurnFailureClassifier.isInterruption(failure)) {
+                throw TurnFailureClassifier.propagateControlFlow(failure);
+            }
+            throw failure;
         } catch (Exception e) {
-            LOG.warn("LLM call failed during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(e));
-            state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
-            return false;
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            throw new RuntimeException(e);
         }
     }
 
@@ -73,7 +76,7 @@ final class ToolRepromptChatExecutor {
                 repromptToolSpecs,
                 controls,
                 noAnswerFallback,
-                true);
+                true, RequestPurpose.EVIDENCE_CONTINUATION);
     }
 
     static boolean executeRetryResult(
@@ -89,7 +92,7 @@ final class ToolRepromptChatExecutor {
                 repromptToolSpecs,
                 controls,
                 noAnswerFallback,
-                false);
+                false, RequestPurpose.EVIDENCE_CONTINUATION);
     }
 
     private static boolean executeResult(
@@ -98,13 +101,45 @@ final class ToolRepromptChatExecutor {
             List<ToolSpec> repromptToolSpecs,
             ChatRequestControls controls,
             String noAnswerFallback,
-            boolean failPendingObligationOnEmptyResult
+            boolean failPendingObligationOnEmptyResult,
+            RequestPurpose purpose
     ) {
-        LlmClient.StreamResult repromptResult =
-                state.ctx.llm().chatFull(
-                        requestMessages,
-                        repromptToolSpecs,
-                        controls);
+        ChatRequestControls authorityBoundControls =
+                (controls == null ? ChatRequestControls.defaults() : controls)
+                        .withToolAuthorityMode(
+                                state.ctx.llm().toolAuthorityModeForToolSurface(
+                                        repromptToolSpecs));
+        var delivery = purpose == RequestPurpose.EVIDENCE_CONTINUATION
+                ? ReadOnlyEvidenceContext.delivery(state) : ReadOnlyEvidenceContext.Delivery.unavailable();
+        if (delivery.retentionLimited()) return ReadEvidenceDeliveryRequest.stop(state, "SOURCE_RETENTION_LIMIT");
+        if (delivery.excludedSourceCount() > 0)
+            LocalTurnTraceCapture.recordRepair("READ_EVIDENCE_DELIVERY_EXCLUSIONS",
+                    "excludedSources=" + delivery.excludedSourceCount());
+        var expectedInputs = ReadEvidenceDeliveryRequest.expected(delivery);
+        if (!expectedInputs.isEmpty()) {
+            if (!ReadEvidenceDeliveryRequest.contains(requestMessages, expectedInputs))
+                return ReadEvidenceDeliveryRequest.stop(state, "REQUEST_SOURCE_MEMBERSHIP_MISMATCH");
+            authorityBoundControls = ReadEvidenceDeliveryRequest.controls(authorityBoundControls);
+        }
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
+        LlmClient.StreamResult repromptResult;
+        try {
+            repromptResult = state.ctx.llm().chatFull(
+                    requestMessages,
+                    repromptToolSpecs,
+                    authorityBoundControls);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        }
+        LocalTurnTraceCapture.enterExecutionStage(priorStage);
+        if (!expectedInputs.isEmpty() && (repromptResult == null
+                || !ReadEvidenceDeliveryRequest.delivered(repromptResult.provenance(), expectedInputs)))
+            return ReadEvidenceDeliveryRequest.stop(state, "SERIALIZED_SOURCE_MEMBERSHIP_UNAVAILABLE");
+        if (!expectedInputs.isEmpty())
+            LocalTurnTraceCapture.recordRepair("READ_EVIDENCE_DELIVERED",
+                    "sourceCount=" + expectedInputs.size() + ", semanticCompleteness=notEstablished");
         return applyResult(
                 state,
                 repromptResult,
@@ -126,17 +161,17 @@ final class ToolRepromptChatExecutor {
             String noAnswerFallback,
             boolean failPendingObligationOnEmptyResult
     ) {
-        state.currentText = repromptResult.text();
-        state.currentNativeCalls = repromptResult.hasToolCalls()
-                ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
-        if (state.currentText == null) state.currentText = "";
+        state.applyProviderResult(repromptResult);
+        if (dev.talos.runtime.IncompleteGenerationPresentation.required(repromptResult)) {
+            return false;
+        }
         if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
             if (failPendingObligationOnEmptyResult
                     && state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                 return false;
             }
             if (!state.pendingMutationSummaries.isEmpty()) {
-                state.finishWithAnswer(String.join("\n", state.pendingMutationSummaries));
+                state.finishWithToolAnswer(String.join("\n", state.pendingMutationSummaries));
             } else {
                 state.finishWithAnswer(noAnswerFallback == null || noAnswerFallback.isBlank()
                         ? NO_ANSWER_AFTER_TOOL_EXECUTION

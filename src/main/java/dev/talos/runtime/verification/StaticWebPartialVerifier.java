@@ -3,7 +3,6 @@ package dev.talos.runtime.verification;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,7 +27,7 @@ final class StaticWebPartialVerifier {
 
         String html;
         try {
-            html = Files.readString(root.resolve(htmlFile));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
         } catch (Exception e) {
             problems.add(htmlFile + ": could not be read for styled web verification.");
             return;
@@ -76,7 +75,7 @@ final class StaticWebPartialVerifier {
 
         String html;
         try {
-            html = Files.readString(root.resolve(htmlFile));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
         } catch (Exception e) {
             problems.add(htmlFile + ": could not be read for functional web verification.");
             return;

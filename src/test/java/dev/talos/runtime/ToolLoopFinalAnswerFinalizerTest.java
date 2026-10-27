@@ -1,9 +1,20 @@
 package dev.talos.runtime;
 
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.RecordedMixedCodeAnswer;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.runtime.trace.PromptAuditRedactor;
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ProviderResponseCapture;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,10 +23,148 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolLoopFinalAnswerFinalizerTest {
+    @TempDir Path sessions;
     private static final String UNRESOLVED_CONTINUATION =
             "[Tool-call continuation could not be completed. No further tool calls were executed.]";
     private static final String ITERATION_LIMIT =
             "[Tool-call limit reached. Some tool calls were not executed.]";
+    private static final String FENCED_ANSWER =
+            "Use `#calculate`:\n```html\n<button id=\"calculate\">Calculate</button>\n```\nNo edits.";
+
+    @BeforeEach
+    void beginProviderCapture() {
+        ProviderResponseCapture.begin(new ProviderResponseCapture.Listener() {
+            @Override public ProviderResponseCapture.Receipt responseReturned(
+                    ProviderResponseCapture.AttemptResponse event) {
+                return event.receipt();
+            }
+        });
+    }
+
+    @AfterEach
+    void clearProviderCapture() {
+        ProviderResponseCapture.clear();
+    }
+
+    @Test
+    void selectedExactProviderEosPreservesTheSameBoundedFencedLiteral() {
+        LlmClient.StreamResult response = providerAnswer(FENCED_ANSWER, "stop");
+        assertEquals(FENCED_ANSWER, response.text());
+        assertTrue(response.provenance().providerTerminalEligible());
+        assertFalse(response.provenance().providerToolCallEligible());
+        assertFalse(response.normalized());
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                response.text(), 4, false, List.of(), response.provenance());
+        assertEquals(FENCED_ANSWER, answer);
+        assertEquals(response.provenance().assistantHash(), PromptAuditRedactor.hash(answer));
+        assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(FENCED_ANSWER, 4, false)
+                .contains("<button"), "legacy callers do not acquire a provider waiver");
+    }
+
+    @Test
+    void changedTextAbsentAndDetachedReceiptsCannotPreserveFencedHtml() {
+        LlmClient.StreamResult response = providerAnswer(FENCED_ANSWER, "stop");
+        var selected = response.provenance();
+        var detached = new ProviderResponseCapture.Receipt(selected.generationId(), selected.source(),
+                selected.completion(), true, false, selected.assistantHash());
+        assertFalse(detached.providerTerminalEligible());
+        for (var receipt : List.of(ProviderResponseCapture.Receipt.none(), detached)) {
+            assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                    FENCED_ANSWER, 4, false, List.of(), receipt).contains("<button"));
+        }
+        assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                FENCED_ANSWER, 4, false, List.of(), null).contains("<button"));
+        assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                FENCED_ANSWER + " Altered.", 4, false, List.of(), selected).contains("<button"));
+    }
+
+    @Test
+    void nonEosProviderReceiptsDoNotGainFinalizerPreservation() {
+        for (String reason : List.of("length", "content_filter")) {
+            LlmClient.StreamResult response = providerAnswer(FENCED_ANSWER, reason);
+            assertFalse(response.provenance().providerTerminalEligible());
+            assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                    FENCED_ANSWER, 4, false, List.of(), response.provenance()).contains("<button"));
+        }
+    }
+
+    @Test
+    void hiddenActiveAndControlNormalizationCannotBeLaunderedThroughAReceipt() {
+        for (String source : List.of(
+                FENCED_ANSWER + "<think>hidden</think>",
+                FENCED_ANSWER + "\u0001control",
+                "<button onclick=\"run()\">Run</button>\nDone.")) {
+            LlmClient.StreamResult response = providerAnswer(source, "stop");
+            assertTrue(response.normalized());
+            assertFalse(response.provenance().providerTerminalEligible());
+            String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                    source, 4, false, List.of(), response.provenance());
+            assertFalse(answer.contains("<button"));
+            assertFalse(answer.contains("onclick"));
+        }
+    }
+
+    @Test
+    void completeRecordedMixedAnswerRetainsExactProviderIdentityThroughBothPersistenceForms() {
+        String source = RecordedMixedCodeAnswer.text();
+        LlmClient.StreamResult response = providerAnswer(source, "stop");
+        assertEquals(source, response.text());
+        assertFalse(response.normalized());
+        assertTrue(response.provenance().providerTerminalEligible());
+        assertFalse(response.provenance().providerToolCallEligible());
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                response.text(), 4, false, List.of(), response.provenance());
+        assertEquals(source, answer);
+        assertEquals(response.provenance().assistantHash(), PromptAuditRedactor.hash(answer));
+        try (JsonSessionStore store = new JsonSessionStore(sessions)) {
+            String id = "mixed-code-fidelity";
+            var row = new TurnRecord(1, Instant.EPOCH, 0L, "Explain the four files", answer,
+                    List.of(), 0, 0, 0, "", "ok");
+            var snapshot = new SessionData(id, sessions.toString(), "", 1, Instant.EPOCH,
+                    List.of(new SessionData.Turn("assistant", answer, "ok")), "scripted-test");
+            try (var writer = store.acquireSessionWriter(id)) {
+                writer.appendTurn(id, row);
+                writer.save(snapshot);
+            }
+            assertEquals(answer, store.loadTurns(id).getFirst().assistantText());
+            assertEquals(answer, store.load(id).orElseThrow().turns().getFirst().content());
+        }
+    }
+
+    @Test
+    void toolStrippingLayoutChangesDoNotGetAnExactProviderWaiver() {
+        String source = FENCED_ANSWER + "\n\n\n";
+        LlmClient.StreamResult response = providerAnswer(source, "stop");
+        assertEquals(source, response.text());
+        assertTrue(response.provenance().providerTerminalEligible());
+        assertNotEquals(source, ToolCallParser.stripToolCalls(source));
+        assertFalse(ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                source, 4, false, List.of(), response.provenance()).contains("<button"));
+    }
+
+    @Test
+    void exactProviderPreservationStillAppliesPrivacyRedactionAndRuntimeNotices() {
+        String source = FENCED_ANSWER + "\nPatient Name: Eleni Nikolaou";
+        LlmClient.StreamResult response = providerAnswer(source, "stop");
+        assertTrue(response.provenance().providerTerminalEligible());
+        String notice = "Private content was withheld. Patient Name: Eleni Nikolaou";
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                source, 4, true, List.of(notice, notice), response.provenance());
+        assertTrue(answer.contains("<button"), "inert code remains an exact presentation fragment");
+        assertFalse(answer.contains("Eleni Nikolaou"));
+        assertTrue(answer.contains("[redacted-private-document-canary]"));
+        assertEquals(1, countOccurrences(answer, "Private content was withheld."));
+        assertNotEquals(response.provenance().assistantHash(), PromptAuditRedactor.hash(answer),
+                "privacy/notice changes cannot claim the original whole-answer byte identity");
+    }
+
+    @Test
+    void providerReceiptCannotBypassUnfinishedToolSuppression() {
+        var receipt = providerAnswer(FENCED_ANSWER, "stop").provenance();
+        assertTrue(receipt.providerTerminalEligible());
+        assertEquals(UNRESOLVED_CONTINUATION, ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                "{\"name\":\"talos.read_file\",\"arguments\":{", 4, false, List.of(), receipt));
+    }
 
     @Test
     void normalTextPassesThroughUnchanged() {
@@ -170,6 +319,14 @@ class ToolLoopFinalAnswerFinalizerTest {
         assertFalse(engineSource.contains("ProtectedContentPolicy.sanitizeText"), engineSource);
         assertFalse(facadeSource.contains("Sanitize.stripSuspiciousHtml"), facadeSource);
         assertFalse(engineSource.contains("Sanitize.stripSuspiciousHtml"), engineSource);
+    }
+
+    private static LlmClient.StreamResult providerAnswer(String source, String finishReason) {
+        try (LlmClient client = ScriptedNativeLlmClient.of(
+                List.of(new LlmClient.StreamResult(source, List.of(), finishReason)))) {
+            return client.chatFull(List.of(ChatMessage.user("explain without tools")), List.of(),
+                    ChatRequestControls.defaults().withSingleAttempt(true));
+        }
     }
 
     private static String privateDocumentCanary() {

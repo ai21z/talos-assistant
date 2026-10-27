@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /** Registry of supported non-shell command profiles. Does not execute commands. */
@@ -14,15 +15,17 @@ public final class CommandProfileRegistry {
     private final WorkspaceProfileTrustStore.TrustState workspaceTrustState;
     private final String workspaceRejectionReason;
     private final Set<String> workspaceProfileIds;
+    private final WorkspaceTrustBinding workspaceTrustBinding;
 
     public CommandProfileRegistry(List<CommandProfile> profiles) {
-        this(profiles, WorkspaceProfileTrustStore.TrustState.NONE_DECLARED, "", Set.of());
+        this(profiles, WorkspaceProfileTrustStore.TrustState.NONE_DECLARED, "", Set.of(), null);
     }
 
     private CommandProfileRegistry(List<CommandProfile> profiles,
                                    WorkspaceProfileTrustStore.TrustState workspaceTrustState,
                                    String workspaceRejectionReason,
-                                   Set<String> workspaceProfileIds) {
+                                   Set<String> workspaceProfileIds,
+                                   WorkspaceTrustBinding workspaceTrustBinding) {
         Map<String, CommandProfile> out = new LinkedHashMap<>();
         if (profiles != null) {
             for (CommandProfile profile : profiles) {
@@ -37,6 +40,7 @@ public final class CommandProfileRegistry {
                 : workspaceTrustState;
         this.workspaceRejectionReason = workspaceRejectionReason == null ? "" : workspaceRejectionReason;
         this.workspaceProfileIds = Set.copyOf(workspaceProfileIds == null ? Set.of() : workspaceProfileIds);
+        this.workspaceTrustBinding = workspaceTrustBinding;
     }
 
     /**
@@ -49,20 +53,20 @@ public final class CommandProfileRegistry {
      * carry no colon) - asserted anyway.
      */
     public CommandProfileRegistry withWorkspaceDeclaration(
-            WorkspaceCommandProfiles declaration,
-            WorkspaceProfileTrustStore.TrustState state) {
-        WorkspaceCommandProfiles safe = declaration == null
-                ? WorkspaceCommandProfiles.none()
-                : declaration;
-        WorkspaceProfileTrustStore.TrustState effectiveState = state == null
-                ? WorkspaceProfileTrustStore.TrustState.NONE_DECLARED
-                : state;
+            Path workspace,
+            WorkspaceCommandProfilesLoader.Loaded loaded,
+            WorkspaceProfileTrustStore trustStore) {
+        Path root = workspaceRoot(workspace);
+        Objects.requireNonNull(trustStore, "trustStore is required");
+        WorkspaceCommandProfiles safe = loaded == null
+                ? WorkspaceCommandProfiles.none() : loaded.profiles();
+        WorkspaceProfileTrustStore.TrustState effectiveState = trustStore.state(root, loaded);
         if (effectiveState != WorkspaceProfileTrustStore.TrustState.TRUSTED || !safe.valid()) {
             return new CommandProfileRegistry(
                     new ArrayList<>(profiles.values()),
                     effectiveState,
                     safe.rejectionReason(),
-                    Set.of());
+                    Set.of(), null);
         }
         List<CommandProfile> merged = new ArrayList<>(profiles.values());
         Set<String> declaredIds = new LinkedHashSet<>();
@@ -74,8 +78,31 @@ public final class CommandProfileRegistry {
             merged.add(profile);
             declaredIds.add(profile.id());
         }
-        return new CommandProfileRegistry(merged, effectiveState, "", declaredIds);
+        return new CommandProfileRegistry(merged, effectiveState, "", declaredIds,
+                new WorkspaceTrustBinding(root, loaded.declarationSha256(), trustStore));
     }
+
+    /**
+     * Recheck consent and the exact declaration registered for this session.
+     * Called both before approval and immediately before execution; registration
+     * is a snapshot, never a lease that survives revocation or declaration edits.
+     */
+    public void requireCurrentWorkspaceTrust(Path workspace) {
+        WorkspaceTrustBinding binding = workspaceTrustBinding;
+        if (binding == null || !binding.workspace().equals(workspaceRoot(workspace))) {
+            throw new CommandPlanRejectedException("Workspace profile has no matching live trust binding.");
+        }
+        WorkspaceCommandProfilesLoader.Loaded current = WorkspaceCommandProfilesLoader.load(workspace);
+        if (binding.trustStore().state(workspace, current) != WorkspaceProfileTrustStore.TrustState.TRUSTED
+                || !binding.declarationSha256().equals(current.declarationSha256())) {
+            throw new CommandPlanRejectedException(
+                    "Workspace profile trust was revoked or the declaration changed. "
+                            + "Review /profiles trust and start a new session before using this registered profile.");
+        }
+    }
+
+    private record WorkspaceTrustBinding(
+            Path workspace, String declarationSha256, WorkspaceProfileTrustStore trustStore) {}
 
     /** Trust state of the workspace declaration this registry was built with. */
     public WorkspaceProfileTrustStore.TrustState workspaceTrustState() {
@@ -119,6 +146,9 @@ public final class CommandProfileRegistry {
 
     public CommandPlan plan(String profileId, List<String> callerArgs, Path workspace, String cwd) {
         String id = profileId == null ? "" : profileId.strip();
+        if (CommandToolPlanner.isWorkspaceProfile(id)) {
+            requireCurrentWorkspaceTrust(workspace);
+        }
         CommandProfile profile = profiles.get(id);
         if (profile == null) {
             throw new CommandPlanRejectedException("Unknown command profile: " + id);

@@ -1,5 +1,7 @@
 package dev.talos.runtime.verification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.TurnFailureClassifier;
 import org.htmlunit.BrowserVersion;
 import org.htmlunit.HttpHeader;
 import org.htmlunit.WebClient;
@@ -24,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Browser/runtime verifier for simple static-web click/update interaction claims. */
 final class StaticWebBrowserBehaviorVerifier {
@@ -106,8 +109,10 @@ final class StaticWebBrowserBehaviorVerifier {
                     List.of(),
                     List.of("Browser behavior verification could not inspect the static web surface.")));
         }
+        propagateObservedInterruption();
         BrowserRunResult result = (runner == null ? new HtmlUnitBrowserRunner() : runner)
                 .run(root.toAbsolutePath().normalize(), facts.htmlFile(), facts.js(), binding);
+        propagateObservedInterruption();
         ClaimResult claimResult = new ClaimResult(
                 claim,
                 obligation,
@@ -136,13 +141,25 @@ final class StaticWebBrowserBehaviorVerifier {
             }
             List<String> scriptErrors = new ArrayList<>();
             List<String> workspaceRequests = new ArrayList<>();
-            try (WebClient client = new WorkspaceOnlyWebClient(safeRoot, workspaceRequests)) {
+            AtomicBoolean unsupportedGlobalStatusBinding = new AtomicBoolean();
+            try {
+                NoFollowPathPolicy.GuardedRoot guardedRoot =
+                        NoFollowPathPolicy.bindExistingDirectory(safeRoot);
+                guardedRoot.requireRegularFile(htmlPath);
+                try (WebClient client = new WorkspaceOnlyWebClient(
+                        guardedRoot, workspaceRequests)) {
                 client.getOptions().setJavaScriptEnabled(true);
                 client.getOptions().setCssEnabled(false);
                 client.getOptions().setDownloadImages(false);
                 client.getOptions().setThrowExceptionOnScriptError(false);
                 client.getOptions().setThrowExceptionOnFailingStatusCode(false);
                 client.setJavaScriptErrorListener(new CapturingJavaScriptErrorListener(scriptErrors));
+                client.setScriptPreProcessor((scriptPage, source, sourceName, lineNumber, element) -> {
+                    if (StaticWebJavaScriptSyntaxVerifier.hasUnsupportedGlobalStatusBinding(source)) {
+                        unsupportedGlobalStatusBinding.set(true);
+                    }
+                    return source; // Observe every delivered inline/linked script without changing it.
+                });
 
                 HtmlPage page = client.getPage(localPageUrl(htmlFile));
                 client.waitForBackgroundJavaScript(JAVASCRIPT_WAIT_MS);
@@ -154,7 +171,6 @@ final class StaticWebBrowserBehaviorVerifier {
                 String after = visibleText(page, id(binding.outputSelector()));
                 List<String> facts = new ArrayList<>();
                 List<String> limitations = new ArrayList<>();
-                boolean fallbackEvalChangedWithoutClickChange = false;
                 facts.add("Browser behavior runner loaded `" + htmlFile + "` from the workspace.");
                 facts.add("Browser behavior runner clicked `" + binding.triggerSelector()
                         + "` and observed `" + binding.outputSelector() + "`.");
@@ -162,25 +178,18 @@ final class StaticWebBrowserBehaviorVerifier {
                     facts.add("Browser behavior runner requested workspace resources: "
                             + String.join(", ", workspaceRequests) + ".");
                 }
-                if (!changed(before, after) && linkedJavaScript != null && !linkedJavaScript.isBlank()) {
-                    String beforeFallbackEval = visibleText(page, id(binding.outputSelector()));
-                    FallbackClickObservation fallback = executeWorkspaceJavaScriptAndClick(
-                            page,
-                            linkedJavaScript,
-                            id(binding.triggerSelector()),
-                            id(binding.outputSelector()));
-                    client.waitForBackgroundJavaScript(JAVASCRIPT_WAIT_MS);
-                    String afterFallbackClick = fallback.afterClick();
-                    if (afterFallbackClick.isBlank()) {
-                        afterFallbackClick = visibleText(page, id(binding.outputSelector()));
-                    }
-                    before = fallback.afterEval();
-                    after = afterFallbackClick;
-                    fallbackEvalChangedWithoutClickChange = changed(beforeFallbackEval, before)
-                            && !changed(before, after);
-                    facts.add("Browser behavior runner executed the linked workspace JavaScript in the loaded page context.");
-                    limitations.add("HtmlUnit browser runner did not observe the interaction before executing linked "
-                            + "workspace JavaScript in-page; static linkage evidence covers the script reference.");
+                // Verify the delivered page, not a repaired execution environment.
+                // Re-evaluating linked code can register missing handlers, run initialization
+                // twice, or otherwise manufacture the behavior being certified.
+                if (unsupportedGlobalStatusBinding.get()) {
+                    limitations.add("Browser behavior is unavailable for this page: HtmlUnit 4.21 "
+                            + "does not preserve a top-level let/const `status` binding independently "
+                            + "of Window.status. The original source was not rewritten or re-executed; "
+                            + "an installed-browser check is required, not a product-failure inference.");
+                    scriptErrors.forEach(error -> limitations.add(
+                            "JavaScript diagnostic from the unsupported simulation: " + error));
+                    return new BrowserRunResult(VerificationVerdict.UNAVAILABLE,
+                            facts, List.of(), limitations);
                 }
                 if (!scriptErrors.isEmpty()) {
                     return BrowserRunResult.failed(
@@ -195,25 +204,15 @@ final class StaticWebBrowserBehaviorVerifier {
                             + "` changed visible text on `" + binding.outputSelector() + "`.");
                     return BrowserRunResult.verified(facts, limitations);
                 }
-                if (fallbackEvalChangedWithoutClickChange) {
-                    return BrowserRunResult.failed(
-                            facts,
-                            List.of("Browser behavior assertion failed: linked workspace JavaScript changed `"
-                                    + binding.outputSelector()
-                                    + "` before the fallback click, but clicking `"
-                                    + binding.triggerSelector()
-                                    + "` did not change it."),
-                            limitations);
-                }
                 return BrowserRunResult.failed(
                         facts,
                         List.of("Browser behavior assertion failed: `" + binding.outputSelector()
                                 + "` visible text did not change after clicking `" + binding.triggerSelector()
                                 + "`."),
                         limitations);
+                }
             } catch (IOException | RuntimeException e) {
-                return BrowserRunResult.unavailable(
-                        "Browser behavior verifier could not execute the static page: " + safeMessage(e));
+                return browserFailureResult(e);
             }
         }
 
@@ -231,12 +230,17 @@ final class StaticWebBrowserBehaviorVerifier {
     }
 
     private static final class WorkspaceOnlyWebClient extends WebClient {
+        private final NoFollowPathPolicy.GuardedRoot guardedRoot;
         private final Path root;
         private final List<String> workspaceRequests;
 
-        WorkspaceOnlyWebClient(Path root, List<String> workspaceRequests) {
+        WorkspaceOnlyWebClient(
+                NoFollowPathPolicy.GuardedRoot guardedRoot,
+                List<String> workspaceRequests
+        ) {
             super(BrowserVersion.CHROME);
-            this.root = root;
+            this.guardedRoot = guardedRoot;
+            this.root = guardedRoot.path();
             this.workspaceRequests = workspaceRequests == null ? new ArrayList<>() : workspaceRequests;
         }
 
@@ -263,7 +267,8 @@ final class StaticWebBrowserBehaviorVerifier {
                 throw new IOException("Blocked non-workspace browser request: " + redactedUrl(url));
             }
             record(requested);
-            if (!Files.exists(requested) || Files.isDirectory(requested)) {
+            NoFollowPathPolicy.EntryType type = guardedRoot.inspect(requested);
+            if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
                 WebResponseData data = new WebResponseData(
                         ("Missing workspace resource: " + root.relativize(requested)).getBytes(StandardCharsets.UTF_8),
                         404,
@@ -271,7 +276,7 @@ final class StaticWebBrowserBehaviorVerifier {
                         List.of(new NameValuePair(HttpHeader.CONTENT_TYPE, "text/plain; charset=UTF-8")));
                 return new WebResponse(data, request, 0);
             }
-            byte[] body = Files.readAllBytes(requested);
+            byte[] body = guardedRoot.readAllBytes(requested);
             WebResponseData data = new WebResponseData(
                     body,
                     200,
@@ -348,43 +353,6 @@ final class StaticWebBrowserBehaviorVerifier {
         page.getElementById(id).click();
     }
 
-    private record FallbackClickObservation(String afterEval, String afterClick) {}
-
-    private static FallbackClickObservation executeWorkspaceJavaScriptAndClick(
-            HtmlPage page,
-            String linkedJavaScript,
-            String triggerId,
-            String outputId
-    ) {
-        Object result = page.executeJavaScript("""
-                (function() {
-                %s
-                  var outputAfterEval = document.getElementById('%s');
-                  var textAfterEval = outputAfterEval ? (outputAfterEval.innerText || outputAfterEval.textContent || '') : '';
-                  var el = document.getElementById('%s');
-                  if (el) {
-                    if (typeof el.click === 'function') {
-                      el.click();
-                    } else {
-                      var event = document.createEvent('MouseEvents');
-                      event.initEvent('click', true, true);
-                      el.dispatchEvent(event);
-                    }
-                  }
-                  var output = document.getElementById('%s');
-                  var textAfterClick = output ? (output.innerText || output.textContent || '') : '';
-                  return String(textAfterEval) + '\\u0000' + String(textAfterClick);
-                })();
-                """.formatted(linkedJavaScript, jsString(outputId), jsString(triggerId), jsString(outputId)))
-                .getJavaScriptResult();
-        if (result == null) return new FallbackClickObservation("", "");
-        String text = result.toString();
-        if ("undefined".equalsIgnoreCase(text)) return new FallbackClickObservation("", "");
-        String[] parts = text.split("\u0000", -1);
-        return new FallbackClickObservation(
-                parts.length > 0 ? parts[0].strip() : "",
-                parts.length > 1 ? parts[1].strip() : "");
-    }
 
     private static String visibleText(HtmlPage page, String id) {
         Object result = page.executeJavaScript("""
@@ -433,6 +401,23 @@ final class StaticWebBrowserBehaviorVerifier {
         if (url == null || url.isBlank()) return "<unknown>";
         int colon = url.indexOf(':');
         return colon > 0 ? url.substring(0, colon) + "://<redacted>" : "<redacted>";
+    }
+
+    static BrowserRunResult browserFailureResult(Throwable failure) {
+        if (TurnFailureClassifier.isCancellation(failure)
+                || TurnFailureClassifier.isInterruption(failure)) {
+            throw TurnFailureClassifier.propagateControlFlow(failure);
+        }
+        return BrowserRunResult.unavailable(
+                "Browser behavior verifier could not execute the static page: "
+                        + safeMessage(failure));
+    }
+
+    private static void propagateObservedInterruption() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw TurnFailureClassifier.propagateControlFlow(
+                    new InterruptedException("browser verification interrupted"));
+        }
     }
 
     private static String safeMessage(Throwable throwable) {

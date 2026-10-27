@@ -76,13 +76,13 @@ class ToolCallParserTest {
     void parseToolCallWithNoParameters() {
         String response = """
                 <tool_call>
-                {"name": "talos.status"}
+                {"name": "talos.list_dir"}
                 </tool_call>
                 """;
 
         List<ToolCall> calls = ToolCallParser.parse(response);
         assertEquals(1, calls.size());
-        assertEquals("talos.status", calls.get(0).toolName());
+        assertEquals("talos.list_dir", calls.get(0).toolName());
         assertTrue(calls.get(0).parameters().isEmpty());
     }
 
@@ -90,7 +90,7 @@ class ToolCallParserTest {
     void parseToolCallWithEmptyParameters() {
         String response = """
                 <tool_call>
-                {"name": "talos.list", "parameters": {}}
+                {"name": "talos.grep", "parameters": {}}
                 </tool_call>
                 """;
 
@@ -190,7 +190,7 @@ class ToolCallParserTest {
 
     @Test
     void containsToolCallsReturnsTrueWhenPresent() {
-        String response = "text <tool_call>{\"name\":\"x\"}</tool_call> more";
+        String response = "text <tool_call>{\"name\":\"talos.grep\"}</tool_call> more";
         assertTrue(ToolCallParser.containsToolCalls(response));
     }
 
@@ -251,9 +251,9 @@ class ToolCallParserTest {
     void stripToolCallsHandlesMultipleBlocks() {
         String response = """
                 Start.
-                <tool_call>{"name":"a"}</tool_call>
+                <tool_call>{"name":"talos.grep"}</tool_call>
                 Middle.
-                <tool_call>{"name":"b"}</tool_call>
+                <tool_call>{"name":"talos.read_file"}</tool_call>
                 End.""";
 
         String stripped = ToolCallParser.stripToolCalls(response);
@@ -394,17 +394,64 @@ class ToolCallParserTest {
 
     @Test
     void containsToolCallsDetectsCodeFence() {
-        String response = "```json\n{\"name\": \"talos.x\"}\n```";
+        String response = "```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"README.md\"}}\n```";
         assertTrue(ToolCallParser.containsToolCalls(response));
     }
 
     @Test
+    void codeFencedJsonAcceptsCustomTalosNamesButNotOrdinaryPackageNames() {
+        String customTool = """
+                ```json
+                {"name":"talos.echo","arguments":{"input":"hello"}}
+                ```
+                """;
+        String packageJson = """
+                ```json
+                {"name":"demo-app","version":"1.0.0"}
+                ```
+                """;
+
+        assertEquals(1, ToolCallParser.parse(customTool).size(),
+                "custom talos.* tools registered at runtime must still enter the text-tool path");
+        assertTrue(ToolCallParser.containsToolCalls(customTool));
+        assertTrue(ToolCallParser.parse(packageJson).isEmpty());
+        assertFalse(ToolCallParser.containsToolCalls(packageJson));
+    }
+
+    @Test
     void stripToolCallsRemovesCodeFence() {
-        String response = "Before.\n```json\n{\"name\": \"talos.x\"}\n```\nAfter.";
+        String response = "Before.\n```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"README.md\"}}\n```\nAfter.";
         String stripped = ToolCallParser.stripToolCalls(response);
-        assertFalse(stripped.contains("talos.x"));
+        assertFalse(stripped.contains("talos.read_file"));
         assertTrue(stripped.contains("Before."));
         assertTrue(stripped.contains("After."));
+    }
+
+    @Test
+    void ordinaryCodeFencedJsonWithNameFieldIsNotToolProtocol() {
+        String response = """
+                Here is package.json:
+                ```json
+                {"name":"demo-app","version":"1.0.0"}
+                ```
+                """;
+
+        assertTrue(ToolCallParser.parse(response).isEmpty(),
+                "ordinary package JSON must not be dispatched as a tool call");
+        assertFalse(ToolCallParser.containsToolCalls(response),
+                "ordinary package JSON must not enter the tool loop");
+        String stripped = ToolCallParser.stripToolCalls(response);
+        assertTrue(stripped.contains("demo-app"), stripped);
+        assertTrue(stripped.contains("version"), stripped);
+    }
+
+    @Test
+    void foreignNamedXmlVariantIsNeitherDetectedNorParsed() {
+        String response = "<tool_call>{\"name\": \"demo-app\", \"arguments\": {}}</tool_call>";
+
+        assertFalse(ToolCallParser.containsToolCalls(response),
+                "a foreign-named XML block must not enter the tool loop");
+        assertTrue(ToolCallParser.parse(response).isEmpty());
     }
 
     // ── Protocol hardening: bare JSON ────────────────────────────────

@@ -1,0 +1,86 @@
+{
+  "provenance": "Six exact final response contents were selected by captured SHA256 from the local interpretation acceptance campaign. Fixtures are inert. Observation identities are reconstructed for replay, not historical authorization.",
+  "contexts": {
+    "C1": {
+      "request": "Read README.md, index.html, script.js and scripts.js. Explain why the Calculate button fails, give the correct selector and the BMI for 72 kg and 1.8 m, and distinguish the two JavaScript files. Do not edit files or claim tests were run.",
+      "paths": ["README.md", "index.html", "script.js", "scripts.js"],
+      "sources": ["bmi-guide", "bmi-html", "bmi-script", "sentinel"]
+    },
+    "C2": {
+      "request": "Please read README.md, index.html, script.js, scripts.js and notes.md. Explain exactly why the Calculate button is broken. Identify the selector that should be used, calculate the BMI for 72 kg and 1.8 m, and explain how script.js differs from scripts.js. Do not edit files or claim tests were run.",
+      "paths": ["README.md", "index.html", "notes.md", "script.js", "scripts.js"],
+      "sources": ["bmi-guide", "bmi-html", "notes", "bmi-script", "sentinel"]
+    },
+    "C3": {
+      "request": "Read README.md, index.html, script.js and scripts.js. Explain why the Calculate button fails and give the correct selector. For span 12 m and rise 2.5 m, give the panel area according to README.md and the mathematical value of the expression in script.js separately. Explain any disagreement and distinguish the two JavaScript files. Do not edit files or claim tests were run.",
+      "paths": ["README.md", "index.html", "script.js", "scripts.js"],
+      "sources": ["area-guide", "area-html", "area-script", "sentinel"]
+    }
+  },
+  "sources": {
+    "bmi-guide": {
+      "sha256": "55e8e208e76fe3d756bfda8ffdd431bb06ef48474c055eb770129a20a950da3e",
+      "text": "# Calculator review fixture\n\nThe calculator in index.html loads script.js. scripts.js is an unrelated sentinel and must stay unchanged. The Calculate button should compute BMI as weight divided by height squared. This fixture is local test data.\n"
+    },
+    "bmi-html": {
+      "sha256": "21aa6fd0a8558bee094d77d790cef8cd297366648905cf43335700b23d3bf08a",
+      "text": "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>BMI fixture</title></head>\n<body>\n<label>Weight (kg)<input id=\"weight\" value=\"72\"></label>\n<label>Height (m)<input id=\"height\" value=\"1.8\"></label>\n<button id=\"calculate\">Calculate</button>\n<p id=\"result\"></p>\n<script src=\"script.js\"></script>\n</body>\n</html>\n"
+    },
+    "bmi-script": {
+      "sha256": "1f3c53767806eb0af9b98db72c208b767e2bc3e72c77ce152f4f2d8217402fa7",
+      "text": "const button = document.querySelector('#calc');\nbutton.addEventListener('click', () => {\n  const weight = Number(document.querySelector('#weight').value);\n  const height = Number(document.querySelector('#height').value);\n  document.querySelector('#result').textContent = (weight / (height * height)).toFixed(1);\n});\n"
+    },
+    "area-guide": {
+      "sha256": "266a01b6d9487ca7d6f0f9dcce436669b9bfd2edaaf468874ce25eeefa6847ee",
+      "text": "# Panel calculator review fixture\n\nThe calculator in index.html loads script.js. scripts.js is an unrelated sentinel and must stay unchanged. The Calculate button should compute panel area as span multiplied by rise. This fixture is local test data.\n"
+    },
+    "area-html": {
+      "sha256": "10cf799c390fde510776f4e822e77c75120b0f19165be919070fd2f2f5b3109a",
+      "text": "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>BMI fixture</title></head>\n<body>\n<label>Span (m)<input id=\"span\" value=\"12\"></label>\n<label>Rise (m)<input id=\"rise\" value=\"2.5\"></label>\n<button id=\"calculate\">Calculate</button>\n<p id=\"result\"></p>\n<script src=\"script.js\"></script>\n</body>\n</html>\n"
+    },
+    "area-script": {
+      "sha256": "4e224ea82088ac76eeae6ac5d258d065076a3971dc9b02f76549645e04c62eb7",
+      "text": "const button = document.querySelector('#calc');\nbutton.addEventListener('click', () => {\n  const span = Number(document.querySelector('#span').value);\n  const rise = Number(document.querySelector('#rise').value);\n  document.querySelector('#result').textContent = (span + rise).toFixed(1);\n});\n"
+    },
+    "sentinel": {
+      "sha256": "8ff1e9adbfed71b3ea0c11e688a5008f7180a78c87c6e42ccafb1a7c9d4940f4",
+      "text": "// Unrelated sentinel. This file is not loaded by index.html.\nconst sentinel = 'KEEP_UNCHANGED';\n"
+    },
+    "notes": {
+      "sha256": "b3fc44684a9a5302766aa2813cd4166186196477ee0417169e37ab6d0753541b",
+      "text": "Fixture housekeeping\nThis directory is used for local review. The sentinel file is retained for comparison.\n"
+    }
+  },
+  "captures": [
+    {
+      "id": "01-qwen-C1", "context": "C1", "bytes": 683,
+      "sha256": "6d8afbf8346514e15edf0bc4a0743a9b7487b8aeff597f60ca96fed6f929cb34",
+      "response": "{\n  \"version\": 4,\n  \"catalogId\": \"07f379282680798098d261196005f42ff48a54d804ff1c66875c69d67ab62ed6\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-54-92\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\"b0\", \"b1\"],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-94-119\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-124-151\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\"b0\", \"b1\"],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-157-193\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": [\n    ]\n}"
+    },
+    {
+      "id": "02-qwen-C2", "context": "C2", "bytes": 892,
+      "sha256": "4b63666958a10f78bb787f469fd17f712791eed39dc746e41965f449881b8211",
+      "response": "{\n  \"version\": 4,\n  \"catalogId\": \"8d1d6f66d26a78f4564f59c0de2f1b0b31b021c940c2b9a7632daa615fd2cda4\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-0-69\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-71-121\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-123-164\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-166-203\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\n        \"b0\",\n        \"b1\"\n      ],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-5-209-254\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": [\n    {\n      \"regionId\": \"result-2-71-121\",\n      \"relationId\": \"d0\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "03-qwen-C3", "context": "C3", "bytes": 926,
+      "sha256": "943e92845053230ed577843b30f06ed161f3b9797a01305f9c90e7844afa7e2b",
+      "response": "{\n  \"version\": 4,\n  \"catalogId\": \"6a753da7075803fc0c01b3df9cae06bf15fbbc8eba64353d716c2405cdcd9935\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-54-92\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-97-122\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-154-196\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\"b0\", \"b1\"],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-201-265\",\n      \"formulaId\": \"f1\",\n      \"bindingIds\": [\"b2\", \"b3\"],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-5-267-291\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-6-296-332\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": []\n}"
+    },
+    {
+      "id": "04-gpt-C1", "context": "C1", "bytes": 475,
+      "sha256": "cd28fdbb00c239ebcc45725253798e42690823e9db2f55cbbd4ba2c932d90f1d",
+      "response": "{\"version\":4,\"catalogId\":\"87d684412999d6daee4f25fdef56d58c611e0b206199cf5cf5bcce8b817b5210\",\"targetId\":\"t0\",\"results\":[{\"slotId\":\"result-1-54-92\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null},{\"slotId\":\"result-2-94-119\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null},{\"slotId\":\"result-3-124-151\",\"formulaId\":\"f0\",\"bindingIds\":[\"b0\",\"b1\"],\"precisionId\":null},{\"slotId\":\"result-4-157-193\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null}],\"interpretations\":[]}"
+    },
+    {
+      "id": "05-gpt-C2", "context": "C2", "bytes": 815,
+      "sha256": "38a95c5b40224214366dcd9a2da3fcd5423660822b6105c7b4f72cb8a8a9fc06",
+      "response": "{\n  \"version\": 4,\n  \"catalogId\": \"6bfbdcad4ebf3e0b68d0510b22cd24c0ae48cc5d5e6b15148f6c1ddc9cdbd8b3\",\n  \"targetId\": \"t0\",\n  \"results\": [\n    {\n      \"slotId\": \"result-1-0-69\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-2-71-121\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-3-123-164\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-4-166-203\",\n      \"formulaId\": \"f0\",\n      \"bindingIds\": [\n        \"b0\",\n        \"b1\"\n      ],\n      \"precisionId\": null\n    },\n    {\n      \"slotId\": \"result-5-209-254\",\n      \"formulaId\": null,\n      \"bindingIds\": [],\n      \"precisionId\": null\n    }\n  ],\n  \"interpretations\": []\n}"
+    },
+    {
+      "id": "06-gpt-C3", "context": "C3", "bytes": 648,
+      "sha256": "5e2ae81dc4d5671bf03e7269fbfbe313ca4edb29d098267a811a62639221cf67",
+      "response": "{\"version\":4,\"catalogId\":\"c9a9cde5c908c60cf28b39829bdc124e74d3afb6ed6595522fba2b0172b53502\",\"targetId\":\"t0\",\"results\":[{\"slotId\":\"result-1-54-92\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null},{\"slotId\":\"result-2-97-122\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null},{\"slotId\":\"result-3-154-196\",\"formulaId\":\"f0\",\"bindingIds\":[\"b0\",\"b1\"],\"precisionId\":null},{\"slotId\":\"result-4-201-265\",\"formulaId\":\"f1\",\"bindingIds\":[\"b2\",\"b3\"],\"precisionId\":null},{\"slotId\":\"result-5-267-291\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null},{\"slotId\":\"result-6-296-332\",\"formulaId\":null,\"bindingIds\":[],\"precisionId\":null}],\"interpretations\":[]}"
+    }
+  ]
+}

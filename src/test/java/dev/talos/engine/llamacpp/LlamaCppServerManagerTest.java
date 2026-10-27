@@ -4,8 +4,11 @@ import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Health;
+import dev.talos.testsupport.InterruptingHttpClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -16,6 +19,12 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +36,82 @@ import static org.junit.jupiter.api.Assertions.*;
 class LlamaCppServerManagerTest {
 
     @TempDir Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void captureHealthFailureBeforeReadinessStopsWithoutHttpProbe(
+            boolean throwsOnObservation) throws Exception {
+        Path exe = touch("capture-health-llama-server.exe");
+        Path model = touch("capture-health-agent.gguf");
+        AtomicInteger healthCalls = new AtomicInteger();
+        HttpServer server = startSequencedHealthServer(
+                healthCalls, List.of(200));
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.outputCaptureHealthy = false;
+            launcher.process.throwOutputCaptureHealth = throwsOnObservation;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg),
+                    launcher,
+                    HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2),
+                    Duration.ofMillis(10),
+                    tempDir.resolve("capture-health-logs-"
+                            + throwsOnObservation));
+
+            EngineException.ConnectionFailed failure = assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+
+            assertTrue(failure.getMessage().contains(
+                    "output capture is incomplete"));
+            assertEquals(0, healthCalls.get());
+            assertFalse(launcher.process.alive);
+            assertTrue(launcher.process.destroyed);
+            assertFalse(manager.health().ok());
+            assertTrue(manager.health().message().contains(
+                    "output capture is incomplete"));
+            assertDoesNotThrow(manager::close,
+                    "proven termination must clear process ownership even "
+                            + "when output evidence is incomplete");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void ordinaryManagedLaunchRejectsExistingListenerWithoutChangingLogsOrStartingChild() throws Exception {
+        HttpServer server = startHealthServer(200, "unrelated Gemma");
+        Path logs = tempDir.resolve("occupied-logs");
+        Files.createDirectories(logs);
+        Path log = logs.resolve("llama_cpp-" + server.getAddress().getPort() + ".log");
+        Files.writeString(log, "preserved previous launch evidence");
+        FakeLauncher launcher = new FakeLauncher();
+        Config cfg = config(Map.of("mode", "managed", "server_path", touch("occupied-server.exe").toString(),
+                "model_path", touch("occupied-model.gguf").toString(), "host", "http://127.0.0.1",
+                "port", server.getAddress().getPort()));
+        try (LlamaCppServerManager manager = new LlamaCppServerManager(LlamaCppConfig.from(cfg), launcher,
+                HttpClient.newHttpClient(), Duration.ofSeconds(2), Duration.ofMillis(10), logs)) {
+            EngineException.ConnectionFailed failure = assertThrows(EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+            assertTrue(failure.getMessage().contains("pre-existing listener"), failure.getMessage());
+            assertTrue(launcher.commands.isEmpty());
+            assertEquals("preserved previous launch evidence", Files.readString(log));
+            assertFalse(launcher.process.destroyed);
+            assertFalse(manager.health().ok(), "an unrelated listener cannot prove managed readiness");
+            assertEquals(200, HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(
+                    java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/health"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode());
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void managedModeLaunchesConfiguredExecutableWithExpectedArguments() throws Exception {
@@ -46,7 +131,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("chat_template", "chatml"),
                     Map.entry("server_args", List.of("--no-webui", "--log-disable"))));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -83,7 +168,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "context", 4096));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -91,6 +176,96 @@ class LlamaCppServerManagerTest {
 
             assertEquals(1, launcher.commands.size());
             assertContainsPair(launcher.commands.get(0), "-c", "8192");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeClampsServerArgsContextOverrideBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "2147483647")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "--ctx-size", "262144");
+            assertFalse(containsPair(command, "--ctx-size", "2147483647"),
+                    "raw absurd context must not win over Talos' launch clamp: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeClampsServerArgsContextOverrideAboveIntegerRangeBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "9999999999")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "--ctx-size", "262144");
+            assertFalse(containsPair(command, "--ctx-size", "9999999999"),
+                    "raw out-of-int context must not win over Talos' launch clamp: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeDropsInvalidNegativeServerArgsContextOverrideBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "-1")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-c", "8192");
+            assertFalse(containsPair(command, "--ctx-size", "-1"),
+                    "raw negative context must not win over Talos' safe context: " + command);
         } finally {
             server.stop(0);
         }
@@ -109,7 +284,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -118,6 +293,73 @@ class LlamaCppServerManagerTest {
             List<String> command = launcher.commands.get(0);
             assertContainsPair(command, "--parallel", "1");
             assertContainsPair(command, "--predict", "2048");
+            // Privacy: ordinary managed sessions must not run at debug log
+            // verbosity - llama.cpp debug logs write prompt and workspace
+            // content into the plaintext server log. Debug verbosity is
+            // scoped to verification launches (doctor --start, tune).
+            assertFalse(command.contains("-lv"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--log-verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchAddsDebugVerbosityForLogEvidence() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-lv", "4");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchStillHonorsUserVerbosityOverride() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true,
+                    "server_args", List.of("-lv", "1")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-lv", "1");
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "user-configured verbosity must win over the verification default: " + command);
         } finally {
             server.stop(0);
         }
@@ -137,7 +379,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "server_args", List.of("-np", "2", "-n", "512")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -148,6 +390,40 @@ class LlamaCppServerManagerTest {
             assertContainsPair(command, "-n", "512");
             assertFalse(command.contains("--parallel"), "must not add default --parallel when -np is configured: " + command);
             assertFalse(command.contains("--predict"), "must not add default --predict when -n is configured: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-lv", "--verbosity", "--log-verbosity", "--verbosity=2", "--log-verbosity=2"})
+    void managedModeHonorsVerbosityOverrideAliasesFromServerArgs(String verbosityArg) throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            List<String> serverArgs = verbosityArg.contains("=") ? List.of(verbosityArg) : List.of(verbosityArg, "2");
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "server_args", serverArgs));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertTrue(command.contains(verbosityArg), command::toString);
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "must not add default -lv 4 when verbosity is configured: " + command);
+            if (!"-lv".equals(verbosityArg)) {
+                assertFalse(command.contains("-lv"), "must not add default -lv when another alias is configured: " + command);
+            }
         } finally {
             server.stop(0);
         }
@@ -167,7 +443,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort(),
                     "server_args", List.of("--parallel=3", "--n-predict=1024")));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -199,7 +475,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("context", 8192),
                     Map.entry("jinja", true)));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -234,7 +510,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("host", "http://127.0.0.1"),
                     Map.entry("port", server.getAddress().getPort())));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -259,6 +535,18 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void modelSourceNoteDoesNotExposeMalformedConfiguredModelPath() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "model", "custom-agent",
+                "model_path", "C:/Users/arisz/private-secret\u0000/model.gguf"));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals("", config.modelSourceNote());
+    }
+
+    @Test
     void connectOnlyKeepsConfiguredContextWindowForExternalServer() {
         Config cfg = config(Map.of(
                 "mode", "connect_only",
@@ -272,13 +560,25 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void hugeConfiguredContextIsClampedBeforeLaunch() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "context", Integer.MAX_VALUE));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals(262_144, config.context(),
+                "hand-edited context must be bounded before reaching llama-server -c");
+    }
+
+    @Test
     void connectOnlyModeDoesNotLaunchProcess() throws Exception {
         Config cfg = config(Map.of(
                 "mode", "connect_only",
                 "host", "http://127.0.0.1",
                 "port", 18080));
         FakeLauncher launcher = new FakeLauncher();
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
 
         manager.ensureStarted();
@@ -300,7 +600,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -310,6 +610,75 @@ class LlamaCppServerManagerTest {
             assertTrue(healthCalls.get() >= 3, "managed startup must wait until health is ready");
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void interruptedHttpHealthStopsReadinessImmediatelyAndRestoresInterrupt() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString(),
+                "host", "http://127.0.0.1",
+                "port", 18080));
+        FakeLauncher launcher = new FakeLauncher();
+        InterruptingHttpClient http = new InterruptingHttpClient(
+                "interrupt llama.cpp health request");
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                LlamaCppConfig.from(cfg),
+                launcher,
+                http,
+                Duration.ofSeconds(1),
+                Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    manager::ensureStarted);
+
+            assertSame(http.interruption(), thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls(),
+                    "an interrupted health request must not be converted into another readiness poll");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void wrappedInterruptedHttpHealthStopsReadinessImmediatelyAndRestoresInterrupt()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString(),
+                "host", "http://127.0.0.1",
+                "port", 18080));
+        InterruptingHttpClient http = InterruptingHttpClient.wrapped(
+                "wrapped llama.cpp health interruption");
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                LlamaCppConfig.from(cfg),
+                new FakeLauncher(),
+                http,
+                Duration.ofSeconds(1),
+                Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    manager::ensureStarted);
+
+            assertSame(http.wrappedFailure(), thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls());
+        } finally {
+            Thread.interrupted();
         }
     }
 
@@ -329,7 +698,7 @@ class LlamaCppServerManagerTest {
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.alive = false;
             launcher.logContentOnStart = "llama_model_load: failed to load model\nout of device memory\n";
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
 
@@ -352,7 +721,7 @@ class LlamaCppServerManagerTest {
                 "mode", "managed",
                 "server_path", tempDir.resolve("missing-server.exe").toString(),
                 "model_path", tempDir.resolve("agent.gguf").toString()));
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
         Health health = manager.health();
@@ -368,7 +737,7 @@ class LlamaCppServerManagerTest {
                 "mode", "managed",
                 "server_path", exe.toString(),
                 "model_path", tempDir.resolve("missing.gguf").toString()));
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
         Health health = manager.health();
@@ -391,7 +760,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -420,7 +789,7 @@ class LlamaCppServerManagerTest {
                 "model_path", model.toString()));
         FakeLauncher launcher = new FakeLauncher();
         launcher.failure = new IOException("cannot start");
-        LlamaCppServerManager manager = new LlamaCppServerManager(
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
                 LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
 
         assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
@@ -439,7 +808,7 @@ class LlamaCppServerManagerTest {
                     "mode", "connect_only",
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), new FakeLauncher(), HttpClient.newHttpClient());
 
             Health health = manager.health();
@@ -464,7 +833,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -490,7 +859,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofMillis(40), Duration.ofMillis(5), tempDir.resolve("logs"));
 
@@ -519,7 +888,7 @@ class LlamaCppServerManagerTest {
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
             launcher.process.destroyLeavesAlive = true;
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
@@ -532,6 +901,308 @@ class LlamaCppServerManagerTest {
                     "close should force-stop a managed process that remains alive");
             assertFalse(launcher.process.alive,
                     "close must leave the managed process stopped");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void closeRetainsManagedOwnershipWhenForcedTerminationCannotBeProven() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertThrows(EngineException.ConnectionFailed.class, manager::close,
+                    "an unproven forced stop must be visible to the owner");
+            assertFalse(manager.health().ok());
+            assertTrue(manager.health().message().contains(
+                    "termination remains unproven"));
+            assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted,
+                    "an unsettled owned process must block replacement launch");
+            assertEquals(1, launcher.commands.size(),
+                    "the manager must retain the original ownership epoch");
+
+            launcher.process.alive = false;
+            assertDoesNotThrow(manager::close,
+                    "a later observation of the retained process exit may release ownership");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void healthCannotIssueOrReportOkDuringOrAfterAnUnsettledStop()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        AtomicBoolean observeHealthRequests = new AtomicBoolean();
+        CountDownLatch healthRequestObserved = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(
+                new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/health", exchange -> {
+            if (observeHealthRequests.get()) {
+                healthRequestObserved.countDown();
+            }
+            byte[] bytes = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            launcher.process.blockGracefulDestroy = true;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+            manager.ensureStarted();
+            observeHealthRequests.set(true);
+
+            Future<?> close = executor.submit(() -> {
+                manager.close();
+                return null;
+            });
+            assertTrue(launcher.process.destroyEntered.await(
+                    5L, TimeUnit.SECONDS));
+
+            CountDownLatch healthStarted = new CountDownLatch(1);
+            Future<Health> concurrentHealth = executor.submit(() -> {
+                healthStarted.countDown();
+                return manager.health();
+            });
+            assertTrue(healthStarted.await(5L, TimeUnit.SECONDS));
+
+            assertFalse(healthRequestObserved.await(
+                            1L, TimeUnit.SECONDS),
+                    "health must not issue an HTTP OK probe while stop owns the lifecycle");
+            assertFalse(concurrentHealth.isDone(),
+                    "health must snapshot lifecycle state only after stop settles");
+
+            launcher.process.releaseDestroy.countDown();
+            java.util.concurrent.ExecutionException stopFailure =
+                    assertThrows(
+                            java.util.concurrent.ExecutionException.class,
+                            () -> close.get(5L, TimeUnit.SECONDS));
+            assertInstanceOf(
+                    EngineException.ConnectionFailed.class,
+                    stopFailure.getCause());
+
+            Health settledHealth =
+                    concurrentHealth.get(5L, TimeUnit.SECONDS);
+            assertFalse(settledHealth.ok());
+            assertTrue(settledHealth.message().contains(
+                    "termination remains unproven"));
+            assertEquals(1L, healthRequestObserved.getCount(),
+                    "unsettled termination must suppress the stale HTTP OK probe");
+        } finally {
+            server.stop(0);
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void interruptedStopRestoresInterruptAndRetainsUnsettledOwnership() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            launcher.process.forceDestroyLeavesAlive = true;
+            launcher.process.interruptNextWait = true;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertThrows(EngineException.ConnectionFailed.class, manager::close);
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "termination must restore the caller's interrupt status");
+            assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+            assertEquals(1, launcher.commands.size());
+        } finally {
+            Thread.interrupted();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void launcherHandoffFailureRetainsStandaloneLeaseForManagerRetry()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString()));
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.process.destroyLeavesAlive = true;
+        launcher.process.forceDestroyLeavesAlive = true;
+        LlamaCppProcessTerminationOwner.Outcome unsettled =
+                launcher.process.terminationLease.terminate(
+                        new LlamaCppProcessTerminationOwner.Policy(
+                                Duration.ZERO,
+                                Duration.ZERO));
+        launcher.runtimeFailure =
+                new LlamaCppProcessTerminationOwner.Unsettled(
+                        "injected post-launch handoff failure",
+                        new IllegalStateException(
+                                "injected launch observation failure"),
+                        unsettled,
+                        launcher.process.terminationLease);
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                Duration.ofMillis(1), Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        assertThrows(EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertThrows(EngineException.ConnectionFailed.class, manager::close,
+                "the standalone lease must remain retryable while live");
+        assertThrows(EngineException.ConnectionFailed.class,
+                manager::ensureStarted,
+                "a retained standalone lease must block another launch");
+        assertEquals(1, launcher.commands.size());
+
+        launcher.process.alive = false;
+        assertDoesNotThrow(manager::close);
+    }
+
+    @Test
+    void aProcessWithoutTerminationLeaseFailsClosedAndBlocksRelaunch()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString()));
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.process.omitTerminationLease = true;
+        LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                Duration.ofMillis(1), Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        EngineException.ConnectionFailed first = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertTrue(first.getMessage().contains(
+                "termination ownership is unavailable"));
+
+        EngineException.ConnectionFailed second = assertThrows(
+                EngineException.ConnectionFailed.class,
+                manager::ensureStarted);
+        assertTrue(second.getMessage().contains(
+                "termination ownership is unavailable"));
+        assertEquals(1, launcher.commands.size(),
+                "a process with unknown termination ownership must never be replaced");
+    }
+
+    @Test
+    void aThrowingTerminationLeaseGetterCachesFailureAndBlocksLiveReuse()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.throwTerminationLease = true;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+
+            assertThrows(RuntimeException.class, manager::ensureStarted);
+
+            Health health = manager.health();
+            assertFalse(health.ok(),
+                    "an ownership getter failure must suppress HTTP OK");
+            assertTrue(health.message().contains(
+                    "termination ownership"));
+            assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted,
+                    "a live epoch without cached ownership must not be reused");
+            assertEquals(1, launcher.commands.size());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aTransientTerminationLeaseGetterFailureCleansTheEpochBeforeRelaunch()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            FakeProcess failedEpoch = launcher.process;
+            failedEpoch.terminationLeaseFailuresRemaining = 1;
+            launcher.replaceDeadProcessOnLaunch = true;
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10),
+                    tempDir.resolve("logs"));
+
+            assertThrows(
+                    EngineException.ConnectionFailed.class,
+                    manager::ensureStarted);
+            assertTrue(failedEpoch.destroyed);
+            assertFalse(failedEpoch.alive);
+
+            assertDoesNotThrow(() -> {
+                manager.ensureStarted();
+            });
+            assertEquals(2, launcher.commands.size(),
+                    "only a fresh process may follow the failed ownership epoch");
+            assertNotSame(failedEpoch, launcher.process);
+            manager.close();
         } finally {
             server.stop(0);
         }
@@ -551,7 +1222,7 @@ class LlamaCppServerManagerTest {
                     "host", "http://127.0.0.1",
                     "port", server.getAddress().getPort()));
             FakeLauncher launcher = new FakeLauncher();
-            LlamaCppServerManager manager = new LlamaCppServerManager(
+            LlamaCppServerManager manager = SyntheticManagedServer.manager(
                     LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
                     Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
 
@@ -609,6 +1280,11 @@ class LlamaCppServerManagerTest {
         assertEquals(value, command.get(index + 1));
     }
 
+    private static boolean containsPair(List<String> command, String flag, String value) {
+        int index = command.indexOf(flag);
+        return index >= 0 && index + 1 < command.size() && value.equals(command.get(index + 1));
+    }
+
     private static HttpServer startHealthServer(int status, String body) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/health", exchange -> {
@@ -638,9 +1314,11 @@ class LlamaCppServerManagerTest {
     private static final class FakeLauncher implements LlamaCppProcessLauncher {
         private final List<List<String>> commands = new ArrayList<>();
         private final List<Map<String, String>> environments = new ArrayList<>();
-        private final FakeProcess process = new FakeProcess();
+        private FakeProcess process = new FakeProcess();
         private IOException failure;
+        private RuntimeException runtimeFailure;
         private String logContentOnStart = "";
+        private boolean replaceDeadProcessOnLaunch;
 
         @Override
         public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
@@ -651,7 +1329,11 @@ class LlamaCppServerManagerTest {
         public LlamaCppProcess start(List<String> command, Path logPath, Map<String, String> environment) throws IOException {
             commands.add(List.copyOf(command));
             environments.add(environment == null ? Map.of() : Map.copyOf(environment));
+            if (runtimeFailure != null) throw runtimeFailure;
             if (failure != null) throw failure;
+            if (replaceDeadProcessOnLaunch && !process.alive) {
+                process = new FakeProcess();
+            }
             if (logPath != null && !logContentOnStart.isBlank()) {
                 Files.createDirectories(logPath.getParent());
                 Files.writeString(logPath, logContentOnStart, StandardCharsets.UTF_8);
@@ -660,17 +1342,74 @@ class LlamaCppServerManagerTest {
         }
     }
 
-    private static final class FakeProcess implements LlamaCppProcess {
+    private static final class FakeProcess implements
+            LlamaCppProcess,
+            LlamaCppProcessTerminationOwner.Target {
+        private final LlamaCppProcessTerminationOwner.ProcessIdentity identity =
+                new LlamaCppProcessTerminationOwner.ProcessIdentity(
+                        1L,
+                        1L,
+                        LlamaCppProcessTerminationOwner.IdentityAuthority
+                                .EXACT_PID_START);
         private boolean alive = true;
+        private boolean outputCaptureHealthy = true;
+        private boolean throwOutputCaptureHealth;
+        private final LlamaCppProcessTerminationOwner.Lease terminationLease =
+                new LlamaCppProcessTerminationOwner().adopt(this);
         private boolean destroyed;
         private boolean destroyLeavesAlive;
         private boolean forceDestroyed;
-
+        private boolean forceDestroyLeavesAlive;
+        private boolean interruptNextWait;
+        private boolean omitTerminationLease;
+        private boolean throwTerminationLease;
+        private int terminationLeaseFailuresRemaining;
+        private boolean blockGracefulDestroy;
+        private final CountDownLatch destroyEntered =
+                new CountDownLatch(1);
+        private final CountDownLatch releaseDestroy =
+                new CountDownLatch(1);
         @Override public boolean isAlive() { return alive; }
+        @Override public boolean outputCaptureHealthy() {
+            if (throwOutputCaptureHealth) {
+                throw new IllegalStateException(
+                        "injected capture-health observation failure");
+            }
+            return outputCaptureHealthy;
+        }
+        @Override public LlamaCppProcessTerminationOwner.ProcessIdentity identity() {
+            return identity;
+        }
+        @Override public boolean identityStillMatches() { return true; }
+        @Override public List<LlamaCppProcessTerminationOwner.Target> descendants() {
+            return List.of();
+        }
+        @Override public LlamaCppProcessTerminationOwner.Lease terminationLease() {
+            if (throwTerminationLease
+                    || terminationLeaseFailuresRemaining > 0) {
+                if (terminationLeaseFailuresRemaining > 0) {
+                    terminationLeaseFailuresRemaining--;
+                }
+                throw new IllegalStateException(
+                        "injected termination lease getter failure");
+            }
+            return omitTerminationLease ? null : terminationLease;
+        }
 
         @Override
         public void destroy() {
             destroyed = true;
+            if (blockGracefulDestroy) {
+                destroyEntered.countDown();
+                try {
+                    releaseDestroy.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "injected blocking destroy was interrupted",
+                            interrupted);
+                }
+            }
             if (!destroyLeavesAlive) {
                 alive = false;
             }
@@ -679,7 +1418,18 @@ class LlamaCppServerManagerTest {
         @Override
         public void destroyForcibly() {
             forceDestroyed = true;
-            alive = false;
+            if (!forceDestroyLeavesAlive) {
+                alive = false;
+            }
+        }
+
+        @Override
+        public boolean waitFor(Duration timeout) throws InterruptedException {
+            if (interruptNextWait) {
+                interruptNextWait = false;
+                throw new InterruptedException("injected stop interruption");
+            }
+            return !alive;
         }
     }
 }

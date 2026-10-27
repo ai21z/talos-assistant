@@ -45,7 +45,7 @@ class CommandToolPlannerTest {
                         + "    outputCaps: stdout=65536 bytes, stderr=65536 bytes\n"
                         + "    expectedWrites: build/, .gradle/\n"
                         + "    checkpoint: not required\n"
-                        + "    network: disabled, interactive: disabled",
+                        + "    network requirement: not declared (host network is not isolated), interactive: disabled",
                 detail);
     }
 
@@ -125,8 +125,8 @@ class CommandToolPlannerTest {
         Path workspace = workspaceWithDeclaredProfile();
         var loaded = WorkspaceCommandProfilesLoader.load(workspace);
         CommandProfileRegistry registry = CommandProfileRegistry.defaultRegistry()
-                .withWorkspaceDeclaration(loaded.profiles(),
-                        WorkspaceProfileTrustStore.TrustState.UNTRUSTED_NEW);
+                .withWorkspaceDeclaration(workspace, loaded,
+                        new WorkspaceProfileTrustStore(tempDir.resolve("untrusted")));
         ToolCall call = new ToolCall("talos.run_command", Map.of("profile", "ws:check"));
 
         assertTrue(registry.workspaceProfileIds().isEmpty(),
@@ -153,8 +153,10 @@ class CommandToolPlannerTest {
 
         CommandProfileRegistry invalid = CommandProfileRegistry.defaultRegistry()
                 .withWorkspaceDeclaration(
-                        WorkspaceCommandProfiles.invalid("YAML parse failed: boom"),
-                        WorkspaceProfileTrustStore.TrustState.INVALID);
+                        workspace,
+                        new WorkspaceCommandProfilesLoader.Loaded(
+                                WorkspaceCommandProfiles.invalid("YAML parse failed: boom"), ""),
+                        new WorkspaceProfileTrustStore(tempDir.resolve("invalid")));
         Optional<String> rejected = CommandToolPlanner.validateBeforeApproval(
                 call, workspace, invalid);
         assertTrue(rejected.isPresent());
@@ -226,10 +228,11 @@ class CommandToolPlannerTest {
         return workspace;
     }
 
-    private static CommandProfileRegistry trustedRegistry(Path workspace) {
+    private CommandProfileRegistry trustedRegistry(Path workspace) {
         var loaded = WorkspaceCommandProfilesLoader.load(workspace);
+        var store = new WorkspaceProfileTrustStore(tempDir.resolve("trust"));
+        store.pin(workspace, loaded.declarationSha256(), loaded.profiles().profiles().size(), java.time.Instant.EPOCH);
         return CommandProfileRegistry.defaultRegistry()
-                .withWorkspaceDeclaration(loaded.profiles(),
-                        WorkspaceProfileTrustStore.TrustState.TRUSTED);
+                .withWorkspaceDeclaration(workspace, loaded, store);
     }
 }

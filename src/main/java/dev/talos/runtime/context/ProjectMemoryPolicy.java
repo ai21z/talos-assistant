@@ -2,6 +2,7 @@ package dev.talos.runtime.context;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -33,6 +34,13 @@ final class ProjectMemoryPolicy {
             return new Decision(false, "NO_TASK_CONTRACT");
         }
         String userRequest = contract.originalUserRequest() == null ? "" : contract.originalUserRequest();
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) {
+            return new Decision(false, "RETAINED_WORK_STATUS_SUPPRESSED");
+        }
+        var conversationEvidence = ConversationEvidenceRequest.interpret(userRequest);
+        if (conversationEvidence.source() != ConversationEvidenceRequest.Source.NORMAL) {
+            return new Decision(false, "RUNTIME_CONVERSATION_EVIDENCE");
+        }
         if (looksProjectMemoryOptOut(userRequest)) {
             return new Decision(false, "USER_OPTED_OUT_PROJECT_MEMORY");
         }
@@ -53,7 +61,7 @@ final class ProjectMemoryPolicy {
             return new Decision(true, "WORKSPACE_EXPLAIN");
         }
         if (type == TaskType.READ_ONLY_QA || type == TaskType.DIAGNOSE_ONLY) {
-            return mentionsWorkspaceSurface(userRequest)
+            return mentionsWorkspaceSurface(conversationEvidence.positiveIntentText())
                     ? new Decision(true, "WORKSPACE_QA")
                     : new Decision(false, "NON_WORKSPACE_QA");
         }

@@ -7,6 +7,7 @@ import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Audit;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.index.IndexedWorkspaceSymbolChecker;
@@ -22,6 +23,7 @@ import dev.talos.runtime.Session;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.SessionStore;
+import dev.talos.runtime.SessionWriterLease;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
@@ -123,6 +125,9 @@ public final class TalosBootstrap {
         NetPolicy      net      = new NetPolicy(cfg);
         Limits         limits   = Limits.fromConfig(cfg);
         SessionMemory  memory   = new SessionMemory();
+        SessionWriterLease sessionWriterLease = null;
+
+        try {
 
         // ── P2 Ctrl-C wiring ─────────────────────────────────────────────
         // JLine saves & restores the INT handler around its own readLine(),
@@ -155,13 +160,13 @@ public final class TalosBootstrap {
         // an approval prompt.
         var workspaceProfilesLoaded = WorkspaceCommandProfilesLoader.load(workspace);
         var profileTrustStore = new WorkspaceProfileTrustStore();
-        var profileTrustState = profileTrustStore.state(workspace, workspaceProfilesLoaded);
         CommandProfileRegistry commandProfiles = CommandProfileRegistry.defaultRegistry()
-                .withWorkspaceDeclaration(workspaceProfilesLoaded.profiles(), profileTrustState);
+                .withWorkspaceDeclaration(workspace, workspaceProfilesLoaded, profileTrustStore);
 
         // ── Tools ────────────────────────────────────────────────────────
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new ReadFileTool());
+        toolRegistry.register(new dev.talos.runtime.toolcall.DocumentComparisonTool());
         toolRegistry.register(new FileWriteTool());
         toolRegistry.register(new FileEditTool());
         toolRegistry.register(new BatchWorkspaceApplyTool());
@@ -189,25 +194,35 @@ public final class TalosBootstrap {
         // ── Session persistence ──────────────────────────────────────────
         boolean sessionPersistenceEnabled = cfg.view().session().persistence();
         boolean sessionAutoLoadEnabled = sessionPersistenceEnabled && cfg.view().session().autoLoad();
-        SessionStore sessionStore = sessionPersistenceEnabled ? new JsonSessionStore() : new NoOpSessionStore();
+        JsonSessionStore fileSessionStore = sessionPersistenceEnabled
+                ? new JsonSessionStore()
+                : null;
+        SessionStore sessionArchive = sessionPersistenceEnabled
+                ? fileSessionStore
+                : new NoOpSessionStore();
         // T799: one workspace, many sessions. The bare workspace hash keys
         // per-workspace artifacts (checkpoints, trace metadata) and is the
         // listing prefix; everything this process WRITES (close snapshot,
         // turn log, traces) goes under a fresh per-run instance id.
         String workspaceId = JsonSessionStore.sessionIdFor(workspace);
-        String sessionId = JsonSessionStore.newSessionInstanceId(workspace, java.time.Instant.now());
+        ExplainLastTurnCommand.SavedTerminalTurnReference savedTerminalTurn =
+                sessionPersistenceEnabled
+                        ? unambiguousSavedTerminalTurnAtStartup(
+                                sessionArchive, workspaceId)
+                                .orElse(null)
+                        : null;
 
         RestoreSummary restoreSummary = new RestoreSummary(0, null, "");
         RestoreSummary savedSessionSummary = new RestoreSummary(0, null, "");
         if (sessionAutoLoadEnabled) {
-            restoreSummary = restoreSavedSession(sessionStore,
-                    latestSessionId(sessionStore, workspaceId), memory, conversationManager);
+            restoreSummary = restoreSavedSession(sessionArchive,
+                    latestSessionId(sessionArchive, workspaceId), memory, conversationManager);
         } else if (sessionPersistenceEnabled) {
-            savedSessionSummary = inspectSavedSession(sessionStore,
-                    latestSessionId(sessionStore, workspaceId));
+            savedSessionSummary = inspectSavedSession(sessionArchive,
+                    latestSessionId(sessionArchive, workspaceId));
         }
-        if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
-            llm.setModel(restoreSummary.model());
+        String modelRestoreNotice = restoreSavedModel(llm, restoreSummary.model());
+        if (modelRestoreNotice.isBlank() && restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
             syncActiveModelIntoConfig(cfg, llm.getModel());
         }
 
@@ -226,6 +241,14 @@ public final class TalosBootstrap {
         final LineReader lineReaderRef = lineReader;
         final java.util.function.IntSupplier terminalWidth =
                 lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null;
+        final TerminalCapabilities terminalCapabilities = lineReader != null
+                ? TerminalCapabilities.detect(
+                        System.getenv(),
+                        true,
+                        System.getProperty("os.name", ""),
+                        lineReader.getTerminal().outputEncoding(),
+                        null)
+                : TerminalCapabilities.detectDefault();
         RenderEngine render = new RenderEngine(cfg, redactor, out,
                 lineReader != null,
                 terminalWidth,
@@ -259,6 +282,16 @@ public final class TalosBootstrap {
         }
 
         // ── Runtime layer ────────────────────────────────────────────────
+        sessionWriterLease = sessionPersistenceEnabled
+                ? fileSessionStore.reserveNewSession(workspace, java.time.Instant.now())
+                : null;
+        SessionStore sessionStore = sessionPersistenceEnabled
+                ? sessionWriterLease
+                : sessionArchive;
+        String sessionId = sessionPersistenceEnabled
+                ? sessionWriterLease.sessionId()
+                : JsonSessionStore.newSessionInstanceId(
+                        workspace, java.time.Instant.now());
         Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
         // Session-scoped approval policy sits above the gate. Without this,
         // the REPL falls back to ALWAYS_ASK and the user's "a = yes for
@@ -316,6 +349,20 @@ public final class TalosBootstrap {
                 }
             });
         }
+        if (sessionWriterLease != null) {
+            final SessionWriterLease leaseToClose = sessionWriterLease;
+            final PrintStream sessionOutput = out;
+            runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
+                @Override public void onSessionEnd() {
+                    try {
+                        leaseToClose.close();
+                    } catch (RuntimeException releaseFailure) {
+                        sessionOutput.println(
+                                "  session warning: durable writer release was not confirmed.");
+                    }
+                }
+            });
+        }
         runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
             @Override public void onSessionEnd() {
                 try { llm.close(); } catch (Exception ignored) { }
@@ -361,6 +408,7 @@ public final class TalosBootstrap {
                 .toolCallLoop(toolCallLoop)
                 .streamSink(streamSink)
                 .onStreamComplete(spinnerStopper)
+                .exactAnswerPresentation(render.exactAnswerPresentation())
                 .build();
 
         // ── Post-turn hooks ──────────────────────────────────────────────
@@ -387,8 +435,10 @@ public final class TalosBootstrap {
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
-                sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth,
-                sessionId, assistModeCompaction);
+                sessionStore, checkpointService, runtimeSession.startedAt(), out,
+                terminalCapabilities, terminalWidth,
+                sessionId, savedTerminalTurn, runtimeSession::turnCount,
+                assistModeCompaction);
         // T806: workspace template commands load AFTER registration so the
         // collision guard sees every built-in name and alias (builtin-wins;
         // a workspace help.md can never shadow /help). The templates-aware
@@ -396,19 +446,36 @@ public final class TalosBootstrap {
         // above - same spec, richer dependencies.
         WorkspaceCommandTemplates templates =
                 WorkspaceCommandTemplates.load(workspace, registry.names());
-        registry.register(new HelpCommand(registry, templates));
+        registry.register(new HelpCommand(registry, templates, terminalWidth));
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
-                ? buildRestoreNotice(restoreSummary)
+                ? buildRestoreNotice(restoreSummary, modelRestoreNotice.isBlank())
                 : buildSavedSessionNotice(savedSessionSummary);
         String startupNotice = joinStartupNotices(
                 buildConfigNotice(cfg.getReport()),
                 sessionNotice,
+                modelRestoreNotice,
                 buildSensitiveWorkspaceNotice(workspace),
                 buildWorkspaceProfilesNotice(workspaceProfilesLoaded));
-        return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
-                              registry, workspace, quit, startupNotice, templates);
+        ReplRouter router = new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
+                                           registry, workspace, quit, startupNotice, templates);
+        return router;
+        } catch (RuntimeException | Error bootstrapFailure) {
+            if (sessionWriterLease != null) {
+                try {
+                    sessionWriterLease.close();
+                } catch (RuntimeException closeFailure) {
+                    bootstrapFailure.addSuppressed(closeFailure);
+                }
+            }
+            try {
+                llm.close();
+            } catch (RuntimeException closeFailure) {
+                bootstrapFailure.addSuppressed(closeFailure);
+            }
+            throw bootstrapFailure;
+        }
     }
 
     /**
@@ -437,8 +504,13 @@ public final class TalosBootstrap {
                                           SessionStore sessionStore,
                                           CheckpointService checkpointService,
                                           java.time.Instant activeSessionStartedAt,
+                                          PrintStream out,
+                                          TerminalCapabilities terminalCapabilities,
                                           java.util.function.IntSupplier terminalWidth,
                                           String activeSessionId,
+                                          ExplainLastTurnCommand.SavedTerminalTurnReference
+                                                  savedTerminalTurn,
+                                          java.util.function.IntSupplier activeTurnCount,
                                           boolean assistModeCompaction) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
@@ -449,7 +521,7 @@ public final class TalosBootstrap {
             @Override public void setDebugLevel(DebugLevel level) { session.setDebugLevel(level); }
         };
 
-        registry.register(new HelpCommand(registry));
+        registry.register(new HelpCommand(registry, null, terminalWidth));
         registry.register(new KCommand(rt));
         registry.register(new DebugCommand(rt));
         registry.register(new QuitCommand(quit));
@@ -464,11 +536,12 @@ public final class TalosBootstrap {
         // T799: /last must read the ACTIVE session's log - the injected id,
         // not a re-derived workspace hash (the pre-T799 silent breaker).
         registry.register(new ExplainLastTurnCommand(workspace, sessionStore,
-                activeSessionStartedAt, activeSessionId));
+                activeSessionStartedAt, activeSessionId, savedTerminalTurn,
+                activeTurnCount));
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new PromptDebugCommand());
         registry.register(new WorkspaceCommand(workspace));
-        registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache));
+        registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache, out, terminalCapabilities));
         registry.register(new MemoryCommand());
         registry.register(new ClearCommand());
         // DX commands
@@ -523,6 +596,97 @@ public final class TalosBootstrap {
     static String latestSessionId(SessionStore store, String workspaceId) {
         var sessions = store.listSessions(workspaceId);
         return sessions.isEmpty() ? workspaceId : sessions.get(0).sessionId();
+    }
+
+    /**
+     * Freeze one unambiguous prior session's exact physical append-tail turn
+     * before a new active session is allocated. Only an exact abnormal status
+     * is eligible. Multiple competing session tails, a newer ordinary tail,
+     * or any degraded listed log fails closed; no wall clock or filename is
+     * promoted into a workspace-global order.
+     */
+    static java.util.Optional<ExplainLastTurnCommand.SavedTerminalTurnReference>
+            unambiguousSavedTerminalTurnAtStartup(
+                    SessionStore store,
+                    String workspaceId
+            ) {
+        if (store == null || workspaceId == null || workspaceId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        final dev.talos.runtime.TurnLogInventoryObservation inventory;
+        try {
+            inventory = store.observeTurnLogInventory(workspaceId);
+        } catch (RuntimeException unavailable) {
+            return java.util.Optional.empty();
+        }
+        if (inventory == null || !inventory.exact()
+                || inventory.sessionIds().size() != 1) {
+            return java.util.Optional.empty();
+        }
+        ExplainLastTurnCommand.SavedTerminalTurnReference observedTail = null;
+        for (String storageSessionId : inventory.sessionIds()) {
+            if (!belongsToWorkspace(storageSessionId, workspaceId)) {
+                continue;
+            }
+            final dev.talos.runtime.TerminalTurnPairObservation pair;
+            try {
+                pair = store.observeTerminalTurnPair(storageSessionId);
+            } catch (RuntimeException unavailable) {
+                return java.util.Optional.empty();
+            }
+            if (pair == null || !pair.exact()) {
+                return java.util.Optional.empty();
+            }
+            final dev.talos.runtime.TurnLogInventoryObservation
+                    inventoryAfterPair;
+            try {
+                inventoryAfterPair = store.observeTurnLogInventory(workspaceId);
+            } catch (RuntimeException unavailable) {
+                return java.util.Optional.empty();
+            }
+            if (inventoryAfterPair == null || !inventoryAfterPair.exact()
+                    || !inventory.sessionIds().equals(
+                            inventoryAfterPair.sessionIds())) {
+                return java.util.Optional.empty();
+            }
+            var observation = pair.rowObservation();
+            if (observation == null || !observation.exact()) {
+                return java.util.Optional.empty();
+            }
+            if (observation.turn() == null
+                    || !terminalStatus(observation.turn().status())) {
+                return java.util.Optional.empty();
+            }
+            var reference = ExplainLastTurnCommand.SavedTerminalTurnReference.from(
+                    storageSessionId,
+                    observation,
+                    pair.traceObservation());
+            if (reference == null || observedTail != null) {
+                // No workspace-global sequence exists yet. More than one
+                // competing session tail is ambiguous, regardless of wall
+                // clock or filename ordering.
+                return java.util.Optional.empty();
+            }
+            observedTail = reference;
+        }
+        return observedTail != null && terminalStatus(observedTail.status())
+                ? java.util.Optional.of(observedTail)
+                : java.util.Optional.empty();
+    }
+
+    private static boolean belongsToWorkspace(
+            String sessionId,
+            String workspaceId
+    ) {
+        return sessionId != null
+                && (sessionId.equals(workspaceId)
+                        || sessionId.startsWith(workspaceId + "-"));
+    }
+
+    private static boolean terminalStatus(String status) {
+        return "failed".equals(status)
+                || "cancelled".equals(status)
+                || "no_result".equals(status);
     }
 
     /** Live-memory twin of {@link #hasSavedActiveContext}: is there context worth saving? */
@@ -594,6 +758,8 @@ public final class TalosBootstrap {
         }
         memory.setActiveTaskContext(data.activeTaskContext());
         memory.setArtifactGoal(data.artifactGoal());
+        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(
+                store.loadTurns(sessionId)));
         return new RestoreSummary(pairs, data.createdAt(), data.model(), pairs > 0 || hasSavedActiveContext(data));
     }
 
@@ -626,6 +792,7 @@ public final class TalosBootstrap {
     static int replayTurnLog(SessionStore store, String sessionId, SessionMemory memory) {
         var records = store.loadTurns(sessionId);
         if (records == null || records.isEmpty()) return 0;
+        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(records));
         int replayed = 0;
         for (var rec : records) {
             if (!isReplayableTurnRecord(rec)) continue;
@@ -680,7 +847,30 @@ public final class TalosBootstrap {
         return u != null && !u.isBlank() && a != null && !a.isBlank();
     }
 
+    /** Restores only the saved selection. A failed switch is neither retried nor relabelled. */
+    public static String restoreSavedModel(LlmClient llm, String savedModel) {
+        if (llm == null || savedModel == null || savedModel.isBlank()) return "";
+        if (savedModel.equals(llm.getModel()) && !llm.modelSelectionUnavailable()) return "";
+        try {
+            llm.setModel(savedModel);
+            return "";
+        } catch (RuntimeException failure) {
+            if (dev.talos.spi.types.ControlFlowFailure.classify(failure)
+                    != dev.talos.spi.types.ControlFlowFailure.Kind.NONE) {
+                throw dev.talos.spi.types.ControlFlowFailure.propagate(failure);
+            }
+            return "Saved model was not restored. " + (llm.modelSelectionUnavailable()
+                    ? "No model is available. After the cause is resolved, use "
+                        + dev.talos.cli.repl.slash.SetModelCommand.managedRecoveryCommand(llm.getModel()) + "."
+                    : "The previous model selection was preserved. Use /models to select an available model.");
+        }
+    }
+
     static String buildRestoreNotice(RestoreSummary summary) {
+        return buildRestoreNotice(summary, true);
+    }
+
+    private static String buildRestoreNotice(RestoreSummary summary, boolean modelRestored) {
         if (summary == null || !summary.hasSavedSession()) return "";
         String age = "";
         if (summary.createdAt() != null) {
@@ -694,7 +884,7 @@ public final class TalosBootstrap {
         sb.append("  restored ").append(summary.pairsReplayed()).append(" prior exchange")
                 .append(summary.pairsReplayed() == 1 ? "" : "s");
         if (!age.isBlank()) sb.append(" from ").append(age);
-        if (summary.model() != null && !summary.model().isBlank()) {
+        if (modelRestored && summary.model() != null && !summary.model().isBlank()) {
             sb.append(AnsiColor.isUnicodeSafe() ? " · model " : " - model ")
                     .append(summary.model());
         }
@@ -753,12 +943,6 @@ public final class TalosBootstrap {
         }
         llm.put("model", modelName);
         cfg.data.put("llm", llm);
-
-        if ("ollama".equals(backend)) {
-            Map<String, Object> ollama = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("ollama")));
-            ollama.put("model", modelName);
-            cfg.data.put("ollama", ollama);
-        }
     }
 }
 

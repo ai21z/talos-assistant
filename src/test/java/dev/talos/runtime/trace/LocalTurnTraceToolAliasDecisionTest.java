@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.tools.ToolAliasPolicy;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +34,8 @@ class LocalTurnTraceToolAliasDecisionTest {
 
         assertEquals(Map.of(
                 "status", "ACCEPTED_ALIAS",
-                "rawName", "tool_use:write_file",
+                "rawNameHash", ProviderResponseCapture.toolNameHash("tool_use:write_file"),
+                "rawNameChars", "tool_use:write_file".length(),
                 "canonicalTool", "talos.write_file",
                 "profile", "tool_use",
                 "mutating", true,
@@ -75,7 +77,8 @@ class LocalTurnTraceToolAliasDecisionTest {
 
         assertTrue(factorySource.contains("TOOL_ALIAS_DECISION"), factorySource);
         assertTrue(factorySource.contains("data.put(\"status\""), factorySource);
-        assertTrue(factorySource.contains("data.put(\"rawName\""), factorySource);
+        assertTrue(factorySource.contains("data.put(\"rawNameHash\""), factorySource);
+        assertTrue(factorySource.contains("data.put(\"rawNameChars\""), factorySource);
         assertTrue(factorySource.contains("data.put(\"canonicalTool\""), factorySource);
         assertTrue(factorySource.contains("data.put(\"profile\""), factorySource);
         assertTrue(factorySource.contains("data.put(\"mutating\""), factorySource);

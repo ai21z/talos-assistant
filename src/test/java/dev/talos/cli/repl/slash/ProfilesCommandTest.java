@@ -131,6 +131,43 @@ class ProfilesCommandTest {
     }
 
     @Test
+    void revokeReportsDeletionFailureWithoutClaimingSuccess() throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = new WorkspaceProfileTrustStore(tempDir.resolve("trust"), file -> {
+            throw new IOException("injected deletion failure");
+        });
+        pin(ws, store);
+
+        Result result = new ProfilesCommand(ws, store).execute("revoke", ctxWithoutGate());
+
+        assertInstanceOf(Result.Error.class, result);
+        assertTrue(text(result).contains("Could not revoke"), text(result));
+        assertFalse(text(result).contains("trust revoked"), text(result));
+        assertEquals(WorkspaceProfileTrustStore.TrustState.TRUSTED,
+                store.state(ws, WorkspaceCommandProfilesLoader.load(ws)));
+    }
+
+    @Test
+    void revokeAlsoRemovesPinWhileDeclarationIsTemporarilyAbsent() throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = store();
+        pin(ws, store);
+        Path declaration = ws.resolve(".talos/profiles.yaml");
+        String original = Files.readString(declaration);
+        Files.delete(declaration);
+
+        Result result = new ProfilesCommand(ws, store).execute("revoke", ctxWithoutGate());
+
+        assertInstanceOf(Result.Info.class, result);
+        assertTrue(store.readPin(WorkspaceProfileTrustStore.workspaceId(ws)).isEmpty());
+        Files.writeString(declaration, original);
+        assertEquals(WorkspaceProfileTrustStore.TrustState.UNTRUSTED_NEW,
+                store.state(ws, WorkspaceCommandProfilesLoader.load(ws)));
+    }
+
+    @Test
     void configureDeclaresProfileAfterApprovalButDoesNotTrustIt() throws IOException {
         Path ws = workspace();
         Files.writeString(ws.resolve("gradlew.bat"), "rem wrapper", StandardCharsets.UTF_8);

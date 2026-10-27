@@ -1,7 +1,7 @@
 // The bronze dust. The old molten-bronze "forge" smoke, reused here as warm
 // dust that hangs in the hero (top + right) and recedes as you scroll down.
-// It is transparent over the CSS floor, so a frozen/faded frame can never
-// repaint later sections with an opaque canvas background.
+// Healthy frames blend over the CSS floor. Context loss removes this optional
+// layer completely so the page does not depend on a lost drawing surface.
 
 const VERT = `#version 300 es
 void main(){ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
@@ -37,7 +37,7 @@ void main(){
                  * mix(0.45, 1.0, smoothstep(0.25, 1.0, uv.x));
   float field = smoothstep(0.42, 0.9, n);
   vec3 col = mix(dustLo, dust, smoothstep(0.42, 0.86, n));
-  float vig = smoothstep(1.3, 0.32, length((uv - 0.5) * vec2(0.8, 1.18)));
+  float vig = 1.0 - smoothstep(0.32, 1.3, length((uv - 0.5) * vec2(0.8, 1.18)));
   float alpha = field * presence * mix(0.1, 0.2, vig);
   frag = vec4(col, alpha);
 }`;
@@ -106,15 +106,20 @@ export function setupSmoke() {
 
   let raf = 0;
   let running = false;
-  function loop(t) { draw(t); raf = requestAnimationFrame(loop); }
-  function start() { if (running || reduce.matches || lowPower) return; running = true; raf = requestAnimationFrame(loop); }
+  function loop(t) { if (lost || !running) return; draw(t); raf = requestAnimationFrame(loop); }
+  function start() { if (lost || running || reduce.matches || lowPower) return; running = true; raf = requestAnimationFrame(loop); }
   function stop() { running = false; if (raf) cancelAnimationFrame(raf); raf = 0; }
 
   resize();
   if (reduce.matches || lowPower) draw(6000);
   else start();
 
-  canvas.addEventListener("webglcontextlost", (e) => { lost = true; e.preventDefault(); stop(); }, false);
+  canvas.addEventListener("webglcontextlost", () => {
+    lost = true;
+    stop();
+    // Decoration is optional: use the CSS floor instead of restoring a lost layer.
+    canvas.remove();
+  }, false);
   window.addEventListener("resize", () => { resize(); if (!running) draw(performance.now()); });
   // When frozen on a software renderer, still track scroll so the dust recedes.
   if (lowPower && !reduce.matches) {

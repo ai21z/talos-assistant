@@ -30,17 +30,27 @@ final class EditFilePreApprovalGuard {
             Set<String> staleRereadRequiredAtStart,
             Set<String> fullRewriteRepairTargets
     ) {
-        if (call == null || strict || !"talos.edit_file".equals(call.toolName())) return null;
+        if (call == null || strict || !"talos.edit_file".equals(call.canonicalToolName())) return null;
         String normalizedPath = normalizePath(pathHint);
-        if (fullRewriteRepairTargets != null && fullRewriteRepairTargets.contains(normalizedPath)) {
+        java.nio.file.Path workspace = state == null ? null : state.workspace;
+        if (namesMember(fullRewriteRepairTargets, normalizedPath, pathHint, workspace)) {
+            // The redirect set merges static-web repair targets and T1003
+            // invalid-edit recovery targets; the blocked-edit reason must
+            // name the actual mechanism because it is rendered verbatim in
+            // the terminal answer.
+            boolean editRecoveryTarget = state != null
+                    && namesMember(state.editRecoveryFullRewriteTargets, normalizedPath, pathHint, workspace)
+                    && !namesMember(state.staticWebFullRewriteRequiredTargets, normalizedPath, pathHint, workspace);
             return new Decision(
                     Kind.FULL_REWRITE_REPAIR_REQUIRED,
-                    fullRewriteRepairRequiredDiagnostic(pathHint),
+                    editRecoveryTarget
+                            ? editRecoveryFullRewriteRequiredDiagnostic(pathHint)
+                            : fullRewriteRepairRequiredDiagnostic(pathHint),
                     normalizedPath,
                     false,
                     "");
         }
-        if (staleRereadRequiredAtStart != null && staleRereadRequiredAtStart.contains(normalizedPath)) {
+        if (namesMember(staleRereadRequiredAtStart, normalizedPath, pathHint, workspace)) {
             return new Decision(
                     Kind.STALE_REREAD_REQUIRED,
                     staleEditRereadRequiredDiagnostic(pathHint),
@@ -115,6 +125,16 @@ final class EditFilePreApprovalGuard {
                 + "No approval was requested and no additional file change was made.";
     }
 
+    private static String editRecoveryFullRewriteRequiredDiagnostic(String pathHint) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the target file"
+                : "`" + pathHint + "`";
+        return "The bounded invalid-edit recovery requires a complete talos.write_file "
+                + "replacement for " + target + ". This talos.edit_file call was not executed, "
+                + "no approval was requested, and no file was changed. Use talos.write_file "
+                + "with the full corrected file content.";
+    }
+
     private static String fullRewriteRepairRequiredDiagnostic(String pathHint) {
         String target = pathHint == null || pathHint.isBlank()
                 ? "the target file"
@@ -123,6 +143,26 @@ final class EditFilePreApprovalGuard {
                 + target + ". This talos.edit_file call was not executed, no approval was requested, "
                 + "and no file was changed. Use talos.write_file with the full corrected file content "
                 + "for this small web file.";
+    }
+
+    /**
+     * The path is in a set of recorded paths by text, or names the same workspace file as a member. Both
+     * decisions block, so identity is consulted on every platform. On POSIX a normalized member whose name
+     * held a backslash can only add a block, never let an edit through.
+     */
+    private static boolean namesMember(
+            Set<String> members,
+            String normalizedPath,
+            String pathHint,
+            java.nio.file.Path workspace
+    ) {
+        if (members == null || members.isEmpty()) return false;
+        if (members.contains(normalizedPath)) return true;
+        if (workspace == null) return false;
+        for (String member : members) {
+            if (dev.talos.tools.WorkspacePathIdentity.matches(workspace, member, pathHint)) return true;
+        }
+        return false;
     }
 
     private static String normalizePath(String pathHint) {

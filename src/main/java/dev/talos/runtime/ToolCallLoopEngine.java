@@ -1,11 +1,14 @@
 package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.LoopState;
+import dev.talos.runtime.toolcall.ReadOnlyEvidenceHandoff;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolProgressSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,9 +42,73 @@ final class ToolCallLoopEngine {
     ToolCallLoop.LoopResult run(
             String initialAnswer,
             List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt,
             List<ChatMessage> messages,
             Path workspace,
             RuntimeTurnContext ctx
+    ) {
+        return run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx,
+                ReadOnlyEvidenceHandoff.empty());
+    }
+
+    ToolCallLoop.LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff) {
+        return run(initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx, handoff,
+                maxIterations);
+    }
+
+    ToolCallLoop.LoopResult run(
+            String initialAnswer, List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt, List<ChatMessage> messages,
+            Path workspace, RuntimeTurnContext ctx, ReadOnlyEvidenceHandoff handoff,
+            int remainingIterations) {
+        return run(
+                initialAnswer,
+                nativeToolCalls,
+                responseReceipt,
+                LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE,
+                messages,
+                workspace,
+                ctx,
+                handoff,
+                remainingIterations);
+    }
+
+    ToolCallLoop.LoopResult runRuntimeDeterministic(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason reason,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        return run(
+                initialAnswer,
+                nativeToolCalls,
+                ProviderResponseCapture.Receipt.none(),
+                LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC,
+                reason,
+                messages,
+                workspace,
+                ctx,
+                ReadOnlyEvidenceHandoff.empty(),
+                maxIterations);
+    }
+
+    private ToolCallLoop.LoopResult run(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt,
+            LocalTurnTraceCapture.ToolCallSource initialSource,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeReason,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx,
+            ReadOnlyEvidenceHandoff handoff,
+            int iterationAllowance
     ) {
         if (initialAnswer == null) initialAnswer = "";
 
@@ -53,27 +120,34 @@ final class ToolCallLoopEngine {
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new ToolCallLoop.LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0,
-                    List.of(), 0, 0, 0, 0, List.of());
+                    List.of(), 0, 0, 0, 0, null, List.of(), java.util.Map.of(),
+                    responseReceipt != null && responseReceipt.completion()
+                            == ProviderResponseCapture.Completion.PROVIDER_LENGTH);
         }
 
         Session toolSession = new Session(workspace, ctx.cfg());
         LoopState state = new LoopState(
                 initialAnswer,
                 hasNative ? new ArrayList<>(nativeToolCalls) : List.of(),
+                responseReceipt,
                 messages,
                 workspace,
                 ctx,
                 toolSession,
-                maxIterations,
+                iterationAllowance,
                 turnProcessor.toolRegistry().aliasRescueCount());
+        state.seedReadOnlyEvidence(handoff);
+        if (initialSource == LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC) {
+            state.setRuntimeNativeCalls(initialAnswer, nativeToolCalls, runtimeReason);
+        }
 
         ToolCallParseStage parseStage = new ToolCallParseStage();
         ToolCallExecutionStage executionStage = new ToolCallExecutionStage(turnProcessor, progressSink, strict);
         ToolCallRepromptStage repromptStage = new ToolCallRepromptStage();
 
-        while (state.iterations < maxIterations) {
+        while (state.iterations < state.maxIterations) {
             ToolCallParseStage.ParsedCalls parsed =
-                    parseStage.parse(state.currentText, state.currentNativeCalls, state.iterations + 1);
+                    parseStage.parse(state, state.iterations + 1);
             if (!parsed.useNativePath() && !parsed.useTextPath()) {
                 if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                     break;
@@ -90,7 +164,8 @@ final class ToolCallLoopEngine {
                         state.totalToolsInvoked)) {
                     LOG.warn("Suppressing unfinished tool-call continuation after {} executed tool(s)",
                             state.totalToolsInvoked);
-                    state.currentText = ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback();
+                    state.finishWithAnswer(
+                            ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback());
                 }
                 break;
             }
@@ -105,22 +180,43 @@ final class ToolCallLoopEngine {
             }
 
             ToolCallExecutionStage.IterationOutcome outcome = executionStage.execute(state, parsed);
+            if (runtimeReason == LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT) {
+                state.finishWithAnswer(state.mutatingToolSuccesses == 1 && state.failedCalls == 0
+                        ? "The selected draft was written. Content meaning and complete request coverage remain unverified."
+                        : "The selected draft save did not complete successfully. No follow-up generation or retry was attempted.");
+                break;
+            }
             if (!repromptStage.reprompt(state, outcome)) {
                 break;
             }
         }
 
-        boolean hitIterLimit = repromptStage.hitIterationLimit(state);
-        if (hitIterLimit) {
-            LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
-            state.currentText = ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText);
+        boolean hitIterLimit = runtimeReason != LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT
+                && repromptStage.hitIterationLimit(state);
+        if (hitIterLimit && state.readOnlySynthesisStatus != ToolCallLoop.ReadOnlySynthesisStatus.ACCEPTED) {
+            LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", state.maxIterations);
+            state.transformAnswer(
+                    ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText),
+                    LocalTurnTraceCapture.AnswerTransformationReason.TOOL_LOOP_ITERATION_LIMIT);
         }
 
         String finalAnswer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
                 state.currentText,
                 state.totalToolsInvoked,
                 state.contentWithheldFromModelContext,
-                state.userVisiblePrivacyNotices);
+                state.userVisiblePrivacyNotices,
+                state.currentResponseReceipt);
+        if (ToolLoopFinalAnswerFinalizer.shouldSuppressUnfinishedToolContinuation(
+                state.currentText,
+                state.totalToolsInvoked)
+                && ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback()
+                        .equals(finalAnswer)) {
+            state.finishWithAnswer(finalAnswer);
+        } else {
+            state.transformAnswer(
+                    finalAnswer,
+                    LocalTurnTraceCapture.AnswerTransformationReason.TOOL_LOOP_FINALIZATION);
+        }
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 state.iterations, state.totalToolsInvoked, state.failedCalls);
@@ -134,6 +230,9 @@ final class ToolCallLoopEngine {
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
-                Map.copyOf(state.readFileBodiesThisTurn));
+                state.readEvidence.latestReadFileBodiesByNormalizedPath(), state.currentAnswerOutputLimitReached,
+                state.readOnlySynthesisStatus, ReadOnlyEvidenceHandoff.capture(state),
+                state.readOnlyFinalizationEvidence,
+                dev.talos.runtime.toolcall.ReadEvidenceCoverage.capture(state));
     }
 }

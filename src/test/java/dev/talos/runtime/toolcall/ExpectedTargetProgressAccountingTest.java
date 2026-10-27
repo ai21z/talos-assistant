@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -13,10 +14,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import dev.talos.testsupport.CaseSensitiveFolders;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ExpectedTargetProgressAccountingTest {
 
@@ -133,6 +140,54 @@ class ExpectedTargetProgressAccountingTest {
     }
 
     @Test
+    void syntheticRetryCannotDropCapturedExplicitStaticWebSatellites(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><style>body { font-family: sans-serif; }</style></head>
+                <body><main>Old page</main></body></html>
+                """);
+        String request =
+                "Redesign index.html and explicitly update style.css and script.js.";
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request),
+                ChatMessage.user(
+                        "Retry the page redesign with modern styling and interaction."));
+        LoopState state = state(messages, workspace);
+        state.toolOutcomes.add(outcome("talos.write_file", "index.html"));
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        try {
+            assertEquals(
+                    List.of("script.js", "style.css"),
+                    ExpectedTargetProgressAccounting
+                            .remainingExpectedMutationTargets(state));
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
+    }
+
+    @Test
+    void syntheticRetryCannotWidenCapturedMutationProgressTargets() {
+        String request = "Edit safe.txt.";
+        LoopState state = state(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request),
+                ChatMessage.user("Retry by editing evil.txt.")), Path.of("."));
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        try {
+            assertEquals(
+                    List.of("safe.txt"),
+                    ExpectedTargetProgressAccounting
+                            .remainingExpectedMutationTargets(state));
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
+    }
+
+    @Test
     void workspaceOperationPathEffectsSatisfyExpectedTargets() {
         LoopState state = state(
                 "Organize these files using workspace operation tools only: copy README.md to "
@@ -183,6 +238,45 @@ class ExpectedTargetProgressAccountingTest {
         state.toolOutcomes.add(outcome("talos.write_file", "docs/summary.md"));
 
         assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
+    }
+
+    @Test
+    void sourceEvidenceTargetNeverBecomesPendingMutationProgress() {
+        LoopState state = state(
+                "Summarize long-notes.txt into docs/summary.md. Keep it under 8 bullets.");
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/summary.md"));
+
+        assertTrue(
+                ExpectedTargetProgressAccounting
+                        .remainingExpectedMutationTargets(state)
+                        .isEmpty());
+    }
+
+    @Test
+    void syntheticRetryCannotReplaceCapturedSourceToOutputAuthority() {
+        String request =
+                "Summarize long-notes.txt into docs/summary.md. Keep it under 8 bullets.";
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request),
+                ChatMessage.user(
+                        "Retry required. The user's request was:\n\n«"
+                                + request
+                                + "»."));
+        LoopState state = state(messages, Path.of("."));
+        state.toolOutcomes.add(outcome(
+                "talos.write_file",
+                "docs/summary.md"));
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        try {
+            assertTrue(
+                    ExpectedTargetProgressAccounting
+                            .remainingExpectedMutationTargets(state)
+                            .isEmpty());
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
     }
 
     @Test
@@ -270,5 +364,81 @@ class ExpectedTargetProgressAccountingTest {
                 null,
                 "",
                 plan);
+    }
+
+    @Test
+    void targetWrittenThroughItsAbsolutePathIsNotRemaining(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "a\n");
+        LoopState state = state("Create docs/a.md and b.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", root.resolve("docs").resolve("a.md").toString()));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("b.md"), remaining);
+    }
+
+    @Test
+    void siblingOrSubfolderWriteLeavesTheTargetRemaining(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs").resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("b.md"), "b\n");
+        Files.writeString(root.resolve("docs").resolve("docs").resolve("a.md"), "a\n");
+        LoopState state = state("Create docs/a.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", root.resolve("docs").resolve("b.md").toString()));
+        state.toolOutcomes.add(outcome("talos.write_file",
+                root.resolve("docs").resolve("docs").resolve("a.md").toString()));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("docs/a.md"), remaining);
+    }
+
+    // Uses existing helpers: state(String, Path) (:310), outcome(String, String) (:334).
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void caseVariantWriteLeavesTheTargetRemainingWhereCaseIsSignificant(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Path docs = Files.createDirectories(root.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "this file system ignores case");
+        LoopState state = state("Edit docs/notes.md.", root);
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/Notes.md"));
+
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @Timeout(60)
+    void caseVariantWriteLeavesTheTargetRemainingInACaseSensitiveFolder(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Path docs = Files.createDirectories(root.resolve("docs"));
+        assumeTrue(CaseSensitiveFolders.enable(docs), "case-sensitive folders cannot be made here");
+        assumeTrue(CaseSensitiveFolders.writeBothSpellings(docs, "notes.md", "Notes.md"),
+                "the folder is not case-sensitive");
+        LoopState state = state("Edit docs/notes.md.", root);
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/Notes.md"));
+
+        assertEquals(List.of("docs/notes.md"), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void caseVariantWriteOfAnExistingFileInAnOrdinaryFolderIsNotRemaining(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("notes.md"), "updated\n");
+        LoopState state = state("Edit docs/notes.md.", root);
+        state.toolOutcomes.add(outcome("talos.write_file", "docs/NOTES.md"));
+
+        assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
     }
 }

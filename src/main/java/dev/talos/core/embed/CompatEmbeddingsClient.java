@@ -1,6 +1,5 @@
 package dev.talos.core.embed;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
@@ -23,8 +22,6 @@ import java.util.Objects;
 
 /** OpenAI-compatible embedding transport for local model servers. */
 public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoCloseable {
-    private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
-
     private final ObjectMapper mapper;
     private final HttpClient http;
     private final CacheDb cache;
@@ -126,7 +123,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
 
     @Override
     public float[] embed(String text) throws Exception {
-        List<float[]> vectors = embedInputs(List.of(EmbeddingsClient.normalizeEmbedInput(text)));
+        List<float[]> vectors = embedInputs(List.of(EmbeddingVectors.normalizeEmbedInput(text)));
         if (vectors.isEmpty()) throw new IllegalStateException("No embedding returned from compat provider");
         return vectors.get(0);
     }
@@ -134,7 +131,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
     @Override
     public List<float[]> embedBatch(List<String> texts) throws Exception {
         if (texts == null || texts.isEmpty()) return List.of();
-        return embedInputs(texts.stream().map(EmbeddingsClient::normalizeEmbedInput).toList());
+        return embedInputs(texts.stream().map(EmbeddingVectors::normalizeEmbedInput).toList());
     }
 
     @Override public int preferredBatchSize() { return 16; }
@@ -159,26 +156,47 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
                     + response.statusCode() + ": " + truncate(response.body(), 160));
         }
 
-        List<float[]> vectors = parseEmbeddings(response.body());
-        if (vectors.isEmpty()) {
-            throw new IllegalStateException("No embedding returned from compat provider");
+        List<float[]> vectors = parseEmbeddings(response.body(), inputs.size());
+        if (vectors.size() != inputs.size()) {
+            throw new IllegalStateException("Compat embedding response cardinality mismatch");
         }
+        int expectedDimension = dim == null ? vectors.get(0).length : dim;
         for (float[] vector : vectors) {
-            if (!EmbeddingsClient.isValidVector(vector)) {
+            if (!EmbeddingVectors.isValidVector(vector) || vector.length != expectedDimension) {
                 throw new IllegalStateException("Compat embedding provider returned an invalid vector");
             }
         }
         return vectors;
     }
 
-    private List<float[]> parseEmbeddings(String json) throws Exception {
+    private List<float[]> parseEmbeddings(String json, int expectedCount) throws Exception {
         JsonNode root = mapper.readTree(json);
+        if (root == null || !root.isObject()) {
+            throw new IllegalStateException("Invalid compat embedding response");
+        }
         JsonNode data = root.path("data");
-        if (data.isArray() && !data.isEmpty()) {
-            List<float[]> vectors = new ArrayList<>();
-            for (JsonNode item : data) {
-                JsonNode embedding = item.path("embedding");
-                if (embedding.isArray()) vectors.add(toFloatArray(embedding));
+        if (root.has("data")) {
+            if (!data.isArray() || data.size() != expectedCount) {
+                throw new IllegalStateException("Compat embedding response cardinality mismatch");
+            }
+            List<float[]> vectors = new ArrayList<>(java.util.Collections.nCopies(expectedCount, null));
+            // Index-less compatibility responses use array order. Indexed responses must be
+            // complete permutations; never silently mix the two binding conventions.
+            boolean indexed = data.get(0).has("index");
+            for (int position = 0; position < data.size(); position++) {
+                JsonNode item = data.get(position);
+                if (!item.isObject() || item.has("index") != indexed) {
+                    throw new IllegalStateException("Ambiguous compat embedding indices");
+                }
+                JsonNode index = item.path("index");
+                if (indexed && (!index.isIntegralNumber() || !index.canConvertToInt())) {
+                    throw new IllegalStateException("Invalid compat embedding index");
+                }
+                int destination = indexed ? index.intValue() : position;
+                if (destination < 0 || destination >= expectedCount || vectors.get(destination) != null) {
+                    throw new IllegalStateException("Invalid or duplicate compat embedding index");
+                }
+                vectors.set(destination, toFloatArray(item.path("embedding")));
             }
             return vectors;
         }
@@ -188,25 +206,29 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
             return List.of(toFloatArray(embedding));
         }
 
-        Map<String, Object> raw = mapper.readValue(json, MAP_REF);
-        Object embeddings = raw.get("embeddings");
-        if (embeddings instanceof List<?> list && !list.isEmpty()) {
-            Object first = list.get(0);
-            if (first instanceof List<?> vec) return List.of(toFloatArray(vec));
-            if (first instanceof Number) return List.of(toFloatArray(list));
+        JsonNode embeddings = root.path("embeddings");
+        if (embeddings.isArray() && !embeddings.isEmpty()) {
+            if (embeddings.get(0).isArray()) {
+                List<float[]> vectors = new ArrayList<>();
+                for (JsonNode vector : embeddings) vectors.add(toFloatArray(vector));
+                return vectors;
+            }
+            return List.of(toFloatArray(embeddings));
         }
         return List.of();
     }
 
     private static float[] toFloatArray(JsonNode array) {
+        if (!array.isArray() || array.isEmpty()) {
+            throw new IllegalStateException("Invalid compat embedding vector");
+        }
         float[] out = new float[array.size()];
-        for (int i = 0; i < out.length; i++) out[i] = (float) array.get(i).asDouble();
-        return out;
-    }
-
-    private static float[] toFloatArray(List<?> list) {
-        float[] out = new float[list.size()];
-        for (int i = 0; i < out.length; i++) out[i] = Float.parseFloat(String.valueOf(list.get(i)));
+        for (int i = 0; i < out.length; i++) {
+            if (!array.get(i).isNumber()) {
+                throw new IllegalStateException("Non-numeric compat embedding component");
+            }
+            out[i] = (float) array.get(i).doubleValue();
+        }
         return out;
     }
 

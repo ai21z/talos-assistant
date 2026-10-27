@@ -14,10 +14,11 @@ import java.util.Properties;
  *   <li>{@code buildTimestamp} - {@link Package#getImplementationVendor()}, which the
  *       Gradle build stores as a build-time millis string in {@code Implementation-Vendor}.
  *       Fallback {@code "unknown"}.</li>
- *   <li>{@code commitSha}, {@code branch} - optional classpath resource
+ *   <li>{@code commitSha}, {@code branch} - classpath resource
  *       {@code META-INF/talos-build.properties} with keys {@code git.commit} and
- *       {@code git.branch}. When the resource is absent (current default build),
- *       both return {@code "unknown"}.</li>
+ *       {@code git.branch}. Clean packaged builds generate it from Git. Dirty
+ *       packaged builds record an unknown commit. When the resource is absent,
+ *       including exploded test classpaths, both return {@code "unknown"}.</li>
  * </ul>
  *
  * <p>R7 - this helper exists so runtime logs and the startup banner can record
@@ -58,9 +59,17 @@ public final class BuildInfo {
      *         or {@value #UNKNOWN} if the resource is absent or the key is missing.
      */
     public static String commitSha() {
-        String full = buildProp("git.commit");
+        String full = fullCommitSha();
         if (UNKNOWN.equals(full)) return UNKNOWN;
         return full.length() > 7 ? full.substring(0, 7) : full;
+    }
+
+    /**
+     * @return the complete git commit SHA recorded in the packaged build metadata,
+     *         or {@value #UNKNOWN} when the build is not identity-bearing.
+     */
+    public static String fullCommitSha() {
+        return buildProp("git.commit");
     }
 
     /** @return git branch from {@code META-INF/talos-build.properties}, or {@value #UNKNOWN}. */

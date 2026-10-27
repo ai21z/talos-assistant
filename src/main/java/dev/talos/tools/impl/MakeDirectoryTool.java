@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -20,7 +21,7 @@ public final class MakeDirectoryTool implements TalosTool {
     @Override public String name() { return NAME; }
 
     @Override public String description() {
-        return "Create a directory in the workspace, including missing parent directories.";
+        return "Create a directory beneath an existing workspace parent directory.";
     }
 
     @Override
@@ -54,15 +55,36 @@ public final class MakeDirectoryTool implements TalosTool {
         if (!target.valid()) {
             return ToolResult.fail(ToolError.invalidParams(target.error()));
         }
-        if (Files.isRegularFile(target.path())) {
-            return ToolResult.fail(ToolError.invalidParams("Cannot create directory because a file already exists: "
-                    + pathParam));
-        }
+        ToolResult parentResult =
+                WorkspaceOperationToolSupport.requireExistingOrdinaryParent(
+                        ctx,
+                        target.path());
+        if (parentResult != null) return parentResult;
         try {
-            Files.createDirectories(target.path());
+            NoFollowPathPolicy.GuardedRoot workspace =
+                    NoFollowPathPolicy.bindExistingDirectory(ctx.workspace());
+            NoFollowPathPolicy.EntryType targetType =
+                    workspace.inspect(target.path());
+            if (targetType == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Cannot create directory because a file already exists: "
+                                + pathParam));
+            }
+            if (targetType != NoFollowPathPolicy.EntryType.MISSING
+                    && targetType != NoFollowPathPolicy.EntryType.DIRECTORY) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Cannot create directory at a linked or special path: "
+                                + pathParam));
+            }
+            if (targetType == NoFollowPathPolicy.EntryType.MISSING) {
+                Files.createDirectory(target.path());
+                workspace.requireDirectory(target.path());
+            }
             return ToolResult.ok("Created directory " + pathParam);
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to create directory: " + e.getMessage()));
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Failed to create directory under its existing ordinary parent: "
+                            + e.getMessage()));
         }
     }
 }

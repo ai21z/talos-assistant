@@ -43,12 +43,63 @@ public record Context(
         Runnable onStreamComplete,
         ExecutionPhaseState executionPhaseState,
         List<ToolSpec> nativeToolSpecs,
-        List<AtFilePins.PinnedFile> pinnedFiles
+        List<AtFilePins.PinnedFile> pinnedFiles,
+        ExactAnswerPresentation exactAnswerPresentation,
+        dev.talos.runtime.observation.TurnRequestFrame requestFrame
 ) implements RuntimeTurnContext {
     public Context {
         if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
         if (nativeToolSpecs != null) nativeToolSpecs = List.copyOf(nativeToolSpecs);
         pinnedFiles = pinnedFiles == null ? List.of() : List.copyOf(pinnedFiles);
+    }
+
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry, ConversationManager conversationManager,
+                   ToolCallLoop toolCallLoop, Consumer<String> streamSink,
+                   Runnable onStreamComplete, ExecutionPhaseState executionPhaseState,
+                   List<ToolSpec> nativeToolSpecs, List<AtFilePins.PinnedFile> pinnedFiles,
+                   ExactAnswerPresentation exactAnswerPresentation) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy, memory,
+                approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
+                onStreamComplete, executionPhaseState, nativeToolSpecs, pinnedFiles, exactAnswerPresentation, null);
+    }
+
+    @Override public Context withRequestFrame(dev.talos.runtime.observation.TurnRequestFrame frame) {
+        return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
+                netPolicy, memory, approvalGate, toolRegistry, conversationManager, toolCallLoop,
+                frame.controlled() ? null : streamSink, onStreamComplete, executionPhaseState, nativeToolSpecs, pinnedFiles,
+                exactAnswerPresentation, frame);
+    }
+
+    @Override public Context prepareRequestPins(String request, Path workspace) {
+        if (requestFrame != null) {
+            requestFrame.requireCurrent();
+            if (requestFrame.preparationSuppressed()) {
+                AtFilePins.recordLast(AtFilePins.Resolution.empty());
+                return withPinnedFiles(List.of());
+            }
+        }
+        if (request.indexOf('@') < 0 && !pinnedFiles.isEmpty()) {
+            AtFilePins.recordLast(new AtFilePins.Resolution(pinnedFiles, List.of()));
+            return this;
+        }
+        var resolution = AtFilePins.resolve(request, workspace, sandbox);
+        AtFilePins.recordLast(resolution);
+        return withPinnedFiles(resolution.pins());
+    }
+
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry, ConversationManager conversationManager,
+                   ToolCallLoop toolCallLoop, Consumer<String> streamSink,
+                   Runnable onStreamComplete, ExecutionPhaseState executionPhaseState,
+                   List<ToolSpec> nativeToolSpecs, List<AtFilePins.PinnedFile> pinnedFiles) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy, memory,
+                approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
+                onStreamComplete, executionPhaseState, nativeToolSpecs, pinnedFiles, null);
     }
 
     /** Backward-compatible constructor without pinnedFiles. */
@@ -119,7 +170,7 @@ public record Context(
         return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
                 netPolicy, memory, approvalGate, toolRegistry, conversationManager,
                 toolCallLoop, streamSink, onStreamComplete, executionPhaseState, specs,
-                pinnedFiles);
+                pinnedFiles, exactAnswerPresentation, requestFrame);
     }
 
     /** Turn-scoped copy carrying the prompt's resolved @-file pins (T802). */
@@ -127,7 +178,7 @@ public record Context(
         return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
                 netPolicy, memory, approvalGate, toolRegistry, conversationManager,
                 toolCallLoop, streamSink, onStreamComplete, executionPhaseState,
-                nativeToolSpecs, pins);
+                nativeToolSpecs, pins, exactAnswerPresentation, requestFrame);
     }
 
     /** Fluent builder for tests and advanced wiring. Prefer explicit setter calls over withDefaults in prod. */
@@ -152,6 +203,7 @@ public record Context(
         private Runnable onStreamComplete;
         private ExecutionPhaseState executionPhaseState;
         private List<ToolSpec> nativeToolSpecs;
+        private ExactAnswerPresentation exactAnswerPresentation;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -172,6 +224,10 @@ public record Context(
         public Builder onStreamComplete(Runnable r)  { this.onStreamComplete = r; return this; }
         public Builder executionPhaseState(ExecutionPhaseState s) { this.executionPhaseState = s; return this; }
         public Builder nativeToolSpecs(List<ToolSpec> specs) { this.nativeToolSpecs = specs; return this; }
+        public Builder exactAnswerPresentation(ExactAnswerPresentation presentation) {
+            this.exactAnswerPresentation = presentation;
+            return this;
+        }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -223,7 +279,7 @@ public record Context(
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
                     memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
-                    onStreamComplete, executionPhaseState, nativeToolSpecs, null);
+                    onStreamComplete, executionPhaseState, nativeToolSpecs, null, exactAnswerPresentation);
         }
     }
 }

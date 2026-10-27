@@ -22,6 +22,8 @@ public enum ToolFailureReason {
     USER_APPROVAL_DENIED,
     /** The declarative permission policy denied the call (not the user). */
     PERMISSION_POLICY_DENIED,
+    /** Parsed provider call lacked exact current selected-generation authority. */
+    TOOL_EXECUTION_AUTHORITY_INVALID,
 
     /** Pre-approval: a path parameter could not be resolved. */
     PRE_APPROVAL_PATH_INVALID,

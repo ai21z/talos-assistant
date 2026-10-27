@@ -4,6 +4,9 @@ import dev.talos.safety.ProtectedPathTokens;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
+import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -27,7 +30,34 @@ public final class ProtectedPathPolicy {
 
     public static List<ResourceDecision> classifyAll(Path workspace, ToolCall call) {
         if (call == null) return List.of(ResourceDecision.noPath());
+        // A command's authority is its profile, not arbitrary unused file-path
+        // parameters. Those must not satisfy file ALLOW rules or write memory.
+        // The command planner independently validates the actual working directory.
+        if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
+            return List.of(ResourceDecision.noPath());
+        }
         var decisions = new java.util.ArrayList<ResourceDecision>();
+        if ("compare_documents".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            for (String key : List.of("left", "right")) {
+                String value = call.param(key);
+                if (value != null && !value.isBlank()) decisions.add(classify(workspace, value));
+            }
+        }
+        if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            try {
+                WorkspaceOperationPlanner.checkpointPlan(
+                        call,
+                        TurnTaskContractCapture.workspaceOperationPlan()).ifPresent(plan -> {
+                    for (var effect : plan.pathEffects()) {
+                        if (effect != null && effect.path() != null && !effect.path().isBlank()) {
+                            decisions.add(classify(workspace, effect.path()));
+                        }
+                    }
+                });
+            } catch (IllegalArgumentException ignored) {
+                // Invalid operation payloads are handled by normal pre-approval validation.
+            }
+        }
         if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             for (String value : WorkspaceBatchPlanParser.pathValues(call)) {
                 if (value != null && !value.isBlank()) {

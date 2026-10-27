@@ -8,9 +8,13 @@ import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -20,8 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkspaceOperationToolsTest {
 
     @Test
-    void mkdirCreatesNestedDirectoryAndExposesCreateMetadata(@TempDir Path workspace) {
+    void mkdirCreatesDirectoryUnderExistingParentAndExposesCreateMetadata(
+            @TempDir Path workspace
+    ) throws Exception {
         var tool = new MakeDirectoryTool();
+        Files.createDirectory(workspace.resolve("docs"));
 
         ToolResult result = tool.execute(
                 new ToolCall("talos.mkdir", Map.of("path", "docs/reports")),
@@ -120,6 +127,137 @@ class WorkspaceOperationToolsTest {
                 context(workspace));
         assertTrue(recursiveDir.success(), recursiveDir.errorMessage());
         assertEquals("nested", Files.readString(workspace.resolve("dir-copy/nested.txt")));
+    }
+
+    @Test
+    void copyToTheSameFileOrDirectoryPreservesBytesAndModificationTime(
+            @TempDir Path workspace
+    ) throws Exception {
+        Path file = Files.writeString(workspace.resolve("same.txt"), "same bytes");
+        Path nested = Files.createDirectories(workspace.resolve("tree"))
+                .resolve("nested.txt");
+        Files.writeString(nested, "nested bytes");
+        java.nio.file.attribute.FileTime fixed =
+                java.nio.file.attribute.FileTime.from(
+                        java.time.Instant.parse("2026-01-01T00:00:00Z"));
+        Files.setLastModifiedTime(file, fixed);
+        Files.setLastModifiedTime(nested, fixed);
+        var tool = new CopyPathTool();
+
+        ToolResult fileResult = tool.execute(
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "same.txt",
+                        "to", "same.txt",
+                        "overwrite", "true")),
+                context(workspace));
+        ToolResult directoryResult = tool.execute(
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "tree",
+                        "to", "tree",
+                        "recursive", "true",
+                        "overwrite", "true")),
+                context(workspace));
+
+        assertTrue(fileResult.success(), fileResult.errorMessage());
+        assertTrue(directoryResult.success(), directoryResult.errorMessage());
+        assertEquals("same bytes", Files.readString(file));
+        assertEquals("nested bytes", Files.readString(nested));
+        assertEquals(fixed, Files.getLastModifiedTime(file));
+        assertEquals(fixed, Files.getLastModifiedTime(nested));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void ordinaryFileCopyPreservesExecutablePermissionSemantics(
+            @TempDir Path workspace
+    ) throws Exception {
+        Path source = Files.writeString(workspace.resolve("run.sh"), "#!/bin/sh\nexit 0\n");
+        Files.setPosixFilePermissions(source, java.util.Set.of(
+                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+                java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+                java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
+                java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+                java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE));
+
+        ToolResult result = new CopyPathTool().execute(
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "run.sh",
+                        "to", "run-copy.sh")),
+                context(workspace));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(
+                Files.getPosixFilePermissions(source),
+                Files.getPosixFilePermissions(workspace.resolve("run-copy.sh")));
+    }
+
+    @Test
+    void recursiveCopyRejectsLinkedFilesBeforeCreatingDestination(@TempDir Path temp) throws Exception {
+        Path workspace = Files.createDirectory(temp.resolve("workspace"));
+        Path outside = Files.createDirectory(temp.resolve("outside"));
+        Path source = Files.createDirectories(workspace.resolve("tree/nested"));
+        Path externalCanary = Files.writeString(outside.resolve("external.txt"),
+                "T1170_EXTERNAL_COPY_CANARY");
+        Path internalCanary = Files.writeString(workspace.resolve("internal.txt"),
+                "T1170_INTERNAL_COPY_CANARY");
+        createSymbolicLinkOrAbort(source.resolve("external-link.txt"), externalCanary);
+        createSymbolicLinkOrAbort(source.resolve("internal-link.txt"), internalCanary);
+
+        ToolResult result = new CopyPathTool().execute(
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "tree",
+                        "to", "tree-copy",
+                        "recursive", "true")),
+                context(workspace));
+
+        assertFalse(result.success(), "linked source descendants must fail closed");
+        assertFalse(Files.exists(workspace.resolve("tree-copy")),
+                "the destination must not be created before the entire source tree is accepted");
+        assertFalse(result.errorMessage().contains(outside.toString()),
+                "containment failures must not disclose the external target");
+        assertFalse(result.errorMessage().contains("T1170_EXTERNAL_COPY_CANARY"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void recursiveCopyRejectsWindowsJunctionBeforeCreatingDestination(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = Files.createDirectories(temp.resolve("workspace/tree"));
+        Path external = Files.createDirectory(temp.resolve("external-junction-target"));
+        Files.writeString(external.resolve("canary.txt"), "T1170_WINDOWS_COPY_CANARY");
+        Path junction = workspace.resolve("junction");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        ToolResult result = new CopyPathTool().execute(
+                new ToolCall("talos.copy_path", Map.of(
+                        "from", "tree",
+                        "to", "tree-copy",
+                        "recursive", "true")),
+                context(temp.resolve("workspace")));
+
+        assertFalse(result.success());
+        assertFalse(Files.exists(temp.resolve("workspace/tree-copy")));
+        assertFalse(result.errorMessage().contains("T1170_WINDOWS_COPY_CANARY"));
+        assertFalse(result.errorMessage().contains(external.toString()));
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 
     @Test

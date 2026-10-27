@@ -5,6 +5,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
+import dev.talos.core.llm.ForegroundProviderScriptedLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
@@ -14,6 +15,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.*;
@@ -156,11 +158,15 @@ public final class ScenarioRunner {
                 .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
                 .build();
         ToolCallLoop.LoopResult loopResult;
+        var taskResolution = TaskContractResolver.resolveFromMessages(messages);
+        TurnTaskContractCapture.set(
+                taskResolution, messages);
         TurnUserRequestCapture.set(userPrompt);
         try {
             loopResult = loop.run(scenario.scriptedResponse(), messages,
                     workspace.path(), ctx);
         } finally {
+            TurnTaskContractCapture.clear();
             TurnUserRequestCapture.clear();
         }
 
@@ -223,7 +229,7 @@ public final class ScenarioRunner {
 
         var processor = new TurnProcessor(modes, gate, registry, approvalPolicy);
         var loop = new ToolCallLoop(processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(cfg, scriptedResponses);
         var ctx = Context.builder(cfg)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
@@ -281,7 +287,6 @@ public final class ScenarioRunner {
             // introduce network-dependent nondeterminism into snapshots.
             llm = LlmClient.scripted(java.util.List.of(""));
             MemoryUpdateListener memoryListener = new MemoryUpdateListener(cm, llm);
-            JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sessionId);
 
             TurnResult turnResult = new TurnResult(
                     assistantResult,
@@ -295,21 +300,25 @@ public final class ScenarioRunner {
                     ? "scenario: " + scenario.name()
                     : scenario.userPrompt();
             memoryListener.onTurnComplete(turnResult, userPrompt);
-            appender.onTurnComplete(turnResult, userPrompt);
+            SessionData snapshot;
+            try (var writer = store.acquireSessionWriter(sessionId)) {
+                JsonTurnLogAppender appender = new JsonTurnLogAppender(writer, sessionId);
+                appender.onTurnComplete(turnResult, userPrompt);
 
-            SessionData snapshot = new SessionData(
-                    sessionId,
-                    base.workspace().path().toString(),
-                    cm.sketch() == null ? "" : cm.sketch(),
-                    cm.turnCount(),
-                    Instant.now(),
-                    memory.getTurns().stream()
-                            .map(m -> new SessionData.Turn(m.role(), m.content(),
-                                    "assistant".equals(m.role()) ? "ok" : ""))
-                            .toList(),
-                    llm.getModel()
-            );
-            store.save(snapshot);
+                snapshot = new SessionData(
+                        sessionId,
+                        base.workspace().path().toString(),
+                        cm.sketch() == null ? "" : cm.sketch(),
+                        cm.turnCount(),
+                        Instant.now(),
+                        memory.getTurns().stream()
+                                .map(m -> new SessionData.Turn(m.role(), m.content(),
+                                        "assistant".equals(m.role()) ? "ok" : ""))
+                                .toList(),
+                        llm.getModel()
+                );
+                writer.save(snapshot);
+            }
 
             List<TurnRecord> turnLog = store.loadTurns(sessionId);
             List<AutoCloseable> resourcesToClose = new ArrayList<>(base.resourcesToClose());
@@ -352,8 +361,10 @@ public final class ScenarioRunner {
             Path sessionsDir = java.nio.file.Files.createTempDirectory("talos-e2e-replay-");
             JsonSessionStore store = new JsonSessionStore(sessionsDir);
             String sessionId = JsonSessionStore.sessionIdFor(workspace.path());
-            for (TurnRecord record : records) {
-                store.appendTurn(sessionId, record);
+            try (var writer = store.acquireSessionWriter(sessionId)) {
+                for (TurnRecord record : records) {
+                    writer.appendTurn(sessionId, record);
+                }
             }
 
             SessionMemory memory = new SessionMemory();
@@ -482,8 +493,9 @@ public final class ScenarioRunner {
         // 6. Scripted LlmClient + Context wired with llm override,
         //    sandbox rooted at workspace, and the tool-call loop.
         //    No streamSink → non-streaming path, deterministic.
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config(null))
+        var config = new Config(null);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(config, scriptedResponses);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -499,7 +511,7 @@ public final class ScenarioRunner {
         beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
-            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(turnOut.text());
             LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
             localTrace = LocalTurnTraceCapture.complete();
             TurnAuditCapture.end();
@@ -550,8 +562,9 @@ public final class ScenarioRunner {
                 ChatMessage.user(userPrompt)));
 
         var streamedChunks = new StringBuilder();
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config(null))
+        var config = new Config(null);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(config, scriptedResponses);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -567,7 +580,7 @@ public final class ScenarioRunner {
         beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
-            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(turnOut.text());
             LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
             localTrace = LocalTurnTraceCapture.complete();
             TurnAuditCapture.end();

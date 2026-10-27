@@ -71,5 +71,21 @@ final class RenderEngineSpinnerTest {
         var render = new RenderEngine(new Config(), new Redactor(), new PrintStream(sink), true);
         assertDoesNotThrow(render::stopSpinner);
     }
+
+    @Test
+    void callerInterruptionCannotBeSwallowedWhileStoppingSpinner() {
+        var sink = new ByteArrayOutputStream();
+        var render = new RenderEngine(new Config(), new Redactor(), new PrintStream(sink), true);
+        render.startSpinner();
+
+        try {
+            Thread.currentThread().interrupt();
+            RuntimeException observed = assertThrows(RuntimeException.class, render::stopSpinner);
+            assertTrue(observed.getCause() instanceof InterruptedException);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
 }
 

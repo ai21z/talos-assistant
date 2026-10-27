@@ -1,7 +1,10 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -15,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolExecutionPathContextTest {
+    @AfterEach
+    void cleanup() {
+        TurnTaskContractCapture.clear();
+    }
+
     @Test
     void readOnlyCallUsesPathHintWithoutWorkspaceOperationPlan() {
         ToolExecutionPathContext context = ToolExecutionPathContext.from(
@@ -25,17 +33,27 @@ class ToolExecutionPathContextTest {
     }
 
     @Test
-    void workspaceOperationCallPrefersPrimaryChangedPath() {
-        ToolExecutionPathContext context = ToolExecutionPathContext.from(
-                new ToolCall("talos.move_path", Map.of(
-                        "from", "drafts/notes.md",
-                        "to", "archive/notes.md")));
+    void workspaceOperationCallRequiresTypedAuthorityAndPrefersPrimaryChangedPath() {
+        ToolCall call = new ToolCall("talos.move_path", Map.of(
+                "from", "drafts/notes.md",
+                "to", "archive/notes.md"));
+
+        assertNull(
+                ToolExecutionPathContext.from(call).workspaceOperationPlan(),
+                "a workspace call without current-turn typed authority must not gain a plan");
+
+        String request = "Move drafts/notes.md to archive/notes.md.";
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromUserRequest(request));
+        ToolExecutionPathContext context = ToolExecutionPathContext.from(call);
 
         WorkspaceOperationPlan plan = context.workspaceOperationPlan();
         assertNotNull(plan);
         assertEquals(WorkspaceOperationPlan.OperationKind.MOVE_PATH, plan.operationKind());
         assertEquals("archive/notes.md", context.pathHint());
         assertEquals("archive/notes.md", plan.primaryChangedPath());
+        assertFalse(plan.authorityPlanId().isBlank());
+        assertFalse(plan.operationId().isBlank());
     }
 
     @Test

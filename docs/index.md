@@ -27,9 +27,11 @@ Architecture and development:
 
 - [Architecture overview](architecture/overview.md)
 - [Execution model](architecture/execution-model.md)
+- [Model profile lifecycle](architecture/model-profile-lifecycle.md)
 - [Trust boundaries](architecture/trust-boundaries.md)
 - [Package map](architecture/package-map.md)
 - [Developer setup](development/developer-setup.md)
+- [Onboard new models](development/onboard-new-models.md)
 - [Build and test](development/build-and-test.md)
 - [CI/CD](development/ci-cd.md)
 - [Quality reports](development/quality-reports.md)

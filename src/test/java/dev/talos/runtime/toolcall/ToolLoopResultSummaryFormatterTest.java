@@ -65,7 +65,7 @@ class ToolLoopResultSummaryFormatterTest {
     }
 
     @Test
-    void suppressesRecoveredEditFailuresByNormalizedPath() {
+    void retainsRawFailureCountUntilPostVerificationRecoveryIsKnown() {
         var failedEdit = new ToolCallLoop.ToolOutcome(
                 "talos.edit_file",
                 "./src/App.java",
@@ -105,7 +105,43 @@ class ToolLoopResultSummaryFormatterTest {
                 List.of(failedEdit, laterWrite));
 
         assertEquals(
-                "[Used 2 tool(s): talos.edit_file, talos.write_file | 2 iteration(s)]",
+                "[Used 2 tool(s): talos.edit_file, talos.write_file | 2 iteration(s)] "
+                        + "[1 failed]",
+                ToolLoopResultSummaryFormatter.format(result));
+    }
+
+    @Test
+    void readOnlyAnswerSummaryDisclosesStableSuccessfulReadSet() {
+        var result = new ToolCallLoop.LoopResult(
+                "answer",
+                1,
+                3,
+                List.of("talos.list_dir", "talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("notes/project-notes.md", "notes/meeting-notes.md"),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.continueLoop(),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", "notes", true, false, false,
+                                "project-notes.md\nmeeting-notes.md\n", "", null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "notes/project-notes.md", true, false, false,
+                                "read", "", null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "notes/meeting-notes.md", true, false, false,
+                                "read", "", null)));
+
+        assertEquals(
+                "[Used 3 tool(s): talos.list_dir, talos.read_file | 1 iteration(s) "
+                        + "| read: notes/meeting-notes.md, notes/project-notes.md]",
                 ToolLoopResultSummaryFormatter.format(result));
     }
 
@@ -118,8 +154,12 @@ class ToolLoopResultSummaryFormatterTest {
 
         assertEquals(1, count(loopSource, "ToolLoopResultSummaryFormatter.format(this)"), loopSource);
         assertEquals(0, count(loopSource, "displayFailedCalls("), loopSource);
-        assertTrue(formatterSource.contains("private static int displayFailedCalls"), formatterSource);
-        assertTrue(formatterSource.contains("private static String normalizeSummaryPath"), formatterSource);
+        assertEquals(0, count(formatterSource, "private static int displayFailedCalls"), formatterSource);
+        assertEquals(0, count(formatterSource, "private static String normalizeSummaryPath"), formatterSource);
+        assertTrue(
+                formatterSource.contains(
+                        "int displayFailedCalls = Math.max(0, result.failedCalls())"),
+                formatterSource);
     }
 
     private static int count(String source, String needle) {

@@ -2,6 +2,8 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ActionObligation;
@@ -10,7 +12,6 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ToolSpec;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,15 +38,19 @@ final class CompactMutationContinuationExecutor {
         if (continuation.isEmpty()) return Outcome.NOT_APPLICABLE;
 
         CompactMutationContinuationPlanner.Plan compact = continuation.get();
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
         try {
             LlmClient.StreamResult result = state.ctx.llm().chatFull(
                     compact.messages(),
                     compact.tools(),
-                    compact.controls());
-            state.currentText = result.text() == null ? "" : result.text();
-            state.currentNativeCalls = result.hasToolCalls()
-                    ? new ArrayList<>(result.toolCalls())
-                    : List.of();
+                    compact.controls().withToolAuthorityMode(
+                            state.ctx.llm().toolAuthorityModeForToolSurface(
+                                    compact.tools())));
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            state.applyProviderResult(result);
+            if (dev.talos.runtime.IncompleteGenerationPresentation.required(result)) return Outcome.STOP_TURN;
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION",
                     "used compact mutation continuation after " + retryName
@@ -67,16 +72,23 @@ final class CompactMutationContinuationExecutor {
                     ResponseObligationVerifier.deterministicNoActionAnswer(ActionObligation.MUTATING_TOOL_REQUIRED));
             return Outcome.STOP_TURN;
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION_CONTEXT_BUDGET_EXCEEDED",
                     ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget));
             return Outcome.NOT_APPLICABLE;
         } catch (EngineException ee) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION_FAILED",
                     ee.getMessage() == null ? ee.getClass().getSimpleName() : ee.getMessage());
             return Outcome.NOT_APPLICABLE;
         } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION_FAILED",
                     e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());

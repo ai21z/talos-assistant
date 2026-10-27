@@ -48,42 +48,15 @@ final class ReadDisplayWriteContainmentGuard {
     }
 
     private static boolean hasSameTurnReadDisplayForPath(LoopState state, String pathHint) {
-        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
-        if (target.isBlank()) return false;
-
-        for (Map.Entry<String, String> entry : state.readFileBodiesThisTurn.entrySet()) {
-            if (samePath(entry.getKey(), target) && containsReadDisplayLine(entry.getValue())) {
-                return true;
-            }
-        }
-        for (Map.Entry<String, String> entry : state.successfulReadCallBodies.entrySet()) {
-            if (readSignatureMatchesPath(entry.getKey(), target) && containsReadDisplayLine(entry.getValue())) {
+        // T1013: whole-turn evidence bound to the effective execution path
+        // (the display-prefix block stays active after later mutations,
+        // matching the previous never-cleared path-keyed map).
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(pathHint, false)) {
+            if (containsReadDisplayLine(read.body())) {
                 return true;
             }
         }
         return false;
-    }
-
-    private static boolean readSignatureMatchesPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))) {
-            return false;
-        }
-        String pathMarker = "path=";
-        int start = signature.indexOf(pathMarker, separator + 1);
-        if (start < 0) return false;
-        start += pathMarker.length();
-        int end = signature.indexOf(';', start);
-        String path = end >= 0 ? signature.substring(start, end) : signature.substring(start);
-        return samePath(path, target);
-    }
-
-    private static boolean samePath(String left, String right) {
-        return ToolCallSupport.canonicalizeReadPath(left)
-                .equalsIgnoreCase(ToolCallSupport.canonicalizeReadPath(right));
     }
 
     private static boolean containsReadDisplayLine(String value) {

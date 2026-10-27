@@ -19,8 +19,26 @@ public record TaskContract(
         Set<String> forbiddenTargets,
         String originalUserRequest,
         String classificationReason,
-        StaticWebRequirements staticWebRequirements
+        StaticWebRequirements staticWebRequirements,
+        AnswerRequirements answerRequirements
 ) {
+    public TaskContract(
+            TaskType type,
+            boolean mutationRequested,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            Set<String> expectedTargets,
+            Set<String> sourceEvidenceTargets,
+            Set<String> forbiddenTargets,
+            String originalUserRequest,
+            String classificationReason,
+            StaticWebRequirements staticWebRequirements
+    ) {
+        this(type, mutationRequested, mutationAllowed, verificationRequired, expectedTargets,
+                sourceEvidenceTargets, forbiddenTargets, originalUserRequest, classificationReason,
+                staticWebRequirements, null);
+    }
+
     public TaskContract(
             TaskType type,
             boolean mutationRequested,
@@ -97,6 +115,8 @@ public record TaskContract(
         forbiddenTargets = forbiddenTargets == null ? Set.of() : Set.copyOf(forbiddenTargets);
         originalUserRequest = originalUserRequest == null ? "" : originalUserRequest;
         classificationReason = classificationReason == null ? "" : classificationReason;
+        // Supplied answer requirements cannot replace authority from the original request.
+        answerRequirements = AnswerRequirements.fromRequest(originalUserRequest);
         staticWebRequirements = staticWebRequirements == null
                 ? StaticWebRequirements.fromRequest(originalUserRequest, forbiddenTargets)
                 : staticWebRequirements.merge(StaticWebRequirements.fromRequest(originalUserRequest, forbiddenTargets));

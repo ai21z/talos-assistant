@@ -5,6 +5,7 @@ import java.util.Objects;
 
 public enum TargetRole {
     FORBIDDEN(800),
+    MUST_MUTATE_AFTER_SOURCE_EVIDENCE(750),
     MUST_MUTATE(700),
     OUTPUT_DESTINATION(600),
     MUST_READ(500),
@@ -15,6 +16,7 @@ public enum TargetRole {
 
     private static final List<TargetRole> PRECEDENCE = List.of(
             FORBIDDEN,
+            MUST_MUTATE_AFTER_SOURCE_EVIDENCE,
             MUST_MUTATE,
             OUTPUT_DESTINATION,
             MUST_READ,

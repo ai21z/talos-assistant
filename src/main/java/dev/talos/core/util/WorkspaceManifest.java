@@ -5,7 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -13,11 +12,10 @@ import java.util.stream.Stream;
  * Builds a lightweight workspace manifest for system prompt injection.
  *
  * <p>Provides the model with immediate workspace awareness on session start,
- * without requiring a full index. The manifest includes:
- * <ul>
- *   <li>File tree (depth-limited, skip noise dirs)</li>
- *   <li>Top-level README snippet (if present)</li>
- * </ul>
+ * without requiring a full index. The manifest is the depth-limited file
+ * tree only: paths are bounded metadata, while file CONTENT (including the
+ * README) is workspace data and must never ride in a system-role prompt
+ * (T1011) - the model reads files on demand through the read tool instead.
  *
  * <p>Total output is capped at ~2000 chars to avoid consuming too much
  * of the context window.
@@ -39,9 +37,6 @@ public final class WorkspaceManifest {
     /** Max entries in the tree listing. */
     private static final int MAX_ENTRIES = 80;
 
-    /** Max chars for the README snippet. */
-    private static final int README_MAX_CHARS = 600;
-
     /** Max total chars for the entire manifest. */
     private static final int MANIFEST_MAX_CHARS = 2000;
 
@@ -61,12 +56,6 @@ public final class WorkspaceManifest {
         String tree = buildTree(workspace);
         if (!tree.isEmpty()) {
             sb.append("\n\nFile structure:\n").append(tree);
-        }
-
-        // README snippet
-        String readme = readReadme(workspace);
-        if (!readme.isEmpty()) {
-            sb.append("\n\nREADME (excerpt):\n").append(readme);
         }
 
         // Hard cap
@@ -122,40 +111,6 @@ public final class WorkspaceManifest {
         return false;
     }
 
-    /** Read the first few lines of a README file if present. */
-    static String readReadme(Path root) {
-        Path readme = findReadme(root);
-        if (readme == null) return "";
-
-        try {
-            String content = Files.readString(readme);
-            if (content.length() > README_MAX_CHARS) {
-                content = content.substring(0, README_MAX_CHARS) + "\n...";
-            }
-            return content.strip();
-        } catch (IOException e) {
-            return "";
-        }
-    }
-
-    /** Find a README file in the root directory (case-insensitive). */
-    private static Path findReadme(Path root) {
-        String[] names = {"README.md", "README.txt", "README", "readme.md", "Readme.md"};
-        for (String name : names) {
-            Path candidate = root.resolve(name);
-            if (Files.isRegularFile(candidate)) return candidate;
-        }
-        // Fallback: case-insensitive search in root only
-        try (Stream<Path> list = Files.list(root)) {
-            return list
-                    .filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).startsWith("readme"))
-                    .findFirst()
-                    .orElse(null);
-        } catch (IOException e) {
-            return null;
-        }
-    }
 }
 
 

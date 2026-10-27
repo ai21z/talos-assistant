@@ -136,7 +136,7 @@ class CliStatusDashboardTest {
     }
 
     @Test
-    void snapshot_summarizes_explicit_ollama_policy() {
+    void snapshot_marks_an_unsupported_backend() {
         Config cfg = new Config(null);
         cfg.data.put("llm", java.util.Map.of("default_backend", "ollama"));
 
@@ -149,8 +149,6 @@ class CliStatusDashboardTest {
                 "next");
         String output = CliStatusDashboard.render(snapshot, UNICODE_NO_COLOR, 100);
 
-        assertTrue(snapshot.policy().contains("ask before mutation"));
-        assertTrue(output.contains("ollama"));
-        assertTrue(!output.contains("local Ollama only"));
+        assertTrue(output.contains("ollama (not supported)"), output);
     }
 }

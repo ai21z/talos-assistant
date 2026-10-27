@@ -1,5 +1,9 @@
 package dev.talos.cli.setup;
 
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.engine.llamacpp.profile.LlamaCppArtifactVerificationStore;
+import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -15,13 +19,19 @@ import java.util.Objects;
 
 public final class LlamaCppModelDownloader {
     private final Downloader downloader;
+    private final VerificationRecorder verificationRecorder;
 
     public LlamaCppModelDownloader() {
-        this(new HttpDownloader());
+        this(new HttpDownloader(), LlamaCppModelDownloader::recordCatalogVerification);
     }
 
     public LlamaCppModelDownloader(Downloader downloader) {
+        this(downloader, LlamaCppModelDownloader::recordCatalogVerification);
+    }
+
+    LlamaCppModelDownloader(Downloader downloader, VerificationRecorder verificationRecorder) {
         this.downloader = Objects.requireNonNull(downloader, "downloader");
+        this.verificationRecorder = Objects.requireNonNull(verificationRecorder, "verificationRecorder");
     }
 
     public Result download(LlamaCppModelManifest.Entry entry, Path userHome) {
@@ -35,6 +45,7 @@ public final class LlamaCppModelDownloader {
                 }
                 String actual = sha256Hex(target);
                 if (actual.equalsIgnoreCase(entry.sha256())) {
+                    verificationRecorder.record(entry, target, userHome, actual);
                     return new Result(Status.REUSED, target, "Reusing existing model file at " + target);
                 }
                 return new Result(Status.EXISTING_MISMATCH, target,
@@ -56,6 +67,7 @@ public final class LlamaCppModelDownloader {
                                 + entry.sha256() + " but got " + actual);
             }
             promote(partial, target);
+            verificationRecorder.record(entry, target, userHome, actual);
             return new Result(Status.DOWNLOADED, target, "Downloaded verified model to " + target);
         } catch (Exception error) {
             try {
@@ -102,6 +114,11 @@ public final class LlamaCppModelDownloader {
         void download(URI uri, Path target) throws Exception;
     }
 
+    @FunctionalInterface
+    interface VerificationRecorder {
+        void record(LlamaCppModelManifest.Entry entry, Path path, Path userHome, String sha256) throws Exception;
+    }
+
     public enum Status {
         DOWNLOADED,
         REUSED,
@@ -110,6 +127,24 @@ public final class LlamaCppModelDownloader {
     }
 
     public record Result(Status status, Path modelPath, String message) {}
+
+    private static void recordCatalogVerification(
+            LlamaCppModelManifest.Entry entry,
+            Path path,
+            Path userHome,
+            String sha256) throws Exception {
+        var profile = LlamaCppModelCatalog.byAlias(entry.alias());
+        if (profile.isEmpty()) return;
+        Path home = (userHome == null ? Path.of(System.getProperty("user.home", ".")) : userHome)
+                .resolve(".talos")
+                .toAbsolutePath()
+                .normalize();
+        LlamaCppProfileResolver.ArtifactIdentity identity = new LlamaCppArtifactVerificationStore()
+                .recordVerified(path, entry.alias(), profile.orElseThrow().artifact(), home, sha256);
+        if (identity.state() != LlamaCppProfileResolver.ArtifactState.EXACT) {
+            throw new IOException("verified model evidence could not be persisted: " + identity.state());
+        }
+    }
 
     static final class HttpDownloader implements Downloader {
         @Override

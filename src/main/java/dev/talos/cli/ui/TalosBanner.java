@@ -1,6 +1,9 @@
 package dev.talos.cli.ui;
 
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.engine.llamacpp.LlamaCppPreflight;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -40,7 +43,7 @@ public final class TalosBanner {
                 activeMode,
                 resolveModel(cfg),
                 debug,
-                "Type a request or /help");
+                startupHint(cfg));
         TerminalCapabilities caps = TerminalCapabilities.detectDefault();
         int width = TerminalWidths.resolve(
                 terminalWidth, System.getenv(), StartupBannerRenderer.DEFAULT_WIDTH);
@@ -67,7 +70,7 @@ public final class TalosBanner {
                 activeMode,
                 resolveModel(cfg),
                 "off",
-                "Type a request or /help");
+                startupHint(cfg));
         out.println();
         out.print(StartupBannerRenderer.render(
                 snapshot,
@@ -80,7 +83,34 @@ public final class TalosBanner {
     // ── Config readers ────────────────────────────────────────────────────
 
     static String resolveModel(Config cfg) {
-        return CliStatusDashboard.resolveModel(cfg);
+        String configured = CliStatusDashboard.resolveModel(cfg);
+        try {
+            EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+            if (!"llama_cpp".equals(runtime.backend())) return configured;
+            var identity = LlamaCppProfileIdentity.inspectLocal(
+                    cfg,
+                    Path.of(System.getProperty("user.home", "."), ".talos")
+                            .toAbsolutePath().normalize());
+            return ModelIdentityPresentation.bannerModelLabel(identity, configured);
+        } catch (RuntimeException ignored) {
+            return configured;
+        }
+    }
+
+    static String startupHint(Config cfg) {
+        try {
+            EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+            if (!EngineRuntimeConfig.MANAGED_BACKEND.equals(runtime.backend())) {
+                return "backend " + runtime.backend() + " is not supported · run talos setup models";
+            }
+            LlamaCppPreflight.Report report = LlamaCppPreflight.check(cfg);
+            if (report.managed() && !report.filesOk()) {
+                return "setup incomplete · run talos setup models or /help";
+            }
+        } catch (RuntimeException ignored) {
+            return "setup incomplete · run talos status --verbose";
+        }
+        return "ready · type /help, /status, /tools · or ask a question";
     }
 }
 

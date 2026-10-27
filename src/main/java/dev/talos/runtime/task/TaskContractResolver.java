@@ -1,15 +1,23 @@
 package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.CommandExecutionRequest;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 import dev.talos.runtime.intent.TaskContractCompiler;
 import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentProjector;
+import dev.talos.runtime.intent.CoordinatedMutationTailPlan;
+import dev.talos.runtime.intent.SequentialMutationClausePlan;
 import dev.talos.runtime.intent.TaskIntentResolver;
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetSource;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.spi.types.ChatMessage;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -21,18 +29,36 @@ import java.util.regex.Pattern;
 /** Deterministic resolver for Talos's minimal current-turn task contract. */
 public final class TaskContractResolver {
 
+    // An optional Windows drive is kept only when a path separator follows it.
+    private static final String DRIVE_PREFIX = "(?:[A-Za-z]:(?=[\\\\/]))?";
+
     private static final Pattern TARGET_FILE = Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:[A-Za-z0-9_.\\\\/-]+\\."
+            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
                     + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx|"
                     + "png|jpg|jpeg|gif|bmp|webp|tif|tiff|zip|tar|gz|tgz|7z|rar|"
                     + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
-                    + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
-                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+                    + ")|(?:(?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
+                    + "(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]]|"
+                    + "\\.(?:$|\\s|\\u2028|\\u2029))");
+    private static final Pattern INLINE_EXAMPLE_ARTIFACT_BEFORE = Pattern.compile(
+            "(?is).*\\b(?:example|sample|template)\\s+$");
+    private static final Pattern INLINE_EXAMPLE_ARTIFACT_AFTER = Pattern.compile(
+            "(?is)^\\s*(?:example|sample|template)\\b.*");
+    // Kept aligned with the MutationIntent verb families: a target governed by
+    // any explicit action verb must bind even when example/sample/template
+    // words appear nearby (T1002 hardening).
+    private static final Pattern EXPLICIT_TARGET_ACTION_BEFORE = Pattern.compile(
+            "(?i)\\b(?:read|open|inspect|summarize|create|write|edit|update|fix|delete|remove|use"
+                    + "|modify|overwrite|replace|rewrite|regenerate|make|build|generate|scaffold"
+                    + "|change|copy|move|rename|append|refactor)\\b");
+    // A sentence boundary is punctuation followed by whitespace; dots inside
+    // filenames, version numbers, or abbreviations never sever the verb.
+    private static final Pattern SENTENCE_BOUNDARY_BEFORE_TARGET = Pattern.compile("[.?!;]\\s");
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
-                    + "(?:change|edit|modify|write|create|save|apply|touch|mutate|use)"
+                    + "(?:change|edit|modify|overwrite|write|create|save|apply|touch|mutate|use)"
                     + "|\\bwithout\\s+(?:changing|using))\\s+(.{0,240})");
 
     private static final Pattern IGNORED_INSTRUCTION_OUTPUT_TARGET_SPAN = Pattern.compile(
@@ -49,6 +75,8 @@ public final class TaskContractResolver {
     private static final Pattern PRESERVE_UNCHANGED_TARGET_SPAN = Pattern.compile(
             "(?i)\\b(?:keep|preserve)\\s+(.{0,160}?)\\s+"
                     + "(?:unchanged|as\\s*-?\\s*is|intact)\\b");
+    private static final Pattern MUST_REMAIN_UNCHANGED = Pattern.compile(
+            "(?i)\\bmust\\s+(?:remain|stay)\\s+(?:unchanged|intact|as\\s*-?\\s*is)\\b");
     private static final Pattern DIRECT_NOT_TARGET_PREFIX = Pattern.compile(
             "(?is)(?:^|[\\s,;])not\\s+$");
     private static final Pattern TAILWIND_NEGATIVE_LOCAL_ARTIFACT = Pattern.compile(
@@ -85,9 +113,9 @@ public final class TaskContractResolver {
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
-                    + "((?:[A-Za-z0-9_.\\\\/-]+/)?"
+                    + "((?:" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+/)?"
                     + "(?:README|LICENSE|NOTICE|CHANGELOG|CONTRIBUTING|AUTHORS|Makefile|Dockerfile))"
-                    + "`?(?=$|\\s|[`'\"),;:!?\\]])");
+                    + "`?(?=$|\\s|\\u2028|\\u2029|[`'\"),;:!?\\]])");
 
     private static final Pattern BATCH_DIRECTORY_CREATION_SPAN = Pattern.compile(
             "(?i)\\b(?:create|make|mkdir)\\s+"
@@ -103,7 +131,7 @@ public final class TaskContractResolver {
                     + "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
                     + "(?:directories|directory|dirs|dir|folders|folder))\\s+"
                     + "(?:(?:called|named|as)\\s+)?"
-                    + "`?([A-Za-z0-9_.\\\\/-]+(?:[\\\\/][A-Za-z0-9_.-]+)?)`?"
+                    + "`?(" + DRIVE_PREFIX + "[A-Za-z0-9_.\\\\/-]+(?:[\\\\/][A-Za-z0-9_.-]+)?)`?"
                     + "(?=$|\\s|[`'\"),;:!?\\]])");
 
     private static final Pattern BATCH_DESTINATION_OPERATION = Pattern.compile(
@@ -144,6 +172,8 @@ public final class TaskContractResolver {
             "what is in this", "explain this", "this folder", "this directory",
             "this site"
     );
+    private static final Pattern WORKSPACE_WORD_MARKER = Pattern.compile(
+            "\\b(?:workspace|repo|repository|project|codebase)\\b");
 
     private static final Set<String> COMMAND_EXECUTION_ACTION_MARKERS = Set.of(
             "run ", "execute ", "call ", "try ", "probe ", "verify ", "check ",
@@ -161,6 +191,10 @@ public final class TaskContractResolver {
 
     private static final Pattern EXPLICIT_NATURAL_COMMAND_EXECUTION = Pattern.compile(
             "(?i)\\b(?:run|execute|call|try)\\s+(?:the\\s+)?command\\b");
+    private static final Pattern TEST_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)\\b(?:run|execute|verify|check)\\s+(?:the\\s+)?tests\\b");
+    private static final Pattern GENERIC_TEST_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)\\b(?:run|execute)\\s+(?:the\\s+)?tests\\b");
 
     private static final Pattern SIMPLE_DIRECTORY_LISTING = Pattern.compile(
             "(?i)^\\s*(?:"
@@ -173,6 +207,10 @@ public final class TaskContractResolver {
                     + "|show\\s+me\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"
                     + "(?:here|in\\s+(?:this|the|current)\\s+(?:folder|directory|workspace|repo|repository))?"
                     + ")[\\s.!?]*$");
+    private static final Pattern TOP_LEVEL_DIRECTORY_LISTING = Pattern.compile(
+            "(?i)\\b(?:list|show(?:\\s+me)?)\\s+(?:the\\s+)?top[-\\s]+level\\s+"
+                    + "(?:files|folders|directories|items|entries)"
+                    + "(?:\\s+and\\s+(?:files|folders|directories|items|entries))?\\b");
 
     private static final Set<String> SIMPLE_LISTING_EXCLUSION_MARKERS = Set.of(
             "read", "explain", "summarize", "summary", "inspect", "diagnose",
@@ -217,66 +255,6 @@ public final class TaskContractResolver {
             "no content"
     );
 
-    private static final Set<String> NO_INSPECTION_MARKERS = Set.of(
-            "do not inspect this workspace",
-            "do not inspect the workspace",
-            "do not inspect workspace",
-            "don't inspect this workspace",
-            "don't inspect the workspace",
-            "don't inspect workspace",
-            "dont inspect this workspace",
-            "dont inspect the workspace",
-            "dont inspect workspace",
-            "do not read this workspace",
-            "do not read the workspace",
-            "do not read workspace",
-            "don't read this workspace",
-            "don't read the workspace",
-            "don't read workspace",
-            "do not check this workspace",
-            "do not check the workspace",
-            "do not check workspace",
-            "do not inspect my files",
-            "don't inspect my files",
-            "dont inspect my files",
-            "without inspecting the workspace",
-            "without inspecting workspace",
-            "without checking the workspace",
-            "without checking workspace",
-            "without reading the workspace",
-            "without reading workspace",
-            "without using this workspace",
-            "without using the workspace",
-            "without using workspace",
-            "without inspecting or using this workspace",
-            "without inspecting or using the workspace",
-            "without inspecting or using workspace",
-            "without inspecting the repo",
-            "without inspecting repo",
-            "without checking the repo",
-            "without checking repo",
-            "without reading the repo",
-            "without reading repo",
-            "without inspecting the repository",
-            "without checking the repository",
-            "without reading the repository",
-            "without inspecting the codebase",
-            "without checking the codebase",
-            "without reading the codebase"
-    );
-
-    private static final Set<String> NO_INSPECTION_DIRECT_ANSWER_MARKERS = Set.of(
-            "how you would approach",
-            "how would you approach",
-            "how you would review",
-            "how would you review",
-            "approach reviewing",
-            "approach review",
-            "reviewing a",
-            "methodology",
-            "general approach"
-    );
-
     private static final Pattern SOURCE_EVIDENCE_SPAN = Pattern.compile(
             "(?i)\\b(according\\s+to|based\\s+on|summari[sz]ing|summary\\s+of|from|using)\\b\\s+(.{1,320})");
 
@@ -285,12 +263,17 @@ public final class TaskContractResolver {
     // rather than a MUST_MUTATE obligation that falsely blocks the turn.
     private static final Pattern READ_CLAUSE_BEFORE_MUTATION = Pattern.compile(
             "(?i)\\b(?:read|open)\\s+(.{0,120}?)\\b(?:and|then)\\b");
+    private static final Pattern DIRECT_CURRENT_READ_OR_VERIFY = Pattern.compile(
+            "(?i)(?:^|[.!?;]\\s+|\\b(?:and|but|then)\\s+)"
+                    + "(?:please\\s+)?"
+                    + "(?:read|open|inspect|review|examine|check|verify)\\b");
 
     // T896: distinguish a leading EDIT verb from a CREATE verb so an explicit edit of an existing
     // named file ("Edit index.html to add a Contact section") classifies FILE_EDIT even though
     // "add a" is a CREATE_MARKER describing content to add INSIDE the file.
     private static final Pattern EDIT_LEADING_VERB = Pattern.compile(
-            "(?i)\\b(?:edit|modify|change|update|fix|rewrite|replace|append|remove|delete|adjust|tweak|restyle|redesign|refactor)\\b");
+            "(?i)\\b(?:edit|modify|change|update|fix|rewrite|replace|append|remove|delete|adjust|tweak|"
+                    + "improve|polish|restyle|redesign|refactor)\\b");
     private static final Pattern CREATE_LEADING_VERB = Pattern.compile(
             "(?i)\\b(?:create|write|build|generate|scaffold|make|add)\\b");
 
@@ -343,46 +326,220 @@ public final class TaskContractResolver {
     private TaskContractResolver() {}
 
     public static TaskContract fromMessages(List<ChatMessage> messages) {
+        return resolveFromMessages(messages).contract();
+    }
+
+    public static TaskResolution resolveFromMessages(List<ChatMessage> messages) {
         String latest = latestUserRequest(messages);
-        TaskContract current = fromUserRequest(latest);
+        TaskResolution currentResolution = resolveFromUserRequest(latest);
+        if (currentResolution.sequentialMutationPlan()
+                .authorityLimitExceeded()) {
+            return currentResolution;
+        }
+        TaskContract current = currentResolution.contract();
+        // Prior-status authority remains read-only even when extra clauses reject a historical answer.
         if (current.type() == TaskType.VERIFY_ONLY
-                || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
-            return current;
+                || "historical-attribution-request".equals(current.classificationReason())
+                || hasHistoricalEvidenceIntent(latest)) {
+            return currentResolution;
+        }
+        var mutationReference = MutationIntent.currentMutationReference(latest);
+        if (mutationReference.isPresent() && current.expectedTargets().isEmpty()) {
+            ChatMessage previousMessage = previousUserMessage(messages, latest);
+            String previousUser = previousMessage == null ? null : previousMessage.content();
+            TaskResolution prior = previousMessage == null
+                    || !previousMessage.contentRestrictions().equals(dev.talos.safety.ContentRestrictions.UNRESTRICTED)
+                    ? null : resolveFromUserRequest(previousUser);
+            boolean resolved = !mutationReference.get().ambiguous()
+                    && current.mutationRequested() && current.mutationAllowed()
+                    && prior != null && prior.contract().mutationAllowed()
+                    && prior.contract().mutationRequested()
+                    && !prior.contract().expectedTargets().isEmpty()
+                    && prior.contract().expectedTargets().size() <= 8
+                    && prior.contract().originalUserRequest().length() <= 8192
+                    && (mutationReference.get().statedCount() == 0
+                            || mutationReference.get().statedCount() == prior.contract().expectedTargets().size())
+                    && prior.hasIndependentAuthorizedContentMutation()
+                    && prior.workspaceOperationPlan().authorizedOperations().isEmpty()
+                    && prior.sequentialMutationPlan().occurrenceDecisions().stream().allMatch(decision ->
+                            decision.authority() == dev.talos.runtime.intent.SequentialMutationClausePlan.Authority.FORBIDDEN
+                                    || decision.authority() == dev.talos.runtime.intent.SequentialMutationClausePlan.Authority.REQUIRED
+                                    && decision.actionFamily() == dev.talos.runtime.intent.SequentialMutationClausePlan.ActionFamily.CONTENT_MUTATION)
+                    && prior.mutationTailPlan().workspaceOperationObservations().isEmpty()
+                    && prior.mutationTailPlan().workspaceOperationClauseObservations().isEmpty()
+                    && prior.mutationTailPlan().decisions().stream().allMatch(decision ->
+                            decision.authority() == CoordinatedMutationTailPlan.Authority.REQUIRED
+                                    || decision.authority() == CoordinatedMutationTailPlan.Authority.FORBIDDEN)
+                    && !currentTurnConstrainsInheritedAuthority(currentResolution,
+                            prior.contract().expectedTargets());
+            TaskContract referenced = resolved
+                    ? new TaskContract(prior.contract().type(), true, true, true,
+                            prior.contract().expectedTargets(), prior.contract().sourceEvidenceTargets(),
+                            prior.contract().forbiddenTargets(), current.originalUserRequest(),
+                            "explicit-user-mutation-reference")
+                    : new TaskContract(current.type(), true, false, true,
+                            Set.of(), Set.of(), current.forbiddenTargets(), current.originalUserRequest(),
+                            "unresolved-user-mutation-reference");
+            TaskResolution projected = projectResolution(currentResolution, referenced, TargetSource.MESSAGE_HISTORY,
+                    resolved ? "current-request-references-prior-user-scope" : "unresolved-user-mutation-reference");
+            if (!resolved) return projected;
+            var targets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : projected.intent().targets().targets()) {
+                targets = targets.with(new dev.talos.runtime.intent.TargetRef(target.path(), target.role(),
+                        new dev.talos.runtime.intent.IntentDerivation(TargetSource.MESSAGE_HISTORY,
+                                "current-request-references-prior-user-scope", -1, -1, -1,
+                                "", 1.0)));
+            }
+            var intent = new dev.talos.runtime.intent.TaskIntent(referenced.type(), true, true, true, targets,
+                    referenced.originalUserRequest(), referenced.classificationReason());
+            return projected.projectOnto(referenced, intent);
         }
         if (!current.mutationRequested() && looksLikeConfirmationFollowUp(latest)) {
-            TaskContract inherited = inheritedAssistantPlanContract(messages, latest, current);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            // Proposal continuation is resolved by request-bound active context, not assistant prose.
+            return currentResolution;
         }
         if (looksLikeRepairFollowUp(latest)) {
-            TaskContract inherited = inheritedRepairContract(messages, latest, current);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            TaskContract inherited =
+                    inheritedRepairContract(
+                            messages,
+                            latest,
+                            currentResolution);
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        withContextualStaticWebTargets(messages, latest, inherited),
+                        TargetSource.REPAIR_CONTEXT,
+                        "repair-follow-up-projection");
+            }
         }
         if (!current.mutationRequested() && looksLikeCorrectionFollowUp(latest)) {
-            TaskContract inherited = inheritedCorrectionContract(messages, latest);
-            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+            TaskContract inherited = inheritedCorrectionContract(
+                    messages,
+                    latest,
+                    currentResolution);
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        withContextualStaticWebTargets(messages, latest, inherited),
+                        TargetSource.REPAIR_CONTEXT,
+                        "correction-follow-up-projection");
+            }
         }
         if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
             TaskContract inherited = inheritedReadOnlyWorkspaceContract(messages, latest);
-            if (inherited != null) return inherited;
+            if (inherited != null) {
+                return projectResolution(
+                        currentResolution,
+                        inherited,
+                        TargetSource.MESSAGE_HISTORY,
+                        "deictic-follow-up-projection");
+            }
         }
-        return withContextualStaticWebTargets(messages, latest, current);
+        return projectResolution(
+                currentResolution,
+                withContextualStaticWebTargets(messages, latest, current),
+                TargetSource.WORKSPACE_EVIDENCE,
+                "contextual-static-web-projection");
     }
 
     public static TaskIntent intentFromMessages(List<ChatMessage> messages) {
-        return intentFromUserRequest(latestUserRequest(messages));
+        return resolveFromMessages(messages).intent();
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
-        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
-        return TaskContractCompiler.compile(TaskIntentResolver.fromUserRequest(userRequest, legacy));
+        return resolveFromUserRequest(userRequest).contract();
+    }
+
+    /** Current authority ceiling after target-local prohibitions are reconciled, without inherited context. */
+    public static boolean explicitlyForbidsMutation(String userRequest) {
+        TaskContract current = fromUserRequest(userRequest);
+        var saveRequest = dev.talos.runtime.intent.ContentSaveRequest.parse(
+                userRequest == null ? "" : userRequest.strip());
+        return !current.mutationAllowed()
+                && "global-read-only-negation".equals(MutationIntent.classificationReason(userRequest))
+                && (!saveRequest.mutationRequested() || saveRequest.hasUnquotedGlobalReadOnlyProhibition());
+    }
+
+    public static TaskResolution resolveFromUserRequest(String userRequest) {
+        var saveRequest = dev.talos.runtime.intent.ContentSaveRequest.parse(
+                userRequest == null ? "" : userRequest.strip());
+        TaskContract legacy = resolveLegacyFromUserRequest(userRequest, saveRequest);
+        if (!saveRequest.present() && !saveRequest.originalRequest().equals(legacy.originalUserRequest())) {
+            saveRequest = dev.talos.runtime.intent.ContentSaveRequest.empty(legacy.originalUserRequest());
+        }
+        TaskIntentResolver.IntentResolution intentResolution =
+                TaskIntentResolver.resolve(legacy.originalUserRequest(), legacy);
+        TaskIntent intent = intentResolution.intent().withContentSaveRequest(saveRequest);
+        if (saveRequest.restrictsLegacyMutation()) {
+            var restrictedTargets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : intent.targets().targets()) {
+                restrictedTargets = restrictedTargets.with(new dev.talos.runtime.intent.TargetRef(
+                        target.path(), target.role() == dev.talos.runtime.intent.TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        ? dev.talos.runtime.intent.TargetRole.MUST_READ : target.role(), target.derivation()));
+            }
+            intent = new TaskIntent(intent.type(), false, false, intent.verificationRequired(),
+                    restrictedTargets, intent.originalUserRequest(), "scoped-content-save-restriction")
+                    .withContentSaveRequest(saveRequest);
+        }
+        if (saveRequest.clarificationRequired()) {
+            var unresolvedTargets = dev.talos.runtime.intent.ArtifactTargetSet.empty();
+            for (var target : intent.targets().targets()) {
+                unresolvedTargets = unresolvedTargets.with(new dev.talos.runtime.intent.TargetRef(
+                        target.path(), target.role() == dev.talos.runtime.intent.TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                        ? dev.talos.runtime.intent.TargetRole.MUST_READ : target.role(), target.derivation()));
+            }
+            intent = new TaskIntent(intent.type(), true, false, true,
+                    unresolvedTargets, intent.originalUserRequest(),
+                    "content-save-needs-clarification").withContentSaveRequest(saveRequest);
+        }
+        return new TaskResolution(
+                TaskContractCompiler.compile(intent),
+                intent,
+                intentResolution.mutationTailPlan(),
+                intentResolution.sequentialMutationPlan(),
+                intentResolution.workspaceOperationPlan());
     }
 
     public static TaskIntent intentFromUserRequest(String userRequest) {
-        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
-        return TaskIntentResolver.fromUserRequest(userRequest, legacy);
+        return resolveFromUserRequest(userRequest).intent();
+    }
+
+    private static TaskResolution projectResolution(
+            TaskResolution prior,
+            TaskContract effective,
+            TargetSource source,
+            String reason
+    ) {
+        TaskContract contract = effective == null ? TaskContract.unknown("") : effective;
+        if (prior != null && Objects.equals(prior.contract(), contract)) return prior;
+        TaskIntent projected = TaskIntentProjector.project(
+                prior == null ? null : prior.intent(),
+                contract,
+                source,
+                reason);
+        if (prior != null
+                && prior.intent().originalUserRequest().equals(
+                        projected.originalUserRequest())) {
+            return prior.projectOnto(contract, projected);
+        }
+        return new TaskResolution(
+                contract,
+                projected,
+                CoordinatedMutationTailPlan.empty(
+                        projected.originalUserRequest()),
+                SequentialMutationClausePlan.empty(
+                        projected.originalUserRequest()),
+                Set.of(),
+                TaskResolution.Provenance.CURRENT_USER_REQUEST);
     }
 
     static TaskContract resolveLegacyFromUserRequest(String userRequest) {
+        return resolveLegacyFromUserRequest(userRequest,
+                dev.talos.runtime.intent.ContentSaveRequest.parse(userRequest == null ? "" : userRequest.strip()));
+    }
+
+    private static TaskContract resolveLegacyFromUserRequest(
+            String userRequest, dev.talos.runtime.intent.ContentSaveRequest saveRequest) {
         if (userRequest == null || userRequest.isBlank()
                 || ToolCallSupport.isSyntheticToolResultContent(userRequest)) {
             return TaskContract.unknown(userRequest);
@@ -390,6 +547,13 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
+        if (dev.talos.runtime.intent.HistoricalAttributionRequest.parse(original).isPresent()) {
+            String reason = ConversationEvidenceRequest.interpret(original).source()
+                    == ConversationEvidenceRequest.Source.SESSION_ACTIONS
+                    ? "session-action-summary" : "historical-attribution-request";
+            return new TaskContract(TaskType.READ_ONLY_QA, false, false, false,
+                    Set.of(), Set.of(), Set.of(), original, reason);
+        }
         if (looksLikeCheckpointRestoreRequest(lower)) {
             return new TaskContract(
                     TaskType.CHECKPOINT_RESTORE,
@@ -424,26 +588,57 @@ public final class TaskContractResolver {
                     original,
                     "tool-alias-capability-question");
         }
-        boolean sessionMetaEvidenceQuestion = looksLikeSessionMetaEvidenceQuestion(lower);
-        boolean sessionUncertaintyQuestion = looksLikeSessionUncertaintyQuestion(lower);
-        boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
-        String classificationReason = MutationIntent.classificationReason(original);
-        boolean mutationRequested = !sessionMetaEvidenceQuestion
+        var conversationEvidence = ConversationEvidenceRequest.interpret(original);
+        boolean sessionActionSummary = conversationEvidence.source()
+                == ConversationEvidenceRequest.Source.SESSION_ACTIONS;
+        boolean sessionMetaEvidenceQuestion = HistoricalFollowUpRequest.isSessionEvidenceRequest(
+                original, extractExpectedTargets(original));
+        boolean sessionUncertaintyQuestion = HistoricalFollowUpRequest.isSessionUncertaintyRequest(original);
+        boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original)
+                && HistoricalFollowUpRequest.isPriorStatusRequest(original);
+        boolean historicalAuthorityLimit = hasHistoricalEvidenceIntent(original);
+        MutationIntent.RequestShape mutationShape = MutationIntent.classifyShape(original);
+        boolean ambiguousMutationRequest = mutationShape.decision() == MutationIntent.Decision.AMBIGUOUS;
+        String classificationReason = mutationShape.reason();
+        if (saveRequest.mutationRequested() && "global-read-only-negation".equals(classificationReason)
+                && !saveRequest.hasUnquotedGlobalReadOnlyProhibition()) {
+            classificationReason = "compositional-content-save-request";
+            ambiguousMutationRequest = false;
+        }
+        boolean mutationRequested = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
+                && !historicalAuthorityLimit
                 && !priorChangeStatusQuestion
-                && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
-        boolean commandVerificationRequest = !sessionMetaEvidenceQuestion
+                && (mutationShape.decision() == MutationIntent.Decision.EXECUTE_MUTATION
+                || saveRequest.mutationRequested());
+        if (saveRequest.mutationRequested()
+                && mutationShape.decision() != MutationIntent.Decision.EXECUTE_MUTATION
+                && !"global-read-only-negation".equals(classificationReason)) {
+            classificationReason = "compositional-content-save-request";
+            ambiguousMutationRequest = false;
+        }
+        if (saveRequest.restrictsLegacyMutation()) {
+            mutationRequested = false;
+            classificationReason = "scoped-content-save-restriction";
+        }
+        CommandExecutionRequest commandIntent = CommandExecutionRequest.parse(original);
+        boolean commandVerificationRequest = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
-                && looksExplicitCommandVerificationRequest(lower);
-        boolean unsupportedCommandVerificationRequest = !sessionMetaEvidenceQuestion
+                && commandIntent.commandClauses().stream()
+                        .anyMatch(TaskContractResolver::looksExplicitCommandVerificationRequest);
+        boolean unsupportedCommandVerificationRequest = !sessionActionSummary && !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
                 && !commandVerificationRequest
-                && looksUnsupportedNaturalCommandVerificationRequest(lower);
-        TaskType type = sessionMetaEvidenceQuestion
+                && looksUnsupportedNaturalCommandVerificationRequest(commandIntent);
+        TaskType type = sessionActionSummary
+                ? TaskType.READ_ONLY_QA
+                : conversationEvidence.source() == ConversationEvidenceRequest.Source.RUNTIME_IDENTITY
+                ? TaskType.SMALL_TALK
+                : sessionMetaEvidenceQuestion
                 ? TaskType.VERIFY_ONLY
                 : sessionUncertaintyQuestion
                 ? TaskType.VERIFY_ONLY
@@ -453,14 +648,32 @@ public final class TaskContractResolver {
                 ? TaskType.VERIFY_ONLY
                 : unsupportedCommandVerificationRequest
                 ? TaskType.VERIFY_ONLY
-                : classify(lower, mutationRequested, classificationReason);
+                : ambiguousMutationRequest
+                ? TaskType.READ_ONLY_QA
+                : classify(mutationRequested ? lower
+                        : conversationEvidence.positiveIntentText().toLowerCase(Locale.ROOT),
+                        mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
-                && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
+                && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE)
+                && !"global-read-only-negation".equals(classificationReason);
+        if (saveRequest.mutationRequested()
+                && !"global-read-only-negation".equals(classificationReason)) {
+            type = type == TaskType.FILE_EDIT ? type : TaskType.FILE_CREATE;
+            mutationAllowed = !saveRequest.clarificationRequired();
+        }
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
+        String targetAuthorityRequest = saveRequest.mutationRequested()
+                ? saveRequest.withoutQuotedLiteralPayloads() : original;
         MutationIntent.SourceToTargetArtifact sourceToTargetArtifact =
-                MutationIntent.sourceToTargetArtifact(original).orElse(null);
-        Set<String> forbiddenTargets = extractForbiddenTargets(original);
-        Set<String> expectedTargets = extractExpectedTargets(original);
+                MutationIntent.sourceToTargetArtifact(targetAuthorityRequest).orElse(null);
+        Set<String> forbiddenTargets = extractForbiddenTargets(targetAuthorityRequest);
+        Set<String> expectedTargets = extractExpectedTargets(saveRequest.mutationRequested()
+                ? saveRequest.targetDiscoveryRequest() : targetAuthorityRequest);
+        if (saveRequest.mutationRequested() && !saveRequest.resolvedTargets().isEmpty()) {
+            LinkedHashSet<String> saveTargets = new LinkedHashSet<>(expectedTargets);
+            saveTargets.addAll(saveRequest.resolvedTargets());
+            expectedTargets = Set.copyOf(saveTargets);
+        }
         Set<String> sourceEvidenceTargets = sourceToTargetArtifact == null
                 ? Set.of()
                 : sourceToTargetArtifact.sourceTargets();
@@ -475,7 +688,7 @@ public final class TaskContractResolver {
         } else if (mutationRequested && looksNaturalBatchWorkspaceOperation(original)) {
             Set<String> batchSources = extractBatchWorkspaceSourceTargets(original);
             if (!batchSources.isEmpty()) {
-                expectedTargets = withoutForbiddenTargets(expectedTargets, batchSources);
+                expectedTargets = withoutSourceTargets(expectedTargets, batchSources);
             }
             Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
             if (!batchTargets.isEmpty()) {
@@ -484,14 +697,26 @@ public final class TaskContractResolver {
                 expectedTargets = Set.copyOf(merged);
             }
         }
-        if (mutationAllowed) {
-            Set<String> lexicalSourceTargets = extractLexicalSourceEvidenceTargets(original);
+        if (mutationAllowed || saveRequest.mutationRequested()) {
+            TaskIntentResolver.DirectSourceAuthority directSourceAuthority =
+                    TaskIntentResolver.authoritativeDirectSourceAuthority(
+                            targetAuthorityRequest);
+            Set<String> lexicalSourceTargets =
+                    extractLexicalSourceEvidenceTargets(
+                            targetAuthorityRequest,
+                            directSourceAuthority.sourceTargets());
             if (!lexicalSourceTargets.isEmpty()) {
                 LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
                 mergedSources.addAll(lexicalSourceTargets);
                 sourceEvidenceTargets = Set.copyOf(mergedSources);
                 if (!readEvidenceTargetsAreAlsoMutationTargets(original)) {
-                    expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+                    LinkedHashSet<String> sourceOnlyTargets =
+                            new LinkedHashSet<>(sourceEvidenceTargets);
+                    sourceOnlyTargets.removeAll(
+                            directSourceAuthority.outputTargets());
+                    expectedTargets = withoutSourceTargets(
+                            expectedTargets,
+                            sourceOnlyTargets);
                 }
             }
             // T895: "read X and create/write Y" names X as a READ source, not a mutation target.
@@ -528,18 +753,23 @@ public final class TaskContractResolver {
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
             expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
         }
-        if (mutationAllowed && !forbiddenTargets.isEmpty()) {
+        if ((mutationAllowed || saveRequest.mutationRequested()) && !forbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
         }
-        Set<String> readForbiddenTargets = extractReadForbiddenTargets(original);
+        Set<String> readForbiddenTargets = extractReadForbiddenTargets(targetAuthorityRequest);
         if (!readForbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, readForbiddenTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, readForbiddenTargets);
         }
-        Set<String> ignoredInstructionOutputTargets = extractIgnoredInstructionOutputTargets(original);
+        Set<String> ignoredInstructionOutputTargets = extractIgnoredInstructionOutputTargets(targetAuthorityRequest);
         if (!ignoredInstructionOutputTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, ignoredInstructionOutputTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, ignoredInstructionOutputTargets);
+        }
+        if (ambiguousMutationRequest) {
+            expectedTargets = Set.of();
+            sourceEvidenceTargets = Set.of();
+            forbiddenTargets = Set.of();
         }
 
         return new TaskContract(
@@ -551,7 +781,9 @@ public final class TaskContractResolver {
                 sourceEvidenceTargets,
                 forbiddenTargets,
                 original,
-                sessionMetaEvidenceQuestion
+                sessionActionSummary
+                        ? "session-action-summary"
+                        : sessionMetaEvidenceQuestion
                         ? "session-meta-evidence-question"
                         : sessionUncertaintyQuestion
                         ? "session-uncertainty-question"
@@ -598,12 +830,21 @@ public final class TaskContractResolver {
         Set<String> out = new LinkedHashSet<>();
         while (matcher.find()) {
             String target = normalizeTarget(matcher.group(1));
-            if (!target.isBlank()) out.add(target);
+            if (!target.isBlank()
+                    && !inlineExampleArtifactMention(userRequest, matcher.start(1), matcher.end(1))) {
+                out.add(target);
+            }
         }
         Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(userRequest);
         while (extensionlessMatcher.find()) {
             String target = normalizeTarget(extensionlessMatcher.group(1));
-            if (!target.isBlank()) out.add(target);
+            if (!target.isBlank()
+                    && !inlineExampleArtifactMention(
+                    userRequest,
+                    extensionlessMatcher.start(1),
+                    extensionlessMatcher.end(1))) {
+                out.add(target);
+            }
         }
         Matcher directoryMatcher = SINGLE_DIRECTORY_CREATION_TARGET.matcher(userRequest);
         while (directoryMatcher.find()) {
@@ -613,23 +854,76 @@ public final class TaskContractResolver {
         return Set.copyOf(out);
     }
 
-    private static Set<String> extractLexicalSourceEvidenceTargets(String userRequest) {
+    private static boolean inlineExampleArtifactMention(String userRequest, int start, int end) {
+        if (userRequest == null || userRequest.isBlank() || start < 0 || end < start) return false;
+        // Windows are sliced from the original string first and lowercased
+        // per window: lowercasing the whole request can change its length
+        // (Turkish dotted capital I under ROOT), which would misalign the
+        // matcher offsets and silently disable the suppression.
+        int beforeStart = Math.max(0, start - 160);
+        int afterEnd = Math.min(userRequest.length(), end + 40);
+        String before = userRequest.substring(beforeStart, start).toLowerCase(Locale.ROOT);
+        String after = userRequest.substring(end, afterEnd).toLowerCase(Locale.ROOT);
+        if (explicitTargetActionNear(before)) return false;
+        return INLINE_EXAMPLE_ARTIFACT_BEFORE.matcher(before).matches()
+                || INLINE_EXAMPLE_ARTIFACT_AFTER.matcher(after).matches();
+    }
+
+    private static boolean explicitTargetActionNear(String beforeTarget) {
+        if (beforeTarget == null || beforeTarget.isBlank()) return false;
+        String tail = beforeTarget.replaceAll("\\s+", " ");
+        Matcher boundary = SENTENCE_BOUNDARY_BEFORE_TARGET.matcher(tail);
+        int lastBoundaryEnd = -1;
+        while (boundary.find()) {
+            lastBoundaryEnd = boundary.end();
+        }
+        if (lastBoundaryEnd >= 0) {
+            tail = tail.substring(lastBoundaryEnd);
+        }
+        return EXPLICIT_TARGET_ACTION_BEFORE.matcher(tail).find();
+    }
+
+    private static Set<String> extractLexicalSourceEvidenceTargets(
+            String userRequest,
+            Set<String> authoritativeDirectSources
+    ) {
         if (userRequest == null || userRequest.isBlank()) return Set.of();
         LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (authoritativeDirectSources != null) {
+            out.addAll(authoritativeDirectSources);
+        }
         Matcher spanMatcher = SOURCE_EVIDENCE_SPAN.matcher(userRequest);
         while (spanMatcher.find()) {
             String marker = spanMatcher.group(1);
+            boolean directSourceConnector =
+                    marker.regionMatches(
+                                    true,
+                                    0,
+                                    "according",
+                                    0,
+                                    "according".length())
+                            || marker.regionMatches(
+                                    true,
+                                    0,
+                                     "based",
+                                     0,
+                                     "based".length());
+            if (directSourceConnector) continue;
             String span = sourceEvidenceFragment(marker, spanMatcher.group(2));
             if (span.isBlank()) continue;
             Matcher targetMatcher = TARGET_FILE.matcher(span);
             while (targetMatcher.find()) {
                 String target = normalizeTarget(targetMatcher.group(1));
-                if (!target.isBlank()) out.add(target);
+                if (!target.isBlank()) {
+                    out.add(target);
+                }
             }
             Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(span);
             while (extensionlessMatcher.find()) {
                 String target = normalizeTarget(extensionlessMatcher.group(1));
-                if (!target.isBlank()) out.add(target);
+                if (!target.isBlank()) {
+                    out.add(target);
+                }
             }
         }
         return Set.copyOf(out);
@@ -877,7 +1171,7 @@ public final class TaskContractResolver {
         if (value == null || value.isBlank()) return false;
         if (isBarePathStopWord(value)) return false;
         if (value.contains(" ")) return false;
-        return value.matches("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
+        return value.matches("(?:[A-Za-z]:/)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
     }
 
     private static boolean isBarePathStopWord(String value) {
@@ -976,8 +1270,52 @@ public final class TaskContractResolver {
                 if (!target.isBlank()) out.add(target);
             }
         }
+        addMustRemainUnchangedTargets(out, userRequest);
         return Set.copyOf(out);
     }
+
+    private static void addMustRemainUnchangedTargets(Set<String> out, String userRequest) {
+        Matcher unchanged = MUST_REMAIN_UNCHANGED.matcher(userRequest);
+        while (unchanged.find()) {
+            int clauseStart = unchangedClauseStart(userRequest, unchanged.start());
+            String prefix = userRequest.substring(clauseStart, unchanged.start());
+            List<MatcherSpan> targets = new ArrayList<>();
+            Matcher target = TARGET_FILE.matcher(prefix);
+            while (target.find()) {
+                String normalized = normalizeTarget(target.group(1));
+                if (!normalized.isBlank()) {
+                    targets.add(new MatcherSpan(normalized, target.start(1), target.end(1)));
+                }
+            }
+            if (targets.isEmpty()) continue;
+
+            MatcherSpan current = targets.getLast();
+            out.add(current.value());
+            for (int i = targets.size() - 2; i >= 0; i--) {
+                MatcherSpan previous = targets.get(i);
+                String connector = prefix.substring(previous.end(), current.start());
+                if (!connector.matches("(?i)\\s*,?\\s*(?:and|or)\\s+")) break;
+                out.add(previous.value());
+                current = previous;
+            }
+        }
+    }
+
+    private static int unchangedClauseStart(String request, int before) {
+        int floor = Math.max(0, before - 200);
+        for (int i = before - 1; i >= floor; i--) {
+            char c = request.charAt(i);
+            boolean boundaryPunctuation = c == '.' || c == '!' || c == '?' || c == ';';
+            if (boundaryPunctuation
+                    && i + 1 < request.length()
+                    && Character.isWhitespace(request.charAt(i + 1))) {
+                return i + 1;
+            }
+        }
+        return floor;
+    }
+
+    private record MatcherSpan(String value, int start, int end) {}
 
     private static boolean preserveSpanNamesOnlyTargets(String span) {
         if (span == null || span.isBlank()) return false;
@@ -1105,9 +1443,6 @@ public final class TaskContractResolver {
             }
             return TaskType.FILE_EDIT;
         }
-        if (looksExplicitNoInspectionDirectAnswer(lower)) {
-            return TaskType.SMALL_TALK;
-        }
         if (ConversationBoundaryPolicy.isDirectAnswerOnly(lower)
                 || looksConversationalGreetingRequest(lower)
                 || looksAssistantIdentityQuestion(lower)) {
@@ -1122,7 +1457,12 @@ public final class TaskContractResolver {
         if (containsAny(lower, DIAGNOSE_MARKERS)) {
             return TaskType.DIAGNOSE_ONLY;
         }
-        if (containsAny(lower, WORKSPACE_MARKERS)) {
+        // The requested result decides: a scoped text search asks for search evidence, not for a
+        // project explanation, and a workspace word inside a quotation is not the request.
+        if (dev.talos.runtime.intent.ContentSearchRequest.matches(lower)) {
+            return TaskType.READ_ONLY_QA;
+        }
+        if (containsWorkspaceMarker(dev.talos.runtime.intent.ContentSearchRequest.unquotedLower(lower))) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
         if (looksSmallTalkOnly(lower)) {
@@ -1150,9 +1490,15 @@ public final class TaskContractResolver {
                 && looksGradleBuildOrTestVerification(lower);
     }
 
-    private static boolean looksUnsupportedNaturalCommandVerificationRequest(String lower) {
+    private static boolean looksUnsupportedNaturalCommandVerificationRequest(CommandExecutionRequest intent) {
+        if (looksUnsupportedPythonCommandExecutionRequest(intent)) return true;
+        return intent.commandClauses().stream()
+                .anyMatch(TaskContractResolver::looksUnsupportedNaturalCommandClause);
+    }
+
+    private static boolean looksUnsupportedNaturalCommandClause(String lower) {
         if (lower == null || lower.isBlank()) return false;
-        if (looksUnsupportedPythonCommandExecutionRequest(lower)) return true;
+        if (GENERIC_TEST_COMMAND_EXECUTION.matcher(lower).find()) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         if (!lower.contains("command")) return false;
         if (EXPLICIT_NATURAL_COMMAND_EXECUTION.matcher(lower).find()) return true;
@@ -1171,22 +1517,31 @@ public final class TaskContractResolver {
     }
 
     public static boolean looksUnsupportedPythonCommandExecutionRequest(String request) {
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
+        return looksUnsupportedPythonCommandExecutionRequest(CommandExecutionRequest.parse(request));
+    }
+
+    private static boolean looksUnsupportedPythonCommandExecutionRequest(CommandExecutionRequest intent) {
+        return intent.commandClauses().stream()
+                .anyMatch(TaskContractResolver::looksUnsupportedPythonCommandClause);
+    }
+
+    private static boolean looksUnsupportedPythonCommandClause(String lower) {
         if (PYTHON_COMMAND_EXECUTION.matcher(lower).find()) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         boolean pythonSurface = lower.contains("python")
                 || lower.contains("pytest")
                 || lower.contains(".py");
         if (!pythonSurface) return false;
-        return lower.contains("run tests")
-                || lower.contains("run the tests")
-                || lower.contains("execute tests")
-                || lower.contains("execute the tests")
-                || lower.contains("verify tests")
-                || lower.contains("verify the tests")
-                || lower.contains("check tests")
-                || lower.contains("check the tests");
+        return TEST_COMMAND_EXECUTION.matcher(lower).find();
+    }
+
+    /** Existing evidence and authority limits are retained, never whole-request answer eligibility. */
+    public static boolean hasHistoricalEvidenceIntent(String request) {
+        if (request == null) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return MutationIntent.looksPriorChangeStatusQuestion(request)
+                || looksLikeSessionMetaEvidenceQuestion(lower)
+                || looksLikeSessionUncertaintyQuestion(lower);
     }
 
     private static boolean looksLikeSessionMetaEvidenceQuestion(String lower) {
@@ -1280,7 +1635,8 @@ public final class TaskContractResolver {
             return false;
         }
         return containsAny(lower, DIRECTORY_LIST_ONLY_MARKERS)
-                || containsAny(lower, NEGATIVE_CONTENT_MARKERS);
+                || containsAny(lower, NEGATIVE_CONTENT_MARKERS)
+                || TOP_LEVEL_DIRECTORY_LISTING.matcher(lower).find();
     }
 
     private static boolean asksForDirectoryListing(String lower) {
@@ -1290,24 +1646,14 @@ public final class TaskContractResolver {
                 || lower.contains("show the files")
                 || lower.contains("what files")
                 || lower.contains("which files")
+                || TOP_LEVEL_DIRECTORY_LISTING.matcher(lower).find()
                 || SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
-    }
-
-    private static boolean looksExplicitNoInspectionDirectAnswer(String lower) {
-        if (lower == null || lower.isBlank()) return false;
-        if (!containsAny(lower, NO_INSPECTION_MARKERS)) return false;
-        if (asksForDirectoryListing(lower)) return false;
-        return !(lower.contains("search")
-                || lower.contains("grep")
-                || lower.contains("read ")
-                || lower.contains("show me the files")
-                || lower.contains("what files"));
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {
         if (lower == null || lower.isBlank()) return false;
         if (!lower.matches("^\\s*(?:hi|hello|hey|hey there|yo)\\b.*")) return false;
-        if (containsAny(lower, WORKSPACE_MARKERS)
+        if (containsWorkspaceMarker(lower)
                 || containsAny(lower, DIAGNOSE_MARKERS)
                 || lower.contains("read ")
                 || lower.contains("search ")
@@ -1335,7 +1681,9 @@ public final class TaskContractResolver {
                 .replaceAll("[.!?]+$", "");
         return lower.equals("yes")
                 || lower.equals("yes proceed")
+                || lower.equals("yes, proceed")
                 || lower.equals("yes proceed please")
+                || lower.equals("yes, proceed please")
                 || lower.equals("proceed")
                 || lower.equals("proceed please")
                 || lower.equals("go ahead")
@@ -1425,6 +1773,8 @@ public final class TaskContractResolver {
     ) {
         if (contract == null
                 || !contract.expectedTargets().isEmpty()
+                || (!contract.mutationAllowed()
+                        && !MutationIntent.looksExplicitMutationRequest(latestUserRequest))
                 || !looksContextualStaticWebAssetFollowUp(latestUserRequest)
                 || !priorMessagesMentionStaticWebSurface(messages, latestUserRequest)) {
             return contract;
@@ -1510,6 +1860,9 @@ public final class TaskContractResolver {
             if (message == null || message.content() == null || message.content().isBlank()) {
                 continue;
             }
+            if (!"user".equals(message.role()) && !"assistant".equals(message.role())) {
+                continue;
+            }
             String lower = message.content().toLowerCase(Locale.ROOT);
             if (mentionsStaticWebSurface(lower)
                     || lower.contains("index.html")
@@ -1539,54 +1892,15 @@ public final class TaskContractResolver {
         return -1;
     }
 
-    private static TaskContract inheritedAssistantPlanContract(
-            List<ChatMessage> messages,
-            String latestUserRequest,
-            TaskContract current
-    ) {
-        String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
-        if (!looksLikeConcreteMutationProposal(previousAssistant)) return null;
-        Set<String> expectedTargets = extractExpectedTargets(previousAssistant);
-        if (expectedTargets.isEmpty()) return null;
-        Set<String> forbiddenTargets = current == null ? Set.of() : current.forbiddenTargets();
-        expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
-        if (expectedTargets.isEmpty()) return null;
-        return new TaskContract(
-                TaskType.FILE_EDIT,
-                true,
-                true,
-                true,
-                expectedTargets,
-                Set.of(),
-                forbiddenTargets,
-                "Confirmed assistant-proposed mutation plan.\n\nConfirmation follow-up: "
-                        + (latestUserRequest == null ? "" : latestUserRequest.strip()),
-                "confirmation-follow-up-inherits-assistant-mutation-plan");
-    }
-
-    private static boolean looksLikeConcreteMutationProposal(String assistantResponse) {
-        if (assistantResponse == null || assistantResponse.isBlank()) return false;
-        String lower = assistantResponse.toLowerCase(Locale.ROOT);
-        boolean asksConfirmation = lower.contains("would you like")
-                || lower.contains("should i proceed")
-                || lower.contains("shall i proceed")
-                || lower.contains("proceed?");
-        if (!asksConfirmation) return false;
-        boolean mutationLanguage = lower.contains("update")
-                || lower.contains("edit")
-                || lower.contains("create")
-                || lower.contains("write")
-                || lower.contains("change")
-                || lower.contains("modify");
-        return mutationLanguage && !extractExpectedTargets(assistantResponse).isEmpty();
-    }
-
     private static TaskContract inheritedRepairContract(
             List<ChatMessage> messages,
             String latestUserRequest,
-            TaskContract current
+            TaskResolution currentResolution
     ) {
         if (messages == null || messages.isEmpty()) return null;
+        TaskContract current = currentResolution == null
+                ? TaskContract.unknown(latestUserRequest)
+                : currentResolution.contract();
         String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
         if (!looksLikeIncompleteOutcome(previousAssistant)) return null;
         String previousUser = previousUserRequest(messages, latestUserRequest);
@@ -1597,26 +1911,99 @@ public final class TaskContractResolver {
         if (current != null && current.mutationRequested() && !current.expectedTargets().isEmpty()) {
             return current;
         }
+        if (currentTurnConstrainsInheritedAuthority(
+                currentResolution,
+                prior.expectedTargets())) {
+            return current;
+        }
         return new TaskContract(
                 prior.type(),
                 true,
                 true,
                 true,
                 prior.expectedTargets(),
+                prior.sourceEvidenceTargets(),
                 prior.forbiddenTargets(),
                 inheritedRepairOriginalRequest(previousUser, latestUserRequest),
                 "repair-follow-up-inherits-previous-mutation-contract");
     }
 
+    private static boolean currentTurnConstrainsInheritedAuthority(
+            TaskResolution currentResolution,
+            Set<String> inheritedTargets
+    ) {
+        if (currentResolution == null) return false;
+        TaskContract current = currentResolution.contract();
+        Set<String> inherited = inheritedTargets == null
+                ? Set.of()
+                : inheritedTargets;
+        boolean directReadOrVerify =
+                DIRECT_CURRENT_READ_OR_VERIFY.matcher(
+                                current.originalUserRequest())
+                        .find();
+        // "Review ... and fix ..." carries its own mutation authority; the
+        // inherited target set supplies its scope. Typed prohibitions,
+        // source dependencies, workspace operations, and non-required tails
+        // below remain stronger fail-closed constraints.
+        boolean currentExplicitlyAuthorizesMutation =
+                current.mutationRequested() && current.mutationAllowed();
+        if ("global-read-only-negation".equals(
+                        current.classificationReason())
+                || current.type() == TaskType.VERIFY_ONLY
+                || !current.forbiddenTargets().isEmpty()
+                || !current.sourceEvidenceTargets().isEmpty()
+                || currentResolution.blocksWorkspaceOperations()
+                || (directReadOrVerify
+                        && !currentExplicitlyAuthorizesMutation)) {
+            return true;
+        }
+        for (var decision : currentResolution.mutationTailPlan().decisions()) {
+            if (decision.authority()
+                    != CoordinatedMutationTailPlan.Authority.REQUIRED) {
+                return true;
+            }
+        }
+        for (var target : currentResolution.intent().targets().targets()) {
+            if (target.role() == TargetRole.MENTIONED_ONLY) {
+                if (inherited.contains(target.path())) continue;
+                return true;
+            }
+            if (target.role() == TargetRole.MUST_MUTATE
+                    && "active-contract-projection".equals(
+                            target.derivation().reason())
+                    && !current.mutationRequested()
+                    && inherited.contains(target.path())) {
+                // A read-only correction can name the artifact whose prior
+                // mutation was incomplete. The legacy target extractor
+                // projects that mention as MUST_MUTATE even though no current
+                // mutation clause authorized it. When it names an existing
+                // inherited target, that passive projection is evidence for
+                // the correction, not a new limitation.
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
     private static TaskContract inheritedCorrectionContract(
             List<ChatMessage> messages,
-            String latestUserRequest
+            String latestUserRequest,
+            TaskResolution currentResolution
     ) {
+        TaskContract current = currentResolution == null
+                ? TaskContract.unknown(latestUserRequest)
+                : currentResolution.contract();
         String previousUser = previousUserRequest(messages, latestUserRequest);
         if (previousUser == null || previousUser.isBlank()) return null;
 
         TaskContract prior = fromUserRequest(previousUser);
         if (!prior.mutationRequested() || !prior.mutationAllowed()) return null;
+        if (currentTurnConstrainsInheritedAuthority(
+                currentResolution,
+                prior.expectedTargets())) {
+            return current;
+        }
         return new TaskContract(
                 prior.type(),
                 true,
@@ -1682,6 +2069,15 @@ public final class TaskContractResolver {
         return false;
     }
 
+    private static boolean containsWorkspaceMarker(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (WORKSPACE_WORD_MARKER.matcher(lower).find()) return true;
+        for (String marker : WORKSPACE_MARKERS) {
+            if (marker.indexOf(' ') >= 0 && lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
     private static Set<String> withoutForbiddenTargets(Set<String> expectedTargets, Set<String> forbiddenTargets) {
         if (expectedTargets == null || expectedTargets.isEmpty()
                 || forbiddenTargets == null || forbiddenTargets.isEmpty()) {
@@ -1689,11 +2085,32 @@ public final class TaskContractResolver {
         }
         Set<String> forbidden = new LinkedHashSet<>();
         for (String target : forbiddenTargets) {
-            forbidden.add(normalizeTargetForComparison(target));
+            forbidden.add(normalizeTarget(target));
         }
         Set<String> out = new LinkedHashSet<>();
         for (String target : expectedTargets) {
-            if (!forbidden.contains(normalizeTargetForComparison(target))) {
+            if (!forbidden.contains(normalizeTarget(target))) {
+                out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static Set<String> withoutSourceTargets(
+            Set<String> expectedTargets,
+            Set<String> sourceTargets
+    ) {
+        if (expectedTargets == null || expectedTargets.isEmpty()
+                || sourceTargets == null || sourceTargets.isEmpty()) {
+            return expectedTargets == null ? Set.of() : expectedTargets;
+        }
+        Set<String> sources = new LinkedHashSet<>();
+        for (String target : sourceTargets) {
+            sources.add(normalizeTarget(target));
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            if (!sources.contains(normalizeTarget(target))) {
                 out.add(target);
             }
         }
@@ -1720,6 +2137,11 @@ public final class TaskContractResolver {
     }
 
     private static String previousUserRequest(List<ChatMessage> messages, String latestUserRequest) {
+        ChatMessage previous = previousUserMessage(messages, latestUserRequest);
+        return previous == null ? null : previous.content();
+    }
+
+    private static ChatMessage previousUserMessage(List<ChatMessage> messages, String latestUserRequest) {
         if (messages == null || messages.isEmpty()) return null;
         boolean skippedLatest = false;
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -1728,11 +2150,15 @@ public final class TaskContractResolver {
             String content = message.content();
             if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
             if (content == null || content.isBlank()) continue;
+            // Runtime-injected user-role data blocks (project memory rides
+            // in user role since T1011) are workspace bytes, not user
+            // requests: they must never seed inherited contracts.
+            if (content.startsWith("[ProjectMemory]") || content.startsWith("[PinnedFiles]")) continue;
             if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
                 skippedLatest = true;
                 continue;
             }
-            return content;
+            return message;
         }
         return null;
     }
@@ -1767,10 +2193,6 @@ public final class TaskContractResolver {
             normalized = normalized.substring(2);
         }
         return normalized;
-    }
-
-    private static String normalizeTargetForComparison(String raw) {
-        return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
 
     private record FrameworkArtifactFamily(String name, List<String> artifactTargets) {}

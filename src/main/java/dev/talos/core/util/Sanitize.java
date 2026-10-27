@@ -1,5 +1,7 @@
 package dev.talos.core.util;
 
+import dev.talos.core.tool.ToolProtocolText;
+
 import java.util.regex.Pattern;
 
 /**
@@ -8,29 +10,44 @@ import java.util.regex.Pattern;
 public final class Sanitize {
     private Sanitize() {}
 
+    private static final int MAX_PROJECTION_STABILIZATION_PASSES = 8;
+    // Counts projection regions examined on this thread, only while a test asks for it.
+    private static final ThreadLocal<long[]> PROJECTION_REGIONS_EXAMINED = new ThreadLocal<>();
+
     // ANSI escape sequences
     private static final Pattern ANSI = Pattern.compile("\u001B\\[[;\\d]*m");
-    // Control chars & nulls (TAB and LF/CR are kept for readability)
+    // Control chars & nulls (TAB and LF are kept; CR is removed)
     private static final Pattern CTRL = Pattern.compile("[\u0000-\u0008\u000B-\u001F\u007F]");
-    // Suspicious HTML/JS tags and attributes (defense in depth; not a full HTML sanitizer)
-    private static final Pattern SUS_HTML = Pattern.compile(
-            "(?is)<\\s*(script|style|iframe|object|embed|meta|link|svg|form|input|textarea|button)\\b.*?>.*?<\\s*/\\s*\\1\\s*>|on\\w+\\s*=\\s*['\"][^'\"]*['\"]"
-    );
     // Hidden chain-of-thought blocks (e.g., <think>...</think>)
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
+    // Same source language after stripThinkTags decodes its supported angle-bracket escapes.
+    // Opening and closing tags are classified independently so literal tag
+    // fragments cannot pair across immutable executable JSON boundaries.
+    private static final Pattern SOURCE_THINK_OPEN = Pattern.compile(
+            "(?is)(?:<|(?-i:\\\\u003c))\\s*think\\s*(?:>|(?-i:\\\\u003e))"
+    );
+    private static final Pattern SOURCE_THINK_CLOSE = Pattern.compile(
+            "(?is)(?:<|(?-i:\\\\u003c))\\s*/\\s*think\\s*(?:>|(?-i:\\\\u003e))"
+    );
+    private static final java.util.Set<String> SUSPICIOUS_PAIRED_TAGS =
+            java.util.Set.of(
+                    "script", "style", "iframe", "object", "embed", "meta",
+                    "link", "svg", "form", "input", "textarea", "button");
 
     /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants).
      *  DEPRECATED COMPATIBILITY ONLY - retained for models that emit XML from training habits.
      *  JSON code-fenced tool calls are the actively instructed text fallback format.
      *  Scheduled for removal once native tool calling is stable across model versions. */
-    private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
-            "(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>"
-    );
-
-    /** Matches JSON code-fenced tool calls: ```json {"name":"talos...} ```. */
-    private static final Pattern JSON_TOOL_CALL_FENCE = Pattern.compile(
-            "(?s)```(?:json)?\\s*\\n(\\{[^`]*\"name\"\\s*:\\s*\"talos\\.[^`]*\\})\\s*\\n?```"
-    );
+    private static final java.util.List<String> XML_PROTECTED_OPENERS =
+            java.util.List.of("<tool_call>", "<function_call>");
+    private static final java.util.List<String> XML_PROTECTED_CLOSERS =
+            java.util.List.of("</tool_call>", "</function_call>");
+    private static final java.util.List<String> XML_PROTOCOL_OPENERS =
+            java.util.List.of(
+                    "<tool_call>", "<function_call>", "<tool>", "<function>");
+    private static final java.util.List<String> XML_PROTOCOL_CLOSERS =
+            java.util.List.of(
+                    "</tool_call>", "</function_call>", "</tool>", "</function>");
 
     /**
      * Strips ANSI escape sequences, control characters, and nulls from the input string.
@@ -47,7 +64,7 @@ public final class Sanitize {
      */
     public static String stripSuspiciousHtml(String s) {
         if (s == null || s.isEmpty()) return "";
-        return SUS_HTML.matcher(s).replaceAll("");
+        return stripSuspiciousHtmlLinear(s);
     }
 
     /**
@@ -94,12 +111,12 @@ public final class Sanitize {
                 continue;
             }
 
+            String plain = plainPunctuation(cp);
+            if (plain != null) {
+                out.append(plain);
+                continue;
+            }
             switch (cp) {
-                case 0x00A0, 0x202F -> out.append(' '); // non-breaking / narrow non-breaking space
-                case 0x2018, 0x2019, 0x201B, 0x2032 -> out.append('\'');
-                case 0x201C, 0x201D, 0x201F, 0x2033 -> out.append('"');
-                case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> out.append('-');
-                case 0x2026 -> out.append("...");
                 case 0x2022, 0x25E6, 0x2043 -> out.append('*');
                 case 0x2190 -> out.append("<-");
                 case 0x2192, 0x21D2 -> out.append("->");
@@ -121,6 +138,34 @@ public final class Sanitize {
     }
 
     /**
+     * Replaces selected typographic quotes, dashes, non-breaking spaces and the ellipsis with the plain
+     * characters the ASCII fallback uses. Every other character is kept.
+     */
+    public static String plainPunctuation(String s, java.util.function.IntPredicate selected) {
+        if (s == null || s.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            i += Character.charCount(cp);
+            String plain = plainPunctuation(cp);
+            if (plain != null && selected.test(cp)) out.append(plain);
+            else out.appendCodePoint(cp);
+        }
+        return out.toString();
+    }
+
+    private static String plainPunctuation(int cp) {
+        return switch (cp) {
+            case 0x00A0, 0x202F -> " "; // non-breaking / narrow non-breaking space
+            case 0x2018, 0x2019, 0x201B, 0x2032 -> "'";
+            case 0x201C, 0x201D, 0x201F, 0x2033 -> "\"";
+            case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> "-";
+            case 0x2026 -> "...";
+            default -> null;
+        };
+    }
+
+    /**
      * Sanitizes terminal output and applies ASCII downgrade when Unicode is
      * unsafe for the active terminal/capture path.
      */
@@ -129,24 +174,374 @@ public final class Sanitize {
         return unicodeSafe ? cleaned : toAsciiFallback(cleaned);
     }
 
+    /** Finite diagnostics only. No source text or proposal payload is retained. */
+    public enum ExecutableJsonProjectionResult {
+        EXACT,
+        MISSING_INPUT,
+        UNSETTLED_PROTOCOL,
+        XML_PROTOCOL_PRESENT,
+        EMPTY_VISIBLE_SELECTION,
+        SUPPRESSED_OR_UNSELECTED_PROPOSALS,
+        NONBLANK_FENCE_TAIL,
+        EXACT_ROOTS_MISMATCH
+    }
+
+    public enum ExecutableJsonSuppressionStage {
+        NONE,
+        SOURCE_SUPPRESSION,
+        VISIBLE_SOURCE_SUPPRESSION,
+        PROJECTED_SUPPRESSION,
+        HIDDEN_SELECTION_CHANGE,
+        SOURCE_CANDIDATE_COUNT,
+        PROJECTED_CANDIDATE_COUNT
+    }
+
+    public enum ExecutableJsonSuppressionKind {
+        DUPLICATE_RECOGNIZED_ROOT,
+        UNSELECTED_RECOGNIZED_ROOT,
+        SELECTED_FENCE_TAIL_POTENTIAL,
+        OTHER_POTENTIAL_ENVELOPE
+    }
+
+    public record ExecutableJsonProjectionInspection(
+            ExecutableJsonProjectionResult result, ExecutableJsonSuppressionStage suppressionStage,
+            java.util.Set<ExecutableJsonSuppressionKind> suppressionKinds,
+            java.util.Set<ToolProtocolText.SelectedFenceTailShape> fenceTailShapes) {
+        public ExecutableJsonProjectionInspection(ExecutableJsonProjectionResult result,
+                                                  ExecutableJsonSuppressionStage suppressionStage) {
+            this(result, suppressionStage, java.util.Set.of());
+        }
+        public ExecutableJsonProjectionInspection(ExecutableJsonProjectionResult result,
+                                                  ExecutableJsonSuppressionStage suppressionStage,
+                                                  java.util.Set<ExecutableJsonSuppressionKind> suppressionKinds) {
+            this(result, suppressionStage, suppressionKinds, java.util.Set.of());
+        }
+        public ExecutableJsonProjectionInspection {
+            java.util.Objects.requireNonNull(result);
+            java.util.Objects.requireNonNull(suppressionStage);
+            suppressionKinds = java.util.Set.copyOf(suppressionKinds);
+            fenceTailShapes = java.util.Set.copyOf(fenceTailShapes);
+            if ((result == ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS)
+                    != (suppressionStage != ExecutableJsonSuppressionStage.NONE)) {
+                throw new IllegalArgumentException("suppression stage requires a suppression failure");
+            }
+            if (!suppressionKinds.isEmpty()
+                    && result != ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS)
+                throw new IllegalArgumentException("suppression kinds require a suppression failure");
+            if (!fenceTailShapes.isEmpty()
+                    && !suppressionKinds.contains(ExecutableJsonSuppressionKind.SELECTED_FENCE_TAIL_POTENTIAL))
+                throw new IllegalArgumentException("tail shapes require selected fence tail suppression");
+        }
+    }
+
+    /** Display normalization cannot change the selected executable proposal inventory. */
+    public static boolean hasExactExecutableJsonProjection(String source, String projected) {
+        return executableJsonProjectionResult(source, projected) == ExecutableJsonProjectionResult.EXACT;
+    }
+
+    /** Reports the first failed validation stage without relaxing its predicate order. */
+    public static ExecutableJsonProjectionResult executableJsonProjectionResult(String source, String projected) {
+        return inspectExecutableJsonProjection(source, projected).result();
+    }
+
+    /** Source, roots, arguments and offsets are not retained in diagnostics. */
+    public static ExecutableJsonProjectionInspection inspectExecutableJsonProjection(String source, String projected) {
+        if (source == null || projected == null) return projection(ExecutableJsonProjectionResult.MISSING_INPUT);
+        if (ToolProtocolText.unsettledJsonProtocolTailStart(source) >= 0
+                || ToolProtocolText.unsettledJsonProtocolTailStart(projected) >= 0) {
+            return projection(ExecutableJsonProjectionResult.UNSETTLED_PROTOCOL);
+        }
+        if (ToolProtocolText.containsRecognizedXmlToolCall(source)
+                || ToolProtocolText.containsRecognizedXmlToolCall(projected)) {
+            return projection(ExecutableJsonProjectionResult.XML_PROTOCOL_PRESENT);
+        }
+        ToolProtocolText.JsonProposalSelection raw = ToolProtocolText.selectExecutableJsonProposals(source);
+        java.util.List<int[]> hidden = externalThinkBlocks(source, raw.recognizedCandidates());
+        ToolProtocolText.JsonProposalSelection selected = selectedOutsideThinkBlocks(source, raw, hidden);
+        ToolProtocolText.JsonProposalSelection output = ToolProtocolText.selectExecutableJsonProposals(projected);
+        if (selected.executionOrder().isEmpty()) return projection(ExecutableJsonProjectionResult.EMPTY_VISIBLE_SELECTION);
+        if (!raw.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.SOURCE_SUPPRESSION, source, raw);
+        if (!selected.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.VISIBLE_SOURCE_SUPPRESSION, source, selected);
+        if (!output.suppressionOnlyEnvelopes().isEmpty())
+            return suppression(ExecutableJsonSuppressionStage.PROJECTED_SUPPRESSION, projected, output);
+        if (!raw.executionOrder().equals(selected.executionOrder()))
+            return suppression(ExecutableJsonSuppressionStage.HIDDEN_SELECTION_CHANGE);
+        if (raw.recognizedCandidates().size() != selected.executionOrder().size())
+            return suppression(ExecutableJsonSuppressionStage.SOURCE_CANDIDATE_COUNT);
+        if (output.recognizedCandidates().size() != output.executionOrder().size())
+            return suppression(ExecutableJsonSuppressionStage.PROJECTED_CANDIDATE_COUNT);
+        for (var span : selected.executionOrder()) {
+            if (span.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON
+                    && !source.substring(span.rootEndExclusive(), span.envelopeContentEndExclusive()).isBlank()) {
+                return projection(ExecutableJsonProjectionResult.NONBLANK_FENCE_TAIL);
+            }
+        }
+        return projection(sameExactJsonRoots(source, selected.sourceOrder(), projected, output.sourceOrder())
+                && sameExactJsonRoots(source, selected.executionOrder(), projected, output.executionOrder())
+                ? ExecutableJsonProjectionResult.EXACT
+                : ExecutableJsonProjectionResult.EXACT_ROOTS_MISMATCH);
+    }
+
+    private static ExecutableJsonProjectionInspection projection(ExecutableJsonProjectionResult result) {
+        return new ExecutableJsonProjectionInspection(result, ExecutableJsonSuppressionStage.NONE);
+    }
+
+    private static ExecutableJsonProjectionInspection suppression(ExecutableJsonSuppressionStage stage) {
+        return new ExecutableJsonProjectionInspection(
+                ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS, stage);
+    }
+
+    private static ExecutableJsonProjectionInspection suppression(ExecutableJsonSuppressionStage stage,
+            String source, ToolProtocolText.JsonProposalSelection selection) {
+        var kinds = java.util.EnumSet.noneOf(ExecutableJsonSuppressionKind.class);
+        var selected = java.util.Set.copyOf(selection.executionOrder());
+        var candidates = new java.util.HashMap<ToolProtocolText.SourceRange,
+                ToolProtocolText.SelectedExecutableJsonSpan>();
+        for (var value : selection.recognizedCandidates()) {
+            if (!selected.contains(value)) candidates.put(new ToolProtocolText.SourceRange(
+                    value.envelopeStartInclusive(), value.envelopeEndExclusive()), value);
+        }
+        var selectedRoots = new java.util.HashSet<String>();
+        for (var value : selection.executionOrder()) selectedRoots.add(value.rootFrom(source));
+        var fences = selection.sourceOrder().stream().filter(value ->
+                value.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON).toList();
+        var affectedFences = new java.util.ArrayList<ToolProtocolText.SelectedExecutableJsonSpan>();
+        int fenceIndex = 0;
+        int lastAffectedFence = -1;
+        for (var span : selection.suppressionOnlyEnvelopes()) {
+            while (fenceIndex < fences.size()
+                    && fences.get(fenceIndex).envelopeContentEndExclusive() <= span.startInclusive()) fenceIndex++;
+            var candidate = span.endExclusive() > span.startInclusive() ? candidates.get(
+                    new ToolProtocolText.SourceRange(span.startInclusive(), span.endExclusive())) : null;
+            if (candidate != null) {
+                kinds.add(selectedRoots.contains(candidate.rootFrom(source))
+                        ? ExecutableJsonSuppressionKind.DUPLICATE_RECOGNIZED_ROOT
+                        : ExecutableJsonSuppressionKind.UNSELECTED_RECOGNIZED_ROOT);
+            } else if (fenceIndex < fences.size()
+                    && span.startInclusive() >= fences.get(fenceIndex).rootEndExclusive()
+                    && span.endExclusive() <= fences.get(fenceIndex).envelopeContentEndExclusive()) {
+                kinds.add(ExecutableJsonSuppressionKind.SELECTED_FENCE_TAIL_POTENTIAL);
+                // Suppressed subspans can share a fence. Inspect its whole tail
+                // only once, including text outside the individual subspans.
+                if (lastAffectedFence != fenceIndex) {
+                    // Retain at most the bound plus one overflow witness.
+                    if (affectedFences.size() <= ToolProtocolText.MAX_DIAGNOSTIC_FENCE_TAILS)
+                        affectedFences.add(fences.get(fenceIndex));
+                    lastAffectedFence = fenceIndex;
+                }
+            } else kinds.add(ExecutableJsonSuppressionKind.OTHER_POTENTIAL_ENVELOPE);
+        }
+        return new ExecutableJsonProjectionInspection(
+                ExecutableJsonProjectionResult.SUPPRESSED_OR_UNSELECTED_PROPOSALS, stage, kinds,
+                ToolProtocolText.inspectSelectedFenceTails(source, affectedFences));
+    }
+
+    private static boolean sameExactJsonRoots(
+            String source, java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> sourceSpans,
+            String projected, java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> projectedSpans) {
+        if (sourceSpans.size() != projectedSpans.size()) return false;
+        for (int index = 0; index < sourceSpans.size(); index++) {
+            var before = sourceSpans.get(index);
+            var after = projectedSpans.get(index);
+            if (before.kind() != after.kind() || !before.rootFrom(source).equals(after.rootFrom(projected))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ToolProtocolText.JsonProposalSelection selectedOutsideThinkBlocks(
+            String source, ToolProtocolText.JsonProposalSelection raw, java.util.List<int[]> hidden) {
+        return hidden.isEmpty() ? raw : ToolProtocolText.selectExecutableJsonProposalsOutside(source,
+                hidden.stream().map(block -> new ToolProtocolText.SourceRange(block[0], block[1])).toList());
+    }
+
     /**
      * Sanitizes streamed LLM output while preserving {@code <tool_call>} blocks intact.
      *
      * <p>Tool-call blocks contain JSON with raw file content (HTML, CSS, JS) as parameter
-     * values. The {@link #SUS_HTML} pattern would strip tags like {@code <script>} or
+     * values. Suspicious-HTML stripping would remove tags like {@code <script>} or
      * {@code <style>} from these JSON values, corrupting the tool parameters.
      *
-     * <p>This method applies full sanitization (control chars, think blocks, SUS_HTML)
-     * to prose text <em>outside</em> tool_call blocks, while preserving the raw content
-     * inside tool_call blocks (only control chars are stripped there).
+     * <p>This method applies full sanitization (control chars, think blocks, suspicious HTML)
+     * to prose text <em>outside</em> tool_call blocks. Only the canonical
+     * selection's exact JSON roots are copied byte-for-byte; unselected or
+     * malformed protocol is suppressed. XML compatibility blocks retain their
+     * historical behavior.
      *
      * <p>Use this instead of {@link #sanitizeForOutput} in streaming assembly where the
      * response may contain tool_call blocks with HTML-valued parameters.
      */
     public static String sanitizeForOutputPreservingToolCalls(String s) {
         if (s == null || s.isEmpty()) return "";
-        s = stripControl(dropThinkBlocks(s));
-        return stripSuspiciousHtmlOutsideToolCalls(s);
+        ToolProtocolText.JsonProposalSelection rawSelection =
+                ToolProtocolText.selectExecutableJsonProposals(s);
+        java.util.List<int[]> externalThinkBlocks =
+                externalThinkBlocks(s, rawSelection.recognizedCandidates());
+        ToolProtocolText.JsonProposalSelection selection =
+                selectedOutsideThinkBlocks(s, rawSelection, externalThinkBlocks);
+        java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> protectedJson =
+                selection.sourceOrder();
+        java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> protectedExecution =
+                selection.executionOrder();
+        java.util.List<ToolProtocolText.PotentialJsonEnvelopeSpan> rejectedJson =
+                selection.suppressionOnlyEnvelopes();
+        java.util.List<ToolProtocolText.SourceRange> sourceSuppressionRanges =
+                new java.util.ArrayList<>(
+                        externalThinkBlocks.size() + rejectedJson.size());
+        for (int[] block : externalThinkBlocks) {
+            sourceSuppressionRanges.add(new ToolProtocolText.SourceRange(
+                    block[0], block[1]));
+        }
+        for (ToolProtocolText.PotentialJsonEnvelopeSpan span : rejectedJson) {
+            if (span.endExclusive() > span.startInclusive()) {
+                sourceSuppressionRanges.add(new ToolProtocolText.SourceRange(
+                        span.startInclusive(), span.endExclusive()));
+            }
+        }
+        if (protectedJson.isEmpty()
+                && rejectedJson.isEmpty()
+                && externalThinkBlocks.isEmpty()) {
+            java.util.List<String> expectedXml = expectedRecognizedXmlBlocks(
+                    s, sourceSuppressionRanges, java.util.List.of());
+            String projected = sanitizeLegacyOutputSegment(s);
+            String monotonic = enforceExecutableJsonProjectionMonotonicity(
+                    s,
+                    java.util.List.of(),
+                    java.util.List.of(),
+                    projected,
+                    java.util.List.of(),
+                    expectedXml);
+            return stabilizeSanitizedProjection(
+                    s,
+                    java.util.List.of(),
+                    java.util.List.of(),
+                    monotonic,
+                    java.util.List.of(),
+                    expectedXml);
+        }
+
+        java.util.List<JsonOutputRegion> copyRegions =
+                new java.util.ArrayList<>(protectedJson.size() * 4);
+        for (int spanIndex = 0; spanIndex < protectedJson.size(); spanIndex++) {
+            ToolProtocolText.SelectedExecutableJsonSpan span =
+                    protectedJson.get(spanIndex);
+            if (span.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON
+                    && span.envelopeStartInclusive() < span.rootStartInclusive()) {
+                copyRegions.add(new JsonOutputRegion(
+                        span.envelopeStartInclusive(),
+                        span.rootStartInclusive(),
+                        JsonOutputRegionKind.COPY_FRAME,
+                        spanIndex));
+            }
+            copyRegions.add(new JsonOutputRegion(
+                    span.rootStartInclusive(),
+                    span.rootEndExclusive(),
+                    JsonOutputRegionKind.COPY_ROOT,
+                    spanIndex));
+            if (span.kind() == ToolProtocolText.JsonProtocolKind.FENCED_JSON
+                    && span.envelopeContentEndExclusive()
+                    < span.envelopeEndExclusive()) {
+                int closingFrameStart = span.envelopeContentEndExclusive();
+                if (span.rootEndExclusive() < closingFrameStart
+                        && s.substring(
+                                span.rootEndExclusive(), closingFrameStart)
+                                .isBlank()) {
+                    closingFrameStart = span.rootEndExclusive();
+                }
+                copyRegions.add(new JsonOutputRegion(
+                        closingFrameStart,
+                        span.envelopeEndExclusive(),
+                        JsonOutputRegionKind.COPY_FRAME,
+                        spanIndex));
+            }
+        }
+
+        java.util.List<JsonOutputRegion> dropped =
+                new java.util.ArrayList<>(
+                         rejectedJson.size()
+                                 + externalThinkBlocks.size());
+        for (int[] block : externalThinkBlocks) {
+            dropped.add(new JsonOutputRegion(
+                    block[0], block[1], JsonOutputRegionKind.DROP));
+        }
+        for (ToolProtocolText.PotentialJsonEnvelopeSpan span : rejectedJson) {
+            dropped.add(new JsonOutputRegion(
+                    span.startInclusive(),
+                    span.endExclusive(),
+                    JsonOutputRegionKind.DROP));
+        }
+        addCrossRegionSuspiciousDrops(s, copyRegions, dropped);
+
+        java.util.List<JsonOutputRegion> regions =
+                new java.util.ArrayList<>(copyRegions.size() + dropped.size());
+        regions.addAll(copyRegions);
+        regions.addAll(mergeDroppedRegions(dropped));
+        regions.sort(java.util.Comparator
+                .comparingInt(JsonOutputRegion::startInclusive)
+                .thenComparing(java.util.Comparator.comparingInt(
+                        JsonOutputRegion::endExclusive).reversed()));
+        regions = effectiveProjectionRegions(s.length(), regions);
+        java.util.List<String> expectedXml = expectedRecognizedXmlBlocks(
+                s, sourceSuppressionRanges, regions);
+
+        StringBuilder result = new StringBuilder(s.length());
+        java.util.List<CopiedJsonRegion> copiedJson =
+                new java.util.ArrayList<>(protectedJson.size());
+        int[] safePrefixStarts = new int[protectedJson.size()];
+        java.util.Arrays.fill(safePrefixStarts, -1);
+        int cursor = 0;
+        for (JsonOutputRegion region : regions) {
+            if (region.startInclusive() < cursor || region.endExclusive() > s.length()) {
+                continue;
+            }
+            result.append(sanitizeLegacyOutputSegment(
+                    s.substring(cursor, region.startInclusive())));
+            if (region.kind() != JsonOutputRegionKind.DROP) {
+                int outputStart = result.length();
+                if (region.kind() == JsonOutputRegionKind.COPY_FRAME
+                        && region.ownerIndex() >= 0
+                        && safePrefixStarts[region.ownerIndex()] < 0) {
+                    safePrefixStarts[region.ownerIndex()] = outputStart;
+                }
+                appendProjectedRegion(
+                        result,
+                        s,
+                        region.startInclusive(),
+                        region.endExclusive(),
+                        region.kind());
+                if (region.kind() == JsonOutputRegionKind.COPY_ROOT) {
+                    int safePrefixStart = safePrefixStarts[region.ownerIndex()];
+                    if (safePrefixStart < 0) safePrefixStart = outputStart;
+                    copiedJson.add(new CopiedJsonRegion(
+                            outputStart,
+                            result.length(),
+                            region.startInclusive(),
+                            region.endExclusive(),
+                            safePrefixStart));
+                }
+            }
+            cursor = region.endExclusive();
+        }
+        result.append(sanitizeLegacyOutputSegment(s.substring(cursor)));
+        String projected = result.toString();
+        String monotonic = enforceExecutableJsonProjectionMonotonicity(
+                s,
+                protectedExecution,
+                protectedJson,
+                projected,
+                copiedJson,
+                expectedXml);
+        if (monotonic.length() != projected.length()) return monotonic;
+        return stabilizeSanitizedProjection(
+                s,
+                protectedExecution,
+                protectedJson,
+                monotonic,
+                copiedJson,
+                expectedXml);
     }
 
     /**
@@ -189,26 +584,27 @@ public final class Sanitize {
     /* Back-compatibility aliases for existing code */
 
     /**
-     * Applies {@link #SUS_HTML} stripping only to text <em>outside</em>
-     * tool-call blocks (both JSON code-fence format and XML tags).
+     * Applies suspicious-HTML stripping only to text <em>outside</em>
+     * deprecated XML tool-call blocks. Recognized JSON spans are isolated
+     * before this compatibility helper is called.
      *
-     * <p>JSON code fences are the actively instructed text fallback.
-     * XML tags are DEPRECATED COMPATIBILITY support for models that
+     * <p>XML tags are DEPRECATED COMPATIBILITY support for models that
      * emit XML from training habits or cached context - not actively
      * instructed, scheduled for removal.
      *
-     * <p>The algorithm: find all tool_call blocks (both formats),
-     * protect them, strip HTML from the interstitial prose, then reassemble.
+     * <p>The algorithm: find XML tool_call blocks, protect them, strip HTML
+     * from the interstitial prose, then reassemble.
      */
     private static String stripSuspiciousHtmlOutsideToolCalls(String s) {
-        // Collect all protected regions (tool-call blocks in any format)
+        // Collect deprecated XML compatibility blocks.
         java.util.List<int[]> protectedRegions = new java.util.ArrayList<>();
-        collectRegions(TOOL_CALL_BLOCK, s, protectedRegions);
-        collectRegions(JSON_TOOL_CALL_FENCE, s, protectedRegions);
+        for (XmlBlockRegion region : xmlBlockRegions(s, true)) {
+            protectedRegions.add(new int[] {
+                    region.startInclusive(), region.endExclusive() });
+        }
 
         if (protectedRegions.isEmpty()) {
-            // No tool_call blocks - apply SUS_HTML to the entire string
-            return SUS_HTML.matcher(s).replaceAll("");
+            return stripSuspiciousHtmlLinear(s);
         }
 
         // Sort by start position
@@ -223,24 +619,976 @@ public final class Sanitize {
             if (start < lastEnd) continue; // overlapping region - skip
             // Sanitize prose before this block
             String before = s.substring(lastEnd, start);
-            result.append(SUS_HTML.matcher(before).replaceAll(""));
+            result.append(stripSuspiciousHtmlLinear(before));
             // Preserve the tool_call block verbatim
             result.append(s, start, end);
             lastEnd = end;
         }
         // Sanitize prose after the last block
         String after = s.substring(lastEnd);
-        result.append(SUS_HTML.matcher(after).replaceAll(""));
+        result.append(stripSuspiciousHtmlLinear(after));
         return result.toString();
     }
 
-    /** Collect all match regions from a pattern into the list. */
-    private static void collectRegions(Pattern pattern, String s, java.util.List<int[]> regions) {
-        java.util.regex.Matcher m = pattern.matcher(s);
-        while (m.find()) {
-            regions.add(new int[] { m.start(), m.end() });
+    private static String stripSuspiciousHtmlLinear(String source) {
+        if (source == null || source.isEmpty()) return "";
+        java.util.List<JsonOutputRegion> dropped = new java.util.ArrayList<>();
+        java.util.List<int[]> completeSource = java.util.List.of(
+                new int[] { 0, source.length() });
+        addCrossingPairedTagDrops(source, completeSource, dropped);
+        addCrossingEventAttributeDrops(source, completeSource, dropped);
+        java.util.List<JsonOutputRegion> merged = mergeDroppedRegions(dropped);
+        if (merged.isEmpty()) return source;
+
+        StringBuilder result = new StringBuilder(source.length());
+        int cursor = 0;
+        for (JsonOutputRegion region : merged) {
+            result.append(source, cursor, region.startInclusive());
+            cursor = region.endExclusive();
+        }
+        result.append(source, cursor, source.length());
+        return result.toString();
+    }
+
+    private static String sanitizeLegacyOutputSegment(String s) {
+        return stripSuspiciousHtmlOutsideToolCalls(stripControl(stripThinkTags(s)));
+    }
+
+    /**
+     * Fence delimiters are structural, but their surrounding bytes are not
+     * selected JSON. Preserve ordinary framing exactly while translating the
+     * two control-code line breaks accepted by the parser into safe LF before
+     * applying the normal external-text sanitizer.
+     */
+    private static String sanitizeJsonEnvelopeFrame(String frame) {
+        String safeLineBreaks = frame
+                .replace('\u000B', '\n')
+                .replace('\f', '\n');
+        String withoutThink = stripThinkTags(safeLineBreaks);
+        String withoutAnsi = ANSI.matcher(withoutThink).replaceAll("");
+        StringBuilder withoutControls = new StringBuilder(withoutAnsi.length());
+        for (int index = 0; index < withoutAnsi.length(); index++) {
+            char value = withoutAnsi.charAt(index);
+            boolean strippedControl = value <= '\u0008'
+                    || value >= '\u000B' && value <= '\u001F'
+                    || value == '\u007F';
+            if (!strippedControl || value == '\r') {
+                withoutControls.append(value);
+            }
+        }
+        return stripSuspiciousHtmlOutsideToolCalls(withoutControls.toString());
+    }
+
+    private static void appendProjectedRegion(
+            StringBuilder target,
+            String source,
+            int startInclusive,
+            int endExclusive,
+            JsonOutputRegionKind kind) {
+        if (startInclusive >= endExclusive
+                || kind == JsonOutputRegionKind.DROP) {
+            return;
+        }
+        if (kind == JsonOutputRegionKind.COPY_FRAME) {
+            target.append(sanitizeJsonEnvelopeFrame(
+                    source.substring(startInclusive, endExclusive)));
+            return;
+        }
+        target.append(source, startInclusive, endExclusive);
+    }
+
+    /**
+     * Materializes the same source-ordered, non-overlapping region sequence
+     * consumed by assembly. Sorting puts the widest same-start region first;
+     * later overlaps are intentionally ignored by the existing fail-closed
+     * projection rule.
+     */
+    private static java.util.List<JsonOutputRegion> effectiveProjectionRegions(
+            int sourceLength,
+            java.util.List<JsonOutputRegion> regions) {
+        java.util.List<JsonOutputRegion> effective =
+                new java.util.ArrayList<>(regions.size());
+        int cursor = 0;
+        for (JsonOutputRegion region : regions) {
+            if (region.startInclusive() < cursor
+                    || region.endExclusive() > sourceLength) {
+                continue;
+            }
+            effective.add(region);
+            cursor = region.endExclusive();
+        }
+        return java.util.List.copyOf(effective);
+    }
+
+    /**
+     * Preserves the established precedence of hidden-thought removal over tool
+     * proposal recognition. Think-tag events inside a recognized JSON range are
+     * literal argument text and cannot open or close a block outside that same
+     * immutable range. A complete external pair can still enclose and suppress
+     * one or more proposals.
+     */
+    private static java.util.List<int[]> externalThinkBlocks(
+            String source,
+            java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> selectedJson) {
+        java.util.List<int[]> externalThinkBlocks = new java.util.ArrayList<>();
+        java.util.regex.Matcher openings = SOURCE_THINK_OPEN.matcher(source);
+        java.util.regex.Matcher closings = SOURCE_THINK_CLOSE.matcher(source);
+        boolean hasOpening = openings.find();
+        boolean hasClosing = closings.find();
+        int externalOpenStart = -1;
+        int externalDepth = 0;
+        int spanIndex = 0;
+        while (hasOpening || hasClosing) {
+            boolean opening = hasOpening
+                    && (!hasClosing || openings.start() < closings.start());
+            int eventStart = opening ? openings.start() : closings.start();
+            int eventEnd = opening ? openings.end() : closings.end();
+            while (spanIndex < selectedJson.size()
+                    && selectedJson.get(spanIndex).rootEndExclusive() <= eventStart) {
+                spanIndex++;
+            }
+            boolean insideJson = spanIndex < selectedJson.size()
+                    && eventStart >= selectedJson.get(spanIndex).rootStartInclusive()
+                    && eventEnd <= selectedJson.get(spanIndex).rootEndExclusive();
+            if (!insideJson) {
+                if (opening) {
+                    if (externalDepth == 0) {
+                        externalOpenStart = eventStart;
+                    }
+                    externalDepth++;
+                } else if (externalDepth > 0) {
+                    externalDepth--;
+                    if (externalDepth == 0) {
+                        externalThinkBlocks.add(new int[] {
+                                externalOpenStart, eventEnd });
+                        externalOpenStart = -1;
+                    }
+                }
+            }
+            if (opening) {
+                hasOpening = openings.find();
+            } else {
+                hasClosing = closings.find();
+            }
+        }
+        if (externalDepth > 0) {
+            externalThinkBlocks.add(new int[] {
+                    externalOpenStart, source.length() });
+        }
+        return java.util.List.copyOf(externalThinkBlocks);
+    }
+
+    /**
+     * Finds suspicious constructs whose external opening and closing tokens
+     * lie in different sanitizable gaps. Exact JSON/frame and already-dropped
+     * regions are opaque: their bytes cannot create or close an external
+     * construct. Only the external slices are added to the drop set.
+     */
+    private static void addCrossRegionSuspiciousDrops(
+            String source,
+            java.util.List<JsonOutputRegion> copyRegions,
+            java.util.List<JsonOutputRegion> dropped) {
+        java.util.List<int[]> externalSegments = externalSegments(
+                source.length(), copyRegions, dropped, source);
+        addCrossingPairedTagDrops(source, externalSegments, dropped);
+        addCrossingEventAttributeDrops(source, externalSegments, dropped);
+    }
+
+    private static java.util.List<int[]> externalSegments(
+            int sourceLength,
+            java.util.List<JsonOutputRegion> copyRegions,
+            java.util.List<JsonOutputRegion> dropped,
+            String source) {
+        java.util.List<int[]> opaque = new java.util.ArrayList<>(
+                copyRegions.size() + dropped.size());
+        for (JsonOutputRegion region : copyRegions) {
+            opaque.add(new int[] {
+                    region.startInclusive(), region.endExclusive() });
+        }
+        for (JsonOutputRegion region : dropped) {
+            opaque.add(new int[] {
+                    region.startInclusive(), region.endExclusive() });
+        }
+        for (XmlBlockRegion region : xmlBlockRegions(source, true)) {
+            opaque.add(new int[] {
+                    region.startInclusive(), region.endExclusive() });
+        }
+        opaque.sort(java.util.Comparator
+                .comparingInt((int[] range) -> range[0])
+                .thenComparingInt(range -> range[1]));
+
+        java.util.List<int[]> merged = new java.util.ArrayList<>(opaque.size());
+        for (int[] range : opaque) {
+            int start = Math.max(0, Math.min(sourceLength, range[0]));
+            int end = Math.max(start, Math.min(sourceLength, range[1]));
+            if (start == end) continue;
+            if (merged.isEmpty() || start > merged.getLast()[1]) {
+                merged.add(new int[] { start, end });
+            } else {
+                merged.getLast()[1] = Math.max(merged.getLast()[1], end);
+            }
+        }
+
+        java.util.List<int[]> external = new java.util.ArrayList<>(
+                merged.size() + 1);
+        int cursor = 0;
+        for (int[] range : merged) {
+            if (cursor < range[0]) {
+                external.add(new int[] { cursor, range[0] });
+            }
+            cursor = Math.max(cursor, range[1]);
+        }
+        if (cursor < sourceLength) {
+            external.add(new int[] { cursor, sourceLength });
+        }
+        return java.util.List.copyOf(external);
+    }
+
+    private static void addCrossingPairedTagDrops(
+            String source,
+            java.util.List<int[]> externalSegments,
+            java.util.List<JsonOutputRegion> dropped) {
+        for (String tag : SUSPICIOUS_PAIRED_TAGS) {
+            addCrossingPairedTagDrops(
+                    source, externalSegments, dropped, tag);
         }
     }
+
+    private static void addCrossingPairedTagDrops(
+            String source,
+            java.util.List<int[]> externalSegments,
+            java.util.List<JsonOutputRegion> dropped,
+            String tag) {
+        boolean active = false;
+        java.util.List<int[]> pending = null;
+        for (int[] segment : externalSegments) {
+            int cursor = segment[0];
+            int sliceStart = cursor;
+            while (cursor < segment[1]) {
+                if (!active) {
+                    DangerousTag opening = nextDangerousOpeningTag(
+                            source, cursor, segment[1], tag);
+                    if (opening == null) break;
+                    active = true;
+                    pending = new java.util.ArrayList<>();
+                    sliceStart = opening.startInclusive();
+                    cursor = opening.endExclusive();
+                    continue;
+                }
+
+                int closeEnd = nextDangerousClosingTagEnd(
+                        source, cursor, segment[1], tag);
+                if (closeEnd < 0) {
+                    pending.add(new int[] { sliceStart, segment[1] });
+                    cursor = segment[1];
+                    break;
+                }
+                pending.add(new int[] { sliceStart, closeEnd });
+                for (int[] range : pending) {
+                    dropped.add(new JsonOutputRegion(
+                            range[0], range[1], JsonOutputRegionKind.DROP));
+                }
+                active = false;
+                pending = null;
+                cursor = closeEnd;
+                sliceStart = cursor;
+            }
+            if (active && cursor >= segment[1]) {
+                sliceStart = segment[1];
+            }
+        }
+    }
+
+    private static void addCrossingEventAttributeDrops(
+            String source,
+            java.util.List<int[]> externalSegments,
+            java.util.List<JsonOutputRegion> dropped) {
+        boolean active = false;
+        java.util.List<int[]> pending = null;
+        for (int[] segment : externalSegments) {
+            int cursor = segment[0];
+            int sliceStart = cursor;
+            while (cursor < segment[1]) {
+                if (!active) {
+                    int[] opening = nextEventAttributeOpening(
+                            source, cursor, segment[1]);
+                    if (opening == null) break;
+                    active = true;
+                    pending = new java.util.ArrayList<>();
+                    sliceStart = opening[0];
+                    cursor = opening[1];
+                    continue;
+                }
+
+                int closeEnd = nextEventAttributeCloseEnd(
+                        source, cursor, segment[1]);
+                if (closeEnd < 0) {
+                    pending.add(new int[] { sliceStart, segment[1] });
+                    cursor = segment[1];
+                    break;
+                }
+                pending.add(new int[] { sliceStart, closeEnd });
+                for (int[] range : pending) {
+                    dropped.add(new JsonOutputRegion(
+                            range[0], range[1], JsonOutputRegionKind.DROP));
+                }
+                active = false;
+                pending = null;
+                cursor = closeEnd;
+                sliceStart = cursor;
+            }
+            if (active && cursor >= segment[1]) {
+                sliceStart = segment[1];
+            }
+        }
+    }
+
+    private static DangerousTag nextDangerousOpeningTag(
+            String source,
+            int fromInclusive,
+            int endExclusive,
+            String tag) {
+        int cursor = fromInclusive;
+        while (cursor < endExclusive) {
+            int opening = indexOfWithin(
+                    source, '<', cursor, endExclusive);
+            if (opening < 0) return null;
+            int nameStart = opening + 1;
+            while (nameStart < endExclusive
+                    && isRegexWhitespace(source.charAt(nameStart))) {
+                nameStart++;
+            }
+            int nameEnd = nameStart + tag.length();
+            if (nameEnd <= endExclusive
+                    && source.regionMatches(true, nameStart, tag, 0, tag.length())
+                    && (nameEnd == endExclusive
+                    || !isRegexWord(source.charAt(nameEnd)))) {
+                int tagEnd = indexOfWithin(
+                        source, '>', nameEnd, endExclusive);
+                if (tagEnd < 0) {
+                    return null;
+                }
+                return new DangerousTag(opening, tagEnd + 1);
+            }
+            cursor = opening + 1;
+        }
+        return null;
+    }
+
+    private static int nextDangerousClosingTagEnd(
+            String source,
+            int fromInclusive,
+            int endExclusive,
+            String tag) {
+        int cursor = fromInclusive;
+        while (cursor < endExclusive) {
+            int opening = indexOfWithin(
+                    source, '<', cursor, endExclusive);
+            if (opening < 0) return -1;
+            int index = opening + 1;
+            while (index < endExclusive
+                    && isRegexWhitespace(source.charAt(index))) index++;
+            if (index >= endExclusive || source.charAt(index) != '/') {
+                cursor = opening + 1;
+                continue;
+            }
+            index++;
+            while (index < endExclusive
+                    && isRegexWhitespace(source.charAt(index))) index++;
+            int nameEnd = index + tag.length();
+            if (nameEnd > endExclusive
+                    || !source.regionMatches(true, index, tag, 0, tag.length())) {
+                cursor = opening + 1;
+                continue;
+            }
+            index = nameEnd;
+            while (index < endExclusive
+                    && isRegexWhitespace(source.charAt(index))) index++;
+            if (index < endExclusive && source.charAt(index) == '>') {
+                return index + 1;
+            }
+            cursor = opening + 1;
+        }
+        return -1;
+    }
+
+    private static int indexOfWithin(
+            String source,
+            char target,
+            int fromInclusive,
+            int endExclusive) {
+        for (int index = fromInclusive; index < endExclusive; index++) {
+            if (source.charAt(index) == target) return index;
+        }
+        return -1;
+    }
+
+    private static int[] nextEventAttributeOpening(
+            String source,
+            int fromInclusive,
+            int endExclusive) {
+        int cursor = fromInclusive;
+        while (cursor < endExclusive) {
+            while (cursor < endExclusive
+                    && !isRegexWord(source.charAt(cursor))) cursor++;
+            int firstOpening = -1;
+            char previousPrevious = 0;
+            char previous = 0;
+            while (cursor < endExclusive
+                    && isRegexWord(source.charAt(cursor))) {
+                char current = source.charAt(cursor);
+                if (firstOpening < 0
+                        && asciiEqualsIgnoreCase(previousPrevious, 'o')
+                        && asciiEqualsIgnoreCase(previous, 'n')) {
+                    firstOpening = cursor - 2;
+                }
+                previousPrevious = previous;
+                previous = current;
+                cursor++;
+            }
+            if (firstOpening < 0) continue;
+            while (cursor < endExclusive
+                    && isRegexWhitespace(source.charAt(cursor))) cursor++;
+            if (cursor >= endExclusive || source.charAt(cursor) != '=') continue;
+            cursor++;
+            while (cursor < endExclusive
+                    && isRegexWhitespace(source.charAt(cursor))) cursor++;
+            if (cursor >= endExclusive
+                    || source.charAt(cursor) != '\''
+                    && source.charAt(cursor) != '"') continue;
+            return new int[] { firstOpening, cursor + 1 };
+        }
+        return null;
+    }
+
+    private static boolean asciiEqualsIgnoreCase(char actual, char expectedLowercase) {
+        return actual == expectedLowercase
+                || actual == expectedLowercase - ('a' - 'A');
+    }
+
+    private static int nextEventAttributeCloseEnd(
+            String source,
+            int fromInclusive,
+            int endExclusive) {
+        for (int cursor = fromInclusive; cursor < endExclusive; cursor++) {
+            char value = source.charAt(cursor);
+            if (value == '\'' || value == '"') return cursor + 1;
+        }
+        return -1;
+    }
+
+    private static boolean regionMatchesIgnoreCase(
+            String source,
+            int start,
+            String expected) {
+        return start + expected.length() <= source.length()
+                && source.regionMatches(
+                        true, start, expected, 0, expected.length());
+    }
+
+    private static boolean isRegexWhitespace(char value) {
+        return value == ' '
+                || value == '\t'
+                || value == '\n'
+                || value == '\u000B'
+                || value == '\f'
+                || value == '\r';
+    }
+
+    private static boolean isRegexWord(char value) {
+        return value == '_'
+                || value >= '0' && value <= '9'
+                || value >= 'A' && value <= 'Z'
+                || value >= 'a' && value <= 'z';
+    }
+
+    private static boolean isSourceLineBreak(char value) {
+        return value == '\r'
+                || value == '\n'
+                || value == '\u000B'
+                || value == '\f'
+                || value == '\u0085'
+                || value == '\u2028'
+                || value == '\u2029';
+    }
+
+    private static java.util.List<JsonOutputRegion> mergeDroppedRegions(
+            java.util.List<JsonOutputRegion> dropped) {
+        if (dropped.isEmpty()) return java.util.List.of();
+
+        dropped.sort(java.util.Comparator
+                .comparingInt(JsonOutputRegion::startInclusive)
+                .thenComparing(java.util.Comparator.comparingInt(
+                        JsonOutputRegion::endExclusive).reversed()));
+        java.util.List<JsonOutputRegion> merged = new java.util.ArrayList<>();
+        int start = dropped.getFirst().startInclusive();
+        int end = dropped.getFirst().endExclusive();
+        for (int index = 1; index < dropped.size(); index++) {
+            JsonOutputRegion next = dropped.get(index);
+            if (next.startInclusive() <= end) {
+                end = Math.max(end, next.endExclusive());
+            } else {
+                merged.add(new JsonOutputRegion(
+                        start, end, JsonOutputRegionKind.DROP));
+                start = next.startInclusive();
+                end = next.endExclusive();
+            }
+        }
+        merged.add(new JsonOutputRegion(
+                start, end, JsonOutputRegionKind.DROP));
+        return java.util.List.copyOf(merged);
+    }
+
+    /**
+     * Rechecks the already-normalized projection because deleting a rejected
+     * envelope, control sequence, or hidden-thought block can join two source
+     * fragments into a construct that did not exist in the raw response.
+     * Selected JSON roots stay opaque and byte-exact throughout every pass.
+     */
+    private static String stabilizeSanitizedProjection(
+            String source,
+            java.util.List<ToolProtocolText.SelectedExecutableJsonSpan>
+                    retainedExecution,
+            java.util.List<ToolProtocolText.SelectedExecutableJsonSpan>
+                    retainedSource,
+            String initialProjection,
+            java.util.List<CopiedJsonRegion> initialCopiedJson,
+            java.util.List<String> expectedXml) {
+        String projected = initialProjection;
+        java.util.List<CopiedJsonRegion> copiedJson = initialCopiedJson;
+        for (int pass = 0; pass < MAX_PROJECTION_STABILIZATION_PASSES; pass++) {
+            ToolProtocolText.JsonProposalSelection selection =
+                    ToolProtocolText.selectExecutableJsonProposals(projected);
+            java.util.List<JsonOutputRegion> roots = copiedJson.stream()
+                    .map(copied -> new JsonOutputRegion(
+                            copied.outputStartInclusive(),
+                            copied.outputEndExclusive(),
+                            JsonOutputRegionKind.COPY_ROOT))
+                    .toList();
+            java.util.List<JsonOutputRegion> dropped = new java.util.ArrayList<>();
+            java.util.List<int[]> thinkBlocks = externalThinkBlocks(
+                    projected, selection.sourceOrder());
+            if (thinkBlocksOverlapCopiedJson(thinkBlocks, copiedJson)) {
+                return "";
+            }
+            for (int[] block : thinkBlocks) {
+                dropped.add(new JsonOutputRegion(
+                        block[0], block[1], JsonOutputRegionKind.DROP));
+            }
+            addCrossRegionSuspiciousDrops(projected, roots, dropped);
+            java.util.List<JsonOutputRegion> merged = mergeDroppedRegions(dropped);
+            if (merged.isEmpty()) return projected;
+
+            if (droppedRegionsOverlapCopiedJson(merged, copiedJson)) {
+                return "";
+            }
+            ProjectionState next = removeProjectionRanges(
+                    projected, copiedJson, merged);
+            String monotonic = enforceExecutableJsonProjectionMonotonicity(
+                    source,
+                    retainedExecution,
+                    retainedSource,
+                    next.text(),
+                    next.copiedJson(),
+                    expectedXml);
+            if (monotonic.length() != next.text().length()) return monotonic;
+            projected = monotonic;
+            copiedJson = next.copiedJson();
+        }
+        // A bounded fixed point that does not settle is not evidence of safe
+        // display text. Returning nothing cannot expose or authorize protocol.
+        return "";
+    }
+
+    private static boolean thinkBlocksOverlapCopiedJson(
+            java.util.List<int[]> ranges,
+            java.util.List<CopiedJsonRegion> copiedJson) {
+        int copiedIndex = 0;
+        for (int[] range : ranges) {
+            while (copiedIndex < copiedJson.size()
+                    && copiedJson.get(copiedIndex).outputEndExclusive()
+                    <= range[0]) {
+                copiedIndex++;
+            }
+            if (copiedIndex < copiedJson.size()
+                    && copiedJson.get(copiedIndex).outputStartInclusive()
+                    < range[1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean droppedRegionsOverlapCopiedJson(
+            java.util.List<JsonOutputRegion> ranges,
+            java.util.List<CopiedJsonRegion> copiedJson) {
+        int copiedIndex = 0;
+        for (JsonOutputRegion range : ranges) {
+            while (copiedIndex < copiedJson.size()
+                    && copiedJson.get(copiedIndex).outputEndExclusive()
+                    <= range.startInclusive()) {
+                copiedIndex++;
+            }
+            if (copiedIndex < copiedJson.size()
+                    && copiedJson.get(copiedIndex).outputStartInclusive()
+                    < range.endExclusive()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ProjectionState removeProjectionRanges(
+            String projected,
+            java.util.List<CopiedJsonRegion> copiedJson,
+            java.util.List<JsonOutputRegion> dropped) {
+        StringBuilder retained = new StringBuilder(projected.length());
+        int cursor = 0;
+        for (JsonOutputRegion range : dropped) {
+            retained.append(projected, cursor, range.startInclusive());
+            cursor = range.endExclusive();
+        }
+        retained.append(projected, cursor, projected.length());
+
+        DropBoundaryMapper boundaryMapper = new DropBoundaryMapper(dropped);
+        java.util.List<CopiedJsonRegion> remapped =
+                new java.util.ArrayList<>(copiedJson.size());
+        for (CopiedJsonRegion copied : copiedJson) {
+            int safePrefixStart = boundaryMapper.map(
+                    copied.safePrefixOutputStartInclusive());
+            int outputStart = boundaryMapper.map(
+                    copied.outputStartInclusive());
+            int outputEnd = boundaryMapper.map(
+                    copied.outputEndExclusive());
+            remapped.add(new CopiedJsonRegion(
+                    outputStart,
+                    outputEnd,
+                    copied.sourceStartInclusive(),
+                    copied.sourceEndExclusive(),
+                    safePrefixStart));
+        }
+        return new ProjectionState(retained.toString(), remapped);
+    }
+
+    private static final class DropBoundaryMapper {
+        private final java.util.List<JsonOutputRegion> dropped;
+        private int droppedIndex;
+        private int removed;
+        private int lastBoundary = -1;
+
+        private DropBoundaryMapper(java.util.List<JsonOutputRegion> dropped) {
+            this.dropped = dropped;
+        }
+
+        private int map(int boundary) {
+            if (boundary < lastBoundary) {
+                throw new IllegalStateException(
+                        "JSON projection boundaries are not source ordered");
+            }
+            lastBoundary = boundary;
+            while (droppedIndex < dropped.size()
+                    && dropped.get(droppedIndex).endExclusive() <= boundary) {
+                JsonOutputRegion range = dropped.get(droppedIndex++);
+                removed += range.endExclusive() - range.startInclusive();
+            }
+            if (droppedIndex < dropped.size()
+                    && dropped.get(droppedIndex).startInclusive() < boundary) {
+                return dropped.get(droppedIndex).startInclusive() - removed;
+            }
+            return boundary - removed;
+        }
+    }
+
+    /**
+     * Enforces the central T1194 monotonicity invariant: output sanitation may
+     * retain exact recognized source spans, but it may never create, move,
+     * merge, or rewrite an executable JSON span.
+     */
+    private static String enforceExecutableJsonProjectionMonotonicity(
+            String source,
+            java.util.List<ToolProtocolText.SelectedExecutableJsonSpan>
+                    retainedExecution,
+            java.util.List<ToolProtocolText.SelectedExecutableJsonSpan>
+                    retainedSource,
+            String projected,
+            java.util.List<CopiedJsonRegion> copiedJson,
+            java.util.List<String> expectedXml) {
+        if (!recognizedXmlBlocks(projected).equals(expectedXml)) {
+            return "";
+        }
+        ToolProtocolText.JsonProposalSelection projectedSelection =
+                ToolProtocolText.selectExecutableJsonProposals(projected);
+        java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> projectedSource =
+                projectedSelection.sourceOrder();
+        int shared = Math.min(
+                projectedSource.size(),
+                Math.min(retainedSource.size(), copiedJson.size()));
+        for (int index = 0; index < shared; index++) {
+            ToolProtocolText.SelectedExecutableJsonSpan sourceSpan =
+                    retainedSource.get(index);
+            ToolProtocolText.SelectedExecutableJsonSpan outputSpan =
+                    projectedSource.get(index);
+            CopiedJsonRegion copied = copiedJson.get(index);
+            if (outputSpan.rootStartInclusive() != copied.outputStartInclusive()
+                    || outputSpan.rootEndExclusive() != copied.outputEndExclusive()
+                    || outputSpan.kind() != sourceSpan.kind()
+                    || copied.sourceStartInclusive() != sourceSpan.rootStartInclusive()
+                    || copied.sourceEndExclusive() != sourceSpan.rootEndExclusive()
+                    || !source.regionMatches(
+                            sourceSpan.rootStartInclusive(),
+                            projected,
+                            outputSpan.rootStartInclusive(),
+                            sourceSpan.rootEndExclusive()
+                                    - sourceSpan.rootStartInclusive())) {
+                return "";
+            }
+        }
+        if (projectedSource.size() > shared) {
+            return "";
+        }
+        if (copiedJson.size() > shared) {
+            return "";
+        }
+        if (retainedSource.size() != shared) {
+            return "";
+        }
+
+        java.util.List<ToolProtocolText.SelectedExecutableJsonSpan>
+                projectedCandidates = projectedSelection.recognizedCandidates();
+        int sharedCandidates = Math.min(
+                projectedCandidates.size(), copiedJson.size());
+        for (int index = 0; index < sharedCandidates; index++) {
+            ToolProtocolText.SelectedExecutableJsonSpan candidate =
+                    projectedCandidates.get(index);
+            ToolProtocolText.SelectedExecutableJsonSpan sourceSpan =
+                    retainedSource.get(index);
+            CopiedJsonRegion copied = copiedJson.get(index);
+            if (candidate.rootStartInclusive() != copied.outputStartInclusive()
+                    || candidate.rootEndExclusive() != copied.outputEndExclusive()
+                    || candidate.kind() != sourceSpan.kind()) {
+                return "";
+            }
+        }
+        if (projectedCandidates.size() > sharedCandidates) {
+            return "";
+        }
+        if (copiedJson.size() > sharedCandidates) {
+            return "";
+        }
+
+        java.util.List<ToolProtocolText.SelectedExecutableJsonSpan> projectedExecution =
+                projectedSelection.executionOrder();
+        if (projectedExecution.size() != retainedExecution.size()) {
+            return "";
+        }
+        for (int index = 0; index < retainedExecution.size(); index++) {
+            ToolProtocolText.SelectedExecutableJsonSpan sourceSpan =
+                    retainedExecution.get(index);
+            ToolProtocolText.SelectedExecutableJsonSpan outputSpan =
+                    projectedExecution.get(index);
+            if (sourceSpan.kind() != outputSpan.kind()
+                    || !sourceSpan.rootFrom(source).equals(
+                            outputSpan.rootFrom(projected))) {
+                return "";
+            }
+        }
+        return projected;
+    }
+
+    private static java.util.List<String> expectedRecognizedXmlBlocks(
+            String source,
+            java.util.List<ToolProtocolText.SourceRange> excludedRanges,
+            java.util.List<JsonOutputRegion> projectionRegions) {
+        java.util.List<ToolProtocolText.SourceRange> excluded = excludedRanges.stream()
+                .sorted(java.util.Comparator
+                        .comparingInt(ToolProtocolText.SourceRange::startInclusive)
+                        .thenComparingInt(
+                                ToolProtocolText.SourceRange::endExclusive))
+                .toList();
+        java.util.List<String> expected = new java.util.ArrayList<>();
+        int excludedIndex = 0;
+        int projectionIndex = 0;
+        for (XmlBlockRegion region : xmlBlockRegions(source, false)) {
+            while (excludedIndex < excluded.size()
+                    && excluded.get(excludedIndex).endExclusive()
+                    <= region.startInclusive()) {
+                excludedIndex++;
+            }
+            if (excludedIndex < excluded.size()
+                    && excluded.get(excludedIndex).startInclusive()
+                    < region.endExclusive()) {
+                continue;
+            }
+            String block = source.substring(
+                    region.startInclusive(), region.endExclusive());
+            if (!ToolProtocolText.containsRecognizedXmlToolCall(block)) continue;
+            while (projectionIndex < projectionRegions.size()
+                    && projectionRegions.get(projectionIndex).endExclusive()
+                    <= region.startInclusive()) {
+                projectionIndex++;
+            }
+            String projectedBlock = projectSourceRangeWithPlan(
+                    source,
+                    region.startInclusive(),
+                    region.endExclusive(),
+                    projectionRegions,
+                    projectionIndex);
+            expected.addAll(recognizedXmlBlocks(
+                    projectedBlock));
+        }
+        return java.util.List.copyOf(expected);
+    }
+
+    /**
+     * Projects one raw-eligible XML source range through the exact same region
+     * ownership and transforms as the main assembler. Raw XML eligibility is
+     * established before this step, so normalization cannot manufacture a new
+     * compatibility block.
+     */
+    private static String projectSourceRangeWithPlan(
+            String source,
+            int startInclusive,
+            int endExclusive,
+            java.util.List<JsonOutputRegion> regions,
+            int regionStartIndex) {
+        StringBuilder projected = new StringBuilder(
+                Math.max(0, endExclusive - startInclusive));
+        int cursor = startInclusive;
+        long[] examined = PROJECTION_REGIONS_EXAMINED.get();
+        for (int regionIndex = regionStartIndex;
+                regionIndex < regions.size();
+                regionIndex++) {
+            if (examined != null) examined[0]++;
+            JsonOutputRegion region = regions.get(regionIndex);
+            if (region.endExclusive() <= cursor) continue;
+            if (region.startInclusive() >= endExclusive) break;
+            int regionStart = Math.max(cursor, region.startInclusive());
+            int regionEnd = Math.min(endExclusive, region.endExclusive());
+            projected.append(sanitizeLegacyOutputSegment(
+                    source.substring(cursor, regionStart)));
+            appendProjectedRegion(
+                    projected,
+                    source,
+                    regionStart,
+                    regionEnd,
+                    region.kind());
+            cursor = regionEnd;
+        }
+        projected.append(sanitizeLegacyOutputSegment(
+                source.substring(cursor, endExclusive)));
+        return projected.toString();
+    }
+
+    /**
+     * Returns how many projection regions were examined while {@code action}
+     * ran on this thread. Complexity tests use the count instead of elapsed
+     * time, so they do not depend on machine speed. Counting does not change
+     * any result, and calls are not nested.
+     */
+    static long projectionRegionsExamined(Runnable action) {
+        long[] examined = new long[1];
+        PROJECTION_REGIONS_EXAMINED.set(examined);
+        try {
+            action.run();
+        } finally {
+            PROJECTION_REGIONS_EXAMINED.remove();
+        }
+        return examined[0];
+    }
+
+    private static java.util.List<String> recognizedXmlBlocks(String source) {
+        java.util.List<String> recognized = new java.util.ArrayList<>();
+        for (XmlBlockRegion region : xmlBlockRegions(source, false)) {
+            String block = source.substring(
+                    region.startInclusive(), region.endExclusive());
+            if (ToolProtocolText.containsRecognizedXmlToolCall(block)) {
+                recognized.add(block);
+            }
+        }
+        return java.util.List.copyOf(recognized);
+    }
+
+    private record JsonOutputRegion(
+            int startInclusive,
+            int endExclusive,
+            JsonOutputRegionKind kind,
+            int ownerIndex) {
+        private JsonOutputRegion(
+                int startInclusive,
+                int endExclusive,
+                JsonOutputRegionKind kind) {
+            this(startInclusive, endExclusive, kind, -1);
+        }
+    }
+
+    private enum JsonOutputRegionKind {
+        DROP,
+        COPY_FRAME,
+        COPY_ROOT
+    }
+
+    private record CopiedJsonRegion(
+            int outputStartInclusive,
+            int outputEndExclusive,
+            int sourceStartInclusive,
+            int sourceEndExclusive,
+            int safePrefixOutputStartInclusive) {}
+
+    private record ProjectionState(
+            String text,
+            java.util.List<CopiedJsonRegion> copiedJson) {}
+
+    private record DangerousTag(
+            int startInclusive,
+            int endExclusive) {}
+
+    private static java.util.List<XmlBlockRegion> xmlBlockRegions(
+            String source,
+            boolean protectionOnly) {
+        java.util.List<String> openers = protectionOnly
+                ? XML_PROTECTED_OPENERS
+                : XML_PROTOCOL_OPENERS;
+        java.util.List<String> closers = protectionOnly
+                ? XML_PROTECTED_CLOSERS
+                : XML_PROTOCOL_CLOSERS;
+        java.util.List<XmlBlockRegion> regions = new java.util.ArrayList<>();
+        int cursor = 0;
+        while (cursor < source.length()) {
+            TokenMatch opening = earliestToken(source, openers, cursor);
+            if (opening == null) break;
+            TokenMatch closing = earliestToken(
+                    source, closers, opening.endExclusive());
+            if (closing == null) break;
+            regions.add(new XmlBlockRegion(
+                    opening.startInclusive(), closing.endExclusive()));
+            cursor = closing.endExclusive();
+        }
+        return java.util.List.copyOf(regions);
+    }
+
+    private static TokenMatch earliestToken(
+            String source,
+            java.util.List<String> tokens,
+            int fromInclusive) {
+        int cursor = Math.max(0, fromInclusive);
+        while (cursor < source.length()) {
+            int candidate = source.indexOf('<', cursor);
+            if (candidate < 0) return null;
+            for (String token : tokens) {
+                if (source.regionMatches(
+                        candidate, token, 0, token.length())) {
+                    return new TokenMatch(
+                            candidate, candidate + token.length());
+                }
+            }
+            cursor = candidate + 1;
+        }
+        return null;
+    }
+
+    private record XmlBlockRegion(int startInclusive, int endExclusive) {}
+
+    private record TokenMatch(int startInclusive, int endExclusive) {}
 
     /**
      * Legacy alias: removes ANSI escape sequences only.

@@ -55,7 +55,7 @@ class ModeErrorMessageTest {
     }
 
     @Test
-    void askMode_with_streamSink_placeholder_returns_streamed() throws Exception {
+    void askMode_with_streamSink_placeholder_returns_complete_ok_without_fragments() throws Exception {
         java.util.List<String> chunks = new java.util.ArrayList<>();
         var ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("hello streaming"))
@@ -66,7 +66,8 @@ class ModeErrorMessageTest {
         Optional<Result> result = mode.handle("hello streaming", WS, ctx);
 
         assertTrue(result.isPresent());
-        assertInstanceOf(Result.Streamed.class, result.get());
+        assertEquals("\nhello streaming\n\n", assertInstanceOf(Result.Ok.class, result.get()).text);
+        assertTrue(chunks.isEmpty());
     }
 
     @Test

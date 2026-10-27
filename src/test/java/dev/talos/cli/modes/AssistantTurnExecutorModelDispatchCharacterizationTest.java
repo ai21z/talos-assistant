@@ -3,13 +3,27 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.PromptToolDescriptor;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
+import dev.talos.runtime.IncompleteGenerationPresentation;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.FinalAnswerStatus;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.TalosTool;
@@ -25,13 +39,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("AssistantTurnExecutor model dispatch characterization")
@@ -59,6 +79,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         ChatRequest request = firstRequest(recorded);
         assertEquals(List.of("talos.write_file"), request.tools.stream().map(ToolSpec::name).toList());
         assertEquals(ToolChoiceMode.REQUIRED, request.controls.toolChoice());
+        assertEquals(1024, request.controls.maxOutputTokens());
     }
 
     @Test
@@ -96,6 +117,1110 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
     }
 
     @Test
+    void postToolSynthesisRetryUsesTypedPurposeAndOriginalContract(
+            @TempDir Path workspace
+    ) {
+        String request =
+                "Read result.txt and report its exact contents. "
+                        + "Do not modify files.";
+        ToolSpec read = toolSpec("talos.read_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name()),
+                List.of(read.name()),
+                List.of());
+        List<ChatMessage> turnMessages = new ArrayList<>(List.of(
+                ChatMessage.system(systemPrompt(List.of(read))),
+                ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                turnMessages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(turnMessages);
+        CurrentTurnPlan projected =
+                RetryDispatchPurpose.POST_TOOL_SYNTHESIS.project(plan);
+        assertEquals(plan.taskContract(), projected.taskContract());
+        assertEquals(plan.originalUserRequest(), projected.originalUserRequest());
+        assertEquals(plan.taskExpectations(), projected.taskExpectations());
+        assertEquals(plan.requestObligation(), projected.requestObligation());
+        assertEquals(ActionObligation.NONE, projected.actionObligation());
+        assertEquals("NONE", projected.evidenceObligation());
+        assertTrue(projected.nativeTools().isEmpty());
+        assertTrue(projected.promptTools().isEmpty());
+
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("AFTER", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(read))
+                .build();
+        ToolCallLoop.LoopResult loopResult = new ToolCallLoop.LoopResult(
+                "How can I help?",
+                1,
+                1,
+                List.of("talos.read_file"),
+                turnMessages,
+                0,
+                0,
+                false,
+                0,
+                List.of("result.txt"),
+                0,
+                0,
+                0,
+                0);
+
+        AssistantToolLoopOutcomeResolver.Resolution resolution =
+                AssistantToolLoopOutcomeResolver.resolve(
+                        "How can I help?",
+                        turnMessages,
+                        plan,
+                        loopResult,
+                        workspace,
+                        ctx,
+                        (ignoredLoop, ignoredSuccesses) -> {
+                        },
+                        (answer, ignoredLoop, ignoredSuccesses, ignoredFailure) ->
+                                answer);
+
+        assertEquals("AFTER", resolution.answer());
+        assertEquals(1, recorded.requests().size());
+        ChatRequest retry = recorded.requests().getFirst();
+        assertEquals(ToolChoiceMode.AUTO, retry.controls.toolChoice());
+        assertTrue(
+                retry.controls.debugTags().contains(
+                        "retry-purpose:POST_TOOL_SYNTHESIS"),
+                retry.controls.toString());
+        assertEquals(0, retry.controls.maxOutputTokens());
+        assertEquals(originalMessages, turnMessages);
+        assertEquals(originalMessages.size() + 2, retry.messages.size());
+        assertEquals(
+                capabilityFrameIndex(originalMessages),
+                capabilityFrameIndex(retry.messages),
+                "retry must replace the capability frame in place");
+        assertEquals("assistant", retry.messages.get(
+                originalMessages.size()).role());
+        assertEquals("user", retry.messages.get(
+                originalMessages.size() + 1).role());
+        assertEquals(
+                "How can I help?",
+                retry.messages.get(originalMessages.size()).content());
+        assertTrue(
+                retry.messages.get(originalMessages.size() + 1)
+                        .content()
+                        .startsWith(
+                                "The user's original request was:"));
+        String providerPrompt = retry.messages.stream()
+                .map(ChatMessage::content)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertFalse(providerPrompt.contains("Available Tools"), providerPrompt);
+        assertFalse(providerPrompt.contains(read.name()), providerPrompt);
+        assertTrue(
+                soleCapabilityFrame(retry.messages)
+                        .contains("visibleTools: (none)"),
+                soleCapabilityFrame(retry.messages));
+    }
+
+    @Test
+    void retryReplacesStaleCapabilityFrameWithoutMutatingOriginalMessages(
+            @TempDir Path workspace
+    ) {
+        String request = "Edit result.txt with the required change.";
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("base"),
+                ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("done", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(toolSpec("talos.write_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-capability-retry",
+                "session-t1196-capability-retry",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            TurnModelDispatcher.dispatchBufferedRetry(
+                    ctx,
+                    messages,
+                    plan,
+                    RetryDispatchPurpose.POST_TOOL_SYNTHESIS);
+
+            assertEquals(originalMessages, messages);
+            ChatRequest retry = recorded.requests().getFirst();
+            assertTrue(retry.tools.isEmpty());
+            List<String> capabilityFrames = retry.messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(content -> content.startsWith(
+                            "[CurrentTurnCapability]"))
+                    .toList();
+            assertEquals(1, capabilityFrames.size());
+            String frame = capabilityFrames.getFirst();
+            assertTrue(frame.contains("visibleTools: (none)"), frame);
+            assertTrue(frame.contains("obligation: NONE"), frame);
+            assertFalse(frame.contains("MUTATING_TOOL_REQUIRED"), frame);
+            assertFalse(frame.contains("talos.write_file"), frame);
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void escalatedRetryRejectsMissingOrExcessAuthorityBeforeStageMutation(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt.";
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of("talos.write_file"));
+        ToolSpec read = toolSpec("talos.read_file");
+        ToolSpec write = toolSpec("talos.write_file");
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("unused", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(read, write))
+                .build();
+        List<ChatMessage> messages =
+                List.of(ChatMessage.user(request));
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-escalated-retry-rejection",
+                "session-t1196-escalated-retry-rejection",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LocalTurnTraceCapture.enterExecutionStage(
+                    TurnExecutionStage.VERIFICATION);
+
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchEscalatedRetry(
+                            ctx,
+                            messages,
+                            null,
+                            List.of(read),
+                            RetryDispatchPurpose.MISSING_MUTATION));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchEscalatedRetry(
+                            null,
+                            messages,
+                            plan,
+                            List.of(read),
+                            RetryDispatchPurpose.MISSING_MUTATION));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchEscalatedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            null,
+                            RetryDispatchPurpose.MISSING_MUTATION));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchEscalatedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            List.of(write),
+                            RetryDispatchPurpose.MISSING_MUTATION));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchEscalatedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            List.of(read),
+                            null));
+
+            assertTrue(recorded.requests().isEmpty());
+            assertEquals(
+                    TurnExecutionStage.VERIFICATION,
+                    LocalTurnTraceCapture.currentExecutionStage());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void escalatedRetryProjectsOneExactSubsetAcrossFrameBodyAndReceipt(
+            @TempDir Path workspace
+    ) {
+        String request = "Edit result.txt with the required change.";
+        ToolSpec write = toolSpec("talos.write_file");
+        ToolSpec edit = toolSpec("talos.edit_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                List.of(write.name(), edit.name()),
+                List.of(write.name(), edit.name()),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(
+                List.of(ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("done", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(write, edit))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-escalated-retry-subset",
+                "session-t1196-escalated-retry-subset",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchEscalatedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            List.of(edit),
+                            RetryDispatchPurpose.MISSING_MUTATION);
+
+            ChatRequest retry = recorded.requests().getFirst();
+            assertEquals(originalMessages, messages);
+            assertEquals(
+                    List.of(edit.name()),
+                    retry.tools.stream().map(ToolSpec::name).toList());
+            assertEquals(
+                    List.of(edit.name()),
+                    result.provenance().toolAuthorityContract()
+                            .selectedToolNames());
+            assertEquals(
+                    ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                    retry.controls.toolAuthorityMode());
+            assertTrue(
+                    retry.controls.debugTags().contains(
+                            "retry-purpose:MISSING_MUTATION"),
+                    retry.controls.toString());
+            assertTrue(
+                    soleCapabilityFrame(retry.messages)
+                            .contains("visibleTools: talos.edit_file"),
+                    soleCapabilityFrame(retry.messages));
+            assertFalse(
+                    soleCapabilityFrame(retry.messages)
+                            .contains("talos.write_file"),
+                    soleCapabilityFrame(retry.messages));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void blockedToolOverlapCannotReenterBufferedRetryAuthority(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt.";
+        CurrentTurnPlan base = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+        CurrentTurnPlan blocked = new CurrentTurnPlan(
+                base.taskContract(),
+                base.originalUserRequest(),
+                base.phaseInitial(),
+                base.phaseFinal(),
+                base.actionObligation(),
+                base.taskExpectations(),
+                base.nativeTools(),
+                base.promptTools(),
+                List.of("talos.read_file"),
+                base.evidenceObligation(),
+                base.outputObligation(),
+                base.activeTaskContext(),
+                base.artifactGoal(),
+                base.verifierProfile(),
+                base.requestObligation());
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("safe", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(toolSpec("talos.read_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-blocked-retry-tool",
+                "session-t1196-blocked-retry-tool",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchBufferedRetry(
+                            ctx,
+                            List.of(ChatMessage.user(request)),
+                            blocked,
+                            RetryDispatchPurpose.READ_ONLY_INSPECTION);
+
+            assertEquals(1, recorded.requests().size());
+            assertTrue(recorded.requests().getFirst().tools.isEmpty());
+            assertTrue(
+                    result.provenance()
+                            .toolAuthorityContract()
+                            .selectedToolNames()
+                            .isEmpty());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void retryWithoutCapturedPlanFailsBeforeDispatchOrStageMutation(
+            @TempDir Path workspace
+    ) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("must not dispatch", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(toolSpec("talos.read_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-null-retry-plan",
+                "session-t1196-null-retry-plan",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                "Read safe.txt.");
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.VERIFICATION);
+        try {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchBufferedRetry(
+                            ctx,
+                            List.of(ChatMessage.user(
+                                    "Synthetic retry: edit evil.txt.")),
+                            null,
+                            RetryDispatchPurpose.READ_ONLY_INSPECTION));
+            assertTrue(recorded.requests().isEmpty());
+            assertEquals(
+                    TurnExecutionStage.VERIFICATION,
+                    LocalTurnTraceCapture.currentExecutionStage());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void retryWithoutTypedPurposeFailsBeforeDispatchOrStageMutation(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt.";
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of(),
+                List.of());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("must not dispatch", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(toolSpec("talos.read_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-null-retry-purpose",
+                "session-t1196-null-retry-purpose",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.VERIFICATION);
+        try {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TurnModelDispatcher.dispatchBufferedRetry(
+                            ctx,
+                            List.of(ChatMessage.user(request)),
+                            plan,
+                            null));
+            assertTrue(recorded.requests().isEmpty());
+            assertEquals(
+                    TurnExecutionStage.VERIFICATION,
+                    LocalTurnTraceCapture.currentExecutionStage());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void retryIntersectsProviderTextToolsWithCapturedPromptSurface(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt and report its contents.";
+        List<ChatMessage> messages = List.of(ChatMessage.user(request));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(),
+                List.of("talos.read_file"),
+                List.of("talos.write_file"));
+        var recorded =
+                ScriptedNativeLlmClient.recordingTextToolFallbackWithContextWindow(
+                List.of(new LlmClient.StreamResult("safe", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(
+                        toolSpec("talos.read_file"),
+                        toolSpec("talos.write_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-retry-tool-intersection",
+                "session-t1196-retry-tool-intersection",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchBufferedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            RetryDispatchPurpose.READ_ONLY_INSPECTION);
+
+            assertEquals(1, recorded.requests().size());
+            ChatRequest retry = recorded.requests().getFirst();
+            assertTrue(
+                    retry.tools.isEmpty(),
+                    "JSON-text tool authority is represented by the typed receipt, "
+                            + "not a native transport surface");
+            assertEquals(
+                    List.of("talos.read_file"),
+                    result.provenance()
+                            .toolAuthorityContract()
+                            .selectedToolNames(),
+                    "source=" + result.provenance().source()
+                            + ", receipt="
+                            + result.provenance().toolAuthorityContract()
+                            + ", controls=" + retry.controls);
+            assertEquals(
+                    ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                    retry.controls.toolAuthorityMode());
+            String serializedPrompt = retry.messages.stream()
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            assertEquals(
+                    List.of("visibleTools: talos.read_file"),
+                    serializedPrompt.lines()
+                            .filter(line -> line.startsWith("visibleTools: "))
+                            .toList(),
+                    serializedPrompt);
+            assertFalse(
+                    serializedPrompt.contains(
+                            "Available mutating tools: talos.write_file"),
+                    serializedPrompt);
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void retryIntersectsNativeProviderBodyAndReceiptToCapturedSurface(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt and report its contents.";
+        List<ChatMessage> messages = List.of(ChatMessage.user(request));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of(),
+                List.of("talos.write_file"));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("safe", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(
+                        toolSpec("talos.read_file"),
+                        toolSpec("talos.write_file")))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-native-retry-tool-intersection",
+                "session-t1196-native-retry-tool-intersection",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchBufferedRetry(
+                            ctx,
+                            messages,
+                            plan,
+                            RetryDispatchPurpose.READ_ONLY_INSPECTION);
+
+            assertEquals(1, recorded.requests().size());
+            ChatRequest retry = recorded.requests().getFirst();
+            assertEquals(
+                    List.of("talos.read_file"),
+                    retry.tools.stream().map(ToolSpec::name).toList());
+            assertEquals(
+                    List.of("talos.read_file"),
+                    result.provenance()
+                            .toolAuthorityContract()
+                            .selectedToolNames());
+            assertEquals(
+                    ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                    retry.controls.toolAuthorityMode());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void inspectionRetryPurposesStripMutationAuthorityAcrossBodyFrameControlsAndReceipt(
+            @TempDir Path workspace
+    ) {
+        String request =
+                "Inspect README.md, then edit it if needed.";
+        ToolSpec read = toolSpec("talos.read_file");
+        ToolSpec write = toolSpec("talos.write_file");
+        ToolSpec edit = toolSpec("talos.edit_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                List.of(read.name(), write.name(), edit.name()),
+                List.of(read.name(), write.name(), edit.name()),
+                List.of());
+        List<ChatMessage> messages =
+                new ArrayList<>(List.of(
+                        ChatMessage.system(
+                                systemPrompt(List.of(read, write, edit))),
+                        ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(
+                                new LlmClient.StreamResult("inspected", List.of()),
+                                new LlmClient.StreamResult("inspected", List.of()),
+                                new LlmClient.StreamResult("inspected", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(read, write, edit))
+                .build();
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-inspection-retry-surface",
+                "session-t1196-inspection-retry-surface",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            List<RetryDispatchPurpose> purposes = List.of(
+                    RetryDispatchPurpose.INSPECT_COMPLETENESS,
+                    RetryDispatchPurpose.READ_ONLY_INSPECTION,
+                    RetryDispatchPurpose.NO_TOOL_GROUNDING);
+            for (RetryDispatchPurpose purpose : purposes) {
+                CurrentTurnPlan projected = purpose.project(plan);
+                assertEquals(
+                        plan.taskContract(),
+                        projected.taskContract(),
+                        "the original contract remains provenance");
+                assertEquals(
+                        ExecutionPhase.INSPECT,
+                        projected.phaseInitial());
+                assertEquals(
+                        ExecutionPhase.INSPECT,
+                        projected.phaseFinal());
+            }
+            List<LlmClient.StreamResult> results = new ArrayList<>();
+            for (RetryDispatchPurpose purpose : purposes) {
+                results.add(TurnModelDispatcher.dispatchBufferedRetry(
+                        ctx,
+                        messages,
+                        plan,
+                        purpose));
+            }
+
+            assertEquals(originalMessages, messages);
+            assertEquals(purposes.size(), recorded.requests().size());
+            for (int index = 0; index < purposes.size(); index++) {
+                RetryDispatchPurpose purpose = purposes.get(index);
+                ChatRequest retry = recorded.requests().get(index);
+                assertEquals(
+                        List.of(read.name()),
+                        retry.tools.stream().map(ToolSpec::name).toList());
+                String frame = soleCapabilityFrame(retry.messages);
+                assertTrue(
+                        frame.contains("obligation: INSPECT_REQUIRED"),
+                        frame);
+                assertTrue(frame.contains("phase: INSPECT"), frame);
+                assertTrue(
+                        frame.contains("mutationAllowed: false"),
+                        frame);
+                assertTrue(
+                        frame.contains("visibleTools: talos.read_file"),
+                        frame);
+                assertFalse(frame.contains(write.name()), frame);
+                assertFalse(frame.contains(edit.name()), frame);
+                String body = retry.messages.stream()
+                        .map(ChatMessage::content)
+                        .filter(java.util.Objects::nonNull)
+                        .collect(java.util.stream.Collectors.joining("\n"));
+                assertFalse(body.contains(write.name()), body);
+                assertFalse(body.contains(edit.name()), body);
+                assertEquals(ToolChoiceMode.REQUIRED, retry.controls.toolChoice());
+                assertTrue(
+                        retry.controls.debugTags().contains(
+                                purpose.debugTag()),
+                        retry.controls.toString());
+                assertEquals(
+                        List.of(read.name()),
+                        results.get(index).provenance()
+                                .toolAuthorityContract()
+                                .selectedToolNames());
+            }
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void inheritedProviderSpecsAreBoundedByCapturedPlan(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt.";
+        ToolSpec read = toolSpec("talos.read_file");
+        ToolSpec write = toolSpec("talos.write_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name()),
+                List.of(read.name()),
+                List.of(write.name()));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("safe", List.of())),
+                4096);
+        recorded.client().setToolSpecs(List.of(read, write));
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        TurnModelDispatcher.dispatchBuffered(
+                ctx,
+                List.of(ChatMessage.user(request)),
+                plan);
+
+        ChatRequest providerRequest = recorded.requests().getFirst();
+        assertEquals(
+                List.of(read.name()),
+                providerRequest.tools.stream()
+                        .map(ToolSpec::name)
+                        .toList());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                providerRequest.controls.toolAuthorityMode());
+    }
+
+    @Test
+    void disappearedCurrentToolIsRemovedFromFrameBodyAndReceipt(
+            @TempDir Path workspace
+    ) {
+        String request = "Inspect safe.txt.";
+        ToolSpec read = toolSpec("talos.read_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name(), "talos.grep"),
+                List.of(read.name(), "talos.grep"),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(
+                List.of(ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("safe", List.of())),
+                        4096);
+        recorded.client().setToolSpecs(List.of(read));
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-disappeared-current-tool",
+                "session-t1196-disappeared-current-tool",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchBuffered(
+                            ctx,
+                            messages,
+                            plan);
+
+            ChatRequest providerRequest = recorded.requests().getFirst();
+            assertEquals(originalMessages, messages);
+            assertEquals(
+                    List.of(read.name()),
+                    providerRequest.tools.stream()
+                            .map(ToolSpec::name).toList());
+            assertEquals(
+                    List.of(read.name()),
+                    result.provenance().toolAuthorityContract()
+                            .selectedToolNames());
+            assertTrue(
+                    soleCapabilityFrame(providerRequest.messages)
+                            .contains("visibleTools: talos.read_file"),
+                    soleCapabilityFrame(providerRequest.messages));
+            assertFalse(
+                    soleCapabilityFrame(providerRequest.messages)
+                            .contains("talos.grep"),
+                    soleCapabilityFrame(providerRequest.messages));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void bufferedTimeoutAndStreamingDispatchShareOneNarrowedAuthoritySurface(
+            @TempDir Path workspace
+    ) throws Exception {
+        String request = "Inspect safe.txt.";
+        ToolSpec read = toolSpec("talos.read_file");
+        ToolSpec grep = toolSpec("talos.grep");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name(), grep.name()),
+                List.of(read.name(), grep.name()),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(
+                List.of(ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(
+                                new LlmClient.StreamResult("buffered", List.of()),
+                                new LlmClient.StreamResult("timeout", List.of()),
+                                new LlmClient.StreamResult("streaming", List.of())),
+                        4096);
+        recorded.client().setToolSpecs(List.of(read));
+        List<String> streamedChunks = new ArrayList<>();
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .streamSink(streamedChunks::add)
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-dispatch-parity",
+                "session-t1196-dispatch-parity",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult buffered =
+                    TurnModelDispatcher.dispatchBuffered(
+                            ctx, messages, plan);
+            LlmClient.StreamResult timeout =
+                    TurnModelDispatcher.dispatchBufferedWithTimeout(
+                            ctx,
+                            messages,
+                            plan,
+                            30_000L);
+            LlmClient.StreamResult streaming =
+                    TurnModelDispatcher.dispatchStreaming(
+                            ctx, messages, plan);
+
+            assertEquals(originalMessages, messages);
+            assertEquals(3, recorded.requests().size());
+            List<ChatRequest> requests =
+                    List.copyOf(recorded.requests());
+            List<String> capabilityFrames = requests.stream()
+                    .map(providerRequest ->
+                            soleCapabilityFrame(
+                                    providerRequest.messages))
+                    .toList();
+            assertEquals(
+                    List.of(
+                            capabilityFrames.getFirst(),
+                            capabilityFrames.getFirst(),
+                            capabilityFrames.getFirst()),
+                    capabilityFrames);
+            for (ChatRequest providerRequest : requests) {
+                assertEquals(
+                        List.of(read.name()),
+                        providerRequest.tools.stream()
+                                .map(ToolSpec::name)
+                                .toList());
+                assertEquals(
+                        List.of("visibleTools: talos.read_file"),
+                        soleCapabilityFrame(
+                                providerRequest.messages).lines()
+                                .filter(line -> line.startsWith(
+                                        "visibleTools: "))
+                                .toList());
+                assertFalse(
+                        soleCapabilityFrame(providerRequest.messages)
+                                .contains(grep.name()),
+                        soleCapabilityFrame(
+                                providerRequest.messages));
+            }
+
+            assertEquals(
+                    requests.get(0).controls,
+                    requests.get(1).controls);
+            assertEquals(
+                    requests.get(0).controls,
+                    requests.get(2).controls);
+            assertEquals(
+                    List.of(
+                            "action-obligation:"
+                                    + plan.actionObligation().name()),
+                    requests.getFirst().controls.debugTags().stream()
+                            .filter(tag -> tag.startsWith(
+                                    "action-obligation:"))
+                            .toList());
+
+            ProviderResponseCapture.ToolAuthorityContract
+                    expectedAuthority =
+                            buffered.provenance()
+                                    .toolAuthorityContract();
+            assertEquals(
+                    ProviderResponseCapture.ToolAuthorityMode
+                            .PROVIDER_NATIVE,
+                    expectedAuthority.mode());
+            assertEquals(
+                    List.of(read.name()),
+                    expectedAuthority.selectedToolNames());
+            assertEquals(
+                    expectedAuthority,
+                    timeout.provenance()
+                            .toolAuthorityContract());
+            assertEquals(
+                    expectedAuthority,
+                    streaming.provenance()
+                            .toolAuthorityContract());
+            assertEquals(List.of("streaming"), streamedChunks);
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void promptOnlyNameCannotBePromotedIntoNativeProviderAuthority(
+            @TempDir Path workspace
+    ) {
+        String request = "Inspect safe.txt.";
+        ToolSpec read = toolSpec("talos.read_file");
+        ToolSpec retrieve = toolSpec("talos.retrieve");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name()),
+                List.of(retrieve.name()),
+                List.of());
+        List<ChatMessage> messages = new ArrayList<>(
+                List.of(ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        var recorded =
+                ScriptedNativeLlmClient.recordingWithContextWindow(
+                        List.of(new LlmClient.StreamResult("safe", List.of())),
+                        4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of(read, retrieve))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trace-t1196-native-prompt-precedence",
+                "session-t1196-native-prompt-precedence",
+                1,
+                "2026-07-30T00:00:00Z",
+                "workspace-hash",
+                "assistant",
+                "test",
+                "model",
+                request);
+        try {
+            LlmClient.StreamResult result =
+                    TurnModelDispatcher.dispatchBuffered(
+                            ctx,
+                            messages,
+                            plan);
+
+            ChatRequest providerRequest = recorded.requests().getFirst();
+            assertEquals(originalMessages, messages);
+            assertEquals(
+                    List.of(read.name()),
+                    providerRequest.tools.stream()
+                            .map(ToolSpec::name).toList());
+            assertEquals(
+                    List.of(read.name()),
+                    result.provenance().toolAuthorityContract()
+                            .selectedToolNames());
+            assertEquals(
+                    ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                    providerRequest.controls.toolAuthorityMode());
+            assertEquals(
+                    List.of("visibleTools: talos.read_file"),
+                    soleCapabilityFrame(providerRequest.messages).lines()
+                            .filter(line -> line.startsWith("visibleTools: "))
+                            .toList());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void explicitEmptyContextSurfaceDoesNotInheritProviderSpecs(
+            @TempDir Path workspace
+    ) {
+        String request = "Read safe.txt.";
+        ToolSpec read = toolSpec("talos.read_file");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.INSPECT,
+                List.of(read.name()),
+                List.of(read.name()),
+                List.of());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("safe", List.of())),
+                4096);
+        recorded.client().setToolSpecs(List.of(read));
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .nativeToolSpecs(List.of())
+                .build();
+
+        List<ChatMessage> messages = new ArrayList<>(
+                List.of(ChatMessage.user(request)));
+        CurrentTurnPromptInstructions.replaceTaskContractInstruction(
+                messages,
+                plan);
+        List<ChatMessage> originalMessages = List.copyOf(messages);
+        LlmClient.StreamResult result = TurnModelDispatcher.dispatchBuffered(
+                ctx,
+                messages,
+                plan);
+
+        ChatRequest providerRequest = recorded.requests().getFirst();
+        assertEquals(originalMessages, messages);
+        assertTrue(providerRequest.tools.isEmpty());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                providerRequest.controls.toolAuthorityMode());
+        assertTrue(
+                result.provenance()
+                        .toolAuthorityContract()
+                        .selectedToolNames()
+                        .isEmpty());
+        assertEquals(
+                List.of("visibleTools: (none)"),
+                soleCapabilityFrame(providerRequest.messages).lines()
+                        .filter(line -> line.startsWith("visibleTools: "))
+                        .toList());
+    }
+
+    @Test
     void streamingAndBufferedNoToolDispatchCharacterizesFinalAnswerShape(@TempDir Path workspace) {
         String answer = "Dispatch OK.";
         var streamed = ScriptedNativeLlmClient.recordingWithContextWindow(
@@ -125,14 +1250,19 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                         .build(),
                 new AssistantTurnExecutor.Options());
 
-        assertTrue(streamingOut.streamed(), "stream sink should select the streaming provider path");
-        assertFalse(bufferedOut.streamed(), "missing stream sink should select the buffered provider path");
+        assertFalse(streamingOut.streamed(), "Transport fragments must remain private");
+        assertFalse(bufferedOut.streamed());
+        assertTrue(chunks.isEmpty());
+        assertEquals(1, streamed.requests().size());
+        assertEquals(1, buffered.requests().size());
         assertEquals(bufferedOut.text(), streamingOut.text());
         assertEquals(answer, streamingOut.text());
     }
 
     @Test
     void toolOnlyStreamingResponseInvokesOnStreamCompleteOnceBeforeToolLoop(@TempDir Path workspace) {
+        ProviderAuthorityTestTrace.begin("model-dispatch-stream", null);
+        try {
         AtomicInteger completions = new AtomicInteger();
         AtomicInteger completionCountAtToolExecution = new AtomicInteger(-1);
         AtomicInteger toolExecutions = new AtomicInteger();
@@ -158,7 +1288,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                 .build();
 
         AssistantTurnExecutor.execute(
-                messages("Please perform the selected diagnostic action."),
+                messages("Read notes.txt and summarize it."),
                 workspace,
                 ctx,
                 new AssistantTurnExecutor.Options());
@@ -167,6 +1297,289 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         assertEquals(1, toolExecutions.get(), "native tool call should enter the tool loop");
         assertEquals(1, completionCountAtToolExecution.get(),
                 "stream completion should happen before tool execution starts");
+        assertEquals(512, firstRequest(recorded).controls.maxOutputTokens());
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    @Test
+    void lengthLimitedNoToolAnswerWithholdsProviderTextAndRecordsLimitedAdvisory(@TempDir Path workspace) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("Partial answer", List.of(), "length")),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t989-length",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Explain briefly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Explain briefly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(IncompleteGenerationPresentation.NOTICE, out.text());
+            assertFalse(out.text().contains("Partial answer"));
+            assertFalse(out.streamed());
+            assertEquals(1, recorded.requests().size(), "An incomplete candidate must not trigger another request");
+            assertLimitedAdvisory(trace);
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "LLM_OUTPUT_LIMIT_REACHED".equals(warning.code())
+                            && warning.message().contains("finish_reason=length")));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void terminalLengthLimitedReadAnswerRemainsUnresolvedWithoutFurtherGeneration(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                new LlmClient.StreamResult("I need the current notes.", List.of(), "length"),
+                new LlmClient.StreamResult("I still need the current notes.", List.of(), "length")), 4096);
+        var ctx = Context.builder(new Config()).llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of())).toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry)).build();
+        ProviderAuthorityTestTrace.begin("initial-output-limit-no-read-handoff", null);
+        try {
+            var out = AssistantTurnExecutor.execute(messages("Read notes.txt and tell me the observed value. Do not change files."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            var trace = LocalTurnTraceCapture.complete();
+            assertEquals(2, recorded.requests().size(), "Only the existing bounded initial-generation cap retry is permitted");
+            assertTrue(recorded.requests().getFirst().controls.maxOutputTokens() > 0);
+            assertEquals(0, recorded.requests().getLast().controls.maxOutputTokens());
+            assertTrue(recorded.requests().getLast().controls.debugTags().contains("output-cap-lifted-retry"));
+            var attempts = trace.events().stream().filter(event -> "GENERATION_ATTEMPT_STARTED".equals(event.type())).toList();
+            assertEquals(2, attempts.size());
+            assertEquals("PRIMARY", attempts.getFirst().data().get("attemptKind"));
+            assertEquals("OUTPUT_CAP_LIFT_RETRY", attempts.getLast().data().get("attemptKind"));
+            org.junit.jupiter.api.Assertions.assertNotNull(attempts.getFirst().data().get("generationId"));
+            assertEquals(attempts.getFirst().data().get("generationId"), attempts.getLast().data().get("generationId"));
+            assertEquals(1L, trace.events().stream().filter(event -> "GENERATION_STARTED".equals(event.type())).count());
+            assertTrue(out.text().contains("Evidence incomplete"), out.text());
+            assertFalse(out.text().contains("I need the current notes."), out.text());
+            assertFalse(out.text().contains("I still need the current notes."), out.text());
+            assertFalse(out.text().contains("42"), out.text());
+            assertTrue(trace.events().stream().noneMatch(event -> "TOOL_EXECUTED".equals(event.type())));
+            assertLimitedAdvisory(trace);
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    @Test
+    void recoveredReadAnswerKeepsItsOwnOutputLimit(@TempDir Path workspace) throws Exception {
+        assertReadHandoffOutputLimit(workspace, "length", true);
+    }
+
+    @Test
+    void normalStopReadRecoveryRetainsItsCompletedAnswer(@TempDir Path workspace) throws Exception {
+        assertReadHandoffOutputLimit(workspace, "stop", false);
+    }
+
+    @Test
+    void nativeToolLoopFinalAnswerKeepsItsOwnOutputLimit(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "read-notes", "talos.read_file", Map.of("path", "notes.txt")))),
+                        new LlmClient.StreamResult("The observed value in notes.txt is 42.", List.of(), "length")),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+        ProviderAuthorityTestTrace.begin("selected-output-limit-native-loop", null);
+        try {
+            var out = AssistantTurnExecutor.execute(messages("Read notes.txt and tell me the observed value."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            assertEquals(2, recorded.requests().size());
+            assertFalse(out.text().contains("The observed value in notes.txt is 42."), out.text());
+            assertTrue(out.text().contains("uncommitted provider text was withheld"), out.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            var trace = LocalTurnTraceCapture.complete();
+            assertLimitedAdvisory(trace);
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                    && "talos.read_file".equals(event.toolName())));
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    @Test
+    void incompleteCandidateNoticeDoesNotRequireTraceCapture(@TempDir Path workspace) {
+        LocalTurnTraceCapture.clear();
+        for (boolean streaming : List.of(false, true)) {
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("Partial answer", List.of(), "length")), 4096);
+            var chunks = new ArrayList<String>();
+            var builder = Context.builder(new Config()).llm(recorded.client())
+                    .sandbox(new Sandbox(workspace, Map.of()));
+            if (streaming) builder.streamSink(chunks::add).onStreamComplete(() -> {});
+            var out = AssistantTurnExecutor.execute(messages("Explain briefly."), workspace,
+                    builder.build(), new AssistantTurnExecutor.Options());
+            assertFalse(out.streamed());
+            assertEquals(IncompleteGenerationPresentation.NOTICE, out.text());
+            assertFalse(out.text().contains("Partial answer"));
+            assertTrue(chunks.isEmpty());
+            assertEquals(1, recorded.requests().size());
+        }
+    }
+
+    private static void assertReadHandoffOutputLimit(
+            Path workspace, String finalFinish, boolean expectedNotice) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "Observed value is 42.\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var responses = new ArrayList<LlmClient.StreamResult>();
+        responses.add(new LlmClient.StreamResult("I need the current notes.", List.of(), "stop"));
+        responses.add(new LlmClient.StreamResult("The observed value in notes.txt is 42.", List.of(), finalFinish));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(responses, 4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), 3))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+        ProviderAuthorityTestTrace.begin("selected-output-limit-read-handoff", null);
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Read notes.txt and tell me the observed value. Do not change files."),
+                    workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertEquals(responses.size(), recorded.requests().size(),
+                    "One normal initial response and one post-read synthesis must be consumed");
+            assertEquals(expectedNotice, out.text().contains("uncommitted provider text was withheld"), out.text());
+            if (expectedNotice) {
+                assertFalse(out.text().contains("The observed value in notes.txt is 42."), out.text());
+                assertLimitedAdvisory(trace);
+            } else {
+                assertTrue(out.text().contains("The observed value in notes.txt is 42."), out.text());
+            }
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                            && "talos.read_file".equals(event.toolName())),
+                    "this witness must execute the real deterministic read handoff");
+            assertEquals("Observed value is 42.\n", Files.readString(workspace.resolve("notes.txt")));
+        } finally {
+            ProviderAuthorityTestTrace.clear();
+        }
+    }
+
+    private static void assertLimitedAdvisory(LocalTurnTrace trace) {
+        var status = FinalAnswerStatus.decode(trace);
+        assertTrue(status.available(), trace.events().toString());
+        assertEquals(FinalAnswerStatus.Delivery.LIMITED, status.delivery());
+        assertTrue(status.causes().contains(FinalAnswerStatus.Cause.INCOMPLETE_PROVIDER_GENERATION), status.toString());
+        assertEquals("ADVISORY_ONLY", trace.outcome().status());
+    }
+
+    @Test
+    void bufferedAbortMarkerRecordsFailedOutcome(@TempDir Path workspace) {
+        // This fixture targets wall-clock propagation, not which clock wins.
+        // Disable idle extension so first-chunk timestamp granularity cannot
+        // switch the terminal cause between wall-clock and idle timeout.
+        var blocking = ScriptedNativeLlmClient.blockingAfterFirstChunk(5_000L, 0L);
+        var ctx = Context.builder(new Config())
+                .llm(blocking.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t988-abort",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Answer slowly.");
+        try {
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Answer slowly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options().llmTimeoutMs(150L)));
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var watchdog = assertInstanceOf(dev.talos.runtime.GenerationWatchdogException.class, failure);
+            assertEquals(ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT, watchdog.reason());
+            assertTrue(trace.events().stream().anyMatch(event -> "GENERATION_ABANDONED".equals(event.type())
+                            && watchdog.reason().name().equals(event.data().get("abandonment"))),
+                    "the terminal exception must retain the actual winning provider abandonment");
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("LLM_ABORTED", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void directProviderCancellationPropagatesUnchanged(@TempDir Path workspace) {
+        CancellationException cancellation = new CancellationException("stop provider request");
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(cancellation))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> AssistantTurnExecutor.execute(
+                        messages("Answer briefly with the number four."),
+                        workspace,
+                        ctx,
+                        new AssistantTurnExecutor.Options()));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void genericWrappedProviderCancellationPropagatesUnchanged(@TempDir Path workspace) {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop provider request"));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(wrapped))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> AssistantTurnExecutor.execute(
+                        messages("Answer briefly with the number four."),
+                        workspace,
+                        ctx,
+                        new AssistantTurnExecutor.Options()));
+
+        assertSame(wrapped, thrown);
     }
 
     private static List<ChatMessage> messages(String request) {
@@ -195,6 +1608,50 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
     private static ChatRequest firstRequest(ScriptedNativeLlmClient.RecordedClient recorded) {
         assertFalse(recorded.requests().isEmpty(), "provider request should be recorded");
         return recorded.requests().getFirst();
+    }
+
+    private static String systemPrompt(List<ToolSpec> tools) {
+        List<PromptToolDescriptor> descriptors = tools.stream()
+                .map(tool -> new PromptToolDescriptor(
+                        tool.name(),
+                        tool.description(),
+                        tool.parametersSchemaJson(),
+                        false))
+                .toList();
+        return SystemPromptBuilder.forUnified()
+                .withNativeTools(true)
+                .withPromptTools(descriptors)
+                .withVisibleToolNames(
+                        tools.stream().map(ToolSpec::name).toList())
+                .build();
+    }
+
+    private static String soleCapabilityFrame(List<ChatMessage> messages) {
+        List<String> frames = messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(ChatMessage::content)
+                .filter(java.util.Objects::nonNull)
+                .filter(content -> content.startsWith(
+                        "[CurrentTurnCapability]"))
+                .toList();
+        assertEquals(1, frames.size(), frames.toString());
+        return frames.getFirst();
+    }
+
+    private static int capabilityFrameIndex(
+            List<ChatMessage> messages
+    ) {
+        for (int i = 0; i < messages.size(); i++) {
+            ChatMessage message = messages.get(i);
+            if (message != null
+                    && "system".equals(message.role())
+                    && message.content() != null
+                    && message.content().startsWith(
+                            "[CurrentTurnCapability]")) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private record CompletionAwareReadFileTool(

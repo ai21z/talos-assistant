@@ -143,9 +143,11 @@ class ReadDisplayWriteContainmentGuardTest {
     }
 
     private static void addReadback(LoopState state, String path, String readback) {
-        state.pathsReadThisTurn.add(ToolCallSupport.normalizePath(path));
-        state.successfulReadCallBodies.put("talos.read_file:path=" + path + ";", readback);
-        state.readFileBodiesThisTurn.put(ToolCallSupport.normalizePath(path), readback);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCall writeFile(String path, String content) {
@@ -158,7 +160,7 @@ class ReadDisplayWriteContainmentGuardTest {
     ) {
         return new ToolCallPreExecutionGuardChain(
                 false,
-                (s, nativePath, callIndex, content) -> modelMessages.add(content),
+                (s, nativePath, callIndex, content, outcome) -> modelMessages.add(content),
                 (toolName, result) -> emitted.add(result));
     }
 

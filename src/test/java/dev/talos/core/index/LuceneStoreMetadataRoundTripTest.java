@@ -1,10 +1,15 @@
 package dev.talos.core.index;
 import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.spi.CorpusStore;
+import dev.talos.core.Config;
+import dev.talos.core.context.ContextResult;
+import dev.talos.core.privacy.ContextSourcePolicy;
+import dev.talos.spi.types.SourceIdentity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests metadata round-trip through LuceneStore:
@@ -13,6 +18,55 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Backwards compatible: missing metadata returns ChunkMetadata.empty()
  */
 class LuceneStoreMetadataRoundTripTest {
+    @Test
+    void explicitSourcePathSurvivesRoundTripAndInconsistentProvenanceIsDenied(@TempDir Path dir) {
+        var meta = new ChunkMetadata(null, -1, -1, null, SourceIdentity.unclassified("notes#draft.docx"));
+        try (var store = new LuceneStore(dir.resolve("index"), 0)) {
+            store.add("public.md#0", "retained private prose", null, "hash", 0, meta);
+            store.commit();
+            var hit = store.bm25("retained private prose", 1).getFirst();
+            assertEquals(meta.sourceIdentity(), hit.metadata().sourceIdentity());
+            var admitted = ContextSourcePolicy.admit(new Config(null), dir,
+                    new ContextResult.Snippet(hit.path(), store.getTextByPath(hit.path()), hit.metadata()));
+            assertFalse(admitted.contentRestrictions().modelAllowed());
+            assertFalse(admitted.contentRestrictions().artifactAllowed());
+            assertFalse(admitted.contentRestrictions().historyAllowed());
+        }
+    }
+
+    @Test
+    void legacyStoredIdentityReconstructsOnlyFinalNumericSuffix(@TempDir Path dir) throws Exception {
+        // An actual pre-sourcePath index fixture, containing classification but no source path field.
+        try (var directory = org.apache.lucene.store.FSDirectory.open(dir);
+             var analyzer = new org.apache.lucene.analysis.standard.StandardAnalyzer();
+             var writer = new org.apache.lucene.index.IndexWriter(directory,
+                     new org.apache.lucene.index.IndexWriterConfig(analyzer))) {
+            var document = new org.apache.lucene.document.Document();
+            document.add(new org.apache.lucene.document.StringField(LuceneStore.F_PATH,
+                    "notes#draft.docx#0", org.apache.lucene.document.Field.Store.YES));
+            document.add(new org.apache.lucene.document.StringField(LuceneStore.F_SOURCE_TYPE,
+                    "UNKNOWN", org.apache.lucene.document.Field.Store.YES));
+            document.add(new org.apache.lucene.document.TextField(LuceneStore.F_TEXT,
+                    "legacy extracted prose", org.apache.lucene.document.Field.Store.YES));
+            writer.addDocument(document);
+        }
+        try (var store = new LuceneStore(dir, 0)) {
+            var hit = store.bm25("legacy extracted prose", 1).getFirst();
+            assertEquals("notes#draft.docx", hit.metadata().sourceIdentity().path());
+            Config cfg = new Config(null);
+            cfg.data.put("privacy", Map.of("mode", "private", "rag", Map.of("enabled_in_private_mode", true),
+                    "document_extraction", Map.of("allow_send_to_model", false,
+                            "allow_rag_indexing", true, "persist_raw_artifacts", false)));
+            cfg.data.put("document_extraction", Map.of("enabled", true, "word", Map.of("enabled", true)));
+            var admitted = ContextSourcePolicy.admit(cfg, dir,
+                    new ContextResult.Snippet(hit.path(), store.getTextByPath(hit.path()), hit.metadata()));
+            assertFalse(admitted.contentRestrictions().modelAllowed());
+            assertFalse(admitted.contentRestrictions().artifactAllowed());
+            assertFalse(admitted.contentRestrictions().historyAllowed());
+            assertTrue(admitted.contentRestrictions().indexAllowed());
+        }
+    }
+
     @Test
     void bm25_returnsMetadataOnHit(@TempDir Path dir) {
         var meta = new ChunkMetadata("java", 10, 25, "## Architecture");

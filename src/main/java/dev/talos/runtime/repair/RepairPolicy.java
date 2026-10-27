@@ -166,6 +166,10 @@ public final class RepairPolicy {
         if (selectorFacts == null || selectorFacts.isBlank()) {
             return instruction;
         }
+        selectorFacts = sanitizeSelectorFactLines(selectorFacts);
+        if (selectorFacts.isBlank()) {
+            return instruction;
+        }
         selectorFacts = compactSelectorFacts(selectorFacts);
         return instruction
                 + "\n\n[Current static selector facts]\n"
@@ -198,6 +202,9 @@ public final class RepairPolicy {
                 + "\"arguments\":{\"path\":\"" + targetPathForJson(path) + "\","
                 + "\"old_string\":\"...\",\"new_string\":\"...\"}}. "
                 + "Fill old_string and new_string with real file text, not placeholders. "
+                + "For an append or insert task, set old_string to an existing anchor line "
+                + "copied exactly from the read result and new_string to that same anchor "
+                + "line plus the added text. "
                 + "Do not call talos.edit_file with empty old_string again. If you "
                 + "cannot form the exact edit, stop and say no edit was applied.";
     }
@@ -211,7 +218,7 @@ public final class RepairPolicy {
     ) {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
-        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
+        Set<String> forbiddenKeys = normalizedForbiddenTargets(forbiddenTargets);
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
         boolean frontendFrameworkCoherenceRepair =
                 problems.stream().anyMatch(RepairPolicy::isFrontendFrameworkCoherenceProblem);
@@ -301,18 +308,18 @@ public final class RepairPolicy {
             List<String> forbiddenTargets
     ) {
         if (targets == null || targets.isEmpty()) return Set.of();
-        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
+        Set<String> forbiddenKeys = normalizedForbiddenTargets(forbiddenTargets);
         if (forbiddenKeys.isEmpty()) return targets;
         LinkedHashSet<String> out = new LinkedHashSet<>(targets);
         removeForbiddenTargets(out, forbiddenKeys);
         return out;
     }
 
-    private static Set<String> normalizedTargetKeys(List<String> targets) {
+    private static Set<String> normalizedForbiddenTargets(List<String> targets) {
         if (targets == null || targets.isEmpty()) return Set.of();
         LinkedHashSet<String> keys = new LinkedHashSet<>();
         for (String target : targets) {
-            String key = normalizeTargetKey(target);
+            String key = normalizeTarget(target);
             if (!key.isBlank()) keys.add(key);
         }
         return keys;
@@ -323,7 +330,7 @@ public final class RepairPolicy {
                 || forbiddenKeys == null || forbiddenKeys.isEmpty()) {
             return;
         }
-        targets.removeIf(target -> forbiddenKeys.contains(normalizeTargetKey(target)));
+        targets.removeIf(target -> forbiddenKeys.contains(normalizeTarget(target)));
     }
 
     private static Set<String> verifierSpecificStructuralRepairTargets(
@@ -566,6 +573,55 @@ public final class RepairPolicy {
                 out.add(target);
             }
         }
+    }
+
+    /**
+     * T1011: selector facts are workspace-derived tokens riding in a
+     * system-role instruction, so every word must stay selector-shaped.
+     * A line carrying any word longer than 64 characters or containing
+     * characters outside the selector/path alphabet is dropped whole
+     * (fail closed per line); the verifier's own template words are plain
+     * English and always pass. This bounds the injection bandwidth of
+     * crafted class/id names to short identifier tokens.
+     */
+    static String sanitizeSelectorFactLines(String selectorFacts) {
+        if (selectorFacts == null || selectorFacts.isBlank()) return "";
+        StringBuilder out = new StringBuilder();
+        for (String line : selectorFacts.split("\\R")) {
+            if (selectorFactLineIsSafe(line)) {
+                appendLine(out, line.stripTrailing());
+            }
+        }
+        return out.toString().stripTrailing();
+    }
+
+    private static boolean selectorFactLineIsSafe(String line) {
+        for (String rawWord : line.strip().split("\\s+")) {
+            String word = stripSelectorWordPunctuation(rawWord);
+            if (word.isEmpty()) continue;
+            if (word.length() > 64) return false;
+            for (int i = 0; i < word.length(); i++) {
+                char c = word.charAt(i);
+                boolean allowed = Character.isLetterOrDigit(c)
+                        || c == '_' || c == '-' || c == '.' || c == '#' || c == '/';
+                if (!allowed) return false;
+            }
+        }
+        return true;
+    }
+
+    private static String stripSelectorWordPunctuation(String word) {
+        int start = 0;
+        int end = word.length();
+        while (start < end && isSelectorWordEdgeChar(word.charAt(start))) start++;
+        while (end > start && isSelectorWordEdgeChar(word.charAt(end - 1))) end--;
+        return word.substring(start, end);
+    }
+
+    private static boolean isSelectorWordEdgeChar(char c) {
+        return c == '`' || c == '\'' || c == '"' || c == '(' || c == ')' || c == '['
+                || c == ']' || c == ',' || c == ';' || c == ':' || c == '.' || c == '!'
+                || c == '?' || c == '<' || c == '>';
     }
 
     private static String compactSelectorFacts(String selectorFacts) {

@@ -4,6 +4,7 @@ public record IntentDerivation(
         TargetSource source,
         String reason,
         int startOffset,
+        int authorityEndOffset,
         int endOffset,
         String sourceText,
         double confidence
@@ -18,8 +19,11 @@ public record IntentDerivation(
             throw new IllegalArgumentException("confidence must be between 0.0 and 1.0");
         }
         boolean startKnown = startOffset >= 0;
+        boolean authorityEndKnown = authorityEndOffset >= 0;
         boolean endKnown = endOffset >= 0;
-        if (startOffset < UNKNOWN_OFFSET || endOffset < UNKNOWN_OFFSET) {
+        if (startOffset < UNKNOWN_OFFSET
+                || authorityEndOffset < UNKNOWN_OFFSET
+                || endOffset < UNKNOWN_OFFSET) {
             throw new IllegalArgumentException("source offsets must be non-negative or UNKNOWN_OFFSET");
         }
         if (startKnown != endKnown) {
@@ -28,12 +32,38 @@ public record IntentDerivation(
         if (startKnown && endOffset < startOffset) {
             throw new IllegalArgumentException("endOffset must be greater than or equal to startOffset");
         }
+        if (authorityEndKnown
+                && (!startKnown
+                        || authorityEndOffset <= startOffset
+                        || authorityEndOffset > endOffset)) {
+            throw new IllegalArgumentException(
+                    "authorityEndOffset must be unknown or inside the exact source span");
+        }
+    }
+
+    public IntentDerivation(
+            TargetSource source,
+            String reason,
+            int startOffset,
+            int endOffset,
+            String sourceText,
+            double confidence
+    ) {
+        this(
+                source,
+                reason,
+                startOffset,
+                UNKNOWN_OFFSET,
+                endOffset,
+                sourceText,
+                confidence);
     }
 
     public static IntentDerivation unknown() {
         return new IntentDerivation(
                 TargetSource.RUNTIME_DEFAULT,
                 "",
+                UNKNOWN_OFFSET,
                 UNKNOWN_OFFSET,
                 UNKNOWN_OFFSET,
                 "",

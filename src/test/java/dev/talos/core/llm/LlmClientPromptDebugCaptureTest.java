@@ -28,6 +28,26 @@ class LlmClientPromptDebugCaptureTest {
     @AfterEach
     void clearCapture() {
         PromptDebugCapture.clear();
+        dev.talos.safety.ContentRestrictionScope.end();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void markedHistorySurvivesRealRequestPreparationAndWorkerDispatch(boolean stream) {
+        String prose = "The ceramics workshop was moved to Thursday.";
+        var policy = new dev.talos.safety.ContentRestrictions(true, false, false, false);
+        var resolver = new RecordingResolver();
+        var messages = List.of(new ChatMessage("assistant", prose, null, null, policy), ChatMessage.user("Summarize."));
+        dev.talos.safety.ContentRestrictionScope.begin();
+        try (var client = new LlmClient(engineConfig(), resolver)) {
+            var result = stream ? client.chatStreamFull(messages, chunk -> {}, 5000L) : client.chatFull(messages, 5000L);
+            assertEquals("reply", result.text());
+            assertEquals(1, resolver.chatCalls.get());
+            assertEquals(policy, resolver.lastRequest.contentRestrictions);
+            assertTrue(resolver.lastRequest.messages.stream().anyMatch(message -> prose.equals(message.content())));
+            assertEquals(policy, dev.talos.safety.ContentRestrictionScope.current());
+            assertFalse(PromptDebugCapture.latest().orElseThrow().toString().contains(prose));
+        }
     }
 
     @Test
@@ -45,7 +65,7 @@ class LlmClientPromptDebugCaptureTest {
 
         var snapshot = PromptDebugCapture.latest().orElseThrow();
         assertEquals("CHAT_REQUEST", snapshot.stage());
-        assertEquals("ollama", snapshot.backend());
+        assertEquals("llama_cpp", snapshot.backend());
         assertEquals("qwen2.5-coder:14b", snapshot.model());
         assertEquals(false, snapshot.stream());
         assertEquals(List.of("talos.write_file"), snapshot.tools().stream().map(ToolSpec::name).toList());
@@ -156,12 +176,12 @@ class LlmClientPromptDebugCaptureTest {
     }
 
     @Test
-    void chatPlainSummarizerDoesNotOverwriteLatestUserFacingPromptDebugCapture() {
+    void explicitBackgroundMaintenanceDoesNotOverwriteLatestUserFacingPromptDebugCapture() {
         RecordingResolver resolver = new RecordingResolver();
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
         client.chatFull(List.of(ChatMessage.user("List current files.")), 5_000L);
-        client.chatPlain(
+        client.chatPlainBackgroundMaintenance(
                 "You are a conversation summarizer for a developer CLI tool.",
                 "Recent conversation turns to incorporate:");
 
@@ -196,6 +216,39 @@ class LlmClientPromptDebugCaptureTest {
     }
 
     @Test
+    void consecutiveOwnedPromptScopesResetWithoutEndingAnOuterRuntimeScope() {
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            PromptDebugCapture.putTurnDiagnostic("first", "one");
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                    new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
+            assertEquals("one", PromptDebugCapture.latest().orElseThrow()
+                    .diagnostics().get("first"));
+        }
+
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            assertTrue(PromptDebugCapture.history().isEmpty());
+            assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            PromptDebugCapture.putTurnDiagnostic("second", "two");
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                    new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
+            assertFalse(PromptDebugCapture.latest().orElseThrow().diagnostics()
+                    .containsKey("first"));
+            assertEquals("two", PromptDebugCapture.latest().orElseThrow()
+                    .diagnostics().get("second"));
+        }
+
+        PromptDebugCapture.beginTurn();
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            PromptDebugCapture.putTurnDiagnostic("outer", "retained");
+        }
+        PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                new ChatRequest("llama_cpp", "model", "", "", List.of(), null), false));
+        assertEquals("retained", PromptDebugCapture.latest().orElseThrow()
+                .diagnostics().get("outer"));
+        PromptDebugCapture.endTurn();
+    }
+
+    @Test
     void exposesSelectedBackendRequiredToolChoiceCapability() {
         LlmClient required = new LlmClient(engineConfig(), new RecordingResolver(Capabilities.of(
                 true, true, false, 8192,
@@ -220,17 +273,15 @@ class LlmClientPromptDebugCaptureTest {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         return cfg;
     }
 
     private static final class RecordingResolver implements LlmEngineResolver {
         private final AtomicInteger chatCalls = new AtomicInteger();
+        private volatile ChatRequest lastRequest;
         private final Capabilities capabilities;
 
         private RecordingResolver() {
@@ -248,6 +299,7 @@ class LlmClientPromptDebugCaptureTest {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
+            lastRequest = request;
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
         }

@@ -16,18 +16,16 @@ import java.util.Objects;
  * <p>
  * Supports explicit transport selection through {@code embed.provider}. The
  * default is disabled/BM25-only until a user configures a local embedding
- * endpoint. Ollama remains available as a legacy provider, while compat
- * providers use OpenAI-compatible local embedding endpoints.
+ * endpoint. The llama_cpp and compat providers use the OpenAI-compatible
+ * embedding transport of llama-server.
  */
 public final class EmbeddingsFactory {
     private EmbeddingsFactory() {}
     /**
      * Resolve the active embedding profile from configuration.
      * <p>
-     * Reads {@code embed.model} first (new canonical key), falling back to
-     * {@code ollama.embed} (legacy key for explicit Ollama configs), then to
-     * {@code "none"}. Provider is read from {@code embed.provider}, defaulting
-     * to {@code "disabled"}.
+     * Reads {@code embed.model}, falling back to {@code "none"}. Provider is
+     * read from {@code embed.provider}, defaulting to {@code "disabled"}.
      * <p>
      * When the resolved model name matches a known built-in profile, the
      * built-in is used as <em>defaults</em> - not as an unconditional
@@ -39,18 +37,12 @@ public final class EmbeddingsFactory {
     public static EmbeddingProfile profileFrom(Config cfg) {
         Objects.requireNonNull(cfg, "cfg must not be null");
         Map<String, Object> embedCfg = CfgUtil.map(cfg.data.get("embed"));
-        Map<String, Object> ollamaCfg = CfgUtil.map(cfg.data.get("ollama"));
 
         // Provider: embed.provider > "disabled"
         String provider = stringOr(embedCfg.get("provider"), "disabled");
 
-        // Model: embed.model > provider-specific fallback
-        String model = stringOr(embedCfg.get("model"), null);
-        if (model == null) {
-            model = "ollama".equals(provider)
-                    ? stringOr(ollamaCfg.get("embed"), "bge-m3")
-                    : "none";
-        }
+        // Model: embed.model > "none"
+        String model = stringOr(embedCfg.get("model"), "none");
 
         // Find built-in defaults for this model (may be null for unknown models)
         EmbeddingProfile builtIn = findBuiltIn(model);
@@ -129,9 +121,6 @@ public final class EmbeddingsFactory {
      */
     private static Embeddings createRawClient(Config cfg, EmbeddingProfile profile) {
         String provider = profile.provider();
-        if ("ollama".equals(provider)) {
-            return new EmbeddingsClient(cfg);
-        }
         if ("compat".equals(provider)
                 || "openai_compat".equals(provider)
                 || "llama_cpp".equals(provider)) {
@@ -142,8 +131,19 @@ public final class EmbeddingsFactory {
         }
         throw new UnsupportedOperationException(
                 "Embedding provider '" + provider + "' is not supported by this build. "
-                + "Supported providers: compat, openai_compat, llama_cpp, ollama, disabled.");
+                + "Supported providers: compat, openai_compat, llama_cpp, disabled.");
     }
+    /** True for a provider this build can construct. */
+    public static boolean isSupportedProvider(String provider) {
+        return "compat".equals(provider) || "openai_compat".equals(provider)
+                || "llama_cpp".equals(provider) || "disabled".equals(provider);
+    }
+
+    /** An embedder that refuses every call, used when vectors are off or unavailable. */
+    public static Embeddings disabled(EmbeddingProfile profile) {
+        return new DisabledEmbeddings(profile.provider(), profile.model());
+    }
+
     private static String stringOr(Object o, String fallback) {
         if (o == null) return fallback;
         String s = String.valueOf(o).trim();

@@ -2,7 +2,6 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,8 +59,9 @@ final class StaticWebFrontendFrameworkAssetVerifier {
     private static String read(Path root, String relative) {
         try {
             Path resolved = root.resolve(relative).normalize();
-            if (!resolved.startsWith(root.normalize()) || !Files.isRegularFile(resolved)) return "";
-            return Files.readString(resolved);
+            if (!resolved.startsWith(root.normalize())
+                    || !StaticWebFileAccess.isRegularFile(root, resolved)) return "";
+            return StaticWebFileAccess.readString(root, resolved);
         } catch (Exception e) {
             return "";
         }

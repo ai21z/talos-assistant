@@ -33,10 +33,11 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ToolMetadataParityTest {
 
-    /** The same 13 tools TalosBootstrap registers (RetrieveTool's service is not used by descriptor()). */
+    /** The TalosBootstrap registrations are mirrored without invoking retrieval. */
     static ToolRegistry bootstrapEquivalentRegistry() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
+        registry.register(new DocumentComparisonTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());
@@ -62,6 +63,7 @@ class ToolMetadataParityTest {
 
     private static final Map<String, Golden> GOLDEN = Map.ofEntries(
             Map.entry("talos.read_file", new Golden(ToolRiskLevel.READ_ONLY, false, false, false, false)),
+            Map.entry("talos.compare_documents", new Golden(ToolRiskLevel.READ_ONLY, false, false, false, false)),
             Map.entry("talos.list_dir", new Golden(ToolRiskLevel.READ_ONLY, false, false, false, false)),
             Map.entry("talos.grep", new Golden(ToolRiskLevel.READ_ONLY, false, false, false, false)),
             Map.entry("talos.retrieve", new Golden(ToolRiskLevel.READ_ONLY, false, false, false, false)),

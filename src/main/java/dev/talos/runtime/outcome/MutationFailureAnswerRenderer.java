@@ -2,13 +2,15 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.PendingActionObligation;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -16,51 +18,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 
 /** Renders final-answer truthfulness text for failed or blocked mutation turns. */
 public final class MutationFailureAnswerRenderer {
-    private static final Set<String> MUTATION_CLAIM_MARKERS = Set.of(
-            "i have updated", "i've updated", "i updated",
-            "i have edited", "i've edited", "i edited",
-            "i have changed", "i've changed", "i changed",
-            "i have applied", "i've applied", "i applied",
-            "i have written", "i've written", "i wrote",
-            "i have created", "i've created", "i created",
-            "i have modified", "i've modified", "i modified",
-            "i have saved", "i've saved", "i saved",
-            "i have replaced", "i've replaced", "i replaced",
-            "changes have been applied",
-            "changes were applied",
-            "the file has been updated",
-            "the file has been modified",
-            "the file has been edited",
-            "the file has been saved",
-            "the file has been written",
-            "the changes have been saved",
-            "has been updated to",
-            "has been modified to"
-    );
-    private static final String PAST_MUTATION_ACTION =
-            "(?:updated|edited|changed|applied|written|wrote|created|modified|saved|replaced)";
-    private static final String PAST_MUTATION_ACTION_SEQUENCE =
-            PAST_MUTATION_ACTION + "(?:\\s+(?:or|and)\\s+" + PAST_MUTATION_ACTION + ")*";
-    private static final Pattern FIRST_PERSON_ZERO_FILE_MUTATION = Pattern.compile(
-            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE
-                    + "\\s+(?:exactly\\s+)?(?:zero|0|no)\\s+files?\\b");
-    private static final Pattern FIRST_PERSON_NOTHING_MUTATION = Pattern.compile(
-            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE
-                    + "\\s+nothing\\b");
-    private static final Pattern PASSIVE_NO_CHANGE_MUTATION = Pattern.compile(
-            "\\b(?:no|zero|0)\\s+(?:file\\s+)?changes?\\s+"
-                    + "(?:have\\s+been\\s+|has\\s+been\\s+|were\\s+|was\\s+)?"
-                    + PAST_MUTATION_ACTION_SEQUENCE + "\\b");
-
     public static final String FALSE_MUTATION_ANNOTATION =
-            "[Truth check: the response below claims a file was changed, "
-            + "but no file-mutating tool succeeded in this turn. "
-            + "No file on disk was actually modified.]\n\n";
+            "[Truth check: the response below claims a Talos file change, "
+            + "but supporting successful execution is not recorded for that claim in this turn. "
+            + "Other actors and unrecorded filesystem changes are not assessed.]\n\n";
+
+    public static final String UNVERIFIED_MUTATION_ANNOTATION =
+            "[Truth check: the actor or time of a claimed file change is unresolved. "
+            + "This turn's execution records do not establish that claim.]\n\n";
 
     public static final String PARTIAL_MUTATION_ANNOTATION =
             "[Truth check: some requested file changes succeeded and some failed. "
@@ -89,54 +59,20 @@ public final class MutationFailureAnswerRenderer {
             + "No file changes were applied. Ask explicitly to edit, update, or "
             + "create files if you want Talos to modify the workspace.";
 
+    public static final String READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT =
+            "[Truth check: no file was changed in this turn. Mutating tool calls "
+            + "were blocked because executable authority was not established "
+            + "for those proposals. This turn's task contract was read-only.]\n\n"
+            + "No file changes were applied. An explicit change request and "
+            + "valid executable authority are required before a mutation can proceed.";
+
     private MutationFailureAnswerRenderer() {
     }
 
     public static boolean containsMutationClaim(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase();
-        for (String marker : MUTATION_CLAIM_MARKERS) {
-            int start = lower.indexOf(marker);
-            while (start >= 0) {
-                if (!isNoChangeMarkerContext(lower, marker, start)) return true;
-                start = lower.indexOf(marker, start + marker.length());
-            }
-        }
-        return false;
-    }
-
-    private static boolean isNoChangeMarkerContext(String lower, String marker, int markerStart) {
-        if (lower == null || marker == null || markerStart < 0) return false;
-        int markerEnd = Math.min(lower.length(), markerStart + marker.length());
-        int sentenceEnd = sentenceEnd(lower, markerEnd);
-        if (marker.startsWith("i ")) {
-            String firstPersonWindow = lower.substring(
-                    markerStart,
-                    Math.min(sentenceEnd, markerStart + 140));
-            return FIRST_PERSON_ZERO_FILE_MUTATION.matcher(firstPersonWindow).find()
-                    || FIRST_PERSON_NOTHING_MUTATION.matcher(firstPersonWindow).find();
-        }
-        if (marker.startsWith("changes ") || marker.startsWith("the changes ")) {
-            String passiveWindow = lower.substring(
-                    Math.max(0, markerStart - 18),
-                    Math.min(sentenceEnd, markerEnd + 60));
-            return PASSIVE_NO_CHANGE_MUTATION.matcher(passiveWindow).find();
-        }
-        return false;
-    }
-
-    private static int sentenceEnd(String text, int from) {
-        if (text == null || text.isBlank()) return 0;
-        int start = Math.max(0, from);
-        int end = text.length();
-        for (int i = start; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '.' || c == '!' || c == '?' || c == '\n') {
-                end = i + 1;
-                break;
-            }
-        }
-        return end;
+        var assessment = MutationClaimAssessment.assess(answer);
+        return assessment.hasCurrentRuntimeClaim() || assessment.hasUnattributedClaim()
+                || assessment.hasCompletedFileNarrative();
     }
 
     public static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {
@@ -148,13 +84,82 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (loopResult == null) return answer;
-        int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
-        if (totalMutations > 0) return answer;
-        if (hasDeniedMutation(loopResult)) return answer;
-        if (!containsMutationClaim(answer)) return answer;
-        return FALSE_MUTATION_ANNOTATION + answer;
+        return selectMutationClaimAnswer(answer, loopResult, extraMutationSuccesses, null).answer();
+    }
+
+    public record MutationClaimAnswer(String answer, boolean unsupportedCurrentClaim, boolean unresolvedClaim) {}
+
+    public static MutationClaimAnswer selectMutationClaimAnswer(
+            String answer, ToolCallLoop.LoopResult loopResult, int extraMutationSuccesses, Path workspace) {
+        if (answer == null || answer.isBlank() || loopResult == null
+                || hasFailedMutationEffects(loopResult) || hasDeniedMutation(loopResult)) {
+            return new MutationClaimAnswer(answer, false, false);
+        }
+        var assessment = MutationClaimAssessment.assess(answer);
+        Set<String> successfulPaths = new LinkedHashSet<>();
+        boolean recordedSuccess = false;
+        for (var outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.mutating() || !outcome.success() || outcome.denied()
+                    || !outcome.mutationEffects().uncertainPaths().isEmpty()) continue;
+            recordedSuccess = true;
+            List<String> paths = outcome.workspaceOperationPlan() != null
+                    ? outcome.workspaceOperationPlan().changedPaths() : List.of(outcome.pathHint());
+            for (String path : paths) {
+                String identity = claimPathIdentity(path, workspace);
+                if (!identity.isBlank()) successfulPaths.add(identity);
+            }
+        }
+        boolean existentialSuccess = recordedSuccess || loopResult.mutatingToolSuccesses() > 0
+                || extraMutationSuccesses > 0;
+        Set<String> unsupportedTargets = new LinkedHashSet<>();
+        boolean unsupported = false;
+        boolean unresolved = false;
+        for (var claim : assessment.claims()) {
+            if (claim.isCurrentRuntimeClaim() || claim.completedFileNarrative()) {
+                if (claim.targets().isEmpty()) {
+                    if (!existentialSuccess) {
+                        if (claim.isCurrentRuntimeClaim()) unsupported = true;
+                        else unresolved = true;
+                    }
+                    else if (Pattern.compile("\\b(?:all|every|each)\\b", Pattern.CASE_INSENSITIVE)
+                            .matcher(claim.text()).find()) unresolved = true;
+                } else {
+                    for (String target : claim.targets()) {
+                        String identity = claimPathIdentity(target, workspace);
+                        if (identity.isBlank() || !successfulPaths.contains(identity)) {
+                            if (claim.isCurrentRuntimeClaim()) unsupported = true;
+                            else unresolved = true;
+                            unsupportedTargets.add(target);
+                        }
+                    }
+                }
+            } else if (claim.isUnattributedClaim()
+                    && (claim.actor() == MutationClaimAssessment.Actor.SELF
+                    || claim.actor() == MutationClaimAssessment.Actor.TALOS
+                    || claim.assertion() == MutationClaimAssessment.Assertion.QUOTED
+                    || claim.temporalScope() == MutationClaimAssessment.TemporalScope.CURRENT
+                    || claim.completedFileNarrative())) {
+                unresolved = true;
+            }
+        }
+        if (unsupported) {
+            String targets = unsupportedTargets.isEmpty() ? ""
+                    : "Targets without matching execution: " + String.join(", ", unsupportedTargets) + ".\n\n";
+            return new MutationClaimAnswer(FALSE_MUTATION_ANNOTATION + targets + answer, true, unresolved);
+        }
+        return new MutationClaimAnswer(unresolved ? UNVERIFIED_MUTATION_ANNOTATION + answer : answer,
+                false, unresolved);
+    }
+
+    private static String claimPathIdentity(String raw, Path workspace) {
+        if (raw == null || raw.isBlank()) return "";
+        try {
+            Path path = Path.of(raw.replace('\\', '/'));
+            if (workspace != null && !path.isAbsolute()) path = workspace.resolve(path);
+            return path.normalize().toString().replace('\\', '/');
+        } catch (InvalidPathException invalid) {
+            return "";
+        }
     }
 
     public static String summarizePartialMutationOutcomesIfNeeded(
@@ -162,34 +167,80 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        boolean actionObligationAnswer = answer != null && answer.startsWith("[Action obligation failed:");
+        return summarizePartialMutationOutcomesIfNeeded(
+                answer,
+                MutationRecoveryAssessment.provisional(
+                        null,
+                        null,
+                        loopResult,
+                        extraMutationSuccesses));
+    }
 
-        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
-        if (outcomes == null || outcomes.isEmpty()) return answer;
+    public static String summarizePartialMutationOutcomesIfNeeded(
+            String answer,
+            MutationRecoveryAssessment assessment
+    ) {
+        return selectPartialMutationAnswerIfNeeded(answer, assessment).answer();
+    }
 
-        List<ToolCallLoop.ToolOutcome> mutating = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .toList();
-        if (mutating.isEmpty()) return answer;
+    public record PartialMutationAnswer(String answer, boolean inputRetained) {}
 
-        List<ToolCallLoop.ToolOutcome> successes = mutating.stream()
-                .filter(ToolCallLoop.ToolOutcome::success)
-                .toList();
-        List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
-                .filter(outcome -> !outcome.success())
-                .filter(outcome -> !isRecoveredInvalidEditFailure(outcome, mutating))
-                .filter(outcome -> !MutationFailureRecovery.isRecoveredDuplicateWorkspaceOperationFailure(
-                        outcome, mutating))
-                .toList();
-        if (successes.isEmpty() || failures.isEmpty()) return answer;
+    public static PartialMutationAnswer selectPartialMutationAnswerIfNeeded(
+            String answer, MutationRecoveryAssessment assessment) {
+        if (assessment == null || !assessment.partial()) return new PartialMutationAnswer(answer, true);
+        MutationOutcome mutationOutcome = assessment.mutationOutcome();
+        if (mutationOutcome.failed().stream().anyMatch(outcome -> outcome.mutationEffects().hasEffects())) {
+            return new PartialMutationAnswer(failedMutationEffectsSummary(mutationOutcome.failed(), mutationOutcome.successful()), false);
+        }
+        if (mutationOutcome.extraSuccesses() > 0) return new PartialMutationAnswer(answer, true);
+        boolean actionObligationAnswer = answer != null
+                && answer.contains("[Action obligation failed:");
+
+        List<ToolCallLoop.ToolOutcome> successes = mutationOutcome.successful();
+        List<ToolCallLoop.ToolOutcome> failures = assessment.unresolvedOutcomesInOrder();
+        if (successes.isEmpty() || failures.isEmpty()) return new PartialMutationAnswer(answer, true);
 
         String partialSummary = partialMutationOutcomeSummary(successes, failures, !actionObligationAnswer);
         if (actionObligationAnswer) {
-            return answer.stripTrailing() + "\n\n" + partialSummary;
+            return new PartialMutationAnswer(answer.stripTrailing() + "\n\n" + partialSummary, true);
         }
-        return partialSummary;
+        return new PartialMutationAnswer(partialSummary, false);
+    }
+
+    public static boolean hasFailedMutationEffects(ToolCallLoop.LoopResult loopResult) {
+        return loopResult != null && loopResult.toolOutcomes().stream().anyMatch(outcome ->
+                outcome != null && outcome.mutating() && !outcome.success()
+                        && outcome.mutationEffects().hasEffects());
+    }
+
+    public static String failedMutationEffectsSummary(ToolCallLoop.LoopResult loopResult) {
+        if (!hasFailedMutationEffects(loopResult)) return "";
+        return failedMutationEffectsSummary(loopResult.toolOutcomes().stream()
+                .filter(outcome -> outcome != null && outcome.mutating() && !outcome.success()).toList(),
+                loopResult.toolOutcomes().stream()
+                        .filter(outcome -> outcome != null && outcome.mutating() && outcome.success()).toList());
+    }
+
+    private static String failedMutationEffectsSummary(List<ToolCallLoop.ToolOutcome> failures,
+                                                       List<ToolCallLoop.ToolOutcome> successes) {
+        StringBuilder out = new StringBuilder("The operation did not complete successfully. "
+                + "Applied and uncertain effects must not be treated as no changes.\n");
+        for (ToolCallLoop.ToolOutcome outcome : failures) {
+            for (String path : outcome.mutationEffects().appliedPaths()) {
+                out.append("- ").append(path).append(": APPLIED_UNVERIFIED before tool failure.\n");
+            }
+            for (String path : outcome.mutationEffects().uncertainPaths()) {
+                out.append("- ").append(path).append(": UNKNOWN; final mutation state is not established.\n");
+            }
+            out.append("- Failed ").append(outcome.toolName()).append(": ")
+                    .append(trimMixedOutcomeFailureMessage(outcome.errorMessage())).append('\n');
+        }
+        for (ToolCallLoop.ToolOutcome outcome : successes) {
+            out.append("- Separately successful call at ").append(outcome.pathHint())
+                    .append(" via ").append(outcome.toolName())
+                    .append("; matching a prior path does not by itself prove recovery.\n");
+        }
+        return out.toString().stripTrailing();
     }
 
     private static String partialMutationOutcomeSummary(
@@ -211,7 +262,7 @@ public final class MutationFailureAnswerRenderer {
             out.append("- ")
                     .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
                     .append(": ")
-                    .append(trimFailureMessage(outcome.errorMessage()))
+                    .append(trimMixedOutcomeFailureMessage(outcome.errorMessage()))
                     .append('\n');
         }
         if (includeReplacementNote) {
@@ -254,7 +305,7 @@ public final class MutationFailureAnswerRenderer {
     ) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
         if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -314,6 +365,14 @@ public final class MutationFailureAnswerRenderer {
         return out.toString().stripTrailing();
     }
 
+    /** The read-only refusal notice that opens an answer, or empty when the answer does not open with one. */
+    public static String readOnlyRefusalNotice(String answer) {
+        if (answer == null) return "";
+        for (String notice : List.of(READ_ONLY_DENIED_MUTATION_REPLACEMENT, READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT))
+            if (answer.startsWith(notice)) return notice;
+        return "";
+    }
+
     public static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
             String answer,
             CurrentTurnPlan plan,
@@ -323,7 +382,7 @@ public final class MutationFailureAnswerRenderer {
     ) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
 
         TaskContract contract = safePlanFromMessages(plan, messages).taskContract();
         if (contract.mutationAllowed()) return answer;
@@ -331,14 +390,22 @@ public final class MutationFailureAnswerRenderer {
         List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(outcome -> !outcome.success())
+                .filter(outcome -> outcome.denied()
+                        || !contract.mutationRequested()
+                        && ToolError.INVALID_AUTHORITY.equals(outcome.errorCode())
+                        && outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)
                 .toList();
         if (readOnlyBlockedMutations.isEmpty()) return answer;
 
+        String replacement = readOnlyBlockedMutations.stream().anyMatch(ToolCallLoop.ToolOutcome::denied)
+                ? READ_ONLY_DENIED_MUTATION_REPLACEMENT
+                : READ_ONLY_AUTHORITY_REJECTED_MUTATION_REPLACEMENT;
+
         String cleanReadOnlyAnswer = readOnlyDeniedCleanAnswer(answer);
         if (cleanReadOnlyAnswer.isBlank()) {
-            return READ_ONLY_DENIED_MUTATION_REPLACEMENT;
+            return replacement;
         }
-        return READ_ONLY_DENIED_MUTATION_REPLACEMENT
+        return replacement
                 + "\n\nRead-only answer from inspected evidence:\n"
                 + cleanReadOnlyAnswer;
     }
@@ -350,10 +417,19 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (answer != null && answer.startsWith("[Action obligation failed:")) return answer;
+        // T1003: a breached invalid-edit full-rewrite recovery must terminate
+        // through this truthful invalid-mutation summary (the obligation was
+        // only a bounded retry for the same invalid edits). Other obligation
+        // flows keep their own terminal answers.
+        boolean editRecoveryBreach = answer != null
+                && answer.startsWith(PendingActionObligation.EDIT_RECOVERY_FAILURE_MARKER);
+        if (answer != null && !editRecoveryBreach
+                && answer.startsWith("[Action obligation failed:")) {
+            return answer;
+        }
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0 || hasFailedMutationEffects(loopResult)) return answer;
         if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -388,34 +464,6 @@ public final class MutationFailureAnswerRenderer {
         return out.toString().stripTrailing();
     }
 
-    private static boolean isRecoveredInvalidEditFailure(
-            ToolCallLoop.ToolOutcome failure,
-            List<ToolCallLoop.ToolOutcome> orderedMutatingOutcomes
-    ) {
-        if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
-        if (!failure.invalidEmptyEditArguments()
-                && !failure.fullRewriteRepairRedirect()
-                && !failure.oldStringNotFoundEditFailure()) {
-            return false;
-        }
-        String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
-        if (failedPath.isBlank()) return false;
-        boolean sawFailure = false;
-        for (ToolCallLoop.ToolOutcome outcome : orderedMutatingOutcomes) {
-            if (outcome == failure) {
-                sawFailure = true;
-                continue;
-            }
-            if (!sawFailure) continue;
-            if (outcome.mutating()
-                    && outcome.success()
-                    && failedPath.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static String trimFailureMessage(String errorMessage) {
         if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
         String msg = errorMessage.strip();
@@ -423,6 +471,24 @@ public final class MutationFailureAnswerRenderer {
         if (newline > 0) msg = msg.substring(0, newline).strip();
         if (msg.length() > 180) msg = msg.substring(0, 177) + "…";
         return msg;
+    }
+
+    private static String trimMixedOutcomeFailureMessage(String errorMessage) {
+        if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
+        String callScoped = errorMessage
+                .replace(
+                        "No approval was requested and no additional file was changed.",
+                        "That failed call requested no approval and changed no additional file.")
+                .replace(
+                        "No approval was requested and no file was changed.",
+                        "That failed call requested no approval and changed no file.")
+                .replace(
+                        "no approval was requested and no additional file was changed.",
+                        "that failed call requested no approval and changed no additional file.")
+                .replace(
+                        "no approval was requested and no file was changed.",
+                        "that failed call requested no approval and changed no file.");
+        return trimFailureMessage(callScoped);
     }
 
     private static List<String> successfulMutatingTargets(ToolCallLoop.LoopResult loopResult) {
@@ -448,13 +514,12 @@ public final class MutationFailureAnswerRenderer {
     private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages);
         TaskContract contract = safePlan.taskContract();
-        return contract.mutationRequested()
-                || TaskContractResolver.fromUserRequest(safePlan.originalUserRequest()).mutationRequested();
+        return contract.mutationRequested();
     }
 
     private static CurrentTurnPlan safePlanFromMessages(CurrentTurnPlan plan, List<ChatMessage> messages) {
         if (plan != null) return plan;
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = TurnTaskContractCapture.currentOrResolve(messages);
         return CurrentTurnPlan.compatibility(
                 contract,
                 CurrentTurnPlan.defaultPhaseFor(contract),

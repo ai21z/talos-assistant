@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.expectation.AppendLineExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
@@ -53,7 +55,8 @@ final class TargetReadbackCompactRepairPlanner {
         Set<String> remaining = remainingExpectedTargets.stream()
                 .map(ExpectedTargetProgressAccounting::normalizeExpectedTargetKey)
                 .collect(Collectors.toSet());
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (outcome == null || !outcome.appendLinePreservationFailure()) continue;
@@ -114,6 +117,7 @@ final class TargetReadbackCompactRepairPlanner {
             if (path.isBlank()) {
                 path = ToolCallSupport.normalizePath(outcome.pathHint());
             }
+            if (dev.talos.safety.ProtectedPathTokens.isSensitiveReadbackPath(path)) continue;
             if (!successfulReadbackForPath(state, path)) continue;
             String readback = latestSuccessfulReadbackForPath(state, path);
             if (readback == null || readback.isBlank()) continue;
@@ -162,31 +166,10 @@ final class TargetReadbackCompactRepairPlanner {
     }
 
     static String latestSuccessfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) {
-            return null;
-        }
-        String target = ToolCallSupport.canonicalizeReadPath(normalizedPath)
-                .toLowerCase(Locale.ROOT);
-        String fullBody = latestSuccessfulReadbackForPath(state.successfulReadCallBodies, target);
-        if (fullBody != null) return fullBody;
-        return latestSuccessfulReadbackForPath(state.successfulReadCalls, target);
-    }
-
-    private static String latestSuccessfulReadbackForPath(Map<String, String> readbacksBySignature, String target) {
-        if (readbacksBySignature == null || readbacksBySignature.isEmpty()
-                || target == null || target.isBlank()) {
-            return null;
-        }
-        for (var entry : readbacksBySignature.entrySet()) {
-            String signature = entry.getKey() == null
-                    ? ""
-                    : entry.getKey().replace('\\', '/').toLowerCase(Locale.ROOT);
-            if (signature.startsWith("talos.read_file:")
-                    && signature.contains("path=" + target + ";")) {
-                return entry.getValue();
-            }
-        }
-        return null;
+        if (state == null) return null;
+        // T1013: deterministic latest read_file body for the effective path.
+        ReadEvidence read = state.readEvidence.latestReadFileForPath(normalizedPath, true);
+        return read == null ? null : read.body();
     }
 
     private static List<ToolSpec> repairToolSpecs(List<ToolSpec> baseTools) {
@@ -203,7 +186,7 @@ final class TargetReadbackCompactRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Apply the requested file change."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
@@ -234,7 +217,7 @@ final class TargetReadbackCompactRepairPlanner {
     ) {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Append the requested line to the target file."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
@@ -295,7 +278,24 @@ final class TargetReadbackCompactRepairPlanner {
 
     private static String safeRepairReason(String reason) {
         if (reason == null || reason.isBlank()) return "old_string not found";
-        return reason.strip();
+        // The edit tool's old-string-not-found error embeds the first
+        // lines of the target file after this marker; that snippet is
+        // workspace data and must never gain system-role authority. The
+        // readback itself rides in the user-role message.
+        String bounded = reason;
+        int snippetStart = bounded.indexOf("File begins with:");
+        if (snippetStart >= 0) {
+            bounded = bounded.substring(0, snippetStart);
+        }
+        int newline = bounded.indexOf('\n');
+        if (newline >= 0) {
+            bounded = bounded.substring(0, newline);
+        }
+        if (bounded.length() > 300) {
+            bounded = bounded.substring(0, 300);
+        }
+        bounded = bounded.strip();
+        return bounded.isBlank() ? "old_string not found" : bounded;
     }
 
     private static String safeAppendLineRepairReason(String reason) {

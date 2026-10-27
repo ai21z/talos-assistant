@@ -15,6 +15,7 @@ import java.util.UUID;
  * checkpointing, preview, application, trace, and result rendering.
  */
 public record WorkspaceOperationPlan(
+        String authorityPlanId,
         String operationId,
         OperationKind operationKind,
         List<PathEffect> pathEffects,
@@ -26,13 +27,47 @@ public record WorkspaceOperationPlan(
         String previewSummary
 ) {
     public WorkspaceOperationPlan {
+        authorityPlanId = authorityPlanId == null
+                ? ""
+                : authorityPlanId.strip().toLowerCase();
         operationId = normalize(operationId, "op-" + UUID.randomUUID());
+        if (!authorityPlanId.isEmpty()
+                && (!authorityPlanId.matches("[0-9a-f]{64}")
+                        || !operationId.matches("[0-9a-f]{64}"))) {
+            throw new IllegalArgumentException(
+                    "bound workspace operation identities must be SHA-256");
+        }
         operationKind = operationKind == null ? OperationKind.BATCH_APPLY : operationKind;
         pathEffects = List.copyOf(pathEffects == null ? List.of() : pathEffects);
         riskLevel = riskLevel == null ? ToolRiskLevel.WRITE : riskLevel;
         overwritePolicy = overwritePolicy == null ? OverwritePolicy.FAIL_IF_EXISTS : overwritePolicy;
         approvalSummary = normalize(approvalSummary, operationKind.name().toLowerCase().replace('_', ' '));
         previewSummary = normalize(previewSummary, approvalSummary);
+    }
+
+    /** Compatibility constructor for unbound legacy operation plans. */
+    public WorkspaceOperationPlan(
+            String operationId,
+            OperationKind operationKind,
+            List<PathEffect> pathEffects,
+            ToolRiskLevel riskLevel,
+            boolean requiresCheckpoint,
+            OverwritePolicy overwritePolicy,
+            boolean recursive,
+            String approvalSummary,
+            String previewSummary
+    ) {
+        this(
+                "",
+                operationId,
+                operationKind,
+                pathEffects,
+                riskLevel,
+                requiresCheckpoint,
+                overwritePolicy,
+                recursive,
+                approvalSummary,
+                previewSummary);
     }
 
     public static WorkspaceOperationPlan movePath(

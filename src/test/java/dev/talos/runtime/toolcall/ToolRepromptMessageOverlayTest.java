@@ -57,11 +57,40 @@ class ToolRepromptMessageOverlayTest {
             assertEquals("""
                     [Expected target progress] Continue this mutation task. Remaining expected target paths not successfully mutated in this turn: script.js. Use the visible write/edit tools to mutate these exact paths before answering. Similar filenames are not substitutes. For small static web files, prefer talos.write_file with complete file content. Do not claim completion until static verification passes.""",
                     state.messages.get(3).content());
+            assertEquals("user", state.messages.get(4).role());
             assertEquals("[Current task - stay focused on this] " + "x".repeat(500) + "…",
                     state.messages.get(4).content());
+            assertFalse(state.messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .anyMatch(content -> content != null && content.contains("x".repeat(100))));
         }
 
         assertEquals(List.of(permanent, ChatMessage.user("original task")), state.messages);
+    }
+
+    @Test
+    void userControlledCurrentTaskNeverGainsSystemRoleAndCleanupPreservesHistory() {
+        String marker = "USER-CONTROLLED-TASK-MARKER";
+        ChatMessage earlierUser = ChatMessage.user("earlier user history");
+        LoopState state = stateWith(ChatMessage.system("policy"), earlierUser);
+
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
+                state,
+                List.of(),
+                List.of("notes.txt"),
+                "Edit notes.txt. " + marker)) {
+            assertTrue(state.messages.stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .anyMatch(content -> content != null && content.contains(marker)));
+            assertFalse(state.messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .anyMatch(content -> content != null && content.contains(marker)));
+        }
+
+        assertEquals(List.of(ChatMessage.system("policy"), earlierUser), state.messages);
     }
 
     @Test

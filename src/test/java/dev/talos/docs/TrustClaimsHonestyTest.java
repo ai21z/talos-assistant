@@ -30,15 +30,27 @@ class TrustClaimsHonestyTest {
     private static final String RAG_LOCAL_BOUNDARY =
             "RAG in Talos means the local Lucene index and retrieval pipeline";
     private static final String VECTOR_OPTIONAL_BOUNDARY =
-            "Vector retrieval requires a local embedding endpoint";
+            "Vector retrieval requires an enabled embedding endpoint, which is localhost-gated by default";
     private static final String ACCEPTED_MODEL_BOUNDARY =
             "Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b";
+    private static final String LARGE_MODEL_BOUNDARY =
+            "The accepted beta profiles are large local-model lanes";
     private static final String EXPERIMENTAL_MODEL_BOUNDARY =
-            "Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles";
+            "Qwen3-8B, Granite 4.1 3B, Qwen3 4B Instruct 2507, Granite 4.1 8B, Qwen3.5 9B, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles";
     private static final String GPT_OSS_LOCAL_GGUF_BOUNDARY =
             "gpt-oss-20b requires a concrete local GGUF model path";
     private static final String DEEPSEEK_TOOL_MODE_BOUNDARY =
             "DeepSeek-Coder-V2-Lite uses text/tool-prompt mode";
+    private static final String QWEN3_EXPERIMENTAL_BOUNDARY =
+            "Qwen3-8B is an experimental selectable profile";
+    private static final String GRANITE_EXPERIMENTAL_BOUNDARY =
+            "Granite 4.1 3B is an experimental selectable profile";
+    private static final String QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY =
+            "Qwen3 4B Instruct 2507 is an experimental selectable profile";
+    private static final String GRANITE_EIGHT_B_EXPERIMENTAL_BOUNDARY =
+            "Granite 4.1 8B is an experimental selectable profile";
+    private static final String QWEN35_EXPERIMENTAL_BOUNDARY =
+            "Qwen3.5 9B is an experimental selectable profile";
 
     private static final Pattern MISUSED_AGENTHALLU_STAT =
             Pattern.compile("11\\.6%.{0,120}(detect|detection|solution|solves|prove|proves)",
@@ -92,11 +104,61 @@ class TrustClaimsHonestyTest {
                 RAG_LOCAL_BOUNDARY,
                 VECTOR_OPTIONAL_BOUNDARY,
                 ACCEPTED_MODEL_BOUNDARY,
+                LARGE_MODEL_BOUNDARY,
                 EXPERIMENTAL_MODEL_BOUNDARY,
                 GPT_OSS_LOCAL_GGUF_BOUNDARY,
-                DEEPSEEK_TOOL_MODE_BOUNDARY)) {
+                DEEPSEEK_TOOL_MODE_BOUNDARY,
+                QWEN3_EXPERIMENTAL_BOUNDARY,
+                GRANITE_EXPERIMENTAL_BOUNDARY,
+                QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY,
+                GRANITE_EIGHT_B_EXPERIMENTAL_BOUNDARY,
+                QWEN35_EXPERIMENTAL_BOUNDARY)) {
             assertContainsNormalized(docs, required);
         }
+    }
+
+    @Test
+    void verificationDenialAndDiagnosticEvidenceDisclosuresRemainExplicit() throws Exception {
+        String site = read("site/index.html");
+        var hero = Pattern.compile("(?s)<h1>.*?</h1>\\s*"
+                + "<p class=\"hero-subtitle\">(.*?)</p>\\s*"
+                + "<p class=\"hero-proof\">(.*?)</p>").matcher(site);
+        assertTrue(hero.find(), "verification limits must remain adjacent to the hero claim");
+        assertContainsNormalized(hero.group(1), "Checks supported actions against tool evidence");
+        assertContainsNormalized(hero.group(2), "Read-only explanations may remain unverified");
+        assertContainsNormalized(hero.group(2), "incomplete or unsupported checks stay explicit");
+        for (String attribute : List.of("name=\"description\"", "property=\"og:description\"",
+                "name=\"twitter:description\"")) {
+            var metadata = Pattern.compile(Pattern.quote(attribute)
+                    + "\\s+content=\"([^\"]+)\"").matcher(site);
+            assertTrue(metadata.find(), "missing description metadata: " + attribute);
+            assertContainsNormalized(metadata.group(1), "checks supported actions against tool evidence");
+            assertContainsNormalized(metadata.group(1), "Read-only explanations may remain unverified");
+            assertContainsNormalized(metadata.group(1), "incomplete or unsupported checks stay explicit");
+        }
+
+        assertContainsNormalized(read("docs/architecture/overview.md"),
+                "Read-only explanations may remain unverified");
+        String execution = read("docs/architecture/execution-model.md");
+        assertContainsNormalized(execution, "Read-only prose may remain unverified");
+        assertContains(execution, "V->>R: evidence-classified outcome");
+        assertFalse(execution.contains("V->>R: grounded outcome"));
+
+        String permissions = read("docs/user/permissions-and-approvals.md");
+        assertContainsNormalized(permissions, "The denied action is not performed");
+        assertContainsNormalized(permissions,
+                "Any earlier applied or uncertain effects remain reported; denial does not roll them back");
+        assertFalse(permissions.contains("should report that nothing was changed"));
+
+        String quality = read("docs/development/quality-reports.md");
+        assertContainsNormalized(quality, "Retain source-bound dirty-tree results as local diagnostic evidence");
+        assertContainsNormalized(quality, "not as qualification of a clean, exact release candidate");
+        assertContainsNormalized(quality, "Rerun the required release gates from the intended committed state");
+        assertContainsNormalized(quality, "preserve their provenance rather than deleting historical evidence");
+
+        assertContainsNormalized(read("CHANGELOG.md"),
+                "Output-limit notices now follow the selected final answer: a successful continuation "
+                        + "no longer inherits an earlier truncation warning, while relevant warnings remain visible");
     }
 
     @Test
@@ -133,13 +195,88 @@ class TrustClaimsHonestyTest {
         String modelProfiles = read("docs/reference/model-profiles.md");
 
         assertContainsNormalized(modelProfiles, ACCEPTED_MODEL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, LARGE_MODEL_BOUNDARY);
         assertContainsNormalized(modelProfiles, EXPERIMENTAL_MODEL_BOUNDARY);
         assertContainsNormalized(modelProfiles, GPT_OSS_LOCAL_GGUF_BOUNDARY);
         assertContainsNormalized(modelProfiles, DEEPSEEK_TOOL_MODE_BOUNDARY);
+        assertContainsNormalized(modelProfiles, QWEN3_EXPERIMENTAL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, GRANITE_EXPERIMENTAL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, GRANITE_EIGHT_B_EXPERIMENTAL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, QWEN35_EXPERIMENTAL_BOUNDARY);
         assertContains(modelProfiles, "talos setup models --profile qwen2.5-coder-14b");
         assertContains(modelProfiles, "talos setup models --profile gpt-oss-20b");
         assertContains(modelProfiles, "talos doctor --start");
         assertContains(modelProfiles, "Save the talos doctor --start output as evidence before calling a profile verified on a new machine.");
+    }
+
+    @Test
+    void modelSetupRecipesContainRequiredWriteArguments() throws Exception {
+        String docs = publicDocs();
+        List<String> recipes = docs.lines().map(String::strip)
+                .filter(line -> line.startsWith("talos setup models --profile ")).toList();
+        assertFalse(recipes.isEmpty(), "Model configuration recipes must remain available");
+        for (String recipe : recipes) {
+            assertTrue(recipe.matches(".* --server-path \\S+.*"), recipe);
+            assertTrue(recipe.matches(".* --write(?:\\s.*)?$"), recipe);
+        }
+        for (String path : List.of("docs/getting-started/model-setup.md",
+                "docs/getting-started/quickstart.md", "docs/getting-started/installation.md",
+                "docs/getting-started/windows-setup.md", "docs/reference/model-profiles.md")) {
+            String page = read(path);
+            assertContains(page, "prints help");
+            assertContains(page, "`--force`");
+            assertContains(page, "backup");
+        }
+    }
+
+    @Test
+    void profileAndVerificationCommandsRemainInTheRepl() throws Exception {
+        for (String path : List.of("docs/user/commands.md", "docs/reference/cli.md")) {
+            String page = read(path);
+            assertContains(page, "/profiles list");
+            assertContains(page, "/profiles configure <id> --exec <executable>");
+            assertContains(page, "/verify");
+            assertFalse(Pattern.compile("(?m)^talos (?:profiles|verify)\\b").matcher(page).find());
+            assertFalse(Pattern.compile("(?m)^\\| `talos (?:profiles|verify)\\b").matcher(page).find());
+        }
+        assertContainsNormalized(read("docs/user/commands.md"), "Bare `/verify` lists runnable profiles");
+        assertContains(read("docs/reference/cli.md"), "`/verify [ws:<id>]`");
+        assertContainsNormalized(read("docs/user/permissions-and-approvals.md"),
+                "Configured allow rules or remembered approval for supported safe writes can avoid a fresh prompt");
+    }
+
+    @Test
+    void modelHandoffAndPersistenceRemainSeparatePermissions() throws Exception {
+        String readme = read("README.md");
+        assertContains(readme, "`SEND_TO_MODEL_CONTEXT`");
+        assertContains(readme, "`privacy.protected_read.allow_send_to_model=true`");
+        assertContains(readme, "`privacy.protected_read.persist_raw_artifacts`");
+        assertContainsNormalized(readme, "Permission to send content to a model does not grant raw persistence");
+        for (String path : List.of("README.md", "docs/reference/config.md",
+                "docs/user/privacy-and-artifacts.md")) {
+            String page = read(path);
+            assertContainsNormalized(page, "Embeddings are disabled by default");
+            assertContains(page, "`embed.allow_remote`");
+            assertFalse(page.contains("Ollama"), path + " must not describe a removed backend");
+            assertContainsNormalized(page, "Eligible indexed text and retrieval queries may then leave this machine");
+            assertContainsNormalized(page, "even when chat remains local");
+            assertFalse(page.contains("Vector retrieval requires a local embedding endpoint"));
+        }
+    }
+
+    @Test
+    void windowsSetupSeparatesPublishedAndUnreleasedCapabilities() throws Exception {
+        for (String path : List.of("docs/getting-started/windows-setup.md",
+                "docs/getting-started/model-setup.md")) {
+            String page = read(path);
+            assertContains(page, "Automatic Windows engine installation and `talos tune`");
+            assertContains(page, "Unreleased");
+            assertContains(page, "not capabilities of the published 0.10.8 Windows artifact");
+            assertContains(page, "conditional on measurable timing evidence");
+        }
+        assertContains(read("docs/user/troubleshooting.md"),
+                "not a capability of the published 0.10.8 artifact");
     }
 
     @Test

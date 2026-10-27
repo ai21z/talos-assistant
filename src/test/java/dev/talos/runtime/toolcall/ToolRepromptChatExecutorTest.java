@@ -10,14 +10,37 @@ import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
 
+import java.net.ConnectException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ToolRepromptChatExecutorTest {
+
+    @Test
+    void incompletePostToolAnswerIsWithheldWithoutLosingExecutedWorkOrRetrying() {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("SYNTHETIC_PRIVATE_PARTIAL", List.of(), "length")), 4096);
+        LoopState state = state(recorded.client());
+        state.totalToolsInvoked = 1;
+        state.mutatingToolSuccesses = 1;
+        state.pendingMutationSummaries.add("[ok] Updated README.md");
+        boolean continued = ToolRepromptChatExecutor.execute(state, state.messages, tools(),
+                ChatRequestControls.defaults(), "test reprompt");
+        assertFalse(continued);
+        assertFalse(state.currentText.contains("SYNTHETIC_PRIVATE"));
+        assertTrue(state.currentText.contains("withheld"));
+        assertFalse(state.currentText.contains("No files were changed"));
+        assertEquals(1, state.totalToolsInvoked);
+        assertEquals(1, state.mutatingToolSuccesses);
+        assertEquals(List.of("[ok] Updated README.md"), state.pendingMutationSummaries);
+        assertTrue(state.currentNativeCalls.isEmpty());
+        assertEquals(1, recorded.requests().size());
+    }
 
     @Test
     void executeCopiesTextAndNativeToolCallsIntoState() {
@@ -81,21 +104,107 @@ class ToolRepromptChatExecutorTest {
     }
 
     @Test
-    void modelNotFoundKeepsExactUserVisibleFailureAnswer() {
+    void modelNotFoundPropagatesWithoutManufacturingAssistantText() {
         EngineException.ModelNotFound missing = new EngineException.ModelNotFound("missing-model");
         LoopState state = state(LlmClient.scriptedFailure(missing));
 
-        boolean continueLoop = ToolRepromptChatExecutor.execute(
-                state,
-                state.messages,
-                tools(),
-                ChatRequestControls.defaults(),
-                "test reprompt");
+        EngineException.ModelNotFound thrown = assertThrows(
+                EngineException.ModelNotFound.class,
+                () -> ToolRepromptChatExecutor.execute(
+                        state,
+                        state.messages,
+                        tools(),
+                        ChatRequestControls.defaults(),
+                        "test reprompt"));
 
-        assertFalse(continueLoop);
-        assertEquals("[Model 'missing-model' not found - tool loop aborted. "
-                + missing.guidance() + "]", state.currentText);
+        assertSame(missing, thrown);
+        assertTrue(state.currentText.isEmpty());
         assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void connectionFailurePropagatesWithoutManufacturingAssistantText() {
+        EngineException.ConnectionFailed failure = new EngineException.ConnectionFailed(
+                "http://127.0.0.1:18115",
+                new ConnectException("connection refused"));
+        LoopState state = state(LlmClient.scriptedFailure(failure));
+
+        EngineException.ConnectionFailed thrown = assertThrows(
+                EngineException.ConnectionFailed.class,
+                () -> ToolRepromptChatExecutor.execute(
+                        state,
+                        state.messages,
+                        tools(),
+                        ChatRequestControls.defaults(),
+                        "test reprompt"));
+
+        assertSame(failure, thrown);
+        assertTrue(state.currentText.isEmpty());
+        assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void directCancellationPropagatesWithoutManufacturingAssistantText() {
+        CancellationException cancellation = new CancellationException("stop reprompt");
+        LoopState state = state(LlmClient.scriptedFailure(cancellation));
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> ToolRepromptChatExecutor.execute(
+                        state,
+                        state.messages,
+                        tools(),
+                        ChatRequestControls.defaults(),
+                        "test reprompt"));
+
+        assertSame(cancellation, thrown);
+        assertTrue(state.currentText.isEmpty());
+        assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void genericWrappedCancellationPropagatesWithoutManufacturingAssistantText() {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop reprompt"));
+        LoopState state = state(LlmClient.scriptedFailure(wrapped));
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> ToolRepromptChatExecutor.execute(
+                        state,
+                        state.messages,
+                        tools(),
+                        ChatRequestControls.defaults(),
+                        "test reprompt"));
+
+        assertSame(wrapped, thrown);
+        assertTrue(state.currentText.isEmpty());
+        assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void genericWrappedInterruptionPropagatesAndRestoresInterruptFlag() {
+        RuntimeException wrapped = new RuntimeException(
+                new InterruptedException("stop reprompt"));
+        LoopState state = state(LlmClient.scriptedFailure(wrapped));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> ToolRepromptChatExecutor.execute(
+                            state,
+                            state.messages,
+                            tools(),
+                            ChatRequestControls.defaults(),
+                            "test reprompt"));
+
+            assertSame(wrapped, thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertTrue(state.currentText.isEmpty());
+            assertTrue(state.currentNativeCalls.isEmpty());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private static LoopState state(LlmClient llm) {

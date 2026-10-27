@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.privacy.PrivateDocumentContentPolicy;
 import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.spi.types.ControlFlowFailure;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -40,9 +41,20 @@ public final class DocumentExtractionService {
     private static final long DEFAULT_OCR_TIMEOUT_MS = 10_000L;
 
     private final Config cfg;
+    private final OcrProcessStarter ocrProcessStarter;
+
+    @FunctionalInterface
+    interface OcrProcessStarter {
+        Process start(ProcessBuilder builder) throws Exception;
+    }
 
     public DocumentExtractionService(Config cfg) {
+        this(cfg, ProcessBuilder::start);
+    }
+
+    DocumentExtractionService(Config cfg, OcrProcessStarter ocrProcessStarter) {
         this.cfg = cfg == null ? new Config(null) : cfg;
+        this.ocrProcessStarter = ocrProcessStarter == null ? ProcessBuilder::start : ocrProcessStarter;
     }
 
     public DocumentExtractionResult extract(DocumentExtractionRequest request) {
@@ -74,6 +86,7 @@ public final class DocumentExtractionService {
                     provenance(sourcePath, "text", "builtin"),
                     PrivateDocumentContentPolicy.modelHandoffAllowed(cfg, request, info));
         } catch (IOException | RuntimeException e) {
+            propagateControlFlow(e);
             return new DocumentExtractionResult(
                     sourcePath,
                     request.intent(),
@@ -133,6 +146,7 @@ public final class DocumentExtractionService {
                     new DocumentExtractionWarning("adapter-missing",
                             info.label() + " is marked extractable, but no adapter is available."));
         } catch (Exception e) {
+            propagateControlFlow(e);
             DocumentExtractionStatus status = classifyExtractionFailure(e);
             DocumentExtractionWarning warning = extractionFailureWarning(info, status);
             return new DocumentExtractionResult(
@@ -171,13 +185,14 @@ public final class DocumentExtractionService {
             }
         }
         long timeoutMs = CfgUtil.longAt(ocr, "timeout_ms", DEFAULT_OCR_TIMEOUT_MS);
+        Process process = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(commandLine);
             builder.redirectErrorStream(true);
-            Process process = builder.start();
+            process = ocrProcessStarter.start(builder);
             boolean done = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!done) {
-                process.destroyForcibly();
+                destroyProcessTree(process);
                 return statusOnly(request, sourcePath, info,
                         DocumentExtractionStatus.FAILED,
                         new DocumentExtractionWarning("ocr-timeout",
@@ -201,6 +216,8 @@ public final class DocumentExtractionService {
                             "Image support is OCR text extraction only; Talos does not perform visual scene understanding.")),
                     "tesseract-command", "local");
         } catch (Exception e) {
+            destroyProcessTree(process);
+            propagateControlFlow(e);
             return statusOnly(request, sourcePath, info,
                     DocumentExtractionStatus.OCR_UNAVAILABLE,
                     new DocumentExtractionWarning("ocr-unavailable",
@@ -407,6 +424,36 @@ public final class DocumentExtractionService {
         if (value == null) return "";
         if (value.length() <= MAX_EXTRACTED_CHARS) return value;
         return value.substring(0, MAX_EXTRACTED_CHARS);
+    }
+
+    private static void destroyProcessTree(Process process) {
+        if (process == null) return;
+        List<ProcessHandle> descendants;
+        try {
+            descendants = process.descendants().toList();
+        } catch (RuntimeException ignored) {
+            descendants = List.of();
+        }
+        descendants.forEach(DocumentExtractionService::destroyForcibly);
+        try {
+            if (process.isAlive()) process.destroyForcibly();
+        } catch (RuntimeException ignored) {
+            // Do not replace the original extraction failure with cleanup failure.
+        }
+    }
+
+    private static void destroyForcibly(ProcessHandle handle) {
+        try {
+            if (handle != null && handle.isAlive()) handle.destroyForcibly();
+        } catch (RuntimeException ignored) {
+            // Best effort continues across the remaining captured descendants.
+        }
+    }
+
+    private static void propagateControlFlow(Exception failure) {
+        if (ControlFlowFailure.classify(failure) != ControlFlowFailure.Kind.NONE) {
+            throw ControlFlowFailure.propagate(failure);
+        }
     }
 
     private DocumentExtractionResult unsupportedResult(

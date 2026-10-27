@@ -132,6 +132,13 @@ class SanitizeToolCallPreservationTest {
         }
 
         @Test
+        void preservesLfAndDeletesCarriageReturnControlBytes() {
+            assertEquals("a\nb", Sanitize.sanitizeMessageContent("a\nb"));
+            assertEquals("a\nb", Sanitize.sanitizeMessageContent("a\r\nb"));
+            assertEquals("ab", Sanitize.sanitizeMessageContent("a\rb"));
+        }
+
+        @Test
         void preserves_script_style_tags() {
             String input = "<script src=\"app.js\"></script><style>.btn{color:blue}</style>";
             String result = Sanitize.sanitizeMessageContent(input);

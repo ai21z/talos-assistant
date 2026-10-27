@@ -3,9 +3,10 @@ package dev.talos.runtime.verification;
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.VerificationStatus;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,11 +20,24 @@ final class MutationTargetReadbackVerifier {
 
     private MutationTargetReadbackVerifier() {}
 
-    static Result verify(Path root, List<ToolCallLoop.ToolOutcome> successfulMutations) {
+    static Result verify(
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations
+    ) {
+        return verify(root, successfulMutations, null);
+    }
+
+    static Result verify(
+            Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            WorkspaceOperationAuthorityPlan expectedWorkspaceOperation
+    ) {
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         Set<String> mutationTargets = new LinkedHashSet<>();
+        Set<String> recordedMutationTargets = new LinkedHashSet<>();
         List<WorkspaceOperationPlan> workspaceOperationPlans = new ArrayList<>();
+        List<String> workspaceOperationToolNames = new ArrayList<>();
 
         if (successfulMutations != null) {
             for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
@@ -37,8 +51,20 @@ final class MutationTargetReadbackVerifier {
                     continue;
                 }
                 WorkspaceOperationPlan workspaceOperationPlan = outcome.workspaceOperationPlan();
-                if (workspaceOperationPlan != null && !workspaceOperationPlan.pathEffects().isEmpty()) {
-                    workspaceOperationPlans.add(workspaceOperationPlan);
+                boolean workspaceOperation =
+                        WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                                outcome.toolName())
+                                || workspaceOperationPlan != null;
+                if (workspaceOperation) {
+                    if (workspaceOperationPlan == null
+                            || workspaceOperationPlan.pathEffects().isEmpty()) {
+                        problems.add(
+                                outcome.toolName()
+                                        + " succeeded without a structured workspace-operation plan.");
+                    } else {
+                        workspaceOperationPlans.add(workspaceOperationPlan);
+                        workspaceOperationToolNames.add(outcome.toolName());
+                    }
                     continue;
                 }
                 String pathHint = normalizePath(outcome.pathHint());
@@ -47,19 +73,83 @@ final class MutationTargetReadbackVerifier {
                     continue;
                 }
                 mutationTargets.add(pathHint);
+                recordedMutationTargets.add(outcome.pathHint());
                 verifyTarget(root, pathHint, outcome.fileVerificationStatus(), facts, problems);
             }
         }
 
-        return new Result(facts, problems, mutationTargets, workspaceOperationPlans);
+        requireWorkspaceOperationIdentity(
+                expectedWorkspaceOperation,
+                workspaceOperationPlans,
+                workspaceOperationToolNames,
+                problems);
+
+        return new Result(facts, problems, mutationTargets, workspaceOperationPlans, recordedMutationTargets);
     }
 
+    private static void requireWorkspaceOperationIdentity(
+            WorkspaceOperationAuthorityPlan expected,
+            List<WorkspaceOperationPlan> actual,
+            List<String> actualToolNames,
+            List<String> problems
+    ) {
+        if (expected == null) return;
+        if (expected.state()
+                != WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE) {
+            if (!actual.isEmpty()) {
+                problems.add(
+                        "workspace operation succeeded without current-turn typed authority.");
+            }
+            return;
+        }
+        if (actual.size() != 1) {
+            problems.add(
+                    "typed workspace operation expected exactly one successful structured outcome; found "
+                            + actual.size() + ".");
+            return;
+        }
+        WorkspaceOperationPlan observed = actual.getFirst();
+        String observedTool = actualToolNames == null
+                        || actualToolNames.size() != actual.size()
+                ? ""
+                : actualToolNames.getFirst();
+        String expectedTool = expected.authorizedOperations()
+                .getFirst().toolName();
+        String expectedOperationId = expected.authorizedOperations()
+                .getFirst().operationId();
+        WorkspaceOperationPlan expectedPlan = WorkspaceOperationPlanner
+                .authorityPlan(expected)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "authorized workspace operation lacks a runtime plan"));
+        if (!expectedTool.equals(observedTool)
+                || !expected.planId().equals(observed.authorityPlanId())
+                || !expectedOperationId.equals(observed.operationId())
+                || !expectedPlan.equals(observed)) {
+            problems.add(
+                    "workspace operation outcome differs from current-turn typed authority.");
+        }
+    }
+
+    /**
+     * The verified mutation targets. mutationTargets are normalized for text checks. recordedMutationTargets keep
+     * the tool's own spelling, so identity never reads a rewritten backslash as a separator.
+     */
     record Result(
             List<String> facts,
             List<String> problems,
             Set<String> mutationTargets,
-            List<WorkspaceOperationPlan> workspaceOperationPlans
+            List<WorkspaceOperationPlan> workspaceOperationPlans,
+            Set<String> recordedMutationTargets
     ) {
+        Result(
+                List<String> facts,
+                List<String> problems,
+                Set<String> mutationTargets,
+                List<WorkspaceOperationPlan> workspaceOperationPlans
+        ) {
+            this(facts, problems, mutationTargets, workspaceOperationPlans, mutationTargets);
+        }
+
         Result {
             facts = facts == null ? List.of() : List.copyOf(facts);
             problems = problems == null ? List.of() : List.copyOf(problems);
@@ -69,6 +159,9 @@ final class MutationTargetReadbackVerifier {
             workspaceOperationPlans = workspaceOperationPlans == null
                     ? List.of()
                     : List.copyOf(workspaceOperationPlans);
+            recordedMutationTargets = recordedMutationTargets == null
+                    ? Set.of()
+                    : Collections.unmodifiableSet(new LinkedHashSet<>(recordedMutationTargets));
         }
     }
 
@@ -90,13 +183,13 @@ final class MutationTargetReadbackVerifier {
             problems.add(pathHint + ": target path resolves outside the workspace.");
             return;
         }
-        if (!Files.isRegularFile(target)) {
+        if (!StaticWebFileAccess.isRegularFile(root, target)) {
             problems.add(pathHint + ": mutated target is not a readable file after apply.");
             return;
         }
         String content;
         try {
-            content = Files.readString(target);
+            content = StaticWebFileAccess.readString(root, target);
         } catch (Exception e) {
             problems.add(pathHint + ": mutated target could not be read after apply (" + e.getMessage() + ")");
             return;

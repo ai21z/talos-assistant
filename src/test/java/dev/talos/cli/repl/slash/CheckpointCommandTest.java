@@ -47,6 +47,64 @@ class CheckpointCommandTest {
     }
 
     @Test
+    void restoreCreatesSafetyCheckpointBeforeDirectRestore(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("index.html"), "before");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(),
+                new ToolCall("talos.write_file", Map.of("path", "index.html", "content", "after")),
+                "trc-test",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.writeString(workspace.resolve("index.html"), "after");
+        CheckpointCommand command = new CheckpointCommand(workspace, service);
+
+        Result result = command.execute("restore " + capture.checkpointId(), context(new AtomicInteger()));
+
+        assertInstanceOf(Result.Ok.class, result);
+        String safetyId = service.listSummaries(workspace).stream()
+                .filter(summary -> ("restore of " + capture.checkpointId()).equals(summary.trigger()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("direct restore must create a safety checkpoint"))
+                .id();
+        assertTrue(service.restore(workspace, safetyId).success());
+        assertEquals("after", Files.readString(workspace.resolve("index.html")),
+                "restoring the safety checkpoint must recover the pre-restore state");
+    }
+
+    @Test
+    void restoreAbortsWhenPreRestoreSafetyCheckpointIsSkipped(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("index.html"), "before");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(),
+                new ToolCall("talos.write_file", Map.of("path", "index.html", "content", "after")),
+                "trc-test",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.writeString(workspace.resolve("index.html"), "after");
+        CheckpointCommand command = new CheckpointCommand(workspace, service);
+
+        Result result = command.execute(
+                "restore " + capture.checkpointId(),
+                context(new AtomicInteger(), config(false)));
+
+        assertInstanceOf(Result.Error.class, result);
+        assertTrue(((Result.Error) result).message.toLowerCase(java.util.Locale.ROOT).contains("safety"),
+                ((Result.Error) result).message);
+        assertEquals("after", Files.readString(workspace.resolve("index.html")),
+                "restore must not modify files when the safety checkpoint is skipped");
+    }
+
+    @Test
     void restoreDenialDoesNotChangeFiles(@TempDir Path temp) throws Exception {
         Path workspace = temp.resolve("workspace");
         Files.createDirectories(workspace);
@@ -194,13 +252,21 @@ class CheckpointCommandTest {
     }
 
     private static Config config() {
+        return config(true);
+    }
+
+    private static Config config(boolean enabled) {
         Config config = new Config();
-        config.data.put("checkpoint", Map.of("enabled", true, "fail_closed", true));
+        config.data.put("checkpoint", Map.of("enabled", enabled, "fail_closed", true));
         return config;
     }
 
     private static Context context(AtomicInteger approvals) {
-        return Context.builder(config())
+        return context(approvals, config());
+    }
+
+    private static Context context(AtomicInteger approvals, Config config) {
+        return Context.builder(config)
                 .approvalGate(new ApprovalGate() {
                     @Override public boolean approve(String description, String detail) {
                         return approveFull(description, detail).isApproved();

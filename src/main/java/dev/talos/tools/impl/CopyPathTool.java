@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -12,7 +13,8 @@ import dev.talos.tools.ToolRiskLevel;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 public final class CopyPathTool implements TalosTool {
@@ -65,31 +67,49 @@ public final class CopyPathTool implements TalosTool {
         WorkspaceOperationToolSupport.ResolvedPath destination =
                 WorkspaceOperationToolSupport.resolveAllowed(ctx, to);
         if (!destination.valid()) return ToolResult.fail(ToolError.invalidParams(destination.error()));
-        if (!Files.exists(source.path())) {
-            return ToolResult.fail(ToolError.notFound("Source not found: " + from));
-        }
+        ToolResult parentResult =
+                WorkspaceOperationToolSupport.requireExistingOrdinaryParent(
+                        ctx,
+                        destination.path());
+        if (parentResult != null) return parentResult;
         boolean overwrite = WorkspaceOperationToolSupport.boolParam(call, "overwrite", false);
         boolean recursive = WorkspaceOperationToolSupport.boolParam(call, "recursive", false);
-        if (Files.exists(destination.path()) && !overwrite) {
-            return ToolResult.fail(ToolError.invalidParams(
-                    "Destination already exists: " + to + ". Set overwrite=true to replace it."));
-        }
-        if (Files.isDirectory(source.path()) && !recursive) {
-            return ToolResult.fail(ToolError.invalidParams(
-                    "Source is a directory; set recursive=true to copy directories."));
-        }
-        ToolResult parentResult = WorkspaceOperationToolSupport.createParentDirectories(ctx, destination.path());
-        if (parentResult != null) return parentResult;
         try {
-            if (Files.isDirectory(source.path())) {
-                if (Files.exists(destination.path()) && overwrite && !Files.isDirectory(destination.path())) {
+            NoFollowPathPolicy.GuardedRoot workspace =
+                    NoFollowPathPolicy.bindExistingDirectory(ctx.workspace());
+            NoFollowPathPolicy.EntryType sourceType = workspace.inspect(source.path());
+            if (sourceType == NoFollowPathPolicy.EntryType.MISSING) {
+                return ToolResult.fail(ToolError.notFound("Source not found: " + from));
+            }
+            NoFollowPathPolicy.EntryType destinationType = workspace.inspect(destination.path());
+            if (destinationType != NoFollowPathPolicy.EntryType.MISSING && !overwrite) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Destination already exists: " + to + ". Set overwrite=true to replace it."));
+            }
+            if (sourceType == NoFollowPathPolicy.EntryType.DIRECTORY && !recursive) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Source is a directory; set recursive=true to copy directories."));
+            }
+
+            List<NoFollowPathPolicy.TreeEntry> sourceTree =
+                    sourceType == NoFollowPathPolicy.EntryType.DIRECTORY
+                            ? workspace.walk(source.path())
+                            : List.of(new NoFollowPathPolicy.TreeEntry(
+                                    workspace.requireRegularFile(source.path()),
+                                    NoFollowPathPolicy.EntryType.REGULAR_FILE));
+            if (destinationType == NoFollowPathPolicy.EntryType.DIRECTORY) {
+                workspace.walk(destination.path());
+            }
+
+            if (sourceType == NoFollowPathPolicy.EntryType.DIRECTORY) {
+                if (destinationType == NoFollowPathPolicy.EntryType.REGULAR_FILE && overwrite) {
                     Files.deleteIfExists(destination.path());
                 }
-                WorkspaceOperationToolSupport.copyDirectory(source.path(), destination.path(), overwrite);
-            } else if (overwrite) {
-                Files.copy(source.path(), destination.path(), StandardCopyOption.REPLACE_EXISTING);
+                WorkspaceOperationToolSupport.copyDirectory(
+                        workspace, source.path(), destination.path(), overwrite, sourceTree);
             } else {
-                Files.copy(source.path(), destination.path());
+                WorkspaceOperationToolSupport.copyRegularFile(
+                        workspace, source.path(), destination.path(), overwrite);
             }
             return ToolResult.ok("Copied " + from + " -> " + to);
         } catch (IOException e) {

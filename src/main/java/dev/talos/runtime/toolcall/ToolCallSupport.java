@@ -127,12 +127,21 @@ public final class ToolCallSupport {
         return ToolResultFormatter.firstSentenceSummary(output);
     }
 
+    /**
+     * Duplicate-failed-edit identity. Canonical tool name and canonicalized
+     * path, so an alias respelling or a "./"-prefixed retry of the exact
+     * failing edit cannot escape the duplicate block; the old_string
+     * component carries its length alongside the hash so a 32-bit
+     * collision alone cannot falsely block a different edit.
+     */
     public static String buildCallSignature(ToolCall call) {
         String path = resolvePathHint(call);
         String oldStr = call.param("old_string");
         if (oldStr == null) oldStr = call.param("oldString");
         int oldHash = oldStr != null ? oldStr.hashCode() : 0;
-        return call.toolName() + ":" + (path != null ? path : "") + ":" + oldHash;
+        int oldLength = oldStr != null ? oldStr.length() : 0;
+        return call.canonicalToolName() + ":" + canonicalizeReadPath(path != null ? path : "")
+                + ":" + oldLength + ":" + oldHash;
     }
 
     public static boolean hasEmptyEditArguments(ToolCall call) {
@@ -194,16 +203,10 @@ public final class ToolCallSupport {
                 || "editfile".equals(normalized);
     }
 
-    public static String buildReadCallSignature(ToolCall call) {
-        var sb = new StringBuilder(call.toolName()).append(":");
-        if (call.parameters() != null) {
-            call.parameters().entrySet().stream()
-                    .sorted(Map.Entry.comparingByKey())
-                    .forEach(e -> sb.append(e.getKey()).append("=")
-                            .append(canonicalizeReadPath(e.getValue())).append(";"));
-        }
-        return sb.toString();
-    }
+    // T1013: the flattened read-call signature and its segment parser are
+    // gone. Read-evidence identity lives in ReadEvidenceLedger, keyed by
+    // the effective execution path with deterministic sequence ordering;
+    // identical-call redundancy compares the raw parameter map directly.
 
     public static ToolCall repairMissingPath(ToolCall call) {
         if (!PATH_REQUIRED_TOOLS.contains(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
@@ -221,24 +224,60 @@ public final class ToolCallSupport {
     }
 
     public static void compactOlderToolResultsInPlace(List<ChatMessage> messages) {
-        if (messages == null || messages.size() < 4) return;
+        compactOlderToolResultsInPlace(messages, null);
+    }
+
+    /**
+     * T1011: when {@code originalsOut} is provided, the pre-compaction
+     * content of each summarized tool result is recorded under its message
+     * index, so the recovery overlay can temporarily restore the real read
+     * tool result instead of granting file bytes system-role authority.
+     */
+    public static void compactOlderToolResultsInPlace(
+            List<ChatMessage> messages,
+            Map<Integer, String> originalsOut
+    ) {
+        compactOlderToolResultsInPlace(messages, originalsOut, java.util.Set.of());
+    }
+
+    /** One tool result removed from the model's view: its message index and its size before compaction. */
+    public record CompactedToolResult(int messageIndex, int chars) {}
+
+    /**
+     * Notices are runtime text in a tool carrier, not evidence. They neither take a keep slot nor get
+     * compacted, so a suppressed duplicate cannot push the result it points at out of the model's view.
+     */
+    public static List<CompactedToolResult> compactOlderToolResultsInPlace(
+            List<ChatMessage> messages,
+            Map<Integer, String> originalsOut,
+            java.util.Set<Integer> noticeIndices
+    ) {
+        List<CompactedToolResult> compacted = new ArrayList<>();
+        if (messages == null || messages.size() < 4) return compacted;
         List<Integer> toolResultIndices = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
-            if ("tool".equals(messages.get(i).role())) {
+            if ("tool".equals(messages.get(i).role())
+                    && (noticeIndices == null || !noticeIndices.contains(i))) {
                 toolResultIndices.add(i);
             }
         }
         int keepFrom = toolResultIndices.size() - KEEP_RECENT_TOOL_RESULTS;
-        if (keepFrom <= 0) return;
+        if (keepFrom <= 0) return compacted;
         for (int k = 0; k < keepFrom; k++) {
             int idx = toolResultIndices.get(k);
             ChatMessage m = messages.get(idx);
             String content = m.content();
             if (content == null || content.isBlank()) continue;
             if (content.startsWith("[compacted:")) continue;
+            if (originalsOut != null) {
+                originalsOut.putIfAbsent(idx, content);
+            }
             String summary = summarizeToolResult(content);
-            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary));
+            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary)
+                    .withContentRestrictions(m.contentRestrictions()));
+            compacted.add(new CompactedToolResult(idx, content.length()));
         }
+        return compacted;
     }
 
     public static String resolvePathHint(ToolCall call) {

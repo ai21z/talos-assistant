@@ -9,7 +9,7 @@ import java.util.Optional;
 public interface SecretStore {
     /**
      * Store or overwrite a secret value.
-     * @param scope logical namespace (e.g., "ollama", "openai"); use "default" if not needed
+     * @param scope logical namespace (e.g., "huggingface"); use "default" if not needed
      * @param key   key name
      * @param value secret payload (caller retains ownership; implementation should copy/wipe)
      */

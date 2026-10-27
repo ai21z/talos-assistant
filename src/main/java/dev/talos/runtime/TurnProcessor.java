@@ -1,7 +1,8 @@
 package dev.talos.runtime;
 
-import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.core.util.TextReplacement;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.command.CommandToolPlanner;
@@ -20,22 +21,23 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
-import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -62,6 +64,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class TurnProcessor {
 
+    @FunctionalInterface
+    interface TerminalizerFactory {
+        TurnTerminalizer create(int turnNumber, long startNanos);
+    }
+
     private static final Logger LOG = LoggerFactory.getLogger(TurnProcessor.class);
 
     private final TurnRouter modes;
@@ -72,6 +79,18 @@ public final class TurnProcessor {
     private final dev.talos.runtime.command.CommandProfileRegistry commandProfiles;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
+    private final ThreadLocal<TurnPublicationHealth> publicationHealth = new ThreadLocal<>();
+    private final TerminalizerFactory terminalizerFactory;
+    private dev.talos.runtime.observation.TurnRequestFrame.ControlledContracts controlledContracts;
+
+    /** Explicit wiring is provided for controlled boundary experiments, not model interpretation. */
+    public TurnProcessor withControlledContracts(
+            dev.talos.runtime.observation.TurnRequestFrame.ControlledContracts source) {
+        var processor = new TurnProcessor(modes, approvalGate, toolRegistry, approvalPolicy,
+                checkpointService, commandProfiles, terminalizerFactory);
+        processor.controlledContracts = Objects.requireNonNull(source);
+        return processor;
+    }
 
     /**
      * Primary constructor. All policy parameters are required - the caller
@@ -102,6 +121,25 @@ public final class TurnProcessor {
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
                          CheckpointService checkpointService,
                          dev.talos.runtime.command.CommandProfileRegistry commandProfiles) {
+        this(
+                modes,
+                approvalGate,
+                toolRegistry,
+                approvalPolicy,
+                checkpointService,
+                commandProfiles,
+                TurnTerminalizer::new);
+    }
+
+    TurnProcessor(
+            TurnRouter modes,
+            ApprovalGate approvalGate,
+            ToolRegistry toolRegistry,
+            ApprovalPolicy approvalPolicy,
+            CheckpointService checkpointService,
+            dev.talos.runtime.command.CommandProfileRegistry commandProfiles,
+            TerminalizerFactory terminalizerFactory
+    ) {
         this.modes = modes;
         this.approvalGate = Objects.requireNonNull(approvalGate,
                 "approvalGate must not be null - pass NoOpApprovalGate() explicitly "
@@ -115,6 +153,8 @@ public final class TurnProcessor {
                 "checkpointService must not be null");
         this.commandProfiles = Objects.requireNonNullElseGet(commandProfiles,
                 dev.talos.runtime.command.CommandProfileRegistry::defaultRegistry);
+        this.terminalizerFactory = Objects.requireNonNull(
+                terminalizerFactory, "turn terminalizer factory");
     }
 
     public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
@@ -156,23 +196,32 @@ public final class TurnProcessor {
         return false;
     }
 
+    /** Consume process-local evidence-publication health for the calling turn. */
+    public TurnPublicationHealth consumePublicationHealth() {
+        TurnPublicationHealth health = publicationHealth.get();
+        publicationHealth.remove();
+        return health;
+    }
+
     /**
      * Process a single user prompt through the mode system.
      *
-     * <p>After a successful turn, all registered {@link SessionListener}s
-     * receive an {@code onTurnComplete} callback with the result and the
-     * original user input. This centralizes memory updates, audit logging,
-     * and future transcript persistence.
+     * <p>Every allocated turn is terminalized before its thread-local captures
+     * are cleared. Settlement-aware listeners receive the frozen envelope;
+     * legacy completion listeners receive ordinary completions only. Failed
+     * and no-result settlements receive a blank listener input so they cannot
+     * enter conversational memory accidentally.
      *
-     * <p>Exceptions are <em>not</em> caught here - they propagate to the caller
-     * (typically {@code ExecutionPipeline}) which owns the error envelope,
-     * redaction, and audit logging.
+     * <p>Route and terminalization exceptions are rethrown to the caller
+     * (typically {@code ExecutionPipeline}) after bounded local evidence is
+     * published. That caller continues to own the user-facing error envelope,
+     * redaction, and coarse audit logging.
      *
      * @param session   the active session
      * @param userInput raw user input (not a colon-command)
      * @param ctx       runtime context (rag, llm, sandbox, etc.)
      * @return a TurnResult, or null if no mode handled the input
-     * @throws Exception if mode dispatch fails (propagated for envelope handling)
+     * @throws Exception if mode dispatch or terminalization fails after evidence settlement
      */
     @SuppressWarnings("resource") // RuntimeTurnContext-owned LlmClient is borrowed for metadata, not closed per turn.
     public TurnResult process(Session session, String userInput, RuntimeTurnContext ctx) throws Exception {
@@ -180,88 +229,260 @@ public final class TurnProcessor {
             return null;
         }
 
+        publicationHealth.remove();
+        clearCapturedTurnState();
         int turn = session.nextTurn();
         long startNanos = System.nanoTime();
+        Throwable primaryFailure = null;
+        TurnTerminalizer terminalizer;
+        try {
+            terminalizer = Objects.requireNonNull(
+                    terminalizerFactory.create(turn, startNanos),
+                    "turn terminalizer factory returned null");
+        } catch (Throwable constructionFailure) {
+            primaryFailure = constructionFailure;
+            terminalizer = new TurnTerminalizer(turn, startNanos);
+        }
 
-        // Publish the current turn's user request + start the per-turn audit
-        // bag so executeTool(...) (called many times during tool-loop runs)
-        // can consult the request for scope guarding and record its tool
-        // activity without threading extra arguments through every call.
-        TurnUserRequestCapture.set(userInput);
-        TurnAuditCapture.begin();
-        String traceId = LocalTurnTraceCapture.newTraceId();
+        String traceId;
+        try {
+            traceId = LocalTurnTraceCapture.newTraceId();
+        } catch (RuntimeException identityFailure) {
+            if (primaryFailure == null) primaryFailure = identityFailure;
+            traceId = "trc-fallback-" + Integer.toUnsignedString(turn)
+                    + "-" + Long.toUnsignedString(startNanos);
+        }
+        try {
+            TurnUserRequestCapture.set(userInput);
+            TurnAuditCapture.begin();
+            PromptDebugCapture.beginTurn();
+        } catch (RuntimeException captureFailure) {
+            if (primaryFailure == null) primaryFailure = captureFailure;
+        }
+        String traceTimestamp;
+        TurnPublicationHealth terminalizationHealth = null;
+        try {
+            traceTimestamp = java.time.Instant.now().toString();
+        } catch (RuntimeException clockFailure) {
+            traceTimestamp = "";
+            if (primaryFailure == null) primaryFailure = clockFailure;
+        }
+        String sessionId = "";
+
         // Deliberately the bare workspace hash, NOT the per-run session
         // instance id (T799): this value only identifies the workspace
         // inside trace metadata. The storage key for turn logs and trace
         // files is owned by JsonTurnLogAppender's injected id.
-        String sessionId = JsonSessionStore.sessionIdFor(session.workspace());
-        String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
-        String traceMode = modes == null ? "unknown" : modes.traceMode(userInput);
-        LocalTurnTraceCapture.begin(
-                traceId,
-                sessionId,
-                turn,
-                java.time.Instant.now().toString(),
-                sessionId,
-                traceMode,
-                modelBackend(model),
-                modelName(model),
-                userInput);
-        TurnResult turnResult;
+        TurnSettlement settlement = null;
+        TurnExecutionStage failedAt = TurnExecutionStage.TURN_INITIALIZATION;
+        Optional<Result> routed = null;
+        boolean traceStarted = false;
+        dev.talos.runtime.observation.TurnRequestFrame requestFrame = null;
         try {
-            Path ws = session.workspace();
-            Optional<Result> result = modes.route(userInput, ws, ctx);
-
-            if (result.isEmpty()) {
-                return null;
-            }
-
-            long elapsedNanos = System.nanoTime() - startNanos;
-
-            // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
-            // For non-RAG turns (AskMode, DevMode), this returns null - expected and correct.
-            RetrievalTrace trace = TurnTraceCapture.consume();
-            if (ctx != null && ctx.executionPhaseState() != null) {
-                TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
-            }
-            String assistantText = MemoryUpdateListener.extractText(result.get());
-            LocalTurnTraceCapture.recordModelResponseReceived(assistantText);
-            LocalTurnTraceCapture.recordOutcomeIfAbsent(
-                    JsonTurnLogAppender.statusOf(result.get()).toUpperCase(java.util.Locale.ROOT),
-                    "NOT_RUN",
-                    "UNKNOWN",
-                    "UNKNOWN",
-                    "TURN_RECORDED");
-            LocalTurnTrace localTrace = LocalTurnTraceCapture.complete();
-            TurnAudit audit = TurnAuditCapture.end().withLocalTrace(localTrace);
-
-            turnResult = new TurnResult(
-                    result.get(),
-                    trace,
+            // Begin every turn-owned capture before mode/provider preparation.
+            // The local trace owns the stage marker and therefore its lifetime.
+            sessionId = JsonSessionStore.sessionIdFor(session.workspace());
+            LocalTurnTraceCapture.begin(
+                    traceId,
+                    sessionId,
                     turn,
-                    Duration.ofNanos(elapsedNanos),
-                    audit
-            );
-        } finally {
-            TurnUserRequestCapture.clear();
-            LocalTurnTraceCapture.clear();
-            // Defensive: if we hit a return/throw above before end() fired,
-            // ensure the thread-local bag is cleaned up.
-            if (TurnAuditCapture.isActive()) {
-                TurnAuditCapture.end();
+                    traceTimestamp,
+                    sessionId,
+                    "unknown",
+                    "",
+                    "",
+                    userInput);
+            traceStarted = traceId.equals(LocalTurnTraceCapture.currentTraceId());
+            if (!traceStarted) {
+                throw new IllegalStateException("turn trace identity did not bind");
             }
+            if (primaryFailure == null) {
+                String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
+                String traceMode = modes == null ? "unknown" : modes.traceMode(userInput);
+                LocalTurnTraceCapture.updateRuntimeMetadata(
+                        traceMode, modelBackend(model), modelName(model));
+                Path ws = session.workspace();
+                requestFrame = dev.talos.runtime.observation.TurnRequestFrame.open(
+                        userInput, ws, turn, controlledContracts);
+                ctx = ctx.withRequestFrame(requestFrame);
+                ctx = ctx.prepareRequestPins(userInput, ws);
+                LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
+                routed = Objects.requireNonNull(
+                        modes.route(userInput, ws, ctx),
+                        "turn router returned null result");
+            }
+        } catch (Throwable failure) {
+            if (primaryFailure == null) primaryFailure = failure;
+            traceStarted = traceId.equals(LocalTurnTraceCapture.currentTraceId());
+            failedAt = traceStarted
+                    ? LocalTurnTraceCapture.currentExecutionStage()
+                    : TurnExecutionStage.TURN_INITIALIZATION;
         }
 
-        // Fire post-turn hooks on all listeners
+        // Some filesystem and channel operations consume the interrupted bit.
+        // Publish the already-observed failure with the bit temporarily clear,
+        // then restore it for the caller on every terminal path. The bit is
+        // preservation state only; typed causality still comes from the caught
+        // throwable graph.
+        boolean restoreInterruptAfterSettlement = Thread.interrupted();
+        try {
+        try {
+            if (primaryFailure != null) {
+                settlement = traceStarted
+                        && traceId.equals(LocalTurnTraceCapture.currentTraceId())
+                        ? terminalizer.fail(primaryFailure, failedAt, ctx)
+                        : terminalizer.failWithoutActiveTrace(
+                                primaryFailure,
+                                TurnExecutionStage.TURN_INITIALIZATION,
+                                ctx,
+                                traceId,
+                                sessionId,
+                                traceTimestamp,
+                                userInput);
+            } else if (routed.isEmpty()) {
+                settlement = terminalizer.noResult(ctx);
+            } else {
+                LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.TURN_FINALIZATION);
+                settlement = terminalizer.complete(routed.get(), ctx);
+            }
+        } catch (Throwable terminalFailure) {
+            Throwable evidenceFailure = primaryFailure == null
+                    ? terminalFailure
+                    : primaryFailure;
+            TurnExecutionStage evidenceStage = primaryFailure != null
+                    ? failedAt
+                    : routed != null && routed.isEmpty()
+                            ? TurnExecutionStage.MODE_ROUTING
+                            : TurnExecutionStage.TURN_FINALIZATION;
+            try {
+                settlement = terminalizer.recoverAfterTerminalizationFailure(
+                        evidenceFailure,
+                        evidenceStage,
+                        terminalFailure,
+                        traceId,
+                        sessionId,
+                        traceTimestamp);
+            } catch (Throwable recoveryFailure) {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        TurnPublicationHealth.internalFailure(
+                                terminalFailure.getClass().getName()),
+                        TurnPublicationHealth.internalFailure(
+                                recoveryFailure.getClass().getName()));
+            }
+            if (primaryFailure == null) {
+                primaryFailure = terminalFailure;
+            }
+            if (terminalizationHealth == null) {
+                terminalizationHealth = TurnPublicationHealth.internalFailure(
+                        terminalFailure.getClass().getName());
+            }
+        } finally {
+            // The terminal settlement is frozen before any thread-local is
+            // cleared; listeners run only after cleanup so their own provider
+            // activity cannot contaminate this turn's trace.
+            if (requestFrame == null) clearCapturedTurnState();
+            else requestFrame.finish(TurnProcessor::clearCapturedTurnState);
+        }
+
+        Throwable publicationFailure = null;
+        if (settlement != null) {
+            try {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        terminalizationHealth,
+                        publishSettlement(
+                                settlement,
+                                userInput,
+                                primaryFailure != null
+                                        || !settlement.ordinaryCompletion()));
+            } catch (Throwable listenerError) {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        terminalizationHealth,
+                        TurnPublicationHealth.listenerFailure(
+                                listenerError.getClass().getName()));
+                publicationFailure = listenerError;
+            }
+        }
+        if (terminalizationHealth != null) {
+            publicationHealth.set(terminalizationHealth);
+        }
+
+        if (primaryFailure != null) {
+            rethrow(primaryFailure);
+        }
+        if (publicationFailure != null) {
+            rethrow(publicationFailure);
+        }
+        return settlement == null || settlement.kind() == TurnSettlement.Kind.NO_RESULT
+                ? null
+                : settlement.result();
+        } finally {
+            if (restoreInterruptAfterSettlement) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private TurnPublicationHealth publishSettlement(
+            TurnSettlement settlement,
+            String userInput,
+            boolean preserveSettledOutcome
+    ) {
+        String listenerInput = settlement.ordinaryCompletion()
+                ? userInput
+                : "";
+        int completed = 0;
+        int skipped = 0;
+        int degraded = 0;
+        List<TurnPublicationReceipt.Reason> reasons = new ArrayList<>();
+        List<String> exceptionClasses = new ArrayList<>();
         for (SessionListener listener : listeners) {
             try {
-                listener.onTurnComplete(turnResult, userInput);
-            } catch (Exception ignored) {
-                // Listener errors must not break the turn pipeline
+                TurnPublicationReceipt receipt = listener.onTurnSettled(
+                        settlement, listenerInput);
+                if (receipt == null) {
+                    degraded++;
+                    reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                } else {
+                    switch (receipt.status()) {
+                        case COMPLETE -> completed++;
+                        case SKIPPED -> skipped++;
+                        case DEGRADED -> {
+                            degraded++;
+                            reasons.add(receipt.reason());
+                        }
+                    }
+                }
+            } catch (Exception listenerFailure) {
+                degraded++;
+                reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                exceptionClasses.add(listenerFailure.getClass().getName());
+            } catch (Error listenerError) {
+                if (!preserveSettledOutcome) throw listenerError;
+                degraded++;
+                reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                exceptionClasses.add(listenerError.getClass().getName());
             }
         }
+        return new TurnPublicationHealth(
+                completed, skipped, degraded, reasons, exceptionClasses);
+    }
 
-        return turnResult;
+    private static void rethrow(Throwable failure) throws Exception {
+        if (failure instanceof Exception exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        throw new RuntimeException(failure);
+    }
+
+    private static void clearCapturedTurnState() {
+        TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
+        TurnSourceEvidenceCapture.clear(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
+        TurnTraceCapture.clear();
+        LocalTurnTraceCapture.clear();
+        if (TurnAuditCapture.isActive()) {
+            TurnAuditCapture.end();
+        }
+        PromptDebugCapture.endTurn();
     }
 
     private static String modelBackend(String model) {
@@ -307,8 +528,79 @@ public final class TurnProcessor {
      * <p>Scope guarding, policy decisions, and approval outcomes are also
      * recorded into the active {@link TurnAuditCapture} bag if one is
      * running on this thread.
-     */
+    */
     public ToolResult executeTool(Session session, ToolCall call, RuntimeTurnContext ctx) {
+        return executeToolWithinStage(() -> executeToolWithDirectAuthority(
+                session, call, ctx));
+    }
+
+    private ToolResult executeToolWithDirectAuthority(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx
+    ) {
+        if (call == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
+        }
+        if (session == null || ctx == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
+        }
+        LocalTurnTraceCapture.ToolCallAuthorityDecision authority =
+                LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                        tracePhase(ctx),
+                        call,
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .DIRECT_RUNTIME_API);
+        LocalTurnTraceCapture.ParsedToolCallPermit permit = authority.permit();
+        if (!authority.authorized()) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Deterministic runtime tool authority is unavailable (" + authority.rejectionReason().name() + ")");
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Deterministic runtime tool authority is unavailable ("
+                            + authority.rejectionReason().name() + ")"));
+        }
+        if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call)) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Tool execution requires current deterministic runtime authority");
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Tool execution requires current deterministic runtime authority"));
+        }
+        return executeTool(session, call, ctx, permit);
+    }
+
+    /** Executes a call whose one-use parse permit was minted by the tool-loop stage. */
+    public ToolResult executeToolAfterParsed(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+        return executeToolWithinStage(() -> executeToolAfterParsedWithinStage(
+                session, call, ctx, parsedPermit));
+    }
+
+    private ToolResult executeToolAfterParsedWithinStage(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit
+    ) {
+        if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
+            TurnAuditCapture.recordAuthorityRejectedToolCall(call,
+                    "Tool execution requires the current exact parsed-call authority");
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Tool execution requires the current exact parsed-call authority"));
+        }
+        return executeTool(session, call, ctx, parsedPermit);
+    }
+
+    private ToolResult executeTool(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
@@ -316,24 +608,30 @@ public final class TurnProcessor {
             return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
         }
         String tracePhase = tracePhase(ctx);
-        LocalTurnTraceCapture.recordToolCallParsed(tracePhase, call);
         ToolAliasPolicy.Decision aliasDecision = ToolAliasPolicy.resolve(call.toolName());
         LocalTurnTraceCapture.recordToolAliasDecision(aliasDecision);
 
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
         if (tool == null) {
-            TurnAuditCapture.recordToolCall(call.toolName(), "", false, "unknown tool");
+            TurnAuditCapture.recordToolCall(call, "", false, "unknown tool");
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
+        }
+        var requestFrame = ctx.requestFrame();
+        if (requestFrame != null) {
+            requestFrame.requireCurrent();
+            if (requestFrame.controlled() && (!requestFrame.workspace().equals(session.workspace().toAbsolutePath().normalize())
+                    || !requestFrame.allowsTool(tool.name())
+                    || !requestFrame.allowsDirectoryTarget(call.parameters()))) {
+                TurnAuditCapture.recordToolCall(call, "", false, "request acquisition boundary");
+                return ToolResult.fail(ToolError.denied("The operation was not admitted by the current request boundary."));
+            }
+        } else if (controlledContracts != null || dev.talos.runtime.observation.TurnRequestFrame.controlledCurrent()) {
+            return ToolResult.fail(ToolError.denied("The current request boundary is missing from the tool context."));
         }
         ToolResult surfaceRejection = rejectIfOutsideCurrentToolSurface(
                 ctx, call, tool.name(), tracePhase);
-        if (surfaceRejection != null) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), "", false,
-                    "current-turn tool surface denied " + tool.name());
-            return surfaceRejection;
-        }
+        if (surfaceRejection != null) return surfaceRejection;
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
         ToolRiskLevel risk = effectiveRisk(tool.descriptor().riskLevel(), call);
@@ -345,13 +643,25 @@ public final class TurnProcessor {
         ToolOperationMetadata opMeta = tool.descriptor().operationMetadata();
         boolean mutatingTool = opMeta.mutatesWorkspace();
         String userRequest = TurnUserRequestCapture.get();
-        TaskContract taskContract = TurnTaskContractCapture.get();
+        TaskContract capturedTaskContract = TurnTaskContractCapture.get();
+        TaskContract taskContract = capturedTaskContract;
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
         }
+        var capturedIntent = TurnTaskContractCapture.getIntent();
+        var selectedDraft = capturedIntent == null ? null : capturedIntent.contentSaveRequest().draftSelection();
+        if (selectedDraft != null && (!"talos.write_file".equals(call.canonicalToolName())
+                || !call.parameters().keySet().equals(java.util.Set.of("path", "content"))
+                || !selectedDraft.destination().equals(call.param("path"))
+                || !selectedDraft.content().equals(call.param("content")))) {
+            TurnAuditCapture.recordBlockedToolCall(call, resolvePathParam(call), tracePhase,
+                    "selected draft mismatch", "Only the exact selected draft and destination may be submitted for approval.");
+            return ToolResult.fail(ToolError.denied("The selected draft or destination changed. No approval or write was attempted."));
+        }
         PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
                 ProtectedPathAliasNormalizer.canonicalizeExpectedProtectedAliases(
-                        session.workspace(), call, pathParameterKeys(), taskContract.expectedTargets());
+                        session.workspace(), call, pathParameterKeys(),
+                        requestFrame != null && requestFrame.controlled() ? java.util.Set.of() : taskContract.expectedTargets());
         if (protectedAliasNormalization.changed()) {
             for (PathArgumentCanonicalizer.PathParameterChange change : protectedAliasNormalization.changes()) {
                 LocalTurnTraceCapture.recordPathArgumentNormalized(
@@ -361,7 +671,13 @@ public final class TurnProcessor {
                         change.rawPath(),
                         change.normalizedPath());
             }
-            call = protectedAliasNormalization.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    protectedAliasNormalization.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .PROTECTED_ALIAS_NORMALIZATION);
         }
         // Markdown-commentary sanitization runs HERE, before pre-approval
         // validation and the approval preview, so approved bytes == written
@@ -369,7 +685,7 @@ public final class TurnProcessor {
         // the corrector is the runtime-owned ground truth for exact-write
         // contracts and, running after, restores the user's literal payload
         // even if sanitization touched it - exactness always wins.
-        if (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName())) {
+        if (selectedDraft == null && (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName()))) {
             MarkdownCommentaryCallNormalizer.Normalization sanitization =
                     isWriteFileTool(call.toolName())
                             ? MarkdownCommentaryCallNormalizer.normalizeWriteContent(call)
@@ -382,12 +698,18 @@ public final class TurnProcessor {
                         sanitization.strippedChars(),
                         sanitization.beforeValue(),
                         sanitization.afterValue());
-                call = sanitization.call();
+                call = transformedToolCall(
+                        parsedPermit,
+                        tracePhase,
+                        call,
+                        sanitization.call(),
+                        LocalTurnTraceCapture.ToolCallTransformationReason
+                                .MARKDOWN_COMMENTARY_SANITIZATION);
             }
         }
         ExactLiteralWriteCallCorrector.Correction exactCorrection =
                 ExactLiteralWriteCallCorrector.correct(call, taskContract);
-        if (exactCorrection.corrected()) {
+        if (selectedDraft == null && exactCorrection.corrected()) {
             LocalTurnTraceCapture.recordExactLiteralWriteCorrected(
                     exactCorrection.targetPath(),
                     exactCorrection.sourcePattern(),
@@ -397,7 +719,13 @@ public final class TurnProcessor {
                     exactCorrection.observedHash(),
                     exactCorrection.observedBytes(),
                     exactCorrection.observedLines());
-            call = exactCorrection.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    exactCorrection.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .EXACT_LITERAL_WRITE_CORRECTION);
         }
         PathArgumentCanonicalizer.ToolCallNormalization pathNormalization =
                 PathArgumentCanonicalizer.canonicalizeToolCall(session.workspace(), call, pathParameterKeys());
@@ -410,15 +738,45 @@ public final class TurnProcessor {
                         change.rawPath(),
                         change.normalizedPath());
             }
-            call = pathNormalization.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    pathNormalization.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .PATH_ARGUMENT_NORMALIZATION);
+        }
+        // Byte-faithful existing-file writes (T1012): re-apply the target's
+        // BOM, line-ending style, and terminal-newline state to the proposed
+        // content BEFORE pre-approval validation, the approval preview,
+        // checkpoint capture, and execution, so the exact bytes approved are
+        // the exact bytes written. Runs after every other content rewrite
+        // (sanitizer, exact-literal corrector); idempotent by construction.
+        WriteFormatPolicy.Preservation formatPreservation =
+                selectedDraft == null ? WriteFormatPolicy.preserveWriteCall(session.workspace(), call, taskContract, userRequest)
+                        : WriteFormatPolicy.Preservation.unchanged(call);
+        if (formatPreservation.changed()) {
+            LocalTurnTraceCapture.recordActionObligation(
+                    "WRITE_FORMAT_PRESERVATION",
+                    "REPAIRED",
+                    formatPreservation.description(),
+                    "WRITE_FORMAT_PRESERVED_BEFORE_APPROVAL");
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    formatPreservation.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .WRITE_FORMAT_PRESERVATION);
         }
         String path = resolvePathParam(call);
 
         if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
-                    "directory-listing contract denied " + call.toolName());
-            LocalTurnTraceCapture.recordToolCallBlocked(tracePhase, call,
+            TurnAuditCapture.recordBlockedToolCall(
+                    call,
+                    path == null ? "" : path,
+                    tracePhase,
+                    "directory-listing contract denied " + call.toolName(),
                     "directory-listing contract allows only talos.list_dir");
             return ToolResult.fail(ToolError.denied(
                     "The user only asked to list directory entries on this turn, so do not call "
@@ -426,17 +784,35 @@ public final class TurnProcessor {
                             + ". Use talos.list_dir only and answer with file and directory names."));
         }
 
+        ToolResult incompleteTargetScanValidation =
+                validateIncompleteAuthorityBeforeApproval(call, mutatingTool);
+        if (incompleteTargetScanValidation != null) {
+            TurnAuditCapture.recordBlockedToolCall(
+                    call,
+                    path == null ? "" : path,
+                    tracePhase,
+                    preApprovalBlockReason(
+                            call,
+                            incompleteTargetScanValidation));
+            return incompleteTargetScanValidation;
+        }
+
         if (mutatingTool
-                && userRequest != null
-                && !taskContract.mutationAllowed()) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
-                    "task-contract read-only denied " + call.toolName());
-            return ToolResult.fail(ToolError.denied(
-                    "The user did not ask to modify files on this turn, so do not call "
+                && (!taskContract.mutationAllowed()
+                        || TaskContractResolver.explicitlyForbidsMutation(userRequest))
+                && (userRequest != null || capturedTaskContract != null)) {
+            String denial = taskContract.mutationRequested()
+                    ? "A file change was requested, but its scope is not authorized by the current task contract. "
+                            + "Ask the user to clarify the target files and requested changes before retrying. "
+                            + "Earlier approval must not be reused, and assistant proposals must not supply missing authority."
+                    : "The user did not ask to modify files on this turn, so do not call "
                             + call.toolName()
                             + " for a read-only request. Answer with information only, "
-                            + "or wait for an explicit change request in a later turn."));
+                            + "or wait for an explicit change request in a later turn.";
+            TurnAuditCapture.recordBlockedToolCall(
+                    call, path == null ? "" : path, tracePhase,
+                    "task-contract mutation denied " + call.toolName(), denial);
+            return ToolResult.fail(ToolError.denied(denial));
         }
 
         if (ctx.executionPhaseState() != null) {
@@ -444,7 +820,7 @@ public final class TurnProcessor {
                     ctx.executionPhaseState().phase(), tool.name(), risk);
             if (phaseRejection != null) {
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "phase " + ctx.executionPhaseState().phase() + " denied " + call.toolName());
                 if (commandTool) {
                     String reason = "Phase policy blocked " + call.toolName()
@@ -473,7 +849,7 @@ public final class TurnProcessor {
             if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "placeholder path parameter `" + k + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
@@ -518,7 +894,7 @@ public final class TurnProcessor {
                 // definitionally bad, but from a trust-accounting perspective
                 // it is a denied mutation, not a success.
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "placeholder content parameter `" + placeholderParam + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
@@ -529,18 +905,16 @@ public final class TurnProcessor {
                     validateBeforeApproval(call, session, ctx, taskContract, mutatingTool,
                             commandProfiles);
             if (preApprovalValidation != null) {
-                TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
-                        preApprovalBlockReason(call, preApprovalValidation));
-                LocalTurnTraceCapture.recordToolCallBlocked(
-                        tracePhase,
+                String blockReason = preApprovalBlockReason(call, preApprovalValidation);
+                TurnAuditCapture.recordBlockedToolCall(
                         call,
-                        preApprovalBlockReason(call, preApprovalValidation));
+                        path == null ? "" : path,
+                        tracePhase,
+                        blockReason);
                 if (commandTool) {
-                    String reason = preApprovalBlockReason(call, preApprovalValidation);
                     LocalTurnTraceCapture.recordCommandPolicyDecision(
                             tracePhase, call, "DENY", "PRE_APPROVAL_VALIDATION");
-                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, blockReason);
                 }
                 return preApprovalValidation;
             }
@@ -558,6 +932,11 @@ public final class TurnProcessor {
                 LocalTurnTraceCapture.recordCommandPolicyDecision(
                         tracePhase, call, "DENY", "PLAN_REJECTED");
                 LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                TurnAuditCapture.recordBlockedToolCall(
+                        call,
+                        path == null ? "" : path,
+                        tracePhase,
+                        reason);
                 return ToolResult.fail(ToolError.invalidParams(reason));
             }
         }
@@ -589,6 +968,23 @@ public final class TurnProcessor {
                     "Scope warning requires approval before running " + call.toolName() + ".");
         }
 
+        // Format-change override (T1012): a BOM, line-ending, or
+        // terminal-newline change that remains after preservation is a
+        // material byte change the user must SEE; a remembered or
+        // configured ALLOW would bypass the Format changes section.
+        if (permissionDecision.action() == PermissionAction.ALLOW
+                && isWriteFileTool(call.toolName())
+                && path != null && !path.isBlank()) {
+            String pendingContent = resolveParam(call, "content", "text", "body", "data", "file_content");
+            if (pendingContent != null && !WriteFormatPolicy
+                    .remainingFormatChanges(session.workspace(), path, pendingContent)
+                    .isEmpty()) {
+                permissionDecision = permissionDecision.forceAsk(
+                        "FORMAT_CHANGE_ASK",
+                        "Format changes require approval before running " + call.toolName() + ".");
+            }
+        }
+
         LocalTurnTraceCapture.recordPermissionDecision(
                 tracePhase,
                 call,
@@ -610,14 +1006,18 @@ public final class TurnProcessor {
             if (risk.requiresApproval()) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                recordWorkspaceOperationLifecycle(
+                        call,
+                        LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .APPROVAL_DENIED);
                 if (commandTool) {
                     LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
                 }
             }
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
-                    "permission policy denied " + call.toolName()
-                            + " (" + permissionDecision.reasonCode() + ")");
+            String policyDenial = "permission policy denied " + call.toolName()
+                    + " (" + permissionDecision.reasonCode() + ")";
+            TurnAuditCapture.recordBlockedToolCall(call, path == null ? "" : path,
+                    tracePhase, policyDenial, policyDenial, ToolFailureReason.PERMISSION_POLICY_DENIED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandDenied(
                         tracePhase,
@@ -634,6 +1034,10 @@ public final class TurnProcessor {
         if (permissionDecision.action() == PermissionAction.ASK) {
             TurnAuditCapture.recordApprovalRequired();
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_REQUIRED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalRequired(tracePhase, call);
             }
@@ -667,6 +1071,10 @@ public final class TurnProcessor {
             if (response == ApprovalResponse.DENIED) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                recordWorkspaceOperationLifecycle(
+                        call,
+                        LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .APPROVAL_DENIED);
                 if (commandTool) {
                     LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
                     LocalTurnTraceCapture.recordCommandDenied(
@@ -674,9 +1082,9 @@ public final class TurnProcessor {
                             call,
                             "User did not approve " + call.toolName());
                 }
-                TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
-                        "approval denied by user for " + call.toolName());
+                String approvalDenial = "approval denied by user for " + call.toolName();
+                TurnAuditCapture.recordBlockedToolCall(call, path == null ? "" : path,
+                        tracePhase, approvalDenial, approvalDenial, ToolFailureReason.USER_APPROVAL_DENIED);
                 // Phrasing matters: previously "Operation denied by user" caused
                 // qwen2.5-coder to hallucinate a "permissions" excuse and tell
                 // the user to "ensure you have the necessary permissions" - the
@@ -695,6 +1103,10 @@ public final class TurnProcessor {
             // Approved - record and optionally propagate the remember choice.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_GRANTED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
             }
@@ -706,6 +1118,10 @@ public final class TurnProcessor {
             // AUTO_ALLOW by policy for a mutating call.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                            .APPROVAL_GRANTED);
             if (commandTool) {
                 LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
             }
@@ -717,10 +1133,28 @@ public final class TurnProcessor {
                     checkpoint.status(),
                     checkpoint.checkpointId(),
                     checkpoint.message(),
-                    checkpoint.capturedFiles());
+                    checkpoint.capturedFiles(),
+                    checkpoint.authorityPlanId(),
+                    checkpoint.operationId());
+            recordWorkspaceOperationLifecycle(
+                    call,
+                    switch (checkpoint.status()) {
+                        case "CREATED" ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_CREATED;
+                        case "SKIPPED" ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_SKIPPED;
+                        default ->
+                                LocalTurnTraceCapture
+                                        .WorkspaceOperationLifecycleStage
+                                        .CHECKPOINT_FAILED;
+                    });
             if (!checkpoint.success()) {
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "checkpoint failed before " + call.toolName());
                 return ToolResult.fail(ToolError.internal(
                         "Required checkpoint failed before mutation: " + checkpoint.message()));
@@ -730,13 +1164,20 @@ public final class TurnProcessor {
         ToolContext toolCtx = new ToolContext(
                 session.workspace(),
                 ctx.sandbox(),
-                session.config()
+                session.config(),
+                ctx.requestFrame() == null
+                        ? dev.talos.spi.WorkspaceObservationBoundary.unrestricted()
+                        : ctx.requestFrame().observationBoundary()
         );
 
         ToolResult result;
         try {
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
             LOG.warn("Tool {} threw unexpected exception: {} - returning fail result instead of crashing turn",
                     call.toolName(), SafeLogFormatter.throwableMessage(e));
             LOG.debug("Tool execution exception stack trace suppressed; sanitized reason={}",
@@ -745,20 +1186,74 @@ public final class TurnProcessor {
                     "Tool execution failed unexpectedly: "
                             + e.getClass().getSimpleName() + ": " + SafeLogFormatter.throwableMessage(e)));
         }
+        List<String> resultPathHints = result.mutationEffects().hasEffects()
+                ? result.mutationEffects().affectedPaths()
+                : result.success()
+                ? auditPathHints(call, path, result)
+                : (path == null || path.isBlank() ? List.of() : List.of(path));
+        recordWorkspaceOperationLifecycle(
+                call,
+                result.success()
+                        ? LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .EXECUTION_SUCCEEDED
+                        : LocalTurnTraceCapture.WorkspaceOperationLifecycleStage
+                                .EXECUTION_FAILED);
+        TurnAuditCapture.recordExecutedToolCall(
+                call,
+                "talos.edit_file".equals(call.canonicalToolName())
+                        || "talos.write_file".equals(call.canonicalToolName())
+                        ? (path == null ? "" : path)
+                        : (resultPathHints.isEmpty() ? "" : resultPathHints.getFirst()),
+                resultPathHints,
+                result.success(),
+                result.success() ? "" : toolFailureReason(result),
+                result.mutationEffects(),
+                result.error() == null ? ToolFailureReason.NONE : result.error().reason(),
+                result.executedEditDetail());
         if (result.success()) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(),
-                    auditPathHints(call, path),
-                    true,
-                    "");
-        } else {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(),
-                    path == null ? "" : path,
-                    false,
-                    toolFailureReason(result));
+            TurnTaskContractCapture.recordSuccessfulToolCall(call);
+            if (WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                    call.toolName())) {
+                LocalTurnTraceCapture.recordWorkspaceOperationConsumed(
+                        TurnTaskContractCapture.workspaceOperationPlan());
+            }
         }
         return result;
+    }
+
+    private static void recordWorkspaceOperationLifecycle(
+            ToolCall call,
+            LocalTurnTraceCapture.WorkspaceOperationLifecycleStage stage
+    ) {
+        if (call == null
+                || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())) {
+            return;
+        }
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (plan.authorizes(call)) {
+            LocalTurnTraceCapture.recordWorkspaceOperationLifecycle(
+                    plan,
+                    call,
+                    stage);
+        }
+    }
+
+    private ToolResult executeToolWithinStage(ToolExecution execution) {
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.TOOL_EXECUTION);
+        try {
+            ToolResult result = execution.run();
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            return result;
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        }
+    }
+
+    @FunctionalInterface
+    private interface ToolExecution {
+        ToolResult run();
     }
 
     /** Access the approval gate (for future use by modes/capabilities). */
@@ -782,7 +1277,10 @@ public final class TurnProcessor {
             return risk;
         }
         try {
-            Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+            Optional<WorkspaceOperationPlan> plan =
+                    WorkspaceOperationPlanner.checkpointPlan(
+                            call,
+                            TurnTaskContractCapture.workspaceOperationPlan());
             if (plan.isPresent() && plan.get().riskLevel() == ToolRiskLevel.DESTRUCTIVE) {
                 return ToolRiskLevel.DESTRUCTIVE;
             }
@@ -805,23 +1303,41 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static List<String> auditPathHints(ToolCall call, String fallbackPath) {
+    private static List<String> auditPathHints(ToolCall call, String fallbackPath, ToolResult result) {
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
+        boolean operationPathsResolved = false;
         if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
-                Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+                Optional<WorkspaceOperationPlan> plan =
+                        WorkspaceOperationPlanner.checkpointPlan(
+                                call,
+                                TurnTaskContractCapture.workspaceOperationPlan());
                 if (plan.isPresent()) {
                     List<String> changedPaths = plan.get().changedPaths();
-                    if (!changedPaths.isEmpty()) return changedPaths;
+                    paths.addAll(changedPaths);
+                    operationPathsResolved = !changedPaths.isEmpty();
                 }
             } catch (IllegalArgumentException ignored) {
                 // Invalid operation payloads are handled before successful audit recording.
             }
         }
-        return fallbackPath == null || fallbackPath.isBlank() ? List.of() : List.of(fallbackPath);
+        if (!operationPathsResolved && fallbackPath != null && !fallbackPath.isBlank()) {
+            paths.add(fallbackPath);
+        }
+        // A listing names entries it did not touch. Its own directory is the audited path, so the
+        // listed names are not persisted as hints.
+        if (result != null && result.contentMetadata() != null
+                && !"list_dir".equals(dev.talos.tools.ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            paths.addAll(result.contentMetadata().sourcePaths());
+        }
+        return List.copyOf(paths);
     }
 
     private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {
-        Optional<WorkspaceOperationPlan> operationPlan = WorkspaceOperationPlanner.checkpointPlan(call);
+        Optional<WorkspaceOperationPlan> operationPlan =
+                WorkspaceOperationPlanner.checkpointPlan(
+                        call,
+                        TurnTaskContractCapture.workspaceOperationPlan());
         if (operationPlan.isPresent()) {
             return checkpointService.captureBeforeOperation(
                     session.workspace(),
@@ -853,19 +1369,38 @@ public final class TurnProcessor {
         }
 
         ToolResult forbiddenTargetValidation =
-                validateForbiddenTargetBeforeApproval(call, taskContract, mutatingTool);
+                validateForbiddenTargetBeforeApproval(
+                        call,
+                        taskContract,
+                        mutatingTool,
+                        session == null ? null : session.workspace());
         if (forbiddenTargetValidation != null) {
             return forbiddenTargetValidation;
         }
 
         ToolResult workspaceOrganizationValidation =
-                validateWorkspaceOrganizationToolBeforeApproval(call, taskContract);
+                validateWorkspaceOrganizationToolBeforeApproval(
+                        call,
+                        taskContract,
+                        session == null ? null : session.workspace());
         if (workspaceOrganizationValidation != null) {
             return workspaceOrganizationValidation;
         }
 
+        ToolResult workspaceContentValidation =
+                validateWorkspaceOperationContentPredecessorBeforeApproval(
+                        call,
+                        mutatingTool);
+        if (workspaceContentValidation != null) {
+            return workspaceContentValidation;
+        }
+
         ToolResult expectedTargetValidation =
-                validateExpectedTargetBeforeApproval(call, taskContract, mutatingTool);
+                validateExpectedTargetBeforeApproval(
+                        call,
+                        taskContract,
+                        mutatingTool,
+                        session.workspace());
         if (expectedTargetValidation != null) {
             return expectedTargetValidation;
         }
@@ -900,6 +1435,24 @@ public final class TurnProcessor {
             ToolResult unsupportedDocumentValidation = validateUnsupportedDocumentWriteBeforeApproval(path);
             if (unsupportedDocumentValidation != null) {
                 return unsupportedDocumentValidation;
+            }
+
+            String unsupportedEncodingError = WriteFormatPolicy
+                    .unsupportedEncodingDirectiveError(TurnUserRequestCapture.get());
+            if (unsupportedEncodingError != null) {
+                return ToolResult.fail(ToolError.unsupportedFormat(unsupportedEncodingError));
+            }
+
+            String requestedLineEndingError = WriteFormatPolicy
+                    .requestedLineEndingError(TurnUserRequestCapture.get(), content);
+            if (requestedLineEndingError != null) {
+                return ToolResult.fail(ToolError.invalidParams(requestedLineEndingError));
+            }
+
+            String oversizedReplacementError = WriteFormatPolicy
+                    .oversizedExistingFileReplacementError(session.workspace(), path);
+            if (oversizedReplacementError != null) {
+                return ToolResult.fail(ToolError.invalidParams(oversizedReplacementError));
             }
 
             return null;
@@ -940,7 +1493,7 @@ public final class TurnProcessor {
         }
 
         ToolResult exactEditMatchValidation =
-                validateExactEditMatchBeforeApproval(path, oldString, session.workspace());
+                validateExactEditMatchBeforeApproval(path, oldString, newString, session.workspace());
         if (exactEditMatchValidation != null) {
             return exactEditMatchValidation;
         }
@@ -951,6 +1504,7 @@ public final class TurnProcessor {
     private static ToolResult validateExactEditMatchBeforeApproval(
             String path,
             String oldString,
+            String newString,
             Path workspace
     ) {
         if (workspace == null || path == null || path.isBlank()
@@ -982,7 +1536,7 @@ public final class TurnProcessor {
                             + "`. Call talos.read_file first and retry with exact current text. "
                             + "No approval was requested and no file was changed."));
         }
-        int occurrences = countOccurrences(content, oldString);
+        int occurrences = TextReplacement.findUniqueMatch(content, oldString, newString).count();
         if (occurrences == 0) {
             return ToolResult.fail(ToolError.invalidParams(
                     ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
@@ -1006,17 +1560,6 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static int countOccurrences(String content, String needle) {
-        if (content == null || needle == null || needle.isEmpty()) return 0;
-        int count = 0;
-        int index = 0;
-        while ((index = content.indexOf(needle, index)) >= 0) {
-            count++;
-            index += needle.length();
-        }
-        return count;
-    }
-
     private static ToolResult validateUnsupportedDocumentWriteBeforeApproval(String path) {
         if (path == null || path.isBlank()) return null;
         try {
@@ -1031,30 +1574,218 @@ public final class TurnProcessor {
 
     private static ToolResult validateWorkspaceOrganizationToolBeforeApproval(
             ToolCall call,
-            TaskContract taskContract) {
+            TaskContract taskContract,
+            Path workspace) {
         if (call == null
-                || taskContract == null
-                || taskContract.type() != TaskType.FILE_EDIT
-                || taskContract.expectedTargets().isEmpty()
-                || !isWorkspaceOrganizationTool(call.toolName())) {
+                || !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())) {
             return null;
         }
-        if (WorkspaceOperationIntent.detect(taskContract).isPresent()) {
+        TurnTaskContractCapture.WorkspaceAuthorization authorization =
+                TurnTaskContractCapture.authorizeWorkspaceOperation(call);
+        LocalTurnTraceCapture.recordWorkspaceOperationAuthorityDecision(
+                TurnTaskContractCapture.workspaceOperationPlan(),
+                call,
+                authorization.name());
+        if (authorization
+                == TurnTaskContractCapture.WorkspaceAuthorization.AUTHORIZED) {
+            var operation = TurnTaskContractCapture.workspaceOperationPlan()
+                    .authorizedOperations()
+                    .getFirst();
+            if (operation.operands().size() == 2
+                    && !workspaceOperationPathsAreDistinctWithoutLinks(
+                            workspace,
+                            operation.sourcePath(),
+                            operation.destinationPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed workspace-operation source and destination "
+                                + "must identify distinct ordinary paths. No "
+                                + "approval was requested and no file was changed."));
+            }
+            if (operation.kind()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation.Kind.MKDIR
+                    && !workspaceTargetIsMissingWithoutLinks(
+                            workspace,
+                            operation.targetPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed directory-creation plan requires an absent "
+                                + "ordinary target. No approval was requested "
+                                + "and no file was changed."));
+            }
+            if (operation.parentPolicy()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation.ParentPolicy
+                                    .REQUIRE_EXISTING_PARENT
+                    && !destinationParentExistsWithoutLinks(
+                            workspace,
+                            operation.kind()
+                                            == dev.talos.runtime.intent
+                                                    .WorkspaceOperationObligation.Kind
+                                                    .MKDIR
+                                    ? operation.targetPath()
+                                    : operation.destinationPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed workspace-operation plan requires an existing "
+                                + "ordinary destination parent. No approval was "
+                                + "requested and no file was changed."));
+            }
             return null;
         }
+        String reason = switch (authorization) {
+            case PREDECESSOR_NOT_COMPLETE ->
+                    "The preceding typed content-mutation obligations have not completed.";
+            case ALREADY_CONSUMED ->
+                    "The exact workspace-operation obligation was already consumed.";
+            case ALREADY_ATTEMPTED ->
+                    "The exact workspace-operation obligation was already attempted; "
+                            + "a new attempt requires typed attempt-aware lifecycle authority.";
+            case CALL_DOES_NOT_MATCH_PLAN ->
+                    "The tool, operand roles, paths, or explicit flags do not match the stored plan.";
+            case NO_TYPED_AUTHORITY, NOT_WORKSPACE_OPERATION ->
+                    "No executable typed workspace-operation authority is stored for this turn.";
+            case AUTHORIZED -> "";
+        };
         return ToolResult.fail(ToolError.invalidParams(
-                "Workspace organization tool `" + call.toolName()
-                        + "` is not allowed for this narrow file-edit task. "
-                        + "Use talos.edit_file or talos.write_file for the expected target(s): "
-                        + String.join(", ", orderedExpectedTargets(taskContract))
-                        + ". No approval was requested and no file was changed."));
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                "Workspace operation `" + call.toolName()
+                        + "` is not authorized by the current typed task plan. "
+                        + reason
+                        + " No approval was requested and no file was changed."));
+    }
+
+    private static ToolResult
+            validateWorkspaceOperationContentPredecessorBeforeApproval(
+                    ToolCall call,
+                    boolean mutatingTool
+            ) {
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (call == null
+                || !mutatingTool
+                || WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        call.toolName())
+                || plan.authorizedOperations().isEmpty()) {
+            return null;
+        }
+        TaskResolution resolution = TurnTaskContractCapture.getResolution();
+        List<String> predecessors = resolution == null
+                ? List.of()
+                : resolution.contentMutationPredecessorPaths();
+        String path = resolveParam(
+                call,
+                "path",
+                "file_path",
+                "filepath",
+                "file",
+                "filename",
+                "target");
+        boolean exactContentPredecessor =
+                (isWriteFileTool(call.toolName())
+                                || isEditFileTool(call.toolName()))
+                        && path != null
+                        && predecessors.contains(
+                                path.strip().replace('\\', '/'));
+        if (exactContentPredecessor) return null;
+        return ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                "The current typed task plan authorizes only its exact "
+                        + "workspace operation and declared preceding content "
+                        + "mutations. No approval was requested and no file "
+                        + "was changed."));
+    }
+
+    private static boolean destinationParentExistsWithoutLinks(
+            Path workspace,
+            String destination
+    ) {
+        if (workspace == null || destination == null || destination.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path target = workspace.toAbsolutePath().normalize()
+                    .resolve(destination)
+                    .normalize();
+            Path parent = target.getParent();
+            if (parent == null) return false;
+            root.requireDirectory(parent);
+            return true;
+        } catch (Exception rejected) {
+            return false;
+        }
+    }
+
+    private static boolean workspaceTargetIsMissingWithoutLinks(
+            Path workspace,
+            String targetPath
+    ) {
+        if (workspace == null || targetPath == null || targetPath.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path target = workspace.toAbsolutePath().normalize()
+                    .resolve(targetPath)
+                    .normalize();
+            return root.inspect(target) == NoFollowPathPolicy.EntryType.MISSING;
+        } catch (Exception rejected) {
+            return false;
+        }
+    }
+
+    private static boolean workspaceOperationPathsAreDistinctWithoutLinks(
+            Path workspace,
+            String sourcePath,
+            String destinationPath
+    ) {
+        if (workspace == null
+                || sourcePath == null
+                || sourcePath.isBlank()
+                || destinationPath == null
+                || destinationPath.isBlank()) {
+            return false;
+        }
+        try {
+            NoFollowPathPolicy.GuardedRoot root =
+                    NoFollowPathPolicy.bindExistingDirectory(workspace);
+            Path workspaceRoot = workspace.toAbsolutePath().normalize();
+            Path source = workspaceRoot.resolve(sourcePath).normalize();
+            Path destination = workspaceRoot.resolve(destinationPath).normalize();
+            NoFollowPathPolicy.EntryType sourceType = root.inspect(source);
+            NoFollowPathPolicy.EntryType destinationType = root.inspect(destination);
+            if (source.equals(destination)) return false;
+            if (sourceType == NoFollowPathPolicy.EntryType.MISSING
+                    || destinationType == NoFollowPathPolicy.EntryType.MISSING) {
+                return true;
+            }
+            return !Files.isSameFile(source, destination);
+        } catch (Exception rejected) {
+            return false;
+        }
     }
 
     private static ToolResult validateExpectedTargetBeforeApproval(
             ToolCall call,
             TaskContract taskContract,
-            boolean mutatingTool
+            boolean mutatingTool,
+            Path workspace
     ) {
+        var capturedResolution = TurnTaskContractCapture.getResolution();
+        if (call != null
+                && mutatingTool
+                && capturedResolution != null
+                && capturedResolution.blocksUnscopedMutation()) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    "The current typed task plan authorizes no content-mutation "
+                            + "target for this non-authoritative mutation tail. "
+                            + "No approval was requested and no file was changed."));
+        }
         if (call == null
                 || taskContract == null
                 || !taskContract.mutationAllowed()
@@ -1062,27 +1793,93 @@ public final class TurnProcessor {
                 || !mutatingTool) {
             return null;
         }
-        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
-        if (path == null || path.isBlank()) {
+        if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())
+                && workspaceOperationRequestOwnsTargetShape(taskContract)) {
             return null;
         }
-        for (String expected : taskContract.expectedTargets()) {
-            if (sameExpectedTarget(call.toolName(), path, expected)) {
-                return null;
+        List<String> paths = expectedTargetValidationPaths(call);
+        if (paths.isEmpty()) {
+            return null;
+        }
+        for (String path : paths) {
+            boolean matched = false;
+            for (String expected : taskContract.expectedTargets()) {
+                if (sameExpectedTarget(
+                        call.toolName(),
+                        path,
+                        expected,
+                        workspace)) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                for (String optional : optionalMutationTargets(taskContract)) {
+                    if (sameExpectedTarget(
+                            call.toolName(),
+                            path,
+                            optional,
+                            workspace)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (!matched) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "Target outside expected targets before approval: `" + path
+                                + "` is outside the current expected target set: "
+                                + String.join(", ", orderedExpectedTargets(taskContract))
+                                + ". Similar filenames are not substitutes for required target paths. "
+                                + "No approval was requested and no file was changed."));
             }
         }
-        for (String optional : optionalMutationTargets(taskContract)) {
-            if (sameExpectedTarget(call.toolName(), path, optional)) {
-                return null;
-            }
+        return null;
+    }
+
+    private static ToolResult validateIncompleteAuthorityBeforeApproval(
+            ToolCall call,
+            boolean mutatingTool
+    ) {
+        TaskResolution capturedResolution =
+                TurnTaskContractCapture.getResolution();
+        if (call == null
+                || !mutatingTool
+                || capturedResolution == null
+                || !capturedResolution.sequentialMutationPlan()
+                        .authorityLimitExceeded()) {
+            return null;
         }
         return ToolResult.fail(ToolError.invalidParams(
                 ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
-                "Target outside expected targets before approval: `" + path
-                        + "` is outside the current expected target set: "
-                        + String.join(", ", orderedExpectedTargets(taskContract))
-                        + ". Similar filenames are not substitutes for required target paths. "
-                        + "No approval was requested and no file was changed."));
+                "The current typed authority analysis did not complete, so no "
+                        + "content-mutation target is authorized. No approval "
+                        + "was requested and no file was changed."));
+    }
+
+    private static List<String> expectedTargetValidationPaths(ToolCall call) {
+        var paths = new LinkedHashSet<String>();
+        if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            try {
+                WorkspaceOperationPlanner.checkpointPlan(
+                                call,
+                                TurnTaskContractCapture.workspaceOperationPlan())
+                        .ifPresent(plan -> paths.addAll(plan.changedPaths()));
+            } catch (IllegalArgumentException ignored) {
+                // Invalid operation payloads are handled by normal pre-approval validation.
+            }
+        }
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
+        if (path != null && !path.isBlank()) {
+            paths.add(path);
+        }
+        return List.copyOf(paths);
+    }
+
+    private static boolean workspaceOperationRequestOwnsTargetShape(TaskContract taskContract) {
+        return !TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty();
     }
 
     private static Set<String> optionalMutationTargets(TaskContract taskContract) {
@@ -1092,7 +1889,12 @@ public final class TurnProcessor {
             return Set.of();
         }
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        TaskContractResolver.intentFromUserRequest(taskContract.originalUserRequest())
+        var capturedIntent = TurnTaskContractCapture.getIntent();
+        var intent = capturedIntent == null
+                ? TaskContractResolver.resolveFromUserRequest(
+                        taskContract.originalUserRequest()).intent()
+                : capturedIntent;
+        intent
                 .targets()
                 .targets()
                 .stream()
@@ -1140,7 +1942,8 @@ public final class TurnProcessor {
     private static ToolResult validateForbiddenTargetBeforeApproval(
             ToolCall call,
             TaskContract taskContract,
-            boolean mutatingTool
+            boolean mutatingTool,
+            Path workspace
     ) {
         if (call == null || taskContract == null || taskContract.forbiddenTargets().isEmpty()) {
             return null;
@@ -1154,7 +1957,10 @@ public final class TurnProcessor {
         }
         for (PathParam param : params) {
             for (String forbidden : taskContract.forbiddenTargets()) {
-                if (sameScopedTarget(param.value(), forbidden)) {
+                if (sameForbiddenTarget(
+                        param.value(),
+                        forbidden,
+                        workspace)) {
                     return ToolResult.fail(ToolError.invalidParams(
                             ToolFailureReason.PRE_APPROVAL_TARGET_FORBIDDEN,
                             "Target forbidden before approval: `" + param.value()
@@ -1188,6 +1994,7 @@ public final class TurnProcessor {
         return List.of(
                 "path", "file_path", "filepath", "file", "filename",
                 "from", "to", "source", "source_path", "src",
+                "left", "right",
                 "destination", "destination_path", "dest", "target",
                 "dir", "directory");
     }
@@ -1233,6 +2040,12 @@ public final class TurnProcessor {
             PermissionDecision permissionDecision
     ) {
         String toolName = call == null ? "unknown tool" : call.toolName();
+        var workspacePlan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (workspacePlan.authorizes(call)) {
+            return "workspace operation: "
+                    + workspacePlan.authorizedOperations().getFirst().kind()
+                            .name().toLowerCase();
+        }
         if (permissionDecision != null
                 && permissionDecision.protectedPath()
                 && isReadFileTool(toolName)) {
@@ -1254,6 +2067,9 @@ public final class TurnProcessor {
 
     private static String toolFailureReason(ToolResult result) {
         if (result == null || result.success()) return "";
+        if (result.contentMetadata().source() == ToolContentMetadata.ContentSource.DOCUMENT_COMPARISON) {
+            return dev.talos.safety.ContentRestrictions.WITHHELD;
+        }
         String code = result.error() == null ? "tool failed" : result.error().code();
         String message = result.errorMessage();
         return code + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
@@ -1262,6 +2078,22 @@ public final class TurnProcessor {
     private static String shortReason(String message) {
         String oneLine = message.replace('\r', ' ').replace('\n', ' ').strip();
         return oneLine.length() <= 160 ? oneLine : oneLine.substring(0, 157) + "...";
+    }
+
+    private static ToolCall transformedToolCall(
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            String phase,
+            ToolCall from,
+            ToolCall to,
+            LocalTurnTraceCapture.ToolCallTransformationReason reason) {
+        if (from.equals(to)) return to;
+        if (permit == null) return to;
+        if (!LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                permit, phase, to, reason)) {
+            throw new IllegalStateException(
+                    "Could not advance the exact parsed-call evidence lineage for " + reason);
+        }
+        return to;
     }
 
     private static String resolveParam(ToolCall call, String canonical, String... aliases) {
@@ -1328,10 +2160,13 @@ public final class TurnProcessor {
                 ? call.toolName()
                 : canonicalToolName;
         String allowedText = allowed.isEmpty() ? "(none)" : String.join(", ", allowed);
-        LocalTurnTraceCapture.recordToolCallBlocked(
-                tracePhase,
+        String reason = "current-turn tool surface denied " + requested + "; allowed: " + allowedText;
+        TurnAuditCapture.recordBlockedToolCall(
                 call,
-                "current-turn tool surface denied " + requested + "; allowed: " + allowedText);
+                "",
+                tracePhase,
+                "current-turn tool surface denied " + requested,
+                reason);
         return ToolResult.fail(ToolError.denied(
                 "Current-turn tool surface did not allow " + requested
                         + ". Allowed tools: " + allowedText + "."));
@@ -1346,41 +2181,108 @@ public final class TurnProcessor {
                 || "create_directory".equals(normalized);
     }
 
-    private static boolean isWorkspaceOrganizationTool(String toolName) {
-        return switch (normalizeToolName(toolName)) {
-            case "apply_workspace_batch", "copy_path", "move_path", "rename_path", "delete_path" -> true;
-            default -> false;
-        };
-    }
-
     private static String normalizeToolName(String toolName) {
         return ToolAliasPolicy.localCanonicalName(toolName);
     }
 
-    private static boolean sameScopedTarget(String candidate, String forbidden) {
-        String c = normalizeScopedTarget(candidate);
-        String f = normalizeScopedTarget(forbidden);
-        if (c.isBlank() || f.isBlank()) return false;
-        return c.equals(f) || c.endsWith("/" + f);
+    private static boolean sameForbiddenTarget(
+            String candidate,
+            String forbidden,
+            Path workspace
+    ) {
+        String f = normalizeScopedTargetPreservingCase(forbidden);
+        if (candidate == null || candidate.isBlank() || f.isBlank()) {
+            return false;
+        }
+        try {
+            Path root = workspace == null
+                    ? Path.of("").toAbsolutePath().normalize()
+                    : workspace.toAbsolutePath().normalize();
+            PathArgumentCanonicalizer.Resolution candidateResolution =
+                    PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(
+                            root,
+                            candidate);
+            Path candidatePath = candidateResolution.resolvedPath();
+            Path forbiddenLexical = Path.of(f);
+            Path forbiddenPath = forbiddenLexical.isAbsolute()
+                    ? forbiddenLexical.normalize()
+                    : root.resolve(forbiddenLexical).normalize();
+            if (candidatePath == null
+                    || !WorkspacePathIdentity.lexicallyWithin(root, candidatePath)
+                    || !WorkspacePathIdentity.lexicallyWithin(root, forbiddenPath)) {
+                return false;
+            }
+            WorkspacePathIdentity.Identity identity = WorkspacePathIdentity.guardedIdentity(
+                    root,
+                    candidatePath,
+                    forbiddenPath);
+            return identity == WorkspacePathIdentity.Identity.SAME
+                    || identity == WorkspacePathIdentity.Identity.UNPROVEN
+                    || identity == WorkspacePathIdentity.Identity.REJECTED;
+        } catch (RuntimeException rejected) {
+            return false;
+        }
     }
 
-    private static boolean sameExpectedTarget(String toolName, String candidate, String expected) {
-        String c = normalizeScopedTarget(candidate);
-        String e = normalizeScopedTarget(expected);
-        if (c.isBlank() || e.isBlank()) return false;
-        return c.equals(e) || (isMkdirTool(toolName) && e.startsWith(c + "/"));
+    private static boolean sameExpectedTarget(
+            String toolName,
+            String candidate,
+            String expected,
+            Path workspace
+    ) {
+        String e = normalizeScopedTargetPreservingCase(expected);
+        if (candidate == null || candidate.isBlank() || e.isBlank()) return false;
+        try {
+            Path root = workspace == null
+                    ? Path.of("").toAbsolutePath().normalize()
+                    : workspace.toAbsolutePath().normalize();
+            PathArgumentCanonicalizer.Resolution candidateResolution =
+                    PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(
+                            root,
+                            candidate);
+            Path candidatePath = candidateResolution.resolvedPath();
+            Path expectedLexical = Path.of(e);
+            Path expectedPath = expectedLexical.isAbsolute()
+                    ? expectedLexical.normalize()
+                    : root.resolve(expectedLexical).normalize();
+            if (candidatePath == null
+                    || !WorkspacePathIdentity.lexicallyWithin(root, candidatePath)
+                    || !WorkspacePathIdentity.lexicallyWithin(root, expectedPath)) {
+                return false;
+            }
+            if (WorkspacePathIdentity.provenIdentity(root, candidatePath, expectedPath)
+                    == WorkspacePathIdentity.Identity.SAME) {
+                return true;
+            }
+            if (!isMkdirTool(toolName)) return false;
+
+            Path expectedParent = expectedPath.getParent();
+            while (expectedParent != null
+                    && WorkspacePathIdentity.lexicallyWithin(root, expectedParent)
+                    && WorkspacePathIdentity.guardedIdentity(root, expectedParent, root)
+                            != WorkspacePathIdentity.Identity.SAME) {
+                if (WorkspacePathIdentity.provenIdentity(root, candidatePath, expectedParent)
+                        == WorkspacePathIdentity.Identity.SAME) {
+                    return true;
+                }
+                expectedParent = expectedParent.getParent();
+            }
+            return false;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static List<String> orderedExpectedTargets(TaskContract taskContract) {
         if (taskContract == null || taskContract.expectedTargets().isEmpty()) return List.of();
         return taskContract.expectedTargets().stream()
-                .map(TurnProcessor::normalizeScopedTarget)
+                .map(TurnProcessor::normalizeScopedTargetPreservingCase)
                 .filter(path -> !path.isBlank())
                 .sorted()
                 .toList();
     }
 
-    private static String normalizeScopedTarget(String path) {
+    private static String normalizeScopedTargetPreservingCase(String path) {
         if (path == null) return "";
         String normalized = ToolCallSupport.normalizePath(path)
                 .strip()
@@ -1391,7 +2293,7 @@ public final class TurnProcessor {
         while (normalized.contains("//")) {
             normalized = normalized.replace("//", "/");
         }
-        return normalized.toLowerCase(java.util.Locale.ROOT);
+        return normalized;
     }
 
     /*
@@ -1454,7 +2356,10 @@ public final class TurnProcessor {
             sb.append("    ");
         }
 
-        if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
+        String workspaceOperationDetail = workspaceOperationApprovalDetail(call);
+        if (workspaceOperationDetail != null) {
+            sb.append(workspaceOperationDetail);
+        } else if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
             try {
                 sb.append(ProtectedContentPolicy.sanitizeText(
                         CommandToolPlanner.approvalDetail(call, workspace, commandProfiles)));
@@ -1486,7 +2391,7 @@ public final class TurnProcessor {
 
         if (content != null && !content.isEmpty()) {
             long bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-            long lines = content.chars().filter(c -> c == '\n').count() + 1;
+            long lines = countLineSeparators(content) + 1;
             sb.append(" (").append(bytes).append(" bytes, ").append(lines).append(" lines)");
 
             // Show first 5 lines as preview
@@ -1532,11 +2437,73 @@ public final class TurnProcessor {
             }
         }
 
+        // Format-change disclosure (T1012): any BOM, line-ending, or
+        // terminal-newline difference that remains after format
+        // preservation is a material byte change the line diff cannot
+        // show, so it must be visible before approval.
+        if (isWriteFileTool(call.toolName()) && content != null && path != null && !path.isBlank()) {
+            List<String> formatChanges =
+                    WriteFormatPolicy.remainingFormatChanges(workspace, path, content);
+            if (!formatChanges.isEmpty()) {
+                sb.append("\n    Format changes:");
+                for (String change : formatChanges) {
+                    sb.append("\n      ").append(sanitizeApprovalText(change));
+                }
+            }
+        }
+
+        return sb.toString();
+    }
+
+    private static String workspaceOperationApprovalDetail(ToolCall call) {
+        var plan = TurnTaskContractCapture.workspaceOperationPlan();
+        if (!plan.authorizes(call)) return null;
+
+        var operation = plan.authorizedOperations().getFirst();
+        var sb = new StringBuilder();
+        sb.append("workspace operation: ")
+                .append(operation.kind().name().toLowerCase());
+        for (var operand : operation.operands()) {
+            String label = switch (operand.role()) {
+                case SOURCE -> "source";
+                case DESTINATION -> "destination";
+                case TARGET -> "target";
+            };
+            sb.append("\n    ")
+                    .append(label)
+                    .append(": ")
+                    .append(sanitizeApprovalText(operand.effectivePath()));
+        }
+        sb.append("\n    overwrite: ")
+                .append(operation.overwritePolicy().name().toLowerCase());
+        sb.append("\n    recursive: ")
+                .append(operation.recursivePolicy().name().toLowerCase());
+        sb.append("\n    parent: ")
+                .append(operation.parentPolicy().name().toLowerCase());
+        sb.append("\n    authority plan: ").append(plan.planId());
+        sb.append("\n    operation: ").append(operation.operationId());
         return sb.toString();
     }
 
     private static String sanitizeApprovalText(String text) {
         return ProtectedContentPolicy.sanitizeText(text);
+    }
+
+    /** Counts logical line separators (CRLF, lone CR, lone LF each count once). */
+    private static long countLineSeparators(String content) {
+        long count = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == '\r') {
+                count++;
+                if (i + 1 < content.length() && content.charAt(i + 1) == '\n') {
+                    i++;
+                }
+            } else if (c == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private record PathParam(String name, String value) { }

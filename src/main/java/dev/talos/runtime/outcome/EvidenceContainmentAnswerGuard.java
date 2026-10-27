@@ -11,6 +11,9 @@ import java.util.Set;
 
 /** Renders final-answer containment for unsatisfied current-turn evidence obligations. */
 public final class EvidenceContainmentAnswerGuard {
+    public static final String TRACE_REASON =
+            "missing workspace evidence claim contained by runtime";
+
     private EvidenceContainmentAnswerGuard() {
     }
 
@@ -37,21 +40,29 @@ public final class EvidenceContainmentAnswerGuard {
             EvidenceObligationVerifier.Result evidenceResult,
             AnswerMarkers markers
     ) {
+        return selectMissingEvidence(answer, plan, obligation, evidenceResult, markers).answer();
+    }
+
+    public record Containment(String answer, boolean inputRetained) {}
+
+    public static Containment selectMissingEvidence(
+            String answer, CurrentTurnPlan plan, EvidenceObligation obligation,
+            EvidenceObligationVerifier.Result evidenceResult, AnswerMarkers markers) {
         EvidenceObligation safeObligation = obligation == null ? EvidenceObligation.NONE : obligation;
         if (safeObligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
-            return protectedReadMissingEvidenceContainment(plan, evidenceResult);
+            return new Containment(protectedReadMissingEvidenceContainment(plan, evidenceResult), false);
         }
         if (isRuntimeFailureStatus(answer)) {
-            return missingEvidencePrefix(answer);
+            return new Containment(missingEvidencePrefix(answer), true);
         }
         if (isDominantRuntimeContainment(answer, markers)) {
-            return answer == null ? "" : answer;
+            return new Containment(answer == null ? "" : answer, true);
         }
-        String runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer, markers);
+        Containment runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer, markers);
         if (runtimeSafeBody != null) {
-            return missingEvidencePrefix(runtimeSafeBody);
+            return new Containment(missingEvidencePrefix(runtimeSafeBody.answer()), runtimeSafeBody.inputRetained());
         }
-        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, safeObligation, evidenceResult));
+        return new Containment(missingEvidencePrefix(missingEvidenceContainmentMessage(plan, safeObligation, evidenceResult)), false);
     }
 
     public static String missingEvidencePrefix(String answer) {
@@ -68,19 +79,27 @@ public final class EvidenceContainmentAnswerGuard {
             EvidenceObligationVerifier.Result evidenceResult
     ) {
         return switch (obligation) {
+            case DOCUMENT_COMPARISON_REQUIRED -> "The requested comparison remains incomplete without a current-turn ordered pair computation.";
             case PROTECTED_READ_APPROVAL_REQUIRED ->
                     "I did not read protected content this turn. A protected read approval "
                             + "path was required before answering from that file, so no protected "
                             + "file content is available from this turn."
                             + targetSentence(plan);
             case READ_TARGET_REQUIRED ->
-                    "I did not inspect the required workspace target this turn, so I cannot "
-                            + "answer from its contents or propose grounded changes yet."
+                    "Current evidence for the required workspace target was not established. "
+                            + "An answer from its contents or grounded changes cannot be supported yet."
                             + targetSentence(plan);
             case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
                     "I did not gather directory or target-read evidence for the requested path "
                             + "existence check, so I cannot answer whether those files exist yet."
                             + targetSentence(plan);
+            case FILE_CONTENT_LOOKUP_REQUIRED ->
+                    "I did not gather source-bearing file content for this lookup, so I cannot "
+                            + "claim the requested fact was found or absent from the workspace.";
+            case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
+                    "Required evidence was incomplete in this turn, "
+                            + "so nothing is said about what the project is or does."
+                            + evidenceDetailSentence(evidenceResult);
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "
                             + "I cannot answer with file contents or derived file claims from "
@@ -89,8 +108,8 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not inspect the workspace this turn, so I cannot list files, "
                             + "show file contents, or claim changed files from this turn.";
             case STATIC_WEB_DIAGNOSIS_REQUIRED ->
-                    "I did not inspect the required static web files this turn, so I cannot "
-                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence."
+                    "Current evidence for the required static web files was not established. "
+                            + "The page diagnosis cannot be supported by grounded HTML, CSS, or JavaScript evidence."
                             + evidenceDetailSentence(evidenceResult);
             case VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     "I did not gather trace or workspace evidence this turn, so I cannot "
@@ -121,21 +140,21 @@ public final class EvidenceContainmentAnswerGuard {
         return false;
     }
 
-    private static String runtimeSafeBodyForMissingEvidence(String answer, AnswerMarkers markers) {
+    private static Containment runtimeSafeBodyForMissingEvidence(String answer, AnswerMarkers markers) {
         if (answer == null || answer.isBlank()) return null;
         AnswerMarkers safeMarkers = markers == null ? new AnswerMarkers(List.of(), "", "") : markers;
         if (!safeMarkers.ungroundedAnnotation().isBlank()
                 && answer.startsWith(safeMarkers.ungroundedAnnotation())) {
-            return safeMarkers.ungroundedAnnotation()
+            return new Containment(safeMarkers.ungroundedAnnotation()
                     + "I did not inspect the required workspace evidence this turn, "
-                    + "so I cannot answer from workspace facts yet.";
+                    + "so I cannot answer from workspace facts yet.", false);
         }
         if (!safeMarkers.localAccessCapabilityCorrection().isBlank()
                 && answer.startsWith(safeMarkers.localAccessCapabilityCorrection())) {
-            return safeMarkers.localAccessCapabilityCorrection();
+            return new Containment(safeMarkers.localAccessCapabilityCorrection(), false);
         }
         if (isCapabilityLimitation(answer)) {
-            return answer;
+            return new Containment(answer, true);
         }
         return null;
     }
@@ -176,6 +195,9 @@ public final class EvidenceContainmentAnswerGuard {
         if (message.contains("not attempted")) {
             return protectedReadNotAttemptedPrefix(protectedReadNotAttemptedMessage(plan));
         }
+        if (evidenceResult != null && evidenceResult.earlierReadSucceeded()) {
+            return staleProtectedReadPrefix(staleProtectedReadMessage(plan));
+        }
         return protectedReadIncompletePrefix(protectedReadIncompleteMessage(plan));
     }
 
@@ -201,6 +223,23 @@ public final class EvidenceContainmentAnswerGuard {
             return current;
         }
         return prefix + "\n\n" + current;
+    }
+
+    private static String staleProtectedReadPrefix(String answer) {
+        String current = answer == null ? "" : answer;
+        String prefix = "[Protected read incomplete: an approved read happened, but the required protected "
+                + "evidence is incomplete.]";
+        if (current.startsWith(prefix)) {
+            return current;
+        }
+        return prefix + "\n\n" + current;
+    }
+
+    private static String staleProtectedReadMessage(CurrentTurnPlan plan) {
+        return "talos.read_file returned protected content in this turn after approval, but the "
+                + "protected evidence this answer needs is incomplete or no longer current, so no answer "
+                + "is given from it."
+                + targetSentence(plan);
     }
 
     private static String protectedReadIncompleteMessage(CurrentTurnPlan plan) {

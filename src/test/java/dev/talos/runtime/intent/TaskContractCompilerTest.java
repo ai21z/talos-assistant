@@ -9,6 +9,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractCompilerTest {
@@ -65,6 +66,67 @@ class TaskContractCompilerTest {
         assertEquals(Set.of("board-brief.pdf", "notes.md"), contract.sourceEvidenceTargets());
         assertEquals(Set.of(".env"), contract.forbiddenTargets());
         assertFalse(contract.sourceEvidenceTargets().contains("index.html"));
+    }
+
+    @Test
+    void projectsRequiredPostReadMutationRoleIntoBothContractDimensions() {
+        TargetRole composite =
+                TargetRole.valueOf("MUST_MUTATE_AFTER_SOURCE_EVIDENCE");
+        TaskIntent intent = new TaskIntent(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                ArtifactTargetSet.of(TargetRef.of("required.css", composite)),
+                "Read required.css, then update required.css.",
+                "composite-role-test");
+
+        TaskContract contract = TaskContractCompiler.compile(intent);
+
+        assertEquals(Set.of("required.css"), contract.expectedTargets());
+        assertEquals(Set.of("required.css"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void rejectsCompositeMutationRoleWhenMutationIsNotAllowed() {
+        TargetRole composite =
+                TargetRole.valueOf("MUST_MUTATE_AFTER_SOURCE_EVIDENCE");
+        TaskIntent intent = new TaskIntent(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                ArtifactTargetSet.of(TargetRef.of(
+                        "required.css",
+                        composite)),
+                "Read required.css.",
+                "invalid-read-only-composite");
+
+        assertThrows(IllegalArgumentException.class, () -> TaskContractCompiler.compile(intent));
+    }
+
+    @Test
+    void readOnlyCompatibilityProjectionRetainsLegacyExpectedRoleKinds() {
+        TaskIntent intent = new TaskIntent(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                ArtifactTargetSet.of(
+                        TargetRef.of("legacy.txt", TargetRole.MUST_MUTATE),
+                        TargetRef.of("destination.txt", TargetRole.OUTPUT_DESTINATION),
+                        TargetRef.of("read.txt", TargetRole.MUST_READ),
+                        TargetRef.of("verify.txt", TargetRole.VERIFY_ONLY)),
+                "Inspect the targets.",
+                "read-only-compatibility");
+
+        TaskContract contract = TaskContractCompiler.compile(intent);
+
+        assertFalse(contract.mutationAllowed());
+        assertEquals(
+                Set.of("legacy.txt", "destination.txt", "read.txt", "verify.txt"),
+                contract.expectedTargets());
+        assertEquals(Set.of("read.txt"), contract.sourceEvidenceTargets());
     }
 
     @Test

@@ -50,7 +50,8 @@ public class DiagnoseCmd implements Runnable {
     @Override
     public void run() {
         try {
-            boolean unicodeSafe = TerminalCapabilities.detectDefault().unicodeSafe();
+            TerminalCapabilities terminal = TerminalCapabilities.detectDefault();
+            boolean unicodeSafe = terminal.unicodeSafe();
             // Resolve root
             if (root == null) {
                 String envWs = System.getenv("TALOS_WORKSPACE");
@@ -77,6 +78,10 @@ public class DiagnoseCmd implements Runnable {
             System.out.println("  ENV overrides:  " + report.envOverridesApplied);
             System.out.println();
 
+            System.out.print(renderTerminalSection(terminal, observedOutputCharset(),
+                    System.getProperty("native.encoding", "")));
+            System.out.println();
+
             // 2. Active engine
             System.out.print(renderEngineSection(cfg, unicodeSafe));
             System.out.println();
@@ -90,7 +95,7 @@ public class DiagnoseCmd implements Runnable {
                 Embeddings embedClient = EmbeddingsFactory.forQuery(cfg);
                 try {
                     float[] probe = embedClient.embed("hello world");
-                    if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingsClient.isValidVector(probe)) {
+                    if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingVectors.isValidVector(probe)) {
                         System.out.println("  Status:    OK");
                         System.out.println("  Dimension: " + probe.length);
                     } else {
@@ -255,6 +260,26 @@ public class DiagnoseCmd implements Runnable {
             return "Retrieved " + retrievedCount + " snippets but answer is empty";
         }
         return "";
+    }
+
+    /** What decides whether typographic punctuation and other non-ASCII text are shown exactly. */
+    static String renderTerminalSection(TerminalCapabilities capabilities, java.nio.charset.Charset stdoutCharset,
+                                        String nativeEncoding) {
+        // The launcher pins the JVM encoding, the platform encoding is the one that pin overrides.
+        return "Terminal:\n"
+                + "  Interactive stdout:  " + (capabilities.interactive() ? "yes" : "no") + "\n"
+                + "  Unicode output:      " + (capabilities.unicodeSafe() ? "exact" : "ASCII fallback") + "\n"
+                + "  JVM stdout encoding: " + stdoutCharset.name() + "\n"
+                + "  Platform encoding:   " + (nativeEncoding == null || nativeEncoding.isBlank() ? "unknown" : nativeEncoding) + "\n";
+    }
+
+    private static java.nio.charset.Charset observedOutputCharset() {
+        try {
+            String name = System.getProperty("stdout.encoding", "");
+            return name.isBlank() ? java.nio.charset.Charset.defaultCharset() : java.nio.charset.Charset.forName(name);
+        } catch (RuntimeException unknown) {
+            return java.nio.charset.Charset.defaultCharset();
+        }
     }
 
     static String renderEngineSection(Config cfg, boolean unicodeSafe) {

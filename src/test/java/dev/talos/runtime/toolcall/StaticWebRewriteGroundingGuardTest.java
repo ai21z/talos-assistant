@@ -12,6 +12,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.tools.ToolResult;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -239,5 +241,144 @@ class StaticWebRewriteGroundingGuardTest {
 
     private static ToolCall writeFile(String path, String content) {
         return new ToolCall("talos.write_file", Map.of("path", path, "content", content));
+    }
+
+    @Test
+    void absoluteSpellingOfAnExpectedStaticWebFileRequiresSameTurnReadLikeTheRelativeSpelling(
+            @TempDir Path temporary) throws Exception {
+        Path root = nestedSite(temporary);
+        String absolute = root.resolve("site").resolve("style.css").toString();
+        LoopState state = state(root);
+        TaskContract contract = nestedRedesignContract();
+
+        String relative = StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile("site/style.css", "body { color: pink; }\n"), state, contract, "site/style.css");
+        String absoluteDiagnostic = StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile(absolute, "body { color: pink; }\n"), state, contract, absolute);
+
+        assertNotNull(relative, "the relative spelling must be held, otherwise the fixture is wrong");
+        assertNotNull(absoluteDiagnostic, "the absolute spelling of the same expected file must be held too");
+        assertTrue(absoluteDiagnostic.contains("must be grounded before approval"), absoluteDiagnostic);
+        assertTrue(absoluteDiagnostic.contains("site/style.css"), absoluteDiagnostic);
+    }
+
+    @Test
+    void relativeReadGroundsAnAbsoluteSpelledRewriteOfTheSameFile(@TempDir Path temporary) throws Exception {
+        Path root = nestedSite(temporary);
+        String absolute = root.resolve("site").resolve("style.css").toString();
+        LoopState state = state(root);
+        recordSuccessfulRead(state, "site/style.css");
+
+        assertNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile(absolute, "body { color: pink; }\n"), state, nestedRedesignContract(), absolute));
+    }
+
+    @Test
+    void absoluteReadGroundsARelativeSpelledRewriteOfTheSameFile(@TempDir Path temporary) throws Exception {
+        Path root = nestedSite(temporary);
+        String absolute = root.resolve("site").resolve("style.css").toString();
+        LoopState state = state(root);
+        recordSuccessfulRead(state, absolute);
+
+        assertNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile("site/style.css", "body { color: pink; }\n"),
+                state, nestedRedesignContract(), "site/style.css"));
+    }
+
+    @Test
+    void readOfASameNamedFileInAnotherFolderDoesNotGroundTheExpectedFile(@TempDir Path temporary)
+            throws Exception {
+        Path root = nestedSite(temporary);
+        String absolute = root.resolve("site").resolve("style.css").toString();
+        String siblingAbsolute = root.resolve("archive").resolve("style.css").toString();
+
+        LoopState relativeWrite = state(root);
+        recordSuccessfulRead(relativeWrite, siblingAbsolute);
+        assertNotNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile("site/style.css", "body { color: pink; }\n"),
+                relativeWrite, nestedRedesignContract(), "site/style.css"));
+
+        LoopState absoluteWrite = state(root);
+        recordSuccessfulRead(absoluteWrite, "archive/style.css");
+        assertNotNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile(absolute, "body { color: pink; }\n"),
+                absoluteWrite, nestedRedesignContract(), absolute));
+    }
+
+    @Test
+    void failedReadUnderAnotherSpellingDoesNotGroundTheRewrite(@TempDir Path temporary) throws Exception {
+        Path root = nestedSite(temporary);
+        String absolute = root.resolve("site").resolve("style.css").toString();
+        LoopState state = state(root);
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome(
+                "talos.read_file", absolute, false, false, false, "", "read failed"));
+
+        assertNotNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile("site/style.css", "body { color: pink; }\n"),
+                state, nestedRedesignContract(), "site/style.css"));
+    }
+
+    @Test
+    void absoluteSpellingOfASameNamedFileInAnotherFolderIsNotAnExpectedTarget(@TempDir Path temporary)
+            throws Exception {
+        Path root = nestedSite(temporary);
+        String sibling = root.resolve("archive").resolve("style.css").toString();
+
+        assertNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile(sibling, "body { color: pink; }\n"), state(root), nestedRedesignContract(), sibling));
+    }
+
+    private static Path nestedSite(Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("site"));
+        Files.createDirectories(root.resolve("archive"));
+        Files.writeString(root.resolve("site").resolve("style.css"), "body { color: white; }\n");
+        Files.writeString(root.resolve("archive").resolve("style.css"), "body { color: gray; }\n");
+        return root;
+    }
+
+    private static TaskContract nestedRedesignContract() {
+        return new TaskContract(
+                TaskType.FILE_EDIT, true, true, true,
+                Set.of("site/index.html", "site/style.css", "site/script.js"),
+                Set.of(), Set.of(),
+                "ok just edit the site to look better",
+                "test-static-web-nested-redesign");
+    }
+
+    /** Records a successful read as the loop does: normalized path set, ledger and raw-path outcome. */
+    private static void recordSuccessfulRead(LoopState state, String rawPath) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", rawPath)),
+                rawPath,
+                ToolResult.ok("1 | body { color: white; }\n"));
+        state.addToolOutcome(new ToolCallLoop.ToolOutcome(
+                "talos.read_file", rawPath, true, false, false, "Read " + rawPath, ""));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aReadOfALowerCaseFileDoesNotGroundARewriteOfItsCaseVariantWhereCaseIsSignificant(@TempDir Path temporary)
+            throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("site"));
+        Files.writeString(root.resolve("site").resolve("style.css"), "body { color: gray; }\n");
+        Files.writeString(root.resolve("site").resolve("Style.css"), "body { color: white; }\n");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                !Files.readString(root.resolve("site").resolve("style.css"))
+                        .equals(Files.readString(root.resolve("site").resolve("Style.css"))),
+                "this file system ignores case");
+        LoopState state = state(root);
+        recordSuccessfulRead(state, "site/style.css");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT, true, true, true,
+                Set.of("site/index.html", "site/Style.css", "site/script.js"),
+                Set.of(), Set.of(),
+                "ok just edit the site to look better",
+                "test-static-web-case-variant");
+
+        assertNotNull(StaticWebRewriteGroundingGuard.diagnostic(
+                writeFile("site/Style.css", "body { color: pink; }\n"), state, contract, "site/Style.css"));
     }
 }

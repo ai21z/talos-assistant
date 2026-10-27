@@ -9,7 +9,7 @@ final class DisabledEmbeddings implements BatchEmbeddings {
     DisabledEmbeddings(String provider, String model) {
         this.message = "Embedding provider is disabled"
                 + (model == null || model.isBlank() ? "" : " for model '" + model + "'")
-                + ". Set embed.provider to 'compat', 'llama_cpp', or 'ollama' to enable vector embeddings.";
+                + ". Set embed.provider to 'llama_cpp' or 'compat' to enable vector embeddings.";
     }
 
     @Override public float[] embed(String text) { throw new UnsupportedOperationException(message); }

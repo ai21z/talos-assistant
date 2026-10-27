@@ -1,10 +1,10 @@
 {
-  "name": "no-tool mutation retry executes create_file alias",
+  "name": "no-tool mutation retry rejects create_file alias outside selected surface",
   "fixture": "doc-repo",
   "v1Pack": true,
   "claims": [
     "explicit-mutation-no-tool-answer-retries",
-    "create-file-alias-counts-as-mutating"
+    "create-file-alias-cannot-borrow-selected-provider-authority"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",

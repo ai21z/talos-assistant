@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Locale;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +10,47 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutationIntentTest {
+
+    @Test
+    void independentlyStatedCurrentImperativesAreNotSuppressedByHistoricalPreambles() {
+        for (String instruction : java.util.List.of(
+                "Please implement those same two changes now.",
+                "Could you apply the same edits now?",
+                "Now please update those changes.",
+                "Implement those improvements.")) {
+            String request = "Those edits were not approved before. " + instruction;
+            assertTrue(MutationIntent.looksExplicitMutationRequest(request), request);
+            assertTrue(MutationIntent.currentMutationReference(request).isPresent(), request);
+        }
+    }
+
+    @Test
+    void historicalQuotedHypotheticalAndConflictingInstructionsDoNotGrantCurrentMutation() {
+        for (String request : java.util.List.of(
+                "Those edits were not approved before.",
+                "Those edits were not approved before. Why was it denied?",
+                "Those edits were not approved before. Explain how to implement those changes.",
+                "Those edits were not approved before. If permission is granted, implement those changes.",
+                "Those edits were not approved before. \"Please implement those changes.\"",
+                "Those edits were not approved before. ```Please implement those changes.```",
+                "Those edits were not approved before. (Please implement those changes.)",
+                "The historical instruction was:\nPlease implement those same two changes.",
+                "For example:\nPlease implement those same two changes.",
+                "For example. Please implement those same two changes.",
+                "The guide says. Please implement those same two changes.",
+                "Those edits were not approved before. Please implement those changes. Do not change files.")) {
+            assertFalse(MutationIntent.looksExplicitMutationRequest(request), request);
+            assertTrue(MutationIntent.currentMutationReference(request).isEmpty(), request);
+        }
+    }
+
+    private static final String F07_CONTRADICTION_PROMPT =
+            "Do not change any files, but update notes.md now. "
+                    + "Ask me to resolve the contradiction instead of acting.";
+
+    private static final String F10_SCOPED_WEB_PROMPT =
+            "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                    + "Do not touch CSS or JavaScript.";
 
     private static final String RETROCATS_AUDIT_PROMPT =
             "Create a complete modern dark synthwave static website for a band called Retrocats. "
@@ -165,6 +207,19 @@ class MutationIntentTest {
     }
 
     @Test
+    void turkishDefaultLocaleDoesNotBreakAsciiMutationIntent() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            assertTrue(MutationIntent.looksExplicitMutationRequest("FIX index.html."),
+                    MutationIntent.classificationReason("FIX index.html."));
+        } finally {
+            Locale.setDefault(previous);
+        }
+    }
+
+    @Test
     void namedFileScopedNegationDoesNotCancelMutationIntent() {
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Fix only styles.css. Do not change index.html or scripts.js."));
@@ -174,6 +229,18 @@ class MutationIntentTest {
                 "Summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files."));
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Summarize long-notes.txt into ideas/summary.md. do not touch protected files."));
+    }
+
+    @Test
+    void scopedDesignConstraintDoesNotCancelMutationIntent() {
+        for (String input : java.util.List.of(
+                "Restyle the page but do not change the color scheme.",
+                "Make the hero bigger, do not touch the footer.")) {
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input),
+                    MutationIntent.classificationReason(input));
+            assertFalse(MutationIntent.classificationReason(input)
+                    .contains("global-read-only-negation"), input);
+        }
     }
 
     @Test
@@ -238,6 +305,60 @@ class MutationIntentTest {
     }
 
     @Test
+    void scopedWebResourceNegationDoesNotCancelMutationIntent() {
+        for (String input : java.util.List.of(
+                F10_SCOPED_WEB_PROMPT,
+                "Update index.html. Don't touch stylesheets or scripts.",
+                "Update index.html, do not touch any CSS, JS, or script files.",
+                "UPDATE index.html. DO NOT TOUCH the JavaScript or the CSS.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(input);
+
+            assertEquals(MutationIntent.Decision.EXECUTE_MUTATION, shape.decision(), input);
+            assertFalse(shape.reason().contains("global-read-only-negation"), input);
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
+        }
+    }
+
+    @Test
+    void globalDoNotTouchControlsRemainReadOnly() {
+        for (String input : java.util.List.of(
+                "Do not touch files.",
+                "Do not touch any files.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(input);
+
+            assertEquals(MutationIntent.Decision.READ_ONLY, shape.decision(), input);
+            assertEquals("global-read-only-negation", shape.reason(), input);
+        }
+
+        MutationIntent.RequestShape contradiction = MutationIntent.classifyShape(
+                "Update index.html, but do not touch any files.");
+        assertEquals(MutationIntent.Decision.AMBIGUOUS, contradiction.decision());
+        assertEquals("global-read-only-negation", contradiction.reason());
+    }
+
+    @Test
+    void globalNegationWithLaterFileMutationClauseIsAmbiguous() {
+        MutationIntent.RequestShape shape = MutationIntent.classifyShape(F07_CONTRADICTION_PROMPT);
+
+        assertEquals(MutationIntent.Decision.AMBIGUOUS, shape.decision());
+        assertEquals("global-read-only-negation", shape.reason());
+        assertEquals("do not change", shape.evidenceSpan());
+        assertFalse(MutationIntent.looksExplicitMutationRequest(F07_CONTRADICTION_PROMPT));
+    }
+
+    @Test
+    void globalNegationWithExplicitInspectionRequestRemainsReadOnly() {
+        for (String request : java.util.List.of(
+                "Do not change any files. Read notes.md and explain what it currently says.",
+                "Do not change any files. Inspect notes.md and explain what should be updated.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(request);
+
+            assertEquals(MutationIntent.Decision.READ_ONLY, shape.decision(), request);
+            assertEquals("global-read-only-negation", shape.reason(), request);
+        }
+    }
+
+    @Test
     void formattingNegationDoesNotCancelExplicitMutationIntent() {
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Use talos.write_file to overwrite index.html. "
@@ -253,5 +374,223 @@ class MutationIntentTest {
                 "Do not edit files. Explain what you would change."));
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "I am only chatting, please don't inspect my files. What can you do for me?"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void explicitInlineOutputPhrasesClassifyAsNonMutatingChatCodegen() {
+        String captured = "Write a Java method int[] twoSum(int[] nums, int target) that returns "
+                + "the indices of two numbers that add up to target. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "inline-output-request", MutationIntent.classificationReason(captured));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(captured));
+
+        for (String input : java.util.List.of(
+                "Write a quicksort in Python. Just show me the code.",
+                "Write a debounce helper in JavaScript, answer inline please.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+        }
+        // Overlaps the older read-only negation counter-signal; either
+        // reason is fine as long as the outcome is non-mutating.
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Write a regex for emails. Do not create any files."));
+    }
+
+    @org.junit.jupiter.api.Test
+    void namedFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        String input = "Write twoSum to Solution.java. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(input),
+                MutationIntent.classificationReason(input));
+    }
+
+    /**
+     * T1009: rename is a CORE_MUTATION_VERB, so sentence-initial rename
+     * classifies correctly, but the mid-sentence net had no rename coverage,
+     * unlike fix/change/update. The live probe showed the model running
+     * read-only and printing the corrected file as prose instead. The
+     * recognition must be request-shaped (clause-start imperative with an
+     * explicit "rename X to Y" relationship), not a bare substring.
+     */
+    @org.junit.jupiter.api.Test
+    void midSentenceRenameRequestsClassifyAsMutation() {
+        for (String input : java.util.List.of(
+                "In src/app.js, rename the function reset to resetAll.",
+                "In the tracker module, rename shippedCount to shippedTotal.",
+                "Please rename reset to resetAll in src/app.js.",
+                "Rename the file old.txt to new.txt.",
+                "Open the tracker file and rename shippedCount to shippedTotal.",
+                "In src/app.js rename reset to resetAll.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    /**
+     * Reopened T1009 hardening: declarative prose where "rename" is a noun
+     * or third-person verb followed by an incidental "to" must not match
+     * the request-shaped pattern, and API identifiers like os.rename must
+     * not satisfy the clause-start branch through their own dot.
+     */
+    @org.junit.jupiter.api.Test
+    void declarativeAndApiRenameMentionsStayReadOnly() {
+        for (String input : java.util.List.of(
+                "In Git, rename detection compares blobs to find moves.",
+                "What does os.rename do compared to shutil.move?",
+                "Historically, rename operations mapped to unlink and link.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    /**
+     * T1009 third pass: generic advice, best-practice statements, quoted
+     * documentation, and historical discussion contain "rename X to Y"
+     * shapes built from plain prose words. Those must never classify as
+     * mutation: a mid-sentence rename needs a concrete file/scope anchor or
+     * an identifier-shaped X or Y, not just the structural shape.
+     */
+    @org.junit.jupiter.api.Test
+    void genericRenameAdviceStaysReadOnly() {
+        for (String input : java.util.List.of(
+                "In general, rename variables to improve readability.",
+                "As a rule, rename methods to match their behavior.",
+                "In Java, rename refactoring to improve clarity is common.",
+                "As a rule, rename methods to match.",
+                "By convention, rename handlers to reflect intent.",
+                "The tutorial says \"rename foo.txt to bar.txt\" in step 3.",
+                "The tutorial says \"rename foo to bar\" in step 3.",
+                "Chapter 2 explains why teams rename modules to align with domains.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    /**
+     * Reopened T1009: a sentence-initial imperative mutation request must
+     * keep its mutation classification even when a trailing how-do-I
+     * question would otherwise trip the widened instructional guard.
+     */
+    @org.junit.jupiter.api.Test
+    void aLeadingImperativeOutranksATrailingInstructionalQuestion() {
+        String input = "Update README.md with the new badge. Also, how do I create a release tag?";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(input),
+                input + " -> " + MutationIntent.classificationReason(input));
+    }
+
+    /**
+     * T1009 reopen: explanatory, definitional, hypothetical, advisory, and
+     * historical discussion of renaming must never become a mutation turn.
+     * The 2026-07-09 review confirmed the bare "rename " marker converted
+     * the first three prompts below into write-capable contracts.
+     */
+    @org.junit.jupiter.api.Test
+    void renameQuestionsAndAdvisoryFormsStayReadOnly() {
+        for (String input : java.util.List.of(
+                "Explain why we rename local variables in Java.",
+                "What does rename mean in Git?",
+                "Describe when teams rename a public API.",
+                "Why would someone rename this method?",
+                "Should I rename this function?",
+                "Should I rename the function reset to resetAll?",
+                "How do I rename a function in Java?",
+                "Can you explain how to rename the reset function?")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void namedSourceFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        for (String input : java.util.List.of(
+                "Edit app.py to fix the bug. Show me only the code.",
+                "Update server.go to add graceful shutdown. Output only the code.",
+                "Fix main.rs so it compiles. Just show me the code.",
+                "Refactor engine.cpp to remove the global state. Output just the code.",
+                "Edit Program.cs to add logging. Show only the code.",
+                "Update gemfile_tasks.rb to add the lint task. Output only the code.",
+                "Edit index.php to escape the query. Just show me the code.",
+                "Fix alloc.c so the buffer is bounded. Show me only the code.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsFileTargets() {
+        for (String input : java.util.List.of(
+                "Write a quicksort. Show me only the code. It is for D.C. rules.",
+                "Write a date formatter. Output only the code. It handles 300 B.C. dates.",
+                "Write a thermostat helper. Just show me the code. It controls the A.C.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Fix alloc.c so the buffer is bounded. Show me only the code."),
+                "real C file targets must still override inline-output phrasing");
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsExplicitFileTargets() {
+        for (String input : java.util.List.of(
+                "The team agreed to update D.C. next quarter.",
+                "Rewrite B.C. in your answer only.",
+                "Rewrite N.C. compliance notes in your answer only.",
+                "Condense notes.md into D.C. as a sentence in chat.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void inlineCodegenForSourceLanguagesWithoutTargetFileStaysNonMutating() {
+        for (String input : java.util.List.of(
+                "Show me only the code for a Python function that parses dates.",
+                "Write a Go worker pool. Output only the code.",
+                "Write a Rust iterator adapter. Just show me the code.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void sourceToTargetCapturePreservesExtensionsThatStartWithC() {
+        MutationIntent.SourceToTargetArtifact artifact = MutationIntent.sourceToTargetArtifact(
+                        "Condense src/parser.cpp into dist/parser-summary.csv.")
+                .orElseThrow();
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("src/parser.cpp"),
+                artifact.sourceTargets());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("dist/parser-summary.csv"),
+                artifact.outputTargets());
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCSourceFileTargetsStillOverrideInlineOutputPhrases() {
+        for (String input : java.util.List.of(
+                "Fix x.c. Show me only the code.",
+                "Fix x.c please. Show me only the code.",
+                "Update a.c in your answer only.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
     }
 }

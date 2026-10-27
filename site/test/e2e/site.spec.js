@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
-const widths = [320, 375, 390, 768, 1024, 1440];
+// 305px models a 320px window with a 15px classic scrollbar.
+// It does not replace a native scrollbar check on a visible browser.
+const widths = [305, 320, 375, 390, 768, 1024, 1440];
 
 // Benign GPU/WebGL lifecycle noise emitted by headless Chromium (occluded tabs
 // drop WebGL contexts; ReadPixels stalls come from screenshot readback). These
@@ -32,6 +35,30 @@ async function expectTalosPage(page, marker) {
 async function gotoTalos(page, path = "/", marker = "landing") {
   await page.goto(path);
   await expectTalosPage(page, marker);
+}
+
+async function expectPageFits(page) {
+  await page.evaluate(() => document.fonts.ready);
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    overflowX: [document.documentElement, document.body].map((node) => getComputedStyle(node).overflowX),
+  }));
+  expect(layout.clientWidth).toBeGreaterThan(0);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  for (const overflowX of layout.overflowX) {
+    expect(["hidden", "clip"]).not.toContain(overflowX);
+  }
+}
+
+async function expectInsideContentWidth(locator) {
+  await expect(locator).toBeVisible();
+  const box = await locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, clientWidth: document.documentElement.clientWidth };
+  });
+  expect(box.left, `${locator} left edge`).toBeGreaterThanOrEqual(0);
+  expect(box.right, `${locator} right edge`).toBeLessThanOrEqual(box.clientWidth + 1);
 }
 
 test("preflight verifies this is the Talos site", async ({ page }) => {
@@ -69,14 +96,15 @@ for (const width of widths) {
   test(`has no horizontal overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
+    await expectPageFits(page);
   });
 }
 
-test("live hero terminal streams a real turn and can replay", async ({ page }) => {
+test("hero terminal streams an illustrative turn and can replay", async ({ page }) => {
   await gotoTalos(page);
   const output = page.locator("[data-live-output]");
+  await expect(page.locator("#live-terminal-caption")).toContainText("Illustrative terminal example");
+  await expect(page.locator("#live-terminal-caption")).toContainText("not measured performance claims");
   // Streams the inspect turn to completion (route → inspect → answer).
   await expect(output).toContainText("route", { timeout: 9000 });
   await expect(output).toContainText("Local-first CLI workspace operator", { timeout: 9000 });
@@ -246,7 +274,7 @@ test("public beta install commands copy the active platform command", async ({ p
   await setup.getByLabel("Public beta details").focus();
   await expect(setup.getByRole("tooltip")).toContainText("Installs from GitHub Release assets");
   await expect(setup.getByRole("tooltip")).toContainText("Windows 0.10.8 is unsigned");
-  await expect(setup.getByRole("tooltip")).toContainText("To upgrade, rerun the installer with --force and the pinned version");
+  await expect(setup.getByRole("tooltip")).toContainText("To upgrade, rerun the installer with -Force on Windows or --force on Linux and the pinned version");
 });
 
 test("header CTAs are real links, not placeholder beta actions", async ({ page }) => {
@@ -306,13 +334,44 @@ test("docs page routes render without hiding content under the sticky header", a
     return {
       h1Top: h1.top,
       headerBottom: header.bottom,
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
   expect(layout.h1Top).toBeGreaterThan(layout.headerBottom + 8);
   expect(layout.overflow).toBeLessThanOrEqual(1);
   expect(page.browserIssues).toEqual([]);
 });
+
+for (const width of [305, 320]) {
+  for (const route of ["", "getting-started/quickstart", "architecture/execution-model"]) {
+    test(`docs ${route || "overview"} fits the content width at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await gotoTalos(page, `/docs.html#/${route}`, "docs");
+      await expect(page.locator("#docs-article h1")).toBeVisible();
+      await expectPageFits(page);
+
+      const containers = page.locator(".docs-main, #docs-article, .docs-code, .docs-table-wrap, .docs-diagram");
+      const containerCount = await containers.count();
+      for (let index = 0; index < containerCount; index += 1) {
+        await expectInsideContentWidth(containers.nth(index));
+      }
+      const articleOverflow = await page.locator(".docs-main, #docs-article").evaluateAll((nodes) =>
+        nodes.map((node) => getComputedStyle(node).overflowX),
+      );
+      for (const overflowX of articleOverflow) {
+        expect(["hidden", "clip"]).not.toContain(overflowX);
+      }
+      // Wide code and tables stay locally scrollable rather than being clipped.
+      const scrollableOverflow = await page.locator(".docs-code, .docs-table-wrap").evaluateAll((nodes) =>
+        nodes.map((node) => getComputedStyle(node).overflowX),
+      );
+      for (const overflowX of scrollableOverflow) {
+        expect(["auto", "scroll"]).toContain(overflowX);
+      }
+      expect(page.browserIssues).toEqual([]);
+    });
+  }
+}
 
 test("docs code blocks expose a working copy control", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -323,101 +382,196 @@ test("docs code blocks expose a working copy control", async ({ page, context })
   await expect(copy).toHaveText("Copied");
 });
 
+for (const slug of ["constructor", "__proto__", "toString", "hasOwnProperty", "missing-review-fixture"]) {
+  test(`unknown docs route ${slug} renders not-found and recovers to a real page`, async ({ page }) => {
+    await gotoTalos(page, `/docs.html#/${slug}`, "docs");
+    await expect(page.locator("#docs-article h1")).toHaveText("Page not found");
+    await expect(page.locator("#docs-article code")).toHaveText(slug);
+    expect(page.browserIssues).toEqual([]);
+
+    await page.locator('[data-doc-slug="getting-started/quickstart"]').click();
+    await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
+    await expect(page).toHaveTitle(/Quickstart \| Talos documentation/);
+    await expect(page.locator(".docs-copy").first()).toBeVisible();
+    expect(page.browserIssues).toEqual([]);
+  });
+}
+
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
   await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
-  await page.getByRole("link", { name: "write test" }).click();
+  await page.getByRole("link", { name: "write test", exact: true }).click();
   await expect(page).toHaveURL(/\/docs(?:\.html)?#\/getting-started\/quickstart#write-test$/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
   await expect(page.locator("#write-test")).toBeInViewport();
   expect(page.browserIssues).toEqual([]);
 });
 
-test("mobile architecture diagrams keep arrows visible and sequence cards readable", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await gotoTalos(page, "/docs.html#/architecture/execution-model", "docs");
+for (const width of [320, 390, 1024, 1440]) {
+  test(`architecture SVG diagrams retain structure at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoTalos(page, "/docs.html#/architecture/execution-model", "docs");
+    await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(3);
+    await expect(page.locator(".docs-diagram svg")).toHaveCount(3);
+    const sequence = page.locator(".docs-diagram").first();
+    await expect(sequence.locator("line.actor-line")).toHaveCount(8);
+    await expect(sequence.locator(".messageLine0")).toHaveCount(11);
+    await expect(sequence.locator(".messageLine1")).toHaveCount(2);
+    expect((await sequence.locator("text.messageText").allTextContents()).join(" ")).toContain("answer with limits and evidence pointers");
+    await expectPageFits(page);
+    await sequence.getByRole("button", { name: "Expand diagram" }).click();
+    const dialog = page.getByRole("dialog", { name: "A turn across runtime participants" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Close diagram" })).toBeFocused();
+    await expect(dialog.locator("svg")).toHaveCount(1);
+    await dialog.getByRole("button", { name: "Fit width" }).click();
+    await expect(dialog.getByRole("button", { name: "Fit width" })).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(sequence.getByRole("button", { name: "Expand diagram" })).toBeFocused();
+    await expect(sequence.locator("svg")).toHaveCount(1);
+    expect(page.browserIssues).toEqual([]);
+  });
+}
 
-  const layout = await page.evaluate(() => {
-    const sequenceArrow = document.querySelector(".docs-sequence-arrow");
-    const sequenceStep = document.querySelector(".docs-sequence-message .docs-diagram-step");
-    const flowArrow = document.querySelector(".docs-flow-path .docs-flow-arrow");
-    const measure = (node) => {
-      const rect = node.getBoundingClientRect();
-      const style = getComputedStyle(node);
+test("architecture maps preserve nodes, groups and decisions", async ({ page }) => {
+  await gotoTalos(page, "/docs.html#/architecture/package-map", "docs");
+  await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(2);
+  const packages = page.locator(".docs-diagram").first();
+  await expect(packages.locator("g.node")).toHaveCount(9);
+  await expect(packages.locator(".flowchart-link")).toHaveCount(12);
+  expect((await packages.locator("g.node").allTextContents()).map((text) => text.trim()).sort()).toEqual(["api", "app", "cli", "core", "engine", "runtime", "safety", "spi", "tools"]);
+
+  await page.goto("/docs.html#/architecture/trust-boundaries");
+  await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(1);
+  await expect(page.locator("g.cluster")).toHaveCount(4);
+  await expect(page.locator("g.node")).toHaveCount(13);
+  const server = page.locator('g.node[id*="-flowchart-Server-"]');
+  await expect(server).toHaveCount(1);
+  expect((await server.locator("tspan:not(:has(tspan))").allTextContents()).join(" ").replace(/\s+/g, " ").trim()).toBe("Managed or configured server");
+
+  await page.goto("/docs.html#/architecture/model-profile-lifecycle");
+  await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(1);
+  await expect(page.locator("g.node").filter({ hasText: "Disposition review" }).locator("polygon")).toHaveCount(1);
+  await expect(page.locator(".flowchart-link")).toHaveCount(16);
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("diagram failure retains escaped source and readable description", async ({ page }) => {
+  await page.route(/mermaid\.core.*\.js/, (route) => route.abort());
+  await gotoTalos(page, "/docs.html#/architecture/overview", "docs");
+  await expect(page.locator(".docs-diagram")).toHaveAttribute("data-diagram-state", "error");
+  await expect(page.locator(".docs-diagram-status")).toContainText("Diagram unavailable");
+  await expect(page.locator(".docs-diagram-source")).toHaveAttribute("open", "");
+  await expect(page.locator(".docs-diagram-source code")).toContainText("subgraph");
+  await expect(page.getByRole("button", { name: "Expand diagram" })).toBeHidden();
+  await expect(page.locator(".docs-diagram-description")).toBeVisible();
+});
+
+test("late diagram rendering cannot overwrite a newer docs route", async ({ page }) => {
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  let requested;
+  const requestSeen = new Promise((resolve) => { requested = resolve; });
+  await page.route(/mermaid\.core.*\.js/, async (route) => {
+    requested();
+    await blocked;
+    await route.continue();
+  });
+  await gotoTalos(page, "/docs.html#/architecture/overview", "docs");
+  await requestSeen;
+  await page.locator('[data-doc-slug="reference/config"]').click();
+  release();
+  await expect(page.locator("#docs-article h1")).toHaveText("Configuration");
+  await expect(page.locator(".docs-diagram")).toHaveCount(0);
+  await expect(page.locator(".docs-diagram-stage")).toHaveCount(0);
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("on-page navigation survives a diagram loaded after the click", async ({ page }) => {
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  await page.route(/mermaid\.core.*\.js/, async (route) => {
+    await blocked;
+    await route.continue();
+  });
+  await gotoTalos(page, "/docs.html#/architecture/overview", "docs");
+  await page.getByRole("navigation", { name: "On this page" }).getByRole("link", { name: "Evidence Model" }).click();
+  release();
+  await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(1);
+  await expect(page.locator("#evidence-model")).toBeInViewport();
+  await expect(page).toHaveURL(/#evidence-model$/);
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("mobile copy controls remain visible without hover", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await gotoTalos(page, "/docs.html#/reference/config", "docs");
+  const copy = page.locator(".docs-copy").first();
+  await expect(copy).toHaveCSS("opacity", "1");
+  const box = await copy.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(36);
+  await expectPageFits(page);
+});
+
+test("source SVG admission rejects active and external content", async ({ page }) => {
+  await gotoTalos(page, "/docs.html#/reference/config", "docs");
+  const moduleSource = readFileSync(new URL("../../src/docs-diagrams.js", import.meta.url), "utf8");
+  const checks = await page.evaluate(async (source) => {
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    try {
+      const { parseDiagramSvg } = await import(url);
+      const wrap = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">${body}</svg>`;
+      const bad = [
+        '<script>alert(1)</script>',
+        '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">active</div></foreignObject>',
+        '<rect onload="alert(1)"/>',
+        '<image href="https://example.com/image.svg"/>',
+        '<a href="https://example.com"><text>Link</text></a>',
+        '<use href="https://example.com/image.svg#node"/>',
+        '<g xml:base="https://example.com/actors.svg"><use href="#node"/></g>',
+        '<style>@import "https://example.com/style.css"</style>',
+        '<rect style="fill:url(https://example.com/paint.svg)"/>',
+      ];
       return {
-        display: style.display,
-        height: rect.height,
-        width: rect.width,
+        rejected: bad.map((body) => {
+          try { parseDiagramSvg(wrap(body)); return false; } catch { return true; }
+        }),
+        valid: parseDiagramSvg(wrap('<defs><symbol id="node"><rect width="10" height="10"/></symbol></defs><use href="#node"/>')).getAttribute("role"),
       };
-    };
-
-    return {
-      flowArrow: measure(flowArrow),
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
-      sequenceArrow: measure(sequenceArrow),
-      sequenceStep: measure(sequenceStep),
-    };
-  });
-
-  expect(layout.overflow).toBeLessThanOrEqual(1);
-  expect(layout.sequenceArrow.display).not.toBe("none");
-  expect(layout.sequenceArrow.height).toBeGreaterThan(8);
-  expect(layout.sequenceStep.width).toBeLessThanOrEqual(32);
-  expect(layout.flowArrow.display).not.toBe("none");
-  expect(layout.flowArrow.height).toBeGreaterThan(8);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, moduleSource);
+  expect(checks.rejected).toEqual(Array(9).fill(true));
+  expect(checks.valid).toBe("img");
   expect(page.browserIssues).toEqual([]);
 });
 
-test("desktop architecture sequence diagrams keep actor transitions compact", async ({ page }) => {
-  await page.setViewportSize({ width: 1024, height: 900 });
-  await gotoTalos(page, "/docs.html#/architecture/execution-model", "docs");
+for (const width of [305, 320]) {
+  test(`mobile header and nav remain usable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 780 });
+    await gotoTalos(page);
+    await expectPageFits(page);
+    const menuTrigger = page.getByRole("button", { name: "Open menu" });
+    await expectInsideContentWidth(menuTrigger);
+    await menuTrigger.click();
 
-  const layout = await page.evaluate(() => {
-    const sequence = document.querySelector(".docs-sequence-message");
-    const actors = sequence.querySelectorAll("strong");
-    const textRect = (node) => {
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      return range.getBoundingClientRect();
-    };
-    const source = textRect(actors[0]);
-    const target = textRect(actors[1]);
-    const arrow = sequence.querySelector(".docs-sequence-arrow").getBoundingClientRect();
-    const message = sequence.querySelector("p").getBoundingClientRect();
+    const menu = page.getByRole("dialog", { name: "Talos sections" });
+    await expect(menu).toBeVisible();
+    await expectInsideContentWidth(menu);
+    await expectInsideContentWidth(menu.locator('a[href="#overview"]'));
+    await expectInsideContentWidth(menu.locator('a[href="#docs"]'));
+    await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
+    await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
+    await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
 
-    return {
-      arrowToTargetGap: target.left - arrow.right,
-      sourceToArrowGap: arrow.left - source.right,
-      messageBelowActors: message.top > source.bottom,
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
-    };
+    await menu.locator('a[href="#docs"]').click();
+    await expect(page.locator("#docs")).toBeInViewport();
+    await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toBeHidden();
+    await expectPageFits(page);
   });
-
-  expect(layout.overflow).toBeLessThanOrEqual(1);
-  expect(layout.sourceToArrowGap).toBeLessThanOrEqual(24);
-  expect(layout.arrowToTargetGap).toBeLessThanOrEqual(24);
-  expect(layout.messageBelowActors).toBe(true);
-  expect(page.browserIssues).toEqual([]);
-});
-
-test("mobile header and nav remain usable", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 780 });
-  await gotoTalos(page);
-  const menuTrigger = page.getByRole("button", { name: "Open menu" });
-  await expect(menuTrigger).toBeVisible();
-  await menuTrigger.click();
-
-  const menu = page.getByRole("dialog", { name: "Talos sections" });
-  await expect(menu).toBeVisible();
-  await expect(menu.locator('a[href="#overview"]')).toBeVisible();
-  await expect(menu.locator('a[href="#docs"]')).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
-  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
-  await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
-
-  await menu.locator('a[href="#docs"]').click();
-  await expect(page.locator("#docs")).toBeInViewport();
-  await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
-});
+}
 
 test("small tablet header uses the compact menu instead of an empty top bar", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
@@ -440,8 +594,7 @@ test("small tablet header uses the compact menu instead of an empty top bar", as
 test("mobile hero content fits without horizontal clipping", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await gotoTalos(page);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  await expectPageFits(page);
 
   for (const selector of [
     "h1",
@@ -451,28 +604,42 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
     ".live-terminal",
     ".hero-inscription",
   ]) {
-    const box = await page.locator(selector).boundingBox();
-    expect(box, `${selector} should render`).not.toBeNull();
-    expect(box.x, `${selector} left edge`).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390 + 1);
+    await expectInsideContentWidth(page.locator(selector));
   }
 });
 
-test("mobile public beta tooltip stays inside the viewport", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 780 });
-  await gotoTalos(page);
-  await page.locator(".setup-info").focus();
-  const tooltip = await page.locator(".setup-tooltip").boundingBox();
-  expect(tooltip, "setup tooltip should render").not.toBeNull();
-  expect(tooltip.x, "tooltip left edge").toBeGreaterThanOrEqual(0);
-  expect(tooltip.x + tooltip.width, "tooltip right edge").toBeLessThanOrEqual(320 + 1);
-});
+for (const width of [305, 320]) {
+  test(`mobile public beta tooltip stays inside the content width at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 780 });
+    await gotoTalos(page);
+    await page.locator(".setup-info").focus();
+    const tooltip = page.getByRole("tooltip");
+    await expect.poll(() => tooltip.evaluate((node) => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0.9);
+    // The hero clips overflow, so a fitting document alone cannot prove this.
+    const bounds = await tooltip.evaluate((node) => {
+      const tooltipRect = node.getBoundingClientRect();
+      const strip = node.closest(".setup-strip");
+      const stripRect = strip.getBoundingClientRect();
+      const stripStyle = getComputedStyle(strip);
+      return {
+        left: tooltipRect.left,
+        right: tooltipRect.right,
+        contentLeft: stripRect.left + parseFloat(stripStyle.borderLeftWidth) + parseFloat(stripStyle.paddingLeft),
+        contentRight: stripRect.right - parseFloat(stripStyle.borderRightWidth) - parseFloat(stripStyle.paddingRight),
+      };
+    });
+    expect(bounds.left, "tooltip stays inside the setup strip content box").toBeGreaterThanOrEqual(bounds.contentLeft - 1);
+    expect(bounds.right, "tooltip stays inside the setup strip content box").toBeLessThanOrEqual(bounds.contentRight + 1);
+    await expectInsideContentWidth(tooltip);
+    await expectPageFits(page);
+  });
+}
 
-for (const width of [320, 390, 768, 1024, 1440]) {
+for (const width of [305, 320, 390, 768, 1024, 1440]) {
   test(`install command wraps without an internal horizontal scrollbar at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
-    const metrics = await page.locator(".setup-command").evaluate((el) => ({
+    const metrics = await page.locator("#setup-command").evaluate((el) => ({
       clientWidth: el.clientWidth,
       scrollWidth: el.scrollWidth,
       overflowX: getComputedStyle(el).overflowX,
@@ -482,7 +649,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
   });
 }
 
-for (const width of [320, 375, 390]) {
+for (const width of [305, 320, 375, 390]) {
   test(`mobile live terminal fits after answer renders at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await gotoTalos(page);
@@ -493,17 +660,14 @@ for (const width of [320, 375, 390]) {
       ".hero-inscription",
       ".live-terminal",
       ".live-terminal .terminal",
-      ".live-terminal .terminal-screen",
+      "[data-live-output]",
       ".live-terminal .terminal-foot",
       "#live-terminal-caption",
     ]) {
-      const box = await page.locator(selector).boundingBox();
-      expect(box, `${selector} should render`).not.toBeNull();
-      expect(box.x, `${selector} left edge at ${width}px`).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width, `${selector} right edge at ${width}px`).toBeLessThanOrEqual(width + 1);
+      await expectInsideContentWidth(page.locator(selector));
     }
 
-    const terminalOverflow = await page.locator(".live-terminal .terminal-screen").evaluate((node) =>
+    const terminalOverflow = await page.locator("[data-live-output]").evaluate((node) =>
       node.scrollWidth - node.clientWidth,
     );
     expect(terminalOverflow).toBeLessThanOrEqual(1);
@@ -530,4 +694,190 @@ test("reduced-motion mode leaves content visible without reveal animations", asy
     .first()
     .evaluate((node) => getComputedStyle(node).opacity);
   expect(Number(cardOpacity)).toBe(1);
+});
+
+for (const width of [320, 390, 760, 768, 1280]) {
+  test(`dynamic panel geometry stays stable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoTalos(page);
+    await page.evaluate(() => document.fonts.ready);
+    await page.locator('[data-live-replay]').click();
+    await expect(page.locator('[data-live-state]')).toHaveText('ready', { timeout: 9000 });
+    await page.evaluate(() => {
+      window.panelSamples = [];
+      const measure = () => {
+        const panel = document.querySelector('[data-live-terminal]').getBoundingClientRect();
+        window.panelSamples.push({ height: panel.height, top: panel.top + scrollY });
+      };
+      measure();
+      window.panelObserver = new MutationObserver(measure);
+      window.panelObserver.observe(document.querySelector('[data-live-output]'), { childList: true, subtree: true });
+    });
+    await page.locator('[data-live-replay]').click();
+    await expect(page.locator('[data-live-state]')).toHaveText('run');
+    await expect(page.locator('[data-live-state]')).toHaveText('ready', { timeout: 9000 });
+    const samples = await page.evaluate(() => {
+      window.panelObserver.disconnect();
+      return window.panelSamples;
+    });
+    expect(samples.length).toBeGreaterThan(10);
+    for (const key of ['height', 'top']) {
+      const values = samples.map((sample) => sample[key]);
+      expect(Math.max(...values) - Math.min(...values), `hero ${key}`).toBeLessThanOrEqual(1);
+    }
+    const readGeometry = async (selector) => page.locator(selector).evaluate((node) => {
+      const r = node.getBoundingClientRect();
+      return { height: r.height, top: r.top + scrollY, complete: node.scrollHeight <= node.clientHeight + 1 };
+    });
+    const turns = [];
+    for (const name of ['Inspect', 'Approve', 'Verify', 'Trace']) {
+      await page.getByRole('tab', { name, exact: true }).click();
+      turns.push(await readGeometry('#terminal-output'));
+    }
+    for (const key of ['height', 'top']) {
+      expect(Math.max(...turns.map(x => x[key])) - Math.min(...turns.map(x => x[key])), `turn ${key}`).toBeLessThanOrEqual(1);
+    }
+    expect(turns.every(x => x.complete)).toBe(true);
+    const commands = [];
+    for (const name of ['Linux', 'Windows']) {
+      await page.getByRole('tab', { name, exact: true }).click();
+      commands.push(await readGeometry('#setup-command'));
+    }
+    expect(Math.abs(commands[0].height - commands[1].height)).toBeLessThanOrEqual(1);
+    expect(commands.every(x => x.complete)).toBe(true);
+    await expectPageFits(page);
+    expect(page.browserIssues).toEqual([]);
+  });
+}
+
+test('sizing variants remain inert and identifiers stay unique after resizing', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await gotoTalos(page);
+  await expect(page.locator('.panel-size-reserve').first()).toBeAttached();
+  const admission = await page.locator('.panel-size-reserve').evaluateAll(nodes => ({
+    inert: nodes.every(node => node.inert && node.getAttribute('aria-hidden') === 'true' && getComputedStyle(node).visibility === 'hidden'),
+    hooks: nodes.flatMap(node => [node, ...node.querySelectorAll('*')]).flatMap(node => [...node.attributes]).filter(a => /^(id|role|name|tabindex)$|^data-/.test(a.name)).length,
+  }));
+  expect(admission).toEqual({ inert: true, hooks: 0 });
+  for (const width of [1280, 320, 921, 920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => document.fonts.ready);
+    const heights = [];
+    for (const name of ['Trace', 'Approve']) {
+      await page.getByRole('tab', { name, exact: true }).click();
+      heights.push(await page.locator('#terminal-output').evaluate(node => node.getBoundingClientRect().height));
+    }
+    expect(Math.abs(heights[0] - heights[1])).toBeLessThanOrEqual(1);
+  }
+  const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(n => n.id));
+  expect(new Set(ids).size).toBe(ids.length);
+  await expect(page.locator('[data-live-output]')).toHaveCount(1);
+  await expect(page.locator('#setup-command code')).toHaveCount(1);
+});
+
+test('mobile capabilities retain every group and leaf without a miniature graph', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await gotoTalos(page);
+  const compact = page.locator('.scope-compact');
+  await expect(compact).toBeVisible();
+  await expect(page.locator('.scope-layout')).toBeHidden();
+  await expect(compact.locator('details')).toHaveCount(5);
+  await expect(compact.locator('li')).toHaveCount(22);
+  await expect(compact).toContainText('keeps model turns on localhost unless you allow remote endpoints');
+  for (const summary of await compact.locator('summary').all()) {
+    await summary.press('Enter');
+    await expect(summary.locator('..')).toHaveAttribute('open', '');
+  }
+  const graphLabels = await page.locator('.tree-node--leaf').evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')).sort());
+  const listLabels = await compact.locator('li').evaluateAll(nodes => nodes.map(n => `${n.querySelector('strong').textContent}, ${n.querySelector('.scope-compact-status').textContent}`).sort());
+  expect(listLabels).toEqual(graphLabels);
+  await expectPageFits(page);
+  await page.setViewportSize({ width: 921, height: 900 });
+  await expect(page.locator('.scope-layout')).toBeVisible();
+  await expect(compact).toBeHidden();
+  await page.setViewportSize({ width: 920, height: 900 });
+  await expect(compact).toBeVisible();
+  await expect(page.locator('.scope-layout')).toBeHidden();
+});
+
+test('desktop capability descriptions reserve all selectable states', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await gotoTalos(page);
+  const heights = [];
+  for (const node of await page.locator('.tree-node').all()) {
+    await node.focus();
+    heights.push(await page.locator('[data-scope-detail]').evaluate(el => el.getBoundingClientRect().height));
+  }
+  expect(heights).toHaveLength(28);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+});
+
+test('script-free capability and docs fallbacks remain available', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 900 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${baseURL}/`);
+    await expect(page.locator('.scope-fallback')).toBeVisible();
+    await page.goto(`${baseURL}/docs.html`);
+    const fallback = page.locator('noscript a');
+    await expect(fallback).toBeVisible();
+    await expect(fallback).toHaveAttribute('href', 'https://github.com/ai21z/talos-assistant/tree/main/docs');
+    await expect(page.locator('noscript p')).toBeVisible();
+    await expect(page.locator('noscript p')).toContainText('This may include unreleased changes');
+  } finally {
+    await context.close();
+  }
+});
+
+for (const width of [390, 1280]) {
+  test(`docs skip and navigation focus preserve routes at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    for (const slug of ['', 'architecture/overview', 'missing-focus-fixture']) {
+      await gotoTalos(page, `/docs.html#/${slug}`, 'docs');
+      const url = page.url();
+      if (width < 860) await page.getByRole('button', { name: 'Documentation menu' }).click();
+      await page.getByRole('link', { name: 'Skip to content', exact: true }).press('Enter');
+      await expect(page).toHaveURL(url);
+      await expect(page.locator('#docs-article h1')).toBeFocused();
+      await expect(page.locator('#docs-article h1')).toBeInViewport();
+      if (width < 860) await page.getByRole('button', { name: 'Documentation menu' }).click();
+    }
+    if (width < 860) await page.getByRole('button', { name: 'Documentation menu' }).click();
+    await page.locator('[data-doc-slug="architecture/overview"]').click();
+    await expect(page.locator('#docs-article h1')).toBeFocused();
+    if (width < 860) {
+      await expect(page.getByRole('button', { name: 'Documentation menu' })).toHaveAttribute('aria-expanded', 'false');
+      await page.getByRole('button', { name: 'Documentation menu' }).click();
+    }
+    await page.locator('[data-doc-slug="architecture/overview"]').click();
+    await expect(page.locator('#docs-article h1')).toBeFocused();
+    const anchor = page.getByRole('navigation', { name: 'On this page' }).getByRole('link', { name: 'Evidence Model' });
+    await anchor.click();
+    await expect(page.locator('#evidence-model')).toBeFocused();
+    await anchor.click();
+    await expect(page.locator('#evidence-model')).toBeFocused();
+    await page.goBack();
+    await expect(page.locator('#docs-article h1')).toBeFocused();
+    await page.goForward();
+    await expect(page.locator('#evidence-model')).toBeFocused();
+    expect(page.browserIssues).toEqual([]);
+  });
+}
+
+test('late diagram completion does not reclaim reader focus', async ({ page }) => {
+  let release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  await page.route(/\/assets\/mermaid\.core[^/]*\.js/, async route => {
+    await barrier;
+    await route.continue();
+  });
+  await gotoTalos(page, '/docs.html#/architecture/overview', 'docs');
+  await page.getByRole('navigation', { name: 'On this page' }).getByRole('link', { name: 'Evidence Model' }).click();
+  await expect(page.locator('#evidence-model')).toBeFocused();
+  await page.keyboard.press('Tab');
+  const focused = await page.evaluate(() => document.activeElement.outerHTML);
+  release();
+  await expect(page.locator('.docs-diagram[data-diagram-state="ready"]')).toHaveCount(1);
+  expect(await page.evaluate(() => document.activeElement.outerHTML)).toBe(focused);
 });

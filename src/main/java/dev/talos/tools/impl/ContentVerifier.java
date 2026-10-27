@@ -36,7 +36,13 @@ final class ContentVerifier {
      * @param status  structured verification outcome
      * @param summary human-readable description
      */
-    record VerifyResult(VerificationStatus status, String summary) {
+    record VerifyResult(VerificationStatus status, String summary, ExecutedEditDetail.ReadBack readBack) {
+        VerifyResult(VerificationStatus status, String summary) {
+            this(status, summary, ExecutedEditDetail.ReadBack.NOT_RECORDED);
+        }
+        VerifyResult {
+            readBack = readBack == null ? ExecutedEditDetail.ReadBack.NOT_RECORDED : readBack;
+        }
         /** Convenience: returns true if the status is acceptable (PASS or UNKNOWN). */
         boolean ok() { return status.acceptable(); }
     }
@@ -48,25 +54,40 @@ final class ContentVerifier {
         } catch (IOException e) {
             String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Read-back failed for {}: {}", SafeLogFormatter.value(file), reason);
-            return new VerifyResult(VerificationStatus.INTEGRITY_FAIL, "read-back failed: " + reason);
+            return new VerifyResult(VerificationStatus.INTEGRITY_FAIL, "read-back failed: " + reason,
+                    ExecutedEditDetail.ReadBack.UNAVAILABLE_AT_EXECUTION);
         }
         if (!readBack.equals(writtenContent)) {
             LOG.warn("Read-back mismatch for {}: wrote {} chars, read {} chars",
                     SafeLogFormatter.value(file), writtenContent.length(), readBack.length());
             return new VerifyResult(VerificationStatus.INTEGRITY_FAIL,
                     "read-back mismatch (wrote " + writtenContent.length()
-                    + " chars, read " + readBack.length() + " chars)");
+                    + " chars, read " + readBack.length() + " chars)",
+                    ExecutedEditDetail.ReadBack.MISMATCH_AT_EXECUTION);
         }
         String ext = getExtension(file);
-        return switch (ext) {
-            case "json"         -> verifyJson(readBack);
-            case "html", "htm"  -> verifyHtml(readBack);
-            case "yaml", "yml"  -> verifyYaml(readBack);
-            case "xml"          -> verifyXml(readBack);
-            case "css"          -> verifyCss(readBack);
-            case "js", "jsx", "mjs" -> verifyJs(readBack);
+        // Format parsers see the content without a leading UTF-8 BOM: the
+        // BOM is byte-level file format (preserved by the write path), not
+        // part of the JSON/YAML/XML document, and Jackson's String reader
+        // rejects it even though the byte-level document is valid.
+        String parseable = stripLeadingBom(readBack);
+        VerifyResult format = switch (ext) {
+            case "json"         -> verifyJson(parseable);
+            case "html", "htm"  -> verifyHtml(parseable);
+            case "yaml", "yml"  -> verifyYaml(parseable);
+            case "xml"          -> verifyXml(parseable);
+            case "css"          -> verifyCss(parseable);
+            case "js", "jsx", "mjs" -> verifyJs(parseable);
             default             -> new VerifyResult(VerificationStatus.UNKNOWN, "read-back OK");
         };
+        return new VerifyResult(format.status(), format.summary(), ExecutedEditDetail.ReadBack.MATCHED_AT_EXECUTION);
+    }
+
+    private static String stripLeadingBom(String content) {
+        if (content != null && !content.isEmpty() && content.charAt(0) == '\uFEFF') {
+            return content.substring(1);
+        }
+        return content;
     }
 
     private static VerifyResult verifyJson(String content) {

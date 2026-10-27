@@ -122,18 +122,26 @@ class ModeScenarioTest {
                     .assertApprovalCounts(0, 0, 0, 0);
 
             LocalTurnTrace trace = result.localTrace();
-            assertTrue(trace.toolSurface().nativeTools().contains("talos.read_file"),
+            assertTrue(trace.toolSurface().nativeTools().isEmpty(),
                     trace.toolSurface().nativeTools().toString());
+            assertTrue(trace.toolSurface().promptTools().contains("talos.read_file"),
+                    trace.toolSurface().promptTools().toString());
             assertFalse(trace.toolSurface().nativeTools().contains("talos.retrieve"),
                     trace.toolSurface().nativeTools().toString());
             assertFalse(trace.toolSurface().promptTools().contains("talos.retrieve"),
                     trace.toolSurface().promptTools().toString());
+            assertTrue(trace.promptAudit().nativeTools().isEmpty(),
+                    trace.promptAudit().nativeTools().toString());
+            assertTrue(trace.promptAudit().promptTools().contains("talos.read_file"),
+                    trace.promptAudit().promptTools().toString());
             assertFalse(trace.promptAudit().nativeTools().contains("talos.retrieve"),
                     trace.promptAudit().nativeTools().toString());
             assertFalse(trace.promptAudit().promptTools().contains("talos.retrieve"),
                     trace.promptAudit().promptTools().toString());
             assertEquals(trace.toolSurface().nativeTools(), trace.promptAudit().nativeTools(),
-                    "Prompt-visible tools must match native tools in private mode");
+                    "Native tool surfaces must match in private mode");
+            assertEquals(trace.toolSurface().promptTools(), trace.promptAudit().promptTools(),
+                    "Prompt tool surfaces must match in private mode");
         }
     }
 

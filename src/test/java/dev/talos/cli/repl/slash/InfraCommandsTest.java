@@ -2,10 +2,13 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.ui.ColorPolicy;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.rag.RagService;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
@@ -22,7 +25,10 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -36,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * BenchCommand, ModelsCommand, SetModelCommand, SecretCommand.
  *
  * <p>Tests cover: spec metadata, argument parsing, error paths,
- * and file-fallback paths. Commands that need Ollama/CacheDb are
+ * and file-fallback paths. Commands that need a model engine or CacheDb are
  * tested for their error handling (graceful failure, not crashes).
  */
 @DisplayName("REPL commands - infrastructure-dependent")
@@ -44,6 +50,11 @@ class InfraCommandsTest {
 
     @TempDir
     Path ws;
+
+    private static final TerminalCapabilities INTERACTIVE_UNICODE =
+            new TerminalCapabilities(ColorPolicy.NEVER, true, false, true, false);
+    private static final TerminalCapabilities INTERACTIVE_ASCII =
+            new TerminalCapabilities(ColorPolicy.NEVER, true, false, false, true);
 
     private final Context ctx = Context.builder(new Config()).build();
 
@@ -167,6 +178,38 @@ class InfraCommandsTest {
             assertFalse(text.contains("Embed     bge-m3"), text);
         }
 
+        @Test void verbose_does_not_project_profile_qualification_from_alias_alone() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                    "transport", "engine",
+                    "default_backend", "llama_cpp",
+                    "model", "qwen2.5-coder-14b")));
+            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                    "llama_cpp", new LinkedHashMap<>(Map.of(
+                            "mode", "managed",
+                            "host", "http://127.0.0.1",
+                            "port", 18116,
+                            "model", "qwen2.5-coder-14b")))));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Resolution"), text);
+            assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("unverified"), text);
+            assertFalse(text.contains("accepted beta stability"), text);
+            assertFalse(text.contains("two-model-large-scale-live-audit"), text);
+        }
+
+        @Test void verboseStatusNamesAnUnsupportedBackend() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama", "model", "qwen2.5-coder:14b")));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Engine    ollama (not supported)"), text);
+        }
+
         @Test void verboseShowsManagedEmbeddingHostAndRetrievalMode() {
             Config cfg = new Config(null);
             cfg.data.put("llm", new LinkedHashMap<>(Map.of(
@@ -199,56 +242,6 @@ class InfraCommandsTest {
             assertFalse(text.contains("EmbedHost http://127.0.0.1:11434"), text);
         }
 
-        @Test void nonVerboseStatusUsesActiveBackendAfterSetModel() {
-            Config cfg = statusSwitchConfig();
-            LlmClient active = ScriptedNativeLlmClient
-                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
-                    .client();
-            active.setModel("ollama/gpt-oss:20b");
-            Context switched = Context.builder(cfg).llm(active).build();
-            var cmd = new StatusCommand(ModeController.defaultController(), ws);
-
-            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("", switched)).text;
-
-            assertTrue(text.contains("ollama/gpt-oss:20b"), text);
-            assertTrue(text.contains("Engine      ollama"), text);
-            assertFalse(text.contains("Engine      llama.cpp (managed)"), text);
-        }
-
-        @Test void verboseStatusUsesActiveBackendHostAfterSetModel() {
-            Config cfg = statusSwitchConfig();
-            LlmClient active = ScriptedNativeLlmClient
-                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
-                    .client();
-            active.setModel("ollama/gpt-oss:20b");
-            Context switched = Context.builder(cfg).llm(active).build();
-            var cmd = new StatusCommand(ModeController.defaultController(), ws);
-
-            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("--verbose", switched)).text;
-
-            assertTrue(text.contains("Model     ollama/gpt-oss:20b"), text);
-            assertTrue(text.contains("Host      http://127.0.0.1:11434"), text);
-            assertFalse(text.contains("Host      http://127.0.0.1:18116"), text);
-        }
-
-        private Config statusSwitchConfig() {
-            Config cfg = new Config(null);
-            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
-                    "transport", "engine",
-                    "default_backend", "llama_cpp",
-                    "model", "qwen3.6-35b-a3b-q4km")));
-            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
-                    "llama_cpp", new LinkedHashMap<>(Map.of(
-                            "mode", "managed",
-                            "host", "http://127.0.0.1",
-                            "port", 18116,
-                            "model", "qwen3.6-35b-a3b-q4km")))));
-            cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
-                    "host", "http://127.0.0.1:11434",
-                    "model", "qwen2.5-coder:14b",
-                    "embed", "bge-m3")));
-            return cfg;
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -514,7 +507,7 @@ class InfraCommandsTest {
         @Test void reindex_graceful_failure() {
             var cmd = new ReindexCommand(ws);
             Result r = cmd.execute("", ctx);
-            // Without Ollama, reindex will fail - should return error, not crash
+            // Without a model engine, reindex may fail - it should return, not crash
             assertNotNull(r);
         }
 
@@ -569,6 +562,53 @@ class InfraCommandsTest {
             assertTrue(Files.exists(new RagService(cfg).getIndexer().indexDirFor(ws)));
         }
 
+        @Test void interactive_progress_preserves_unicode_filename_when_terminal_supports_it() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_UNICODE);
+
+            Result r = cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertInstanceOf(Result.Ok.class, r);
+            String output = progressBytes.toString(StandardCharsets.UTF_8);
+            assertTrue(output.contains("docs/αρχείο.docx"), output);
+            assertFalse(output.contains("╬"), "UTF-8-capable progress output must not mojibake Greek bytes: " + output);
+            assertFalse(output.contains(System.lineSeparator()),
+                    "live progress should stay a carriage-return line, not a durable transcript line");
+        }
+
+        @Test void interactive_progress_degrades_unicode_filename_on_ascii_terminal() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_ASCII);
+
+            Result r = cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertInstanceOf(Result.Ok.class, r);
+            String output = progressBytes.toString(StandardCharsets.UTF_8);
+            assertFalse(output.contains("αρχείο"), output);
+            assertTrue(output.contains(".docx"), output);
+            assertTrue(output.codePoints().allMatch(cp -> cp == '\r' || (cp >= 0x20 && cp <= 0x7E)),
+                    "ASCII fallback progress output must be terminal-safe: " + output);
+        }
+
+        @Test void interactive_progress_uses_injected_output_stream() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_UNICODE);
+
+            cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertTrue(progressBytes.toString(StandardCharsets.UTF_8).contains("Indexing: 1/1"),
+                    "progress must be written to the REPL-owned terminal stream, not hardcoded System.out");
+        }
+
         private Config configWithVectorsDisabled() {
             Config cfg = new Config(null);
             Map<String, Object> rag = new LinkedHashMap<>();
@@ -582,6 +622,16 @@ class InfraCommandsTest {
             Map<String, Object> privacy = (Map<String, Object>) cfg.data.computeIfAbsent("privacy", ignored -> new LinkedHashMap<>());
             return (Map<String, Object>) privacy.computeIfAbsent("rag", ignored -> new LinkedHashMap<>());
         }
+
+        private RagService progressRag(String file) {
+            return new RagService(new Config()) {
+                @Override
+                public ReindexOutcome reindex(Path root, boolean forceFullReindex, IndexProgressListener listener) {
+                    listener.onFileComplete(1, 1, file);
+                    return new ReindexOutcome(true, "Reindexed.");
+                }
+            };
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -594,7 +644,7 @@ class InfraCommandsTest {
 
         @Test void execute_graceful_failure() {
             var cmd = new BenchCommand(ws);
-            // Without Ollama, bench will fail
+            // Without a model engine, bench may fail
             Result r = cmd.execute("", ctx);
             assertNotNull(r);
             // Should return error or ok (empty workspace = no files = fast finish)
@@ -615,25 +665,22 @@ class InfraCommandsTest {
     @DisplayName("ModelsCommand")
     class Models {
 
-        @Test void execute_without_ollama_returns_error() throws Exception {
+        @Test void execute_lists_managed_candidates_without_a_running_engine() throws Exception {
             var cmd = new ModelsCommand();
             Result r = cmd.execute("", ctx);
-            // Without running Ollama, this should fail gracefully
             assertNotNull(r);
             assertTrue(r instanceof Result.Error || r instanceof Result.Info || r instanceof Result.Ok,
-                    "Should handle missing Ollama gracefully");
+                    "Should handle a missing engine gracefully");
             if (r instanceof Result.Ok ok) {
-                assertTrue(ok.text.contains("/set model <backend/model>"));
+                assertTrue(ok.text.contains("/models use <alias>"), ok.text);
+                assertTrue(ok.text.contains("/models --verbose"), ok.text);
+                assertTrue(ok.text.contains("/help models"), ok.text);
+                assertTrue(ok.text.contains("No download is performed"), ok.text);
                 assertFalse(ok.text.contains(":set model"));
-            }
-        }
-
-        @Test void error_message_mentions_ollama() throws Exception {
-            var cmd = new ModelsCommand();
-            Result r = cmd.execute("", ctx);
-            if (r instanceof Result.Error err) {
-                assertTrue(err.message.toLowerCase().contains("ollama"),
-                        "Error should mention Ollama");
+                Result details = cmd.execute("--verbose", ctx);
+                String detailText = assertInstanceOf(Result.Ok.class, details).text;
+                assertTrue(detailText.contains("/set model <alias>"), detailText);
+                assertTrue(detailText.contains("/models add <alias>"), detailText);
             }
         }
 
@@ -670,11 +717,11 @@ class InfraCommandsTest {
 
         @Test void plural_models_subcommand_returns_usage_without_prefix_model_lookup() throws Exception {
             var cmd = new SetModelCommand();
-            Result r = cmd.execute("models ollama/qwen2.5-coder:14b", ctx);
+            Result r = cmd.execute("models llama_cpp/qwen2.5-coder-14b", ctx);
 
             assertInstanceOf(Result.Error.class, r);
             assertTrue(r.toString().contains("Usage"), r.toString());
-            assertFalse(r.toString().contains("sollama"), r.toString());
+            assertFalse(r.toString().contains("sllama_cpp"), r.toString());
         }
 
         @Test void empty_model_name_returns_error() throws Exception {
@@ -704,7 +751,7 @@ class InfraCommandsTest {
 
         @Test void valid_model_attempts_engine_lookup() throws Exception {
             var cmd = new SetModelCommand();
-            // With no running Ollama, this should error on engine lookup
+            // With no running engine, this should error on engine lookup
             Result r = cmd.execute("model qwen3:8b", ctx);
             assertNotNull(r);
             // Either Error (model not found / engine not reachable) or Info

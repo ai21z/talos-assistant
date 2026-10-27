@@ -84,7 +84,7 @@ public final class ContextPacker {
                     int take = Math.min(charBudget - usedChars, s.text().length());
                     if (take <= 0) continue;
                     if (take < s.text().length()) anyTruncated = true;
-                    packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
+                    packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata(), s.contentDecision()));
                     usedChars += take;
                     reservedBases.add(base);
                     if (reservedBases.size() == 2) break;
@@ -99,7 +99,7 @@ public final class ContextPacker {
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
             if (take < s.text().length()) anyTruncated = true;
-            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
+            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata(), s.contentDecision()));
             usedChars += take;
         }
 
@@ -110,7 +110,7 @@ public final class ContextPacker {
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
             if (take < s.text().length()) anyTruncated = true;
-            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
+            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata(), s.contentDecision()));
             usedChars += take;
         }
 
@@ -219,9 +219,9 @@ public final class ContextPacker {
         List<ContextResult.Snippet> out = new ArrayList<>();
         if (xs == null) return out;
         for (ContextResult.Snippet s : xs) {
-            if (s == null) continue;
+            if (s == null || !s.contentRestrictions().modelAllowed()) continue;
             String cleanText = Sanitize.sanitizeForPrompt(s.text());
-            out.add(new ContextResult.Snippet(s.path(), cleanText, s.metadata()));
+            out.add(new ContextResult.Snippet(s.path(), cleanText, s.metadata(), s.contentDecision()));
         }
         return out;
     }

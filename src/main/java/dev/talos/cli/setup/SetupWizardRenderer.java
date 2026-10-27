@@ -44,6 +44,17 @@ public final class SetupWizardRenderer {
         } else {
             out.append("unknown\n");
         }
+        out.append("  GPU: ");
+        if (snapshot.gpuDetected()) {
+            out.append(snapshot.gpuName())
+                    .append(" (driver ").append(snapshot.gpuDriverVersion());
+            if (snapshot.gpuVramTotalMb() > 0) {
+                out.append(", VRAM ").append(snapshot.gpuVramTotalMb()).append(" MB");
+            }
+            out.append("; source nvidia-smi)\n");
+        } else {
+            out.append("no NVIDIA driver evidence (nvidia-smi); CPU lane assumed\n");
+        }
 
         out.append("\nDecision plan:\n");
         for (SetupWizardStep step : plan.steps()) {

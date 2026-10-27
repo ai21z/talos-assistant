@@ -3,11 +3,14 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.ActiveToolAuthorityTraceTest;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
@@ -30,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("AssistantTurnExecutor no-tool outcome characterization")
-class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
+class AssistantTurnExecutorNoToolOutcomeCharacterizationTest
+        extends ActiveToolAuthorityTraceTest {
 
     @Test
     void noToolMalformedMutationDebrisRetryRunsBeforeNoActionShaping(@TempDir Path workspace)
@@ -44,7 +48,7 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
         Context ctx = context(
                 workspace,
                 registry,
-                LlmClient.scripted(List.of(
+                scriptedProvider(List.of(
                         """
                         {
                           "name": "talos.edit_file",
@@ -88,7 +92,7 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
         Context ctx = context(
                 workspace,
                 registry,
-                LlmClient.scripted(List.of(
+                scriptedProvider(List.of(
                         "Create `script.js` with this JavaScript code.",
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
                                 + "\"content\":\"document.body.dataset.ready = 't816';\"}}",
@@ -120,7 +124,7 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
         Context ctx = context(
                 workspace,
                 registry,
-                LlmClient.scripted(List.of(
+                scriptedProvider(List.of(
                         "I can summarize the README.",
                         "README evidence gathered: T816-README-MARKER.")),
                 5);
@@ -154,7 +158,7 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
         Context ctx = context(
                 workspace,
                 registry,
-                LlmClient.scripted(List.of(
+                scriptedProvider(List.of(
                         "Sure, please provide the path of the folder you want me to inspect.",
                         "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                 + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
@@ -200,11 +204,20 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
                 .llm(llm)
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .toolRegistry(registry)
-                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), maxIterations));
+                .toolCallLoop(new ToolCallLoop(
+                        new TurnProcessor(null, new NoOpApprovalGate(), registry),
+                        maxIterations))
+                .nativeToolSpecs(specsFrom(registry));
         if (streamChunks != null) {
             builder.streamSink(streamChunks::add);
         }
         return builder.build();
+    }
+
+    private static LlmClient scriptedProvider(List<String> responses) {
+        return ScriptedNativeLlmClient.textToolFallbackOf(responses.stream()
+                .map(response -> new LlmClient.StreamResult(response, List.of()))
+                .toList());
     }
 
     private static ToolRegistry registryWith(TalosTool... tools) {
@@ -213,6 +226,15 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
             registry.register(tool);
         }
         return registry;
+    }
+
+    private static List<ToolSpec> specsFrom(ToolRegistry registry) {
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
     }
 
     private static List<ChatMessage> messages(String request) {

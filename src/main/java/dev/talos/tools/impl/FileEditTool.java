@@ -1,18 +1,22 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.io.AtomicFileWriter;
+import dev.talos.core.io.StrictUtf8;
+import dev.talos.core.util.TextReplacement;
 import dev.talos.tools.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tool that performs a targeted string replacement within a workspace file.
  *
- * <p>Modeled after local coding assistant's FileEditTool: the caller provides the exact
- * text to find ({@code old_string}) and the replacement ({@code new_string}).
+ * <p>The caller provides the exact text to find ({@code old_string}) and the
+ * replacement ({@code new_string}).
  * The match must be unique - if the old string appears zero or multiple times,
  * the edit is rejected to prevent ambiguous changes.
  *
@@ -32,23 +36,35 @@ public final class FileEditTool implements TalosTool {
 
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
+    private final AtomicFileWriter atomicFileWriter;
 
-    public FileEditTool() { }
+    public FileEditTool() {
+        this(new AtomicFileWriter());
+    }
+
+    FileEditTool(AtomicFileWriter atomicFileWriter) {
+        this.atomicFileWriter = Objects.requireNonNull(atomicFileWriter, "atomicFileWriter");
+    }
 
     @Override public String name() { return NAME; }
     @Override public String description() {
         return "Replace a unique string in a workspace file. "
                 + "TIP: call talos.read_file first to see the exact content. "
-                + "old_string must match the file exactly - strip any line-number prefixes from read_file output before using.";
+                + "old_string must match the file exactly - strip any line-number prefixes from read_file output before using. "
+                + "To APPEND or INSERT text (nothing to replace): set old_string to an existing anchor line copied exactly from the file, "
+                + "and set new_string to that same anchor line plus the added text. Never call this tool with an empty old_string.";
     }
 
     @Override
     public ToolDescriptor descriptor() {
+        // T1007: minLength floors compile into the llama.cpp sampling grammar,
+        // so an empty old_string or path is unproducible on the managed
+        // backend. Runtime validation below stays as the second layer.
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "path":{"type":"string","description":"Relative path to the file in the workspace"},
-                  "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
+                  "path":{"type":"string","minLength":1,"description":"Relative path to the file in the workspace"},
+                  "old_string":{"type":"string","minLength":1,"description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file. For an append or insert, use an existing anchor line as old_string and repeat it plus the added text in new_string."},
                   "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
                 ToolRiskLevel.WRITE,
@@ -127,11 +143,21 @@ public final class FileEditTool implements TalosTool {
         }
 
         // --- Read, validate uniqueness, replace ---
+        String effectPath = ctx.workspace().toAbsolutePath().normalize()
+                .relativize(resolved.toAbsolutePath().normalize()).toString();
+        ToolMutationEffects effects = ToolMutationEffects.none();
         try {
-            String content = Files.readString(resolved);
+            AtomicFileWriter.ReadSnapshot snapshot = atomicFileWriter.readSnapshot(resolved);
+            byte[] sourceBytes = snapshot.bytes();
+            if (sourceBytes.length > MAX_FILE_SIZE) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "File too large (" + (sourceBytes.length / 1024)
+                                + " KB). Max: " + (MAX_FILE_SIZE / 1024) + " KB"));
+            }
+            String content = StrictUtf8.decode(sourceBytes);
 
-            int count = countOccurrences(content, oldString);
-            if (count == 0) {
+            TextReplacement.Match match = TextReplacement.findUniqueMatch(content, oldString, newString);
+            if (match.count() == 0) {
                 String snippet = buildFileSnippet(content, 20);
                 return ToolResult.fail(ToolError.invalidParams(
                         ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
@@ -140,19 +166,30 @@ public final class FileEditTool implements TalosTool {
                         + "Call talos.read_file to see the current content, then copy the exact text into old_string.\n"
                         + "File begins with:\n" + snippet));
             }
-            if (count > 1) {
+            if (match.count() > 1) {
                 return ToolResult.fail(ToolError.invalidParams(
                         ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS,
-                        "old_string found " + count + " times in " + pathParam +
+                        "old_string found " + match.count() + " times in " + pathParam +
                         ". Provide more context to make the match unique."));
             }
 
             // Exactly one match - safe to replace
-            String updated = content.replace(oldString, newString);
+            String updated = content.substring(0, match.startRaw())
+                    + match.replacement()
+                    + content.substring(match.endRaw());
+            if (updated.equals(content)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Replacement would make no change in " + pathParam + ". "
+                        + "Verify the intended edit and provide replacement text that changes the file."));
+            }
 
             // Undo snapshots moved to the governed checkpoint machinery
             // (T795/T796) - captured pre-approval by the runtime, not here.
-            Files.writeString(resolved, updated);
+            atomicFileWriter.replace(
+                    resolved,
+                    StrictUtf8.encode(updated),
+                    snapshot.preimage());
+            effects = ToolMutationEffects.applied(effectPath);
 
             // Report what changed
             long oldLines = oldString.chars().filter(c -> c == '\n').count() + 1;
@@ -162,9 +199,13 @@ public final class FileEditTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, updated);
-            return FileVerificationToolResult.from(base, vr);
+            return FileVerificationToolResult.from(base, vr)
+                    .withMutationEffects(effects)
+                    .withExecutedEditDetail(ExecutedEditDetail.capture(
+                            ctx.workspace(), effectPath, content, updated, match, vr, effects));
         } catch (IOException e) {
-            return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()));
+            return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()))
+                    .withMutationEffects(effects.plus(FileVerificationToolResult.failedWriteEffects(e, effectPath)));
         }
     }
 
@@ -191,14 +232,7 @@ public final class FileEditTool implements TalosTool {
      * Count non-overlapping occurrences of {@code needle} in {@code haystack}.
      */
     static int countOccurrences(String haystack, String needle) {
-        if (haystack.isEmpty() || needle.isEmpty()) return 0;
-        int count = 0;
-        int idx = 0;
-        while ((idx = haystack.indexOf(needle, idx)) != -1) {
-            count++;
-            idx += needle.length();
-        }
-        return count;
+        return TextReplacement.countOccurrences(haystack, needle);
     }
 
     /**

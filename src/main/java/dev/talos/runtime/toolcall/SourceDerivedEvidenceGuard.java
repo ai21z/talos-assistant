@@ -4,6 +4,7 @@ import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -12,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.TreeSet;
 
 final class SourceDerivedEvidenceGuard {
     record SourceReadback(String path, String readback) {}
@@ -79,7 +81,11 @@ final class SourceDerivedEvidenceGuard {
         String canonical = ToolAliasPolicy.localCanonicalName(call.toolName());
         if (!"write_file".equals(canonical)) return null;
         String target = ToolCallSupport.normalizePath(pathHint);
-        if (target.isBlank() || !expectedTargetContains(contract, target)) return null;
+        if (target.isBlank() || !(expectedTargetContains(contract, target)
+                || contract.expectedTargets().stream()
+                        .anyMatch(expected -> WorkspacePathIdentity.matches(state.workspace, expected, pathHint)))) {
+            return null;
+        }
         List<SourceReadback> sourceReadbacks = sourceReadbacks(state, contract);
         if (sourceReadbacks.isEmpty()) return null;
         String content = deterministicEvidenceSummary(target, sourceReadbacks);
@@ -115,15 +121,27 @@ final class SourceDerivedEvidenceGuard {
                 readPaths.add(normalized);
             }
         }
-        List<String> missing = new ArrayList<>();
+        Set<String> missing = new TreeSet<>();
         for (String sourceTarget : contract.sourceEvidenceTargets()) {
             String normalized = evidencePathKey(sourceTarget);
             if (normalized.isBlank()) continue;
-            if (!readPaths.contains(normalized)) {
-                missing.add(sourceTarget);
+            if (!readPaths.contains(normalized) && !sourceReadUnderAnotherSpelling(state, sourceTarget)) {
+                missing.add(normalized);
             }
         }
         return List.copyOf(missing);
+    }
+
+    /**
+     * A source read through another spelling of the same workspace file counts. Only recorded read paths, from
+     * this loop's outcomes or the turn capture, are compared by identity, never normalized ones.
+     */
+    private static boolean sourceReadUnderAnotherSpelling(LoopState state, String sourceTarget) {
+        if (TargetReadEvidence.successfullyRead(sourceTarget, null, state.toolOutcomes, state.workspace)) return true;
+        for (String readPath : TurnSourceEvidenceCapture.recordedReadPaths()) {
+            if (WorkspacePathIdentity.matches(state.workspace, sourceTarget, readPath)) return true;
+        }
+        return false;
     }
 
     static String deterministicEvidenceSummary(
@@ -246,32 +264,10 @@ final class SourceDerivedEvidenceGuard {
     }
 
     private static String latestSuccessfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) {
-            return null;
-        }
-        String target = ToolCallSupport.canonicalizeReadPath(normalizedPath)
-                .toLowerCase(Locale.ROOT);
-        String fullBody = latestSuccessfulReadbackForPath(state.successfulReadCallBodies, target);
-        if (fullBody != null) return fullBody;
-        return latestSuccessfulReadbackForPath(state.successfulReadCalls, target);
-    }
-
-    private static String latestSuccessfulReadbackForPath(java.util.Map<String, String> readbacksBySignature,
-                                                          String target) {
-        if (readbacksBySignature == null || readbacksBySignature.isEmpty()
-                || target == null || target.isBlank()) {
-            return null;
-        }
-        for (var entry : readbacksBySignature.entrySet()) {
-            String signature = entry.getKey() == null
-                    ? ""
-                    : entry.getKey().replace('\\', '/').toLowerCase(Locale.ROOT);
-            if (signature.startsWith("talos.read_file:")
-                    && signature.contains("path=" + target + ";")) {
-                return entry.getValue();
-            }
-        }
-        return null;
+        if (state == null) return null;
+        // T1013: deterministic latest read_file body for the effective path.
+        ReadEvidence read = state.readEvidence.latestReadFileForPath(normalizedPath, true);
+        return read == null ? null : read.body();
     }
 
     private static String evidencePathKey(String pathHint) {

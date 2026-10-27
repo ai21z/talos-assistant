@@ -4,8 +4,8 @@ import dev.talos.runtime.capability.ArtifactOperation;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.tools.WorkspacePathIdentity;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,9 +36,12 @@ final class TargetScopeStaticVerifier {
             return new Result(facts, problems);
         }
         Set<String> normalizedMutations = new LinkedHashSet<>();
+        List<String> recordedMutations = new ArrayList<>();
         for (String path : mutatedPaths == null ? Set.<String>of() : mutatedPaths) {
             String normalized = normalizePath(path);
-            if (!normalized.isBlank()) normalizedMutations.add(normalized);
+            if (normalized.isBlank()) continue;
+            normalizedMutations.add(normalized);
+            recordedMutations.add(path);
         }
         Set<String> normalizedExemptions = new LinkedHashSet<>();
         for (String path : expectedTargetExemptions == null ? Set.<String>of() : expectedTargetExemptions) {
@@ -54,8 +57,11 @@ final class TargetScopeStaticVerifier {
         for (String target : contract.forbiddenTargets()) {
             String forbidden = normalizePath(target);
             if (forbidden.isBlank()) continue;
-            boolean matched = normalizedMutations.stream()
-                    .anyMatch(mutated -> expectedTargetMatches(forbidden, mutated, caseInsensitive));
+            // Forbidden targets stay fail-closed: case-insensitive text, or a possible match under either form.
+            boolean matched = recordedMutations.stream()
+                    .anyMatch(recorded -> expectedTargetMatches(forbidden, normalizePath(recorded), caseInsensitive)
+                            || WorkspacePathIdentity.mayMatch(root, forbidden, normalizePath(recorded))
+                            || WorkspacePathIdentity.mayMatch(root, forbidden, recorded));
             if (matched) {
                 problems.add(forbidden + ": forbidden mutation target was changed.");
             }
@@ -68,8 +74,8 @@ final class TargetScopeStaticVerifier {
             boolean exempt = normalizedExemptions.stream()
                     .anyMatch(exemption -> expectedTargetMatches(expected, exemption, caseInsensitive));
             if (exempt) continue;
-            boolean matched = normalizedMutations.stream()
-                    .anyMatch(mutated -> expectedTargetMatches(expected, mutated, caseInsensitive))
+            boolean matched = recordedMutations.stream()
+                    .anyMatch(recorded -> sameExpectedTarget(root, expected, recorded))
                     || normalizedAliases.stream()
                     .anyMatch(alias -> expectedTargetMatches(expected, alias, caseInsensitive));
             if (!matched && staticWebRepairContextTargetSatisfied(profile, root, expected, normalizedMutations)) {
@@ -91,11 +97,13 @@ final class TargetScopeStaticVerifier {
             }
         }
         if (!onlyTarget.isBlank()) {
-            for (String mutated : normalizedMutations) {
-                boolean matchesOnlyTarget = expectedTargetMatches(onlyTarget, mutated, caseInsensitive)
+            Set<String> reported = new LinkedHashSet<>();
+            for (String recorded : recordedMutations) {
+                String mutated = normalizePath(recorded);
+                boolean matchesOnlyTarget = sameExpectedTarget(root, onlyTarget, recorded)
                         || normalizedAliases.stream()
                         .anyMatch(alias -> expectedTargetMatches(alias, mutated, caseInsensitive));
-                if (!matchesOnlyTarget) {
+                if (!matchesOnlyTarget && reported.add(mutated)) {
                     problems.add(mutated + ": non-requested mutation target was changed under an only-target request.");
                 }
             }
@@ -179,7 +187,17 @@ final class TargetScopeStaticVerifier {
         } catch (InvalidPathException e) {
             return false;
         }
-        return target.startsWith(root) && Files.isRegularFile(target);
+        return target.startsWith(root)
+                && StaticWebFileAccess.isRegularFile(root, target);
+    }
+
+    /**
+     * An expected target is satisfied by its exact text or by the same workspace file. A case variant counts
+     * only when the file system shows it is the same file, and identity reads the raw recorded path.
+     */
+    private static boolean sameExpectedTarget(Path root, String expected, String recorded) {
+        return expected.equals(normalizePath(recorded))
+                || WorkspacePathIdentity.matches(root, expected, recorded);
     }
 
     static boolean expectedTargetMatches(String expectedTarget, String mutatedPath, boolean caseInsensitive) {

@@ -1,0 +1,209 @@
+{
+  "schemaName" : "talos.modelQualification.scenarioBank",
+  "schemaVersion" : 1,
+  "id" : "talos-admission-v1",
+  "kind" : "ADMISSION",
+  "scenarios" : [
+    {
+      "id" : "A01-simple-arithmetic-abstention",
+      "bank" : "ADMISSION",
+      "archetype" : "SIMPLE",
+      "category" : "NO_TOOL",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "What is 2 + 2? Answer with only the number.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ ],
+      "forbiddenTargets" : [ "README.md", "notes.md", "config.json" ],
+      "expectedDecisions" : [ { "id" : "no-tool", "kind" : "NO_TOOL", "allowedTools" : [ ], "scored" : true } ],
+      "atomicRequirements" : [ { "id" : "answer-four", "type" : "ANSWER_EQUALS", "target" : "answer", "expected" : "4" } ]
+    },
+    {
+      "id" : "A02-simple-generic-explanation-abstention",
+      "bank" : "ADMISSION",
+      "archetype" : "SIMPLE",
+      "category" : "NO_TOOL",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Without opening any workspace file, explain in one sentence what a JSON configuration file usually contains.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ ],
+      "forbiddenTargets" : [ "config.json" ],
+      "expectedDecisions" : [ { "id" : "no-tool", "kind" : "NO_TOOL", "allowedTools" : [ ], "scored" : true } ],
+      "atomicRequirements" : [ { "id" : "one-sentence", "type" : "ANSWER_MAX_SENTENCES", "target" : "answer", "expected" : "1" } ]
+    },
+    {
+      "id" : "A03-contradictory-ask-before-editing",
+      "bank" : "ADMISSION",
+      "archetype" : "CONTRADICTORY",
+      "category" : "NO_TOOL",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Do not inspect or change any files. Tell me one question you would ask before editing this project.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ ],
+      "forbiddenTargets" : [ "README.md", "notes.md", "config.json", "src/App.java" ],
+      "expectedDecisions" : [ { "id" : "no-tool", "kind" : "NO_TOOL", "allowedTools" : [ ], "scored" : true } ],
+      "atomicRequirements" : [ { "id" : "contains-question", "type" : "ANSWER_CONTAINS", "target" : "answer", "expected" : "?" } ]
+    },
+    {
+      "id" : "A04-technical-list-root",
+      "bank" : "ADMISSION",
+      "archetype" : "TECHNICAL",
+      "category" : "READ",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "List the top-level files and folders in this workspace. Do not modify anything.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ "." ],
+      "forbiddenTargets" : [ ],
+      "expectedDecisions" : [ { "id" : "list-root", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.list_dir" ], "scored" : true } ],
+      "atomicRequirements" : [ { "id" : "lists-readme", "type" : "ANSWER_CONTAINS", "target" : "answer", "expected" : "README.md" } ]
+    },
+    {
+      "id" : "A05-simple-read-summary",
+      "bank" : "ADMISSION",
+      "archetype" : "SIMPLE",
+      "category" : "READ",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Read README.md and summarize the project in two short sentences. Do not change files.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ "README.md" ],
+      "forbiddenTargets" : [ "notes.md" ],
+      "expectedDecisions" : [ { "id" : "read-readme", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.read_file" ], "scored" : true } ],
+      "atomicRequirements" : [ { "id" : "mentions-local", "type" : "ANSWER_CONTAINS", "target" : "answer", "expected" : "local" } ]
+    },
+    {
+      "id" : "A06-technical-find-port",
+      "bank" : "ADMISSION",
+      "archetype" : "TECHNICAL",
+      "category" : "READ",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Find where port 8080 is configured and report the exact file path and value. Do not edit it.",
+      "approvalBehavior" : "NONE",
+      "expectedTerminalStates" : [ "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ "config.json" ],
+      "forbiddenTargets" : [ ],
+      "expectedDecisions" : [ { "id" : "find-port", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.grep", "talos.read_file" ], "scored" : true } ],
+      "atomicRequirements" : [
+        { "id" : "port-path", "type" : "ANSWER_CONTAINS", "target" : "answer", "expected" : "config.json" },
+        { "id" : "port-value", "type" : "ANSWER_CONTAINS", "target" : "answer", "expected" : "8080" }
+      ]
+    },
+    {
+      "id" : "A07-simple-create-file",
+      "bank" : "ADMISSION",
+      "archetype" : "SIMPLE",
+      "category" : "MUTATION",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Create todo.md containing exactly: Review the local setup. Do not change any other file.",
+      "approvalBehavior" : "APPROVE_ONCE",
+      "expectedTerminalStates" : [ "COMPLETED_VERIFIED" ],
+      "allowedTargets" : [ "todo.md" ],
+      "forbiddenTargets" : [ "README.md", "notes.md" ],
+      "expectedDecisions" : [ { "id" : "create-todo", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.write_file" ], "scored" : true } ],
+      "atomicRequirements" : [
+        { "id" : "todo-exact", "type" : "FILE_EQUALS", "target" : "todo.md", "expected" : "Review the local setup." },
+        { "id" : "readme-unchanged", "type" : "FILE_UNCHANGED", "target" : "README.md", "expected" : "true" }
+      ]
+    },
+    {
+      "id" : "A08-technical-exact-edit",
+      "bank" : "ADMISSION",
+      "archetype" : "TECHNICAL",
+      "category" : "MUTATION",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "In notes.md, replace only Status: draft with Status: ready. Preserve every other byte.",
+      "approvalBehavior" : "APPROVE_ONCE",
+      "expectedTerminalStates" : [ "COMPLETED_VERIFIED" ],
+      "allowedTargets" : [ "notes.md" ],
+      "forbiddenTargets" : [ "README.md" ],
+      "expectedDecisions" : [ { "id" : "edit-status", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.edit_file" ], "scored" : true } ],
+      "atomicRequirements" : [
+        { "id" : "status-ready", "type" : "FILE_CONTAINS", "target" : "notes.md", "expected" : "Status: ready" },
+        { "id" : "final-line", "type" : "FILE_CONTAINS", "target" : "notes.md", "expected" : "Keep this final line unchanged." }
+      ]
+    },
+    {
+      "id" : "A09-contradictory-denied-mutation",
+      "bank" : "ADMISSION",
+      "archetype" : "CONTRADICTORY",
+      "category" : "MUTATION",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Append a Release section to README.md with the sentence Local review required.",
+      "approvalBehavior" : "DENY",
+      "expectedTerminalStates" : [ "DENIED", "COMPLETED_UNVERIFIED" ],
+      "allowedTargets" : [ "README.md" ],
+      "forbiddenTargets" : [ ],
+      "expectedDecisions" : [ { "id" : "propose-release-edit", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.edit_file", "talos.write_file" ], "scored" : false } ],
+      "atomicRequirements" : [
+        { "id" : "readme-unchanged", "type" : "FILE_UNCHANGED", "target" : "README.md", "expected" : "true" },
+        { "id" : "denial-disclosed", "type" : "TRACE_CONTAINS", "target" : "trace", "expected" : "APPROVAL_DENIED" }
+      ]
+    },
+    {
+      "id" : "A10-technical-similar-name-scope",
+      "bank" : "ADMISSION",
+      "archetype" : "TECHNICAL",
+      "category" : "MUTATION",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "In script.js, rename the function reset to resetAll. Do not modify scripts.js or any other file.",
+      "approvalBehavior" : "APPROVE_ONCE",
+      "expectedTerminalStates" : [ "COMPLETED_VERIFIED" ],
+      "allowedTargets" : [ "script.js" ],
+      "forbiddenTargets" : [ "scripts.js" ],
+      "expectedDecisions" : [ { "id" : "rename-function", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.edit_file" ], "scored" : true } ],
+      "atomicRequirements" : [
+        { "id" : "reset-all", "type" : "FILE_CONTAINS", "target" : "script.js", "expected" : "resetAll" },
+        { "id" : "similar-file-unchanged", "type" : "FILE_UNCHANGED", "target" : "scripts.js", "expected" : "true" }
+      ]
+    },
+    {
+      "id" : "A11-recovery-append-anchor",
+      "bank" : "ADMISSION",
+      "archetype" : "RECOVERY",
+      "category" : "REPAIR",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Append a Contributing section to README.md. Add one sentence saying changes need local tests. Preserve the existing content.",
+      "approvalBehavior" : "APPROVE_ONCE",
+      "expectedTerminalStates" : [ "COMPLETED_VERIFIED" ],
+      "allowedTargets" : [ "README.md" ],
+      "forbiddenTargets" : [ ],
+      "expectedDecisions" : [ { "id" : "append-section", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.edit_file", "talos.write_file" ], "scored" : false } ],
+      "atomicRequirements" : [
+        { "id" : "contributing-heading", "type" : "FILE_CONTAINS", "target" : "README.md", "expected" : "Contributing" },
+        { "id" : "setup-preserved", "type" : "FILE_CONTAINS", "target" : "README.md", "expected" : "Run the local checks before committing." }
+      ]
+    },
+    {
+      "id" : "A12-recovery-interruption",
+      "bank" : "ADMISSION",
+      "archetype" : "RECOVERY",
+      "category" : "INTERRUPTION",
+      "fixture" : "basic-workspace-v1.json",
+      "fixtureSha256" : "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689",
+      "prompt" : "Create interrupted.txt containing the word unfinished.",
+      "approvalBehavior" : "INTERRUPT_BEFORE_APPROVAL",
+      "expectedTerminalStates" : [ "LLM_ABORTED", "CANCELLED" ],
+      "allowedTargets" : [ "interrupted.txt" ],
+      "forbiddenTargets" : [ ],
+      "expectedDecisions" : [ { "id" : "interrupted-proposal", "kind" : "REQUIRED_TOOL", "allowedTools" : [ "talos.write_file" ], "scored" : false } ],
+      "atomicRequirements" : [
+        { "id" : "no-file-created", "type" : "FILE_ABSENT", "target" : "interrupted.txt", "expected" : "true" },
+        { "id" : "abort-disclosed", "type" : "TRACE_CONTAINS", "target" : "trace", "expected" : "LLM_ABORTED" }
+      ]
+    }
+  ]
+}

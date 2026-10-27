@@ -1,12 +1,15 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.ConversationEvidenceRequest;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolOperationMetadata;
@@ -44,13 +47,30 @@ public final class ToolSurfacePlanner {
             ToolRegistry registry,
             ToolCapabilityAvailability availability
     ) {
+        return plan(contract, phase, registry, availability, false);
+    }
+
+    private static Plan plan(
+            TaskContract contract,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            ToolCapabilityAvailability availability,
+            boolean suppressWorkspaceOperationBranch
+    ) {
         if (registry == null || registry.isEmpty()) {
             return new Plan(List.of(), "no registry tools");
         }
         ToolCapabilityAvailability safeAvailability =
                 availability == null ? ToolCapabilityAvailability.allEnabled() : availability;
+        if (dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(contract).isPresent()) {
+            return new Plan(List.of(), "retained work status");
+        }
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
+        }
+        if (contract != null && ConversationEvidenceRequest.interpret(contract.originalUserRequest()).source()
+                != ConversationEvidenceRequest.Source.NORMAL) {
+            return new Plan(List.of(), "runtime conversation evidence");
         }
         if (contract != null && contract.type() == TaskType.CHECKPOINT_RESTORE) {
             return new Plan(List.of(), "checkpoint restore direct answer");
@@ -60,6 +80,9 @@ public final class ToolSurfacePlanner {
         }
         if (unsupportedCommandRequest(contract)) {
             return new Plan(List.of(), "unsupported command request");
+        }
+        if (ambiguousMutationClarification(contract)) {
+            return new Plan(List.of(), "ambiguous mutation clarification");
         }
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
             return select(registry, ToolSurfacePlanner::isDirectoryListingTool, safeAvailability, "directory listing");
@@ -85,22 +108,27 @@ public final class ToolSurfacePlanner {
         if (contract != null
                 && !contract.mutationAllowed()
                 && !contract.expectedTargets().isEmpty()) {
-            return select(registry, ToolSurfacePlanner::isFileReadTool, safeAvailability, "expected target read");
+            boolean compare = dev.talos.runtime.task.DocumentComparisonRequest.from(contract).active();
+            return select(registry, descriptor -> isFileReadTool(descriptor)
+                    || compare && DocumentComparisonTool.NAME.equals(descriptor.name()), safeAvailability, "expected target read");
         }
+
+        if (dev.talos.runtime.task.DocumentComparisonRequest.from(contract).active())
+            return select(registry, descriptor -> isFileReadTool(descriptor)
+                    || DocumentComparisonTool.NAME.equals(descriptor.name()), safeAvailability, "requested document comparison");
 
         boolean mutationAllowed = contract != null
                 && contract.mutationAllowed()
                 && phase == ExecutionPhase.APPLY;
 
         if (mutationAllowed) {
-            var workspaceOperation = WorkspaceOperationIntent.detect(contract);
-            if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
-                WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
+            if (explicitTextFormatRequest(contract)) {
                 return select(
                         registry,
-                        descriptor -> intent.toolNames().contains(descriptor.name()),
+                        descriptor -> isFileReadTool(descriptor)
+                                || "talos.write_file".equals(descriptor.name()),
                         safeAvailability,
-                        intent.surfaceReason());
+                        "text format apply surface");
             }
             if (sourceDerivedFileCreateTargets(contract)) {
                 return select(
@@ -130,7 +158,11 @@ public final class ToolSurfacePlanner {
                         safeAvailability,
                         "static web file target apply surface");
             }
-            return select(registry, ToolSurfacePlanner::isApplyOperation, safeAvailability, "mutation apply surface");
+            return select(
+                    registry,
+                    ToolSurfacePlanner::isLegacyApplyOperation,
+                    safeAvailability,
+                    "typed-authority-free mutation apply surface");
         }
         if (explicitCommandVerificationSurface(contract, phase)) {
             return select(registry, ToolSurfacePlanner::isCommandOperation, safeAvailability, "explicit command profile surface");
@@ -139,6 +171,82 @@ public final class ToolSurfacePlanner {
             return select(registry, ToolSurfacePlanner::isVerificationOperation, safeAvailability, "verification command surface");
         }
         return select(registry, ToolSurfacePlanner::isReadOnlyOperation, safeAvailability, "read-only metadata surface");
+    }
+
+    /**
+     * Plans from the authoritative typed resolution when one is available.
+     *
+     * <p>Until the dedicated workspace-operation planner owns coordinated
+     * source/destination clauses, an explicitly blocked tail must not be
+     * advertised merely because legacy request prose resembles an operation.
+     */
+    public static Plan plan(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            ToolCapabilityAvailability availability
+    ) {
+        TaskResolution safeResolution = resolution == null
+                ? TaskResolution.contractOnly(TaskContract.unknown(""))
+                : resolution;
+        if (safeResolution.blocksWorkspaceOperations()
+                && safeResolution.blocksUnscopedMutation()) {
+            return new Plan(
+                    List.of(),
+                    "coordinated workspace-operation tail blocked without "
+                            + "authorized content mutation");
+        }
+        if (safeResolution.blocksUnscopedMutation()) {
+            return select(
+                    registry,
+                    ToolSurfacePlanner::isReadOnlyOperation,
+                    availability,
+                    "non-authoritative mutation tail read-only surface");
+        }
+        if (phase == ExecutionPhase.APPLY
+                && !safeResolution.workspaceOperationPlan()
+                .authorizedOperations().isEmpty()) {
+            List<String> operationTools = safeResolution
+                    .workspaceOperationPlan()
+                    .toolNames();
+            Plan workspacePlan = select(
+                    registry,
+                    descriptor -> operationTools.contains(descriptor.name()),
+                    availability,
+                    "exact typed workspace-operation authority");
+            if (!safeResolution.hasIndependentAuthorizedContentMutation()) {
+                return workspacePlan;
+            }
+            Plan contentPlan = plan(
+                    safeResolution.contract(),
+                    phase,
+                    registry,
+                    availability,
+                    true);
+            java.util.LinkedHashMap<String, ToolSpec> combined =
+                    new java.util.LinkedHashMap<>();
+            contentPlan.nativeToolSpecs().forEach(spec ->
+                    combined.put(spec.name(), spec));
+            workspacePlan.nativeToolSpecs().forEach(spec ->
+                    combined.put(spec.name(), spec));
+            return new Plan(
+                    List.copyOf(combined.values()),
+                    contentPlan.reason()
+                            + "; exact typed workspace-operation authority");
+        }
+        Plan base = plan(
+                safeResolution.contract(),
+                phase,
+                registry,
+                availability,
+                safeResolution.blocksWorkspaceOperations());
+        if (!safeResolution.blocksWorkspaceOperations()) return base;
+        return new Plan(
+                base.nativeToolSpecs().stream()
+                        .filter(spec -> !WorkspaceOperationPlanner
+                                .isWorkspaceOperationTool(spec.name()))
+                        .toList(),
+                base.reason() + "; coordinated workspace-operation tail blocked");
     }
 
     /**
@@ -161,12 +269,31 @@ public final class ToolSurfacePlanner {
         return plan(contract, phase, CanonicalToolDescriptors.registry()).nativeToolNames();
     }
 
+    public static List<String> defaultVisibleToolNamesForResolution(
+            TaskResolution resolution,
+            ExecutionPhase phase
+    ) {
+        if (resolution == null) return List.of();
+        return plan(
+                resolution,
+                phase,
+                CanonicalToolDescriptors.registry(),
+                ToolCapabilityAvailability.allEnabled()).nativeToolNames();
+    }
+
     public static List<String> names(List<ToolSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
         return specs.stream()
                 .map(ToolSpec::name)
                 .sorted()
                 .toList();
+    }
+
+    private static boolean ambiguousMutationClarification(TaskContract contract) {
+        return contract != null
+                && contract.type() == TaskType.READ_ONLY_QA
+                && MutationIntent.classifyShape(contract.originalUserRequest()).decision()
+                == MutationIntent.Decision.AMBIGUOUS;
     }
 
     private static boolean requiresFileWriteForExactExpectation(TaskContract contract) {
@@ -183,6 +310,11 @@ public final class ToolSurfacePlanner {
             }
         }
         return true;
+    }
+
+    private static boolean explicitTextFormatRequest(TaskContract contract) {
+        return contract != null
+                && "explicit-text-format-request".equals(contract.classificationReason());
     }
 
     private static boolean sourceDerivedFileCreateTargets(TaskContract contract) {
@@ -235,6 +367,7 @@ public final class ToolSurfacePlanner {
     }
 
     private static boolean isReadOnlyOperation(ToolDescriptor descriptor) {
+        if (descriptor != null && DocumentComparisonTool.NAME.equals(descriptor.name())) return false;
         ToolOperationMetadata metadata = metadata(descriptor);
         return metadata != null
                 && metadata.riskLevel() != null
@@ -250,6 +383,12 @@ public final class ToolSurfacePlanner {
         return metadata.mutatesWorkspace()
                 && !metadata.destructive()
                 && metadata.riskLevel() == ToolRiskLevel.WRITE;
+    }
+
+    private static boolean isLegacyApplyOperation(ToolDescriptor descriptor) {
+        return isApplyOperation(descriptor)
+                && !WorkspaceOperationPlanner.isWorkspaceOperationTool(
+                        descriptor == null ? "" : descriptor.name());
     }
 
     private static boolean isFileTargetApplyOperation(ToolDescriptor descriptor) {

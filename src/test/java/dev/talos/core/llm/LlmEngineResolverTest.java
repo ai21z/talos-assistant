@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Deeper behavior of the registry - provider discovery, backend switch,
  * engine lifecycle - is exercised by engine-level tests
- * (e.g. {@code OllamaEngineProviderTest}). Duplicating that here would be
+ * (e.g. {@code LlamaCppEngineProviderTest}). Duplicating that here would be
  * shallow restatement, which CCR-017 explicitly calls out as the risk to
  * avoid.
  */
@@ -45,13 +45,13 @@ class LlmEngineResolverTest {
     void interface_contract_is_implementable_without_llm_client() throws Exception {
         FakeResolver fake = new FakeResolver();
 
-        fake.select("ollama", "qwen2.5-coder:14b");
+        fake.select("llama_cpp", "qwen2.5-coder:14b");
         assertEquals(1, fake.selectCalls.get());
-        assertEquals("ollama", fake.lastBackend);
+        assertEquals("llama_cpp", fake.lastBackend);
         assertEquals("qwen2.5-coder:14b", fake.lastModel);
 
         ChatRequest request = new ChatRequest(
-                "ollama", "qwen2.5-coder:14b",
+                "llama_cpp", "qwen2.5-coder:14b",
                 "be helpful", "ping",
                 List.of(), null,
                 List.of(new ChatMessage("user", "ping")));
@@ -72,7 +72,7 @@ class LlmEngineResolverTest {
     void auto_closeable_allows_try_with_resources() {
         FakeResolver fake = new FakeResolver();
         try (LlmEngineResolver r = fake) {
-            r.select("ollama", "qwen3:8b");
+            r.select("llama_cpp", "qwen3:8b");
         }
         assertTrue(fake.closed.get(), "try-with-resources must invoke close()");
     }
@@ -97,8 +97,8 @@ class LlmEngineResolverTest {
         try {
             // Selecting the same backend with a new model should be a no-op
             // on the engine - no backend change means no provider.create(cfg).
-            assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));
-            assertDoesNotThrow(() -> resolver.select("ollama", "other-model"));
+            assertDoesNotThrow(() -> resolver.select("llama_cpp", "qwen2.5-coder:14b"));
+            assertDoesNotThrow(() -> resolver.select("llama_cpp", "other-model"));
         } finally {
             resolver.close();
         }
@@ -116,7 +116,7 @@ class LlmEngineResolverTest {
         // EngineRegistry contract: null Config falls back to the normal default Config.
         RegistryLlmEngineResolver resolver = new RegistryLlmEngineResolver(null);
         try {
-            assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));
+            assertDoesNotThrow(() -> resolver.select("llama_cpp", "qwen2.5-coder:14b"));
         } finally {
             resolver.close();
         }
@@ -127,12 +127,9 @@ class LlmEngineResolverTest {
     private static Config minimalConfig() {
         Config cfg = new Config();
         Map<String, Object> llm = new LinkedHashMap<>();
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        Map<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         return cfg;
     }
 

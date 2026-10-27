@@ -1,10 +1,13 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,16 +113,24 @@ class ToolCallLoopCompactionBehaviorCharacterizationTest {
                 ChatMessage.toolResult("read-recent", recentTwo)
         ));
         LoopState state = new LoopState("", List.of(), messages, null, null, null, 8, 0);
-        state.readFileBodiesThisTurn.put("src/Old.java", "PRIVATE_STATE=ALPHA\nline two");
-        state.readFileBodiesThisTurn.put("src/Middle.java", "BETA retained in state");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "src/Old.java")),
+                "src/Old.java",
+                ToolResult.ok("PRIVATE_STATE=ALPHA\nline two"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "src/Middle.java")),
+                "src/Middle.java",
+                ToolResult.ok("BETA retained in state"));
 
         ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
 
         assertAll(
                 () -> assertEquals("PRIVATE_STATE=ALPHA\nline two",
-                        state.readFileBodiesThisTurn.get("src/Old.java")),
+                        state.readEvidence.latestReadFileForPath("src/Old.java", false).body()),
                 () -> assertEquals("BETA retained in state",
-                        state.readFileBodiesThisTurn.get("src/Middle.java")),
+                        state.readEvidence.latestReadFileForPath("src/Middle.java", false).body()),
                 () -> assertTrue(state.messages.get(1).content().startsWith(
                         "[compacted: talos.read_file result, " + oldRead.length() + " chars")),
                 () -> assertFalse(state.messages.get(1).content().contains("PRIVATE_STATE=ALPHA")),

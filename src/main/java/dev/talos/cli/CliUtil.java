@@ -10,7 +10,7 @@ public final class CliUtil {
 
     /**
      * Shortens a path for display by replacing home directory with ~ if applicable.
-     * Falls back to just the filename if home replacement doesn't apply.
+     * Falls back to the folder name, or to the root text for a drive or filesystem root.
      */
     public static String shortenPath(Path path) {
         String home = System.getProperty("user.home");
@@ -18,7 +18,13 @@ public final class CliUtil {
         if (home != null && !home.isBlank() && pathStr.startsWith(home)) {
             return "~" + pathStr.substring(home.length()).replace('\\', '/');
         }
-        return path.getFileName().toString();
+        return folderName(path);
+    }
+
+    /** The last name of a path, or its root text, such as D:\, when the path is a root. */
+    public static String folderName(Path path) {
+        Path name = path.getFileName();
+        return name == null ? path.toString() : name.toString();
     }
 
     /**

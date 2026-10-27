@@ -12,6 +12,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolMutationStateAccountingTest {
@@ -19,9 +21,7 @@ class ToolMutationStateAccountingTest {
     void successfulMutationRecordsStateClearsReadCachesAndReturnsSummary() {
         LoopState state = loopState();
         state.staticWebFullRewriteRequiredTargets.add("src/App.java");
-        state.successfulReadCalls.put("talos.read_file:path=src/App.java;", "1 | old");
-        state.successfulReadCallBodies.put("talos.read_file:path=src/App.java;", "1 | old");
-        state.readFileBodiesThisTurn.put("src/App.java", "1 | old");
+        addReadEvidence(state, "src/App.java", "1 | old");
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "src\\App.java",
                 "content", "new"));
@@ -39,9 +39,8 @@ class ToolMutationStateAccountingTest {
         assertEquals(1, state.mutatingToolSuccesses);
         assertTrue(state.pathsMutatedSinceRead.contains("src/App.java"));
         assertFalse(state.staticWebFullRewriteRequiredTargets.contains("src/App.java"));
-        assertTrue(state.successfulReadCalls.isEmpty());
-        assertTrue(state.successfulReadCallBodies.isEmpty());
-        assertEquals("1 | old", state.readFileBodiesThisTurn.get("src/App.java"));
+        assertNull(state.readEvidence.latestReadFileForPath("src/App.java", true));
+        assertEquals("1 | old", state.readEvidence.latestReadFileForPath("src/App.java", false).body());
         assertEquals(java.util.List.of("✓ Wrote file successfully"), state.pendingMutationSummaries);
     }
 
@@ -68,7 +67,7 @@ class ToolMutationStateAccountingTest {
     @Test
     void failedMutationAndSuccessfulReadOnlyCallAreNoOps() {
         LoopState failedState = loopState();
-        failedState.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
+        addReadEvidence(failedState, "README.md", "1 | old");
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new"));
 
         ToolMutationStateAccounting.Result failed =
@@ -81,7 +80,7 @@ class ToolMutationStateAccountingTest {
         assertFalse(failed.mutationRecorded());
         assertFalse(failedState.mutationSinceStart);
         assertEquals(0, failedState.mutatingToolSuccesses);
-        assertEquals(1, failedState.successfulReadCalls.size());
+        assertNotNull(failedState.readEvidence.latestReadFileForPath("README.md", true));
 
         LoopState readOnlyState = loopState();
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
@@ -102,7 +101,7 @@ class ToolMutationStateAccountingTest {
     @Test
     void integrityFailedMutationWithVerificationMetadataDoesNotRecordSuccessfulMutation() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
+        addReadEvidence(state, "README.md", "1 | old");
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new"));
         ToolResult result = ToolResult.fail(
                 ToolError.internal("File verification failed: read-back mismatch"),
@@ -119,7 +118,7 @@ class ToolMutationStateAccountingTest {
         assertFalse(state.mutationSinceStart);
         assertEquals(0, state.mutatingToolSuccesses);
         assertTrue(state.pathsMutatedSinceRead.isEmpty());
-        assertEquals(1, state.successfulReadCalls.size());
+        assertNotNull(state.readEvidence.latestReadFileForPath("README.md", true));
         assertTrue(state.pendingMutationSummaries.isEmpty());
     }
 
@@ -135,7 +134,35 @@ class ToolMutationStateAccountingTest {
         assertFalse(source.contains("state.pendingMutationSummaries.add"), source);
     }
 
+    @Test
+    void failedAppliedAndUnknownEffectsInvalidateReadsWithoutSuccessOrRecoveryCredit() {
+        LoopState state = loopState();
+        addReadEvidence(state, "README.md", "1 | old");
+        state.editRecoveryFullRewriteTargets.add("README.md");
+        ToolResult failed = ToolResult.fail("commit unknown").withMutationEffects(
+                new dev.talos.tools.ToolMutationEffects(java.util.List.of("created-dir"),
+                        java.util.List.of("README.md")));
+        var accounting = ToolMutationStateAccounting.recordSuccessfulMutation(state,
+                new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new")),
+                "README.md", failed);
+        assertTrue(accounting.mutationRecorded());
+        assertTrue(state.mutationSinceStart);
+        assertEquals(0, state.mutatingToolSuccesses);
+        assertTrue(state.pathsMutatedSinceRead.containsAll(java.util.List.of("created-dir", "README.md")));
+        assertNull(state.readEvidence.latestReadFileForPath("README.md", true));
+        assertTrue(state.editRecoveryFullRewriteTargets.contains("README.md"));
+        assertFalse(accounting.hasMutationSummary());
+    }
+
     private static LoopState loopState() {
         return new LoopState("", java.util.List.of(), java.util.List.of(), null, null, null, 5, 0);
+    }
+
+    private static void addReadEvidence(LoopState state, String path, String body) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(body));
     }
 }

@@ -1,11 +1,14 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
+import dev.talos.runtime.policy.ProjectSummaryEvidencePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.ToolCallParser;
@@ -16,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -32,8 +36,13 @@ final class ReadOnlyInspectionRetry {
     record Result(
             String answer,
             ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
+            String extraSummary,
+            AnswerOutputLimit outputLimit
+    ) {
+        Result(String answer, ToolCallLoop.LoopResult loopResult, String extraSummary) {
+            this(answer, loopResult, extraSummary, AnswerOutputLimit.KEEP_ORIGINAL);
+        }
+    }
 
     static Result retryIfNeeded(
             String answer,
@@ -45,7 +54,14 @@ final class ReadOnlyInspectionRetry {
     ) {
         if (answer == null) answer = "";
         TaskContract contract = plan == null ? null : plan.taskContract();
-        if (!requiresWorkspaceEvidence(contract)) {
+        boolean boundedWorkspace = plan != null && plan.workspaceResultsApplicable();
+        boolean needsDirectory = boundedWorkspace && (plan.requestedResults().requires(
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_CONTENTS)
+                || plan.requestedResults().requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT)
+                || plan.requestedResults().requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_EMPTINESS));
+        boolean needsPurpose = boundedWorkspace && plan.requestedResults().requires(
+                dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE);
+        if (boundedWorkspace ? !needsDirectory && !needsPurpose : !requiresWorkspaceEvidence(contract)) {
             return new Result(answer, null, null);
         }
         if (contract.mutationRequested()) {
@@ -58,27 +74,82 @@ final class ReadOnlyInspectionRetry {
         String userRequest = plan.originalUserRequest();
         List<ChatMessage> retryMessages = new ArrayList<>(messages);
         retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
-        retryMessages.add(ChatMessage.user(retryPrompt(contract, userRequest, workspace)));
+        retryMessages.add(ChatMessage.user(boundedWorkspace
+                ? requestedResultRetryPrompt(plan, workspace) : retryPrompt(contract, userRequest, workspace)));
 
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                        retryText, retry.toolCalls(), retry.provenance(),
+                        retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
+                boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
+                boolean equalFallback = !emptyFallback && mergedAnswer.equals(answer);
+                if (emptyFallback || equalFallback) {
+                    restoreOriginalCandidate(
+                            originalCandidate,
+                            answer,
+                            emptyFallback
+                                    ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                                    : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                }
                 return new Result(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        emptyFallback ? answer : mergedAnswer,
                         retryLoop,
-                        retryLoop.summary());
+                        retryLoop.summary(),
+                        emptyFallback || equalFallback ? AnswerOutputLimit.KEEP_ORIGINAL
+                                : AnswerOutputLimit.selected(retryLoop.finalAnswerOutputLimitReached()));
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new Result(ToolCallParser.stripToolCalls(retryText), null, null);
+                String stripped = ToolCallParser.stripToolCalls(retryText);
+                if (stripped.equals(answer)) {
+                    restoreOriginalCandidate(
+                            originalCandidate,
+                            answer,
+                            LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                } else {
+                    LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                            stripped,
+                            LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+                }
+                return new Result(stripped, null, null, stripped.equals(answer)
+                        ? AnswerOutputLimit.KEEP_ORIGINAL : AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    retryText.isBlank()
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_FAILED);
             LOG.warn("Read-only inspection retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return new Result(answer, null, null);
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
+    }
+
+    private static void restoreOriginalCandidate(
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint,
+            String answer,
+            LocalTurnTraceCapture.AnswerCandidateRestorationReason reason) {
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
     }
 
     static String retryPrompt(
@@ -87,11 +158,17 @@ final class ReadOnlyInspectionRetry {
             Path workspace
     ) {
         String type = contract == null ? "READ_ONLY_QA" : contract.type().name();
-        String request = userRequest == null ? "" : userRequest.strip();
+        String request = userRequest == null ? ""
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userRequest).strip();
         if (request.length() > 1000) {
             request = request.substring(0, 1000) + "...";
         }
-        String primaryFiles = String.join(", ", StaticTaskVerifier.obviousPrimaryFiles(workspace));
+        LinkedHashSet<String> primaryTargets = new LinkedHashSet<>();
+        if (contract != null && contract.type() == TaskType.WORKSPACE_EXPLAIN) {
+            ProjectSummaryEvidencePolicy.preferredAnchor(workspace).ifPresent(primaryTargets::add);
+        }
+        primaryTargets.addAll(StaticTaskVerifier.obviousPrimaryFiles(workspace));
+        String primaryFiles = String.join(", ", primaryTargets);
         if (primaryFiles.isBlank()) {
             primaryFiles = "any obvious primary text files";
         }
@@ -122,6 +199,24 @@ final class ReadOnlyInspectionRetry {
                 User request: "%s"
 
                 Use read-only tools now. Start with talos.list_dir on "." for "this folder", "here", or "this workspace". Then read the obvious primary files if present: %s. Answer from observed file evidence only. If there are no readable relevant files, say that directly. Do not call write_file or edit_file.""".formatted(type, request, primaryFiles);
+    }
+
+    private static String requestedResultRetryPrompt(CurrentTurnPlan plan, Path workspace) {
+        var inventory = plan.requestedResults();
+        StringBuilder prompt = new StringBuilder("The requested workspace results require separate evidence. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.WORKSPACE_LOCATION))
+            prompt.append("The active workspace location is supplied by the runtime and requires no file-content read. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_CONTENTS)
+                || inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_COUNT)
+                || inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.DIRECTORY_EMPTINESS))
+            prompt.append("Use talos.list_dir on \".\" to observe directory entries, including hidden entries. ");
+        if (inventory.requires(dev.talos.runtime.intent.RequestedResultInventory.Kind.PROJECT_PURPOSE)) {
+            var anchor = ProjectSummaryEvidencePolicy.preferredAnchor(workspace);
+            if (anchor.isPresent()) prompt.append("Read the project source anchor ").append(anchor.get()).append(" for project-purpose claims. ");
+            else prompt.append("No preferred project source anchor is available. Keep project purpose unresolved unless relevant source content is admitted. ");
+        } else prompt.append("File contents are not required by these requested results. Do not read, search, or retrieve arbitrary files. ");
+        prompt.append("Do not mutate files. Answer only from the evidence for each requested result.");
+        return prompt.toString();
     }
 
     private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {

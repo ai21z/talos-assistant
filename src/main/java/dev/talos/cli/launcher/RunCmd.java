@@ -1,5 +1,6 @@
 package dev.talos.cli.launcher;
 
+import dev.talos.cli.CliUtil;
 import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.ReplRouter;
 import dev.talos.cli.repl.DebugLevel;
@@ -28,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -67,12 +69,8 @@ public class RunCmd implements Runnable, SessionState {
 
     @Override
     public void run() {
-        Path ws = (root == null ? Path.of(".") : root).toAbsolutePath().normalize();
-        try { ws = ws.toRealPath(); } catch (Exception ignore) {}
-        if (!Files.isDirectory(ws)) {
-            System.err.println("Not a directory: " + maskPath(ws));
-            return;
-        }
+        Path ws = resolveWorkspace(root, Path::toRealPath, System.err);
+        if (ws == null) return;
 
         Config cfg = new Config();
 
@@ -127,7 +125,8 @@ public class RunCmd implements Runnable, SessionState {
             // Now that the router (and its command registry) exist, activate
             // slash completion on the same LineReader used by approval prompts.
             // Scripted stdin has no completer and no competing reader.
-            completerRef.set(new SlashCommandCompleter(router.getRegistry(), router.getTemplates()));
+            completerRef.set(new SlashCommandCompleter(router.getRegistry(), router.getTemplates(),
+                    router::modelCompletionAliases));
 
             // Show banner unless --no-logo
             String activeMode = router.getModes().getActiveName();
@@ -313,7 +312,37 @@ public class RunCmd implements Runnable, SessionState {
         out.println();
     }
 
-    private static String maskPath(Path path) { return path.getFileName().toString(); }
+    @FunctionalInterface
+    interface WorkspaceResolver {
+        Path resolve(Path path) throws IOException;
+    }
+
+    /**
+     * Resolves the workspace once. Every later boundary assumes the resolved
+     * form, so a folder that cannot be resolved stops startup here.
+     */
+    static Path resolveWorkspace(Path root, WorkspaceResolver resolver, PrintStream err) {
+        Path requested = (root == null ? Path.of(".") : root).toAbsolutePath().normalize();
+        Path ws;
+        try {
+            ws = resolver.resolve(requested);
+        } catch (NoSuchFileException missing) {
+            err.println("Not a directory: " + maskPath(requested));
+            return null;
+        } catch (IOException | RuntimeException unresolved) {
+            err.println("The workspace folder " + maskPath(requested) + " could not be resolved ("
+                    + unresolved.getClass().getSimpleName() + "). Talos did not start. "
+                    + "Check that the folder exists and can be opened, then start Talos again.");
+            return null;
+        }
+        if (!Files.isDirectory(ws)) {
+            err.println("Not a directory: " + maskPath(ws));
+            return null;
+        }
+        return ws;
+    }
+
+    private static String maskPath(Path path) { return CliUtil.folderName(path); }
 
     private static String sanitizeOutput(String text) {
         if (text == null) return "";

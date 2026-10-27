@@ -24,6 +24,20 @@ class DiagnoseCmdTest {
     }
 
     @Test
+    void terminalSectionReportsWhatDecidesExactDisplay() {
+        var capabilities = dev.talos.cli.ui.TerminalCapabilities.detect(
+                java.util.Map.of(), false, "Windows 11", java.nio.charset.Charset.forName("windows-1252"), null);
+        String section = DiagnoseCmd.renderTerminalSection(capabilities,
+                java.nio.charset.Charset.forName("UTF-8"), "Cp1252");
+
+        assertTrue(section.contains("Terminal:"), section);
+        assertTrue(section.contains("Interactive stdout:  no"), section);
+        assertTrue(section.contains("Unicode output:      ASCII fallback"), section);
+        assertTrue(section.contains("JVM stdout encoding: UTF-8"), section);
+        assertTrue(section.contains("Platform encoding:   Cp1252"), section);
+    }
+
+    @Test
     void criticalFailureIsReportedForMalformedUserConfig(@TempDir Path tempDir) throws Exception {
         Path configFile = tempDir.resolve("config.yaml");
         Files.writeString(configFile, """

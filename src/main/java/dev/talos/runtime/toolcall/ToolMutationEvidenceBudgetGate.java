@@ -1,9 +1,9 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 
 import java.util.Optional;
 
@@ -22,9 +22,15 @@ final class ToolMutationEvidenceBudgetGate {
 
     private static boolean mutationReadOnlyBudgetExceeded(LoopState state, int readOnlyToolBudget) {
         if (state == null || state.toolNames.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract captured = TurnTaskContractCapture.get();
+        TaskContract contract = captured == null
+                ? TaskContractResolver.fromMessages(state.messages)
+                : captured;
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
-        if (WorkspaceOperationIntent.detect(contract).isPresent()) return false;
+        if (!TurnTaskContractCapture.workspaceOperationPlan()
+                .authorizedOperations().isEmpty()) {
+            return false;
+        }
         if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return false;
         if (state.failedCalls > 0) return false;
         if (!readOnlyProgressOnly(state)) return false;

@@ -6,7 +6,28 @@ import java.util.Map;
 final class OutcomeTraceRecorder {
     private OutcomeTraceRecorder() {}
 
-    static void record(
+    static void recordEvaluation(
+            LocalTurnTrace.Builder builder,
+            String status,
+            String verificationStatus,
+            String approvalStatus,
+            String mutationStatus,
+            String classification
+    ) {
+        if (builder == null) return;
+        recordSummary(
+                builder,
+                status,
+                verificationStatus,
+                approvalStatus,
+                mutationStatus,
+                classification);
+        builder.event(TurnTraceEvent.simple("OUTCOME_EVALUATED", Instant.now().toString(), Map.of(
+                "status", safe(status),
+                "classification", safe(classification))));
+    }
+
+    static void recordSummary(
             LocalTurnTrace.Builder builder,
             String status,
             String verificationStatus,
@@ -16,6 +37,14 @@ final class OutcomeTraceRecorder {
     ) {
         if (builder == null) return;
         builder.outcome(status, verificationStatus, approvalStatus, mutationStatus, classification);
+    }
+
+    static void recordRendered(
+            LocalTurnTrace.Builder builder,
+            String status,
+            String classification
+    ) {
+        if (builder == null) return;
         builder.event(TurnTraceEvent.simple("OUTCOME_RENDERED", Instant.now().toString(), Map.of(
                 "status", safe(status),
                 "classification", safe(classification))));

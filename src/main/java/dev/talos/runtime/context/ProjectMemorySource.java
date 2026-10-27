@@ -1,6 +1,6 @@
 package dev.talos.runtime.context;
 
-/** Sanitized project-memory source included in the prompt. */
+/** Sanitized project-memory source admitted before final request preparation. */
 public record ProjectMemorySource(
         ProjectMemoryTier tier,
         ProjectMemoryTrust trust,
@@ -38,5 +38,15 @@ public record ProjectMemorySource(
                 lines,
                 estimatedTokens,
                 truncated);
+    }
+
+    public dev.talos.core.context.ContextItem contextItem() {
+        return dev.talos.core.context.ContextItem.fromText(
+                dev.talos.core.context.ContextItemSource.PROJECT_MEMORY,
+                trust == ProjectMemoryTrust.USER_OWNED
+                        ? dev.talos.core.context.ExecutionBoundary.LOCAL_USER_CONFIGURATION
+                        : dev.talos.core.context.ExecutionBoundary.LOCAL_WORKSPACE,
+                dev.talos.core.context.ContextPrivacyClass.NORMAL,
+                pathHint, content, estimatedTokens);
     }
 }

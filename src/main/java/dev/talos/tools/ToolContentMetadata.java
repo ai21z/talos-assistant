@@ -1,5 +1,9 @@
 package dev.talos.tools;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+import dev.talos.core.diff.DocumentPairReceipt;
+
 /**
  * Provenance and handoff metadata for tool output.
  *
@@ -15,7 +19,13 @@ public record ToolContentMetadata(
         boolean modelHandoffAllowed,
         boolean rawArtifactPersistenceAllowed,
         boolean ragIndexAllowed,
-        String decisionReason) {
+        String decisionReason,
+        List<String> sourcePaths,
+        DocumentPairReceipt documentPairReceipt,
+        ReadCoverage readCoverage,
+        DirectoryObservation directoryObservation) {
+
+    public enum ReadCoverage { UNSPECIFIED, COMPLETE, REQUESTED_RANGE, LIMITED }
 
     public enum ContentPrivacyClass {
         NORMAL,
@@ -27,6 +37,21 @@ public record ToolContentMetadata(
         GENERATED_TEXT
     }
 
+    /** Compatibility metadata does not establish directory scope or completeness. */
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths,
+                               DocumentPairReceipt documentPairReceipt, ReadCoverage readCoverage) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, documentPairReceipt, readCoverage, null);
+    }
+
+    public ToolContentMetadata withDirectoryObservation(DirectoryObservation observation) {
+        return new ToolContentMetadata(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, sourcePaths,
+                documentPairReceipt, readCoverage, observation);
+    }
+
     public enum ContentSource {
         TOOL_OUTPUT,
         READ_FILE,
@@ -35,7 +60,8 @@ public record ToolContentMetadata(
         RAG_RETRIEVE,
         GREP,
         COMMAND,
-        MODEL
+        MODEL,
+        DOCUMENT_COMPARISON
     }
 
     public ToolContentMetadata {
@@ -43,6 +69,62 @@ public record ToolContentMetadata(
         source = source == null ? ContentSource.TOOL_OUTPUT : source;
         sourcePath = sourcePath == null ? "" : sourcePath;
         decisionReason = decisionReason == null ? "" : decisionReason;
+        sourcePaths = normalizeSourcePaths(sourcePaths);
+        readCoverage = readCoverage == null ? ReadCoverage.UNSPECIFIED : readCoverage;
+        if (documentPairReceipt != null) {
+            var decision = documentPairReceipt.decision();
+            source = ContentSource.DOCUMENT_COMPARISON;
+            privacyClass = decision.privateDocumentContent()
+                    ? ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                    : ContentPrivacyClass.EXTRACTED_DOCUMENT_TEXT;
+            sourcePath = "";
+            sourcePaths = List.of();
+            modelHandoffAllowed = decision.modelHandoffAllowed() && modelHandoffAllowed;
+            rawArtifactPersistenceAllowed = decision.rawArtifactPersistenceAllowed() && rawArtifactPersistenceAllowed;
+            ragIndexAllowed = decision.ragIndexAllowed() && ragIndexAllowed;
+            decisionReason = "Both admitted document policies are required.";
+        }
+    }
+
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths,
+                               DocumentPairReceipt documentPairReceipt) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, documentPairReceipt, ReadCoverage.UNSPECIFIED);
+    }
+
+    public ToolContentMetadata withReadCoverage(ReadCoverage coverage) {
+        return new ToolContentMetadata(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, sourcePaths,
+                documentPairReceipt, coverage, directoryObservation);
+    }
+
+    public ToolContentMetadata(ContentPrivacyClass privacyClass, ContentSource source, String sourcePath,
+                               boolean modelHandoffAllowed, boolean rawArtifactPersistenceAllowed,
+                               boolean ragIndexAllowed, String decisionReason, List<String> sourcePaths) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed, rawArtifactPersistenceAllowed,
+                ragIndexAllowed, decisionReason, sourcePaths, null);
+    }
+
+    public static ToolContentMetadata documentPair(DocumentPairReceipt receipt) {
+        java.util.Objects.requireNonNull(receipt);
+        var decision = receipt.decision();
+        return new ToolContentMetadata(ContentPrivacyClass.NORMAL, ContentSource.DOCUMENT_COMPARISON, "",
+                decision.modelHandoffAllowed(), decision.rawArtifactPersistenceAllowed(), decision.ragIndexAllowed(),
+                "", List.of(), receipt);
+    }
+
+    public ToolContentMetadata(
+            ContentPrivacyClass privacyClass,
+            ContentSource source,
+            String sourcePath,
+            boolean modelHandoffAllowed,
+            boolean rawArtifactPersistenceAllowed,
+            boolean ragIndexAllowed,
+            String decisionReason) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, List.of());
     }
 
     public static ToolContentMetadata normal() {
@@ -53,7 +135,8 @@ public record ToolContentMetadata(
                 true,
                 false,
                 true,
-                "normal tool output");
+                "normal tool output",
+                List.of());
     }
 
     public static ToolContentMetadata extractedDocument(
@@ -103,10 +186,35 @@ public record ToolContentMetadata(
                 false,
                 decisionReason == null || decisionReason.isBlank()
                         ? "command output"
-                        : decisionReason);
+                        : decisionReason,
+                List.of());
+    }
+
+    public static ToolContentMetadata workspaceEvidence(
+            ContentSource source,
+            List<String> sourcePaths,
+            String decisionReason) {
+        List<String> paths = normalizeSourcePaths(sourcePaths);
+        String primary = paths.isEmpty() ? "" : paths.getFirst();
+        return new ToolContentMetadata(
+                ContentPrivacyClass.NORMAL,
+                source,
+                primary,
+                true,
+                false,
+                true,
+                decisionReason == null || decisionReason.isBlank()
+                        ? "workspace evidence"
+                        : decisionReason,
+                paths);
     }
 
     public ToolContentMetadata withModelHandoffAllowed(boolean allowed, String reason) {
+        if (source == ContentSource.DOCUMENT_COMPARISON) {
+            return new ToolContentMetadata(privacyClass, source, sourcePath,
+                    modelHandoffAllowed && allowed, rawArtifactPersistenceAllowed, ragIndexAllowed,
+                    decisionReason, sourcePaths, documentPairReceipt, readCoverage, directoryObservation);
+        }
         return new ToolContentMetadata(
                 privacyClass,
                 source,
@@ -114,6 +222,17 @@ public record ToolContentMetadata(
                 allowed,
                 rawArtifactPersistenceAllowed,
                 ragIndexAllowed,
-                reason == null || reason.isBlank() ? decisionReason : reason);
+                reason == null || reason.isBlank() ? decisionReason : reason,
+                sourcePaths, documentPairReceipt, readCoverage, directoryObservation);
+    }
+
+    private static List<String> normalizeSourcePaths(List<String> values) {
+        if (values == null || values.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) continue;
+            out.add(value.strip().replace('\\', '/'));
+        }
+        return List.copyOf(out);
     }
 }

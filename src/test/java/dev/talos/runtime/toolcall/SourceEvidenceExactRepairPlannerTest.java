@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,17 +52,18 @@ class SourceEvidenceExactRepairPlannerTest {
 
         String schema = schemaFor(repair.tools(), "talos.write_file");
         assertTrue(schema.contains("\"enum\":[\"office-summary.md\"]"), schema);
-        assertTrue(schema.contains("Board brief marker: ORBITAL-DECK-71."), schema);
-        assertTrue(schema.contains("Client note marker: NEON-RESPONSE-44."), schema);
-        assertTrue(schema.contains("Revenue marker: LASER-LEDGER-19"), schema);
+        // T1011: workspace bytes never ride in the tool schema; the schema
+        // references the user-role data block instead.
+        assertTrue(schema.contains("[SourceEvidenceData]"), schema);
+        assertFalse(schema.contains("ORBITAL-DECK-71"), schema);
 
         String prompt = prompt(repair.messages());
         assertTrue(prompt.contains("[SourceEvidenceExactRepair] Target: office-summary.md"), prompt);
         assertTrue(prompt.contains("Previous write was rejected before approval"), prompt);
-        assertTrue(prompt.contains("Required exact source evidence phrases:"), prompt);
-        assertTrue(prompt.contains("board-brief.md: `Board brief marker: ORBITAL-DECK-71.`"), prompt);
-        assertTrue(prompt.contains("client-notes.md: `Client note marker: NEON-RESPONSE-44.`"), prompt);
-        assertTrue(prompt.contains("revenue.csv: `Revenue marker: LASER-LEDGER-19`"), prompt);
+        assertTrue(prompt.contains("[SourceEvidenceData]"), prompt);
+        assertTrue(prompt.contains("Board brief marker: ORBITAL-DECK-71."), prompt);
+        assertTrue(prompt.contains("Client note marker: NEON-RESPONSE-44."), prompt);
+        assertTrue(prompt.contains("Revenue marker: LASER-LEDGER-19"), prompt);
         assertTrue(prompt.contains(request), prompt);
         assertFalse(prompt.contains("Older unrelated source task"), prompt);
         assertFalse(prompt.contains("Stale prior source answer"), prompt);
@@ -146,15 +149,17 @@ class SourceEvidenceExactRepairPlannerTest {
         state.toolOutcomes.add(readOutcome("board-brief.md"));
         state.toolOutcomes.add(readOutcome("client-notes.md"));
         state.toolOutcomes.add(readOutcome("revenue.csv"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=board-brief.md;",
-                "1 | Board brief marker: ORBITAL-DECK-71.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=client-notes.md;",
-                "1 | Client note marker: NEON-RESPONSE-44.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=revenue.csv;",
-                "1 | Revenue marker: LASER-LEDGER-19");
+        addReadback(state, "board-brief.md", "1 | Board brief marker: ORBITAL-DECK-71.");
+        addReadback(state, "client-notes.md", "1 | Client note marker: NEON-RESPONSE-44.");
+        addReadback(state, "revenue.csv", "1 | Revenue marker: LASER-LEDGER-19");
+    }
+
+    private static void addReadback(LoopState state, String path, String readback) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCallLoop.ToolOutcome readOutcome(String path) {

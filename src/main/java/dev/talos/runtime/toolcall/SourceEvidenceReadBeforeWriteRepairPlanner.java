@@ -1,8 +1,9 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -34,7 +35,8 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
         if (state == null || state.toolOutcomes.isEmpty()) {
             return java.util.Optional.empty();
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || contract.sourceEvidenceTargets().isEmpty()) {
             return java.util.Optional.empty();
         }
@@ -49,7 +51,14 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
         if (state.sourceEvidenceReadRepairPromptedKeys.contains(key)) {
             return java.util.Optional.empty();
         }
-        List<ToolSpec> tools = repairToolSpecs(baseTools, missingSources);
+        List<String> remainingTargets =
+                ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+        List<ToolSpec> tools =
+                repairToolSpecs(
+                        baseTools,
+                        missingSources,
+                        remainingTargets,
+                        supportsNamedReadAuthority(state));
         if (tools.isEmpty()) {
             return java.util.Optional.empty();
         }
@@ -81,7 +90,12 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
                 .collect(Collectors.joining(","));
     }
 
-    private static List<ToolSpec> repairToolSpecs(List<ToolSpec> baseTools, List<String> missingSources) {
+    private static List<ToolSpec> repairToolSpecs(
+            List<ToolSpec> baseTools,
+            List<String> missingSources,
+            List<String> remainingTargets,
+            boolean carryPostReadWriteAuthority
+    ) {
         List<ToolSpec> base = baseTools == null ? List.of() : baseTools;
         List<ToolSpec> readTools = base.stream()
                 .filter(spec -> spec != null && "talos.read_file".equals(spec.name()))
@@ -92,7 +106,8 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
                 .filter(path -> !path.isBlank())
                 .map(path -> "\"" + jsonEscape(path) + "\"")
                 .collect(Collectors.joining(","));
-        return readTools.stream()
+        List<ToolSpec> selected = new java.util.ArrayList<>();
+        selected.addAll(readTools.stream()
                 .map(spec -> new ToolSpec(
                         "talos.read_file",
                         "Read the missing source evidence file before any derived write.",
@@ -100,14 +115,35 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
                                 + "\"path\":{\"type\":\"string\",\"enum\":[" + enumValues + "]},"
                                 + "\"max_lines\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":500}"
                                 + "},\"required\":[\"path\"]}"))
-                .toList();
+                .toList());
+        if (carryPostReadWriteAuthority) {
+            List<ToolSpec> postReadWriteTools =
+                    SourceEvidencePostReadWriteRepairPlanner.repairToolSpecs(
+                            base,
+                            remainingTargets);
+            if (postReadWriteTools.isEmpty()) return List.of();
+            // Only NAMED can select the future write capability without
+            // authorizing it in this read generation. REQUIRED/AUTO authorize
+            // every selected name, so those modes remain read-only and the
+            // later mutation transition fails closed.
+            selected.addAll(postReadWriteTools);
+        }
+        return List.copyOf(selected);
+    }
+
+    private static boolean supportsNamedReadAuthority(LoopState state) {
+        return state != null
+                && state.ctx != null
+                && state.ctx.llm() != null
+                && state.ctx.llm().supportsRequiredToolChoice()
+                && state.ctx.llm().supportsNamedToolChoice();
     }
 
     private static List<ChatMessage> repairMessages(List<String> missingSources, String userTask) {
         String missing = String.join(", ", missingSources);
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Create the requested source-derived output."
-                : userTask.strip();
+                : RuntimeModelIdentityAnswerPolicy.capturedProviderTask(userTask).strip();
         String frame = "[SourceEvidenceReadBeforeWriteRepair]\n"
                 + "A source-derived write was blocked before approval because the source file(s) "
                 + "were not read in this turn. No approval was requested and no file was changed.\n"

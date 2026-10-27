@@ -14,12 +14,7 @@ final class AssistantNoToolOutcomeResolver {
     private AssistantNoToolOutcomeResolver() {
     }
 
-    record Resolution(String answer, String extraSummary) {
-    }
-
-    @FunctionalInterface
-    interface RetryPlanResolver {
-        CurrentTurnPlan resolve(List<ChatMessage> messages);
+    record Resolution(String answer, String extraSummary, boolean outputLimitReached) {
     }
 
     @FunctionalInterface
@@ -41,18 +36,42 @@ final class AssistantNoToolOutcomeResolver {
         String shape(String answer, boolean actionObligationFailed);
     }
 
+    @FunctionalInterface
+    interface SelectedToolAnswerShaper {
+        AnswerOutputLimit.Presentation shape(String answer, ToolCallLoop.LoopResult loopResult,
+                                             int extraMutationSuccesses, boolean actionObligationFailed);
+    }
+
+    @FunctionalInterface
+    interface SelectedNoToolAnswerShaper {
+        AnswerOutputLimit.Presentation shape(String answer, boolean actionObligationFailed);
+    }
+
     static Resolution resolve(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx,
-            RetryPlanResolver retryPlanResolver,
             PhaseTransition phaseTransition,
             ToolAnswerShaper toolAnswerShaper,
             NoToolAnswerShaper noToolAnswerShaper
     ) {
-        CurrentTurnPlan safePlan = safePlan(plan, messages, retryPlanResolver);
+        return resolveSelected(answer, false, messages, plan, workspace, ctx, phaseTransition,
+                (text, loop, mutations, failed) -> new AnswerOutputLimit.Presentation(
+                        toolAnswerShaper.shape(text, loop, mutations, failed), true),
+                (text, failed) -> new AnswerOutputLimit.Presentation(noToolAnswerShaper.shape(text, failed), true));
+    }
+
+    static Resolution resolveSelected(
+            String answer, boolean initialOutputLimitReached, List<ChatMessage> messages, CurrentTurnPlan plan,
+            Path workspace, Context ctx, PhaseTransition phaseTransition,
+            SelectedToolAnswerShaper toolAnswerShaper, SelectedNoToolAnswerShaper noToolAnswerShaper) {
+        if (plan == null) {
+            throw new IllegalArgumentException(
+                    "captured retry plan is required");
+        }
+        CurrentTurnPlan safePlan = plan;
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
                 || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
             // T743: on mutation/workspace-obligation turns, malformed protocol
@@ -78,21 +97,22 @@ final class AssistantNoToolOutcomeResolver {
                             ? debrisRetry.mutationsInRetry()
                             : 0;
                     phaseTransition.moveToVerify(verificationLoop, extraMutationSuccesses);
-                    return new Resolution(
+                    return resolution(
                             toolAnswerShaper.shape(
                                     debrisRetry.answer(),
                                     verificationLoop,
                                     extraMutationSuccesses,
                                     debrisRetry.actionObligationFailed()),
-                            debrisRetry.extraSummary());
+                            debrisRetry.extraSummary(), debrisRetry.outputLimit().apply(initialOutputLimitReached));
                 }
             }
-            return new Resolution(noToolAnswerShaper.shape(answer, false), null);
+            return resolution(noToolAnswerShaper.shape(answer, false), null, initialOutputLimitReached);
         }
 
         ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
         MissingMutationRetry.Result mutationRetry = mutationRetryIfNeeded(
                 answer, messages, safePlan, noToolLoopResult, workspace, ctx);
+        boolean outputLimitReached = mutationRetry.outputLimit().apply(initialOutputLimitReached);
         if (mutationRetry.extraSummary() != null || mutationRetry.mutationsInRetry() > 0) {
             ToolCallLoop.LoopResult verificationLoop = mutationRetry.retryLoopResult() == null
                     ? noToolLoopResult
@@ -101,25 +121,27 @@ final class AssistantNoToolOutcomeResolver {
                     ? mutationRetry.mutationsInRetry()
                     : 0;
             phaseTransition.moveToVerify(verificationLoop, extraMutationSuccesses);
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             mutationRetry.answer(),
                             verificationLoop,
                             extraMutationSuccesses,
                             mutationRetry.actionObligationFailed()),
-                    mutationRetry.extraSummary());
+                    mutationRetry.extraSummary(), outputLimitReached);
         }
 
         ReadEvidenceHandoff.Result readEvidenceHandoff = ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
                 mutationRetry.answer(), messages, safePlan, workspace, ctx);
         if (readEvidenceHandoff.loopResult() != null) {
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             readEvidenceHandoff.answer(),
                             readEvidenceHandoff.loopResult(),
                             0,
                             false),
-                    readEvidenceHandoff.extraSummary());
+                    AnswerGroundingDisclosure.toolLoopSummary(
+                            readEvidenceHandoff.loopResult(), safePlan, workspace, messages),
+                    readEvidenceHandoff.outputLimit().apply(outputLimitReached));
         }
 
         ReadOnlyInspectionRetry.Result inspectionRetry = ReadOnlyInspectionRetry.retryIfNeeded(
@@ -128,33 +150,37 @@ final class AssistantNoToolOutcomeResolver {
                 safePlan,
                 workspace,
                 ctx,
-                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                retryMessages -> TurnModelDispatcher.dispatchBufferedRetry(
                         ctx,
                         retryMessages,
-                        retryPlanResolver.resolve(retryMessages)));
+                        safePlan,
+                        RetryDispatchPurpose.READ_ONLY_INSPECTION));
         if (inspectionRetry.loopResult() != null) {
-            return new Resolution(
+            return resolution(
                     toolAnswerShaper.shape(
                             inspectionRetry.answer(),
                             inspectionRetry.loopResult(),
                             0,
                             false),
-                    inspectionRetry.extraSummary());
+                    AnswerGroundingDisclosure.toolLoopSummary(
+                            inspectionRetry.loopResult(), safePlan, workspace, messages),
+                    inspectionRetry.outputLimit().apply(outputLimitReached));
         }
 
-        return new Resolution(
+        if (safePlan.workspaceResultsApplicable()) {
+            return resolution(toolAnswerShaper.shape(inspectionRetry.answer(), noToolLoopResult, 0, false),
+                    null, inspectionRetry.outputLimit().apply(outputLimitReached));
+        }
+        return resolution(
                 noToolAnswerShaper.shape(
                         inspectionRetry.answer(),
                         mutationRetry.actionObligationFailed()),
-                null);
+                AnswerGroundingDisclosure.zeroReadWorkspaceNote(safePlan),
+                inspectionRetry.outputLimit().apply(outputLimitReached));
     }
 
-    private static CurrentTurnPlan safePlan(
-            CurrentTurnPlan plan,
-            List<ChatMessage> messages,
-            RetryPlanResolver retryPlanResolver
-    ) {
-        return plan == null ? retryPlanResolver.resolve(messages) : plan;
+    private static Resolution resolution(AnswerOutputLimit.Presentation shaped, String summary, boolean reached) {
+        return new Resolution(shaped.answer(), summary, shaped.outputLimit().apply(reached));
     }
 
     private static MissingMutationRetry.Result mutationRetryIfNeeded(
@@ -177,7 +203,8 @@ final class AssistantNoToolOutcomeResolver {
                                 ctx,
                                 retryMessages,
                                 retryPlan,
-                                retryToolSpecs));
+                                retryToolSpecs,
+                                RetryDispatchPurpose.MISSING_MUTATION));
     }
 
     private static ToolCallLoop.LoopResult emptyNoToolLoopResult(

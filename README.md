@@ -18,8 +18,7 @@ Talos is under active beta hardening. The current beta path focuses on bounded
 local workspace tasks, explicit user control, local model execution, and
 auditable outcomes.
 
-The preferred model backend for the current product path is managed
-`llama.cpp`. Ollama remains available as a legacy backend option.
+Talos runs one model backend, managed `llama.cpp`.
 
 ## User Documentation
 
@@ -117,7 +116,7 @@ Secret redaction is best-effort. It covers common key=value secret shapes, known
 
 Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
-Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
+Chat model endpoints are localhost-gated by default. A non-localhost `engines.llama_cpp.host` is rejected unless `engines.llama_cpp.allow_remote=true` is configured. When remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
 
 On Windows, the local secret-store master key is protected at rest with DPAPI CurrentUser and is tied to the Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect it. On non-Windows platforms, master-key custody remains unchanged and is not yet OS-backed. Treat the `~/.talos/secrets/` directory and your OS account as part of the trust boundary; use OS-level disk encryption.
 
@@ -133,12 +132,15 @@ privacy/file-capability policy changes.
 Approved direct protected reads are different. In developer/default mode, an
 approved `talos.read_file(".env")` or `talos.read_file("secrets/...")` may place
 protected file contents into model context for that turn. In private mode,
-approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
-file locally after approval, but withholds raw contents from model context and
-redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
-enabled. This is still not enough to position Talos as safe for sensitive
-paperwork folders; private-document positioning still needs stronger real-world
-fixture coverage and private-folder release evidence.
+approved protected reads default to `LOCAL_DISPLAY_ONLY`. Raw contents are
+withheld from model context. Sending them in private mode requires both
+`SEND_TO_MODEL_CONTEXT` scope and `privacy.protected_read.allow_send_to_model=true`.
+Raw persistence is separately controlled by
+`privacy.protected_read.persist_raw_artifacts`, which defaults to false.
+Permission to send content to a model does not grant raw persistence.
+This is still not enough to position Talos as safe for sensitive paperwork
+folders. Stronger real-world fixture coverage and private-folder release
+evidence are still needed.
 
 Private mode is user-visible in the REPL:
 
@@ -279,8 +281,12 @@ Talos has a local indexing and retrieval path:
 RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
 search or a vector database. BM25 retrieval works without embeddings and is
 best for exact names, paths, identifiers, config keys, and obvious text
-matches. Vector retrieval requires a local embedding endpoint. When embeddings
-are disabled or fail, Talos falls back to BM25-only retrieval. Use direct file
+matches. Vector retrieval requires an enabled embedding endpoint, which is
+localhost-gated by default. Embeddings are disabled by default. Remote embeddings
+require explicit opt-in through `embed.allow_remote`. Eligible indexed text and retrieval
+queries may then leave this machine, even when chat remains local. The index
+remains local. When embeddings are disabled or fail, Talos falls back to
+BM25-only retrieval. Use direct file
 reads for exact file contents, edits, line-sensitive reasoning, and
 verification.
 
@@ -288,9 +294,10 @@ verification.
 
 Talos has a focused tool set for local workspace work:
 
-| Tool | Purpose | Approval |
+| Tool | Purpose | Default approval |
 |---|---|---|
 | `read_file` | read a file with line-oriented output | not required |
+| `compare_documents` | compare requested ordered text files, or extracted PDF and DOCX text | not required |
 | `list_dir` | inspect workspace structure | not required |
 | `grep` | search for patterns in the workspace | not required |
 | `retrieve` | pull relevant indexed context | not required |
@@ -301,11 +308,20 @@ Talos has a focused tool set for local workspace work:
 | `move_path` | move a file or directory inside the workspace | required |
 | `rename_path` | rename a file or directory inside its parent | required |
 | `delete_path` | delete a file or directory inside the workspace | required |
-| `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
+| `apply_workspace_batch` | internal compatibility surface; not exposed to models | required |
 | `run_command` | run approved bounded command profiles | required |
 
-Write tools are approval-gated. The workspace remains under user control, and
-Talos records the outcome of each governed operation.
+The table describes registered defaults, not unconditional permission. Protected
+direct reads require approval, and configured policy can require approval or
+deny ordinary reads. Protected comparison operands are rejected, not unlocked by
+read approval. Write tools remain permission-gated, but configured allow rules
+or remembered approval for supported safe writes can avoid a new prompt.
+The outcome of each governed operation is recorded.
+
+`apply_workspace_batch` remains registered internally for compatibility and
+negative-boundary testing, but the current assistant planner does not expose it
+to models. Compound workspace-operation requests fail closed until Talos has a
+typed multi-operation authority contract.
 
 ### Workspace Boundary
 
@@ -358,8 +374,15 @@ Windows x64:
 iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 talos --version
-talos setup models
+```
+
+Model setup must then be completed using [Windows setup](docs/getting-started/windows-setup.md).
+`talos setup models` alone prints help and does not configure a model. After a
+successful configuration write:
+
+```powershell
 talos status --verbose
+talos doctor --start
 talos
 ```
 
@@ -387,8 +410,9 @@ This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
 `talos setup wizard`.
 
-To upgrade an existing install, rerun the installer with `--force` and the pinned
-version. For beta releases, use the exact version instead of `latest`:
+To upgrade an existing install, rerun the installer with `-Force` on Windows or
+`--force` on Linux and the pinned version. For beta releases, use the exact
+version instead of `latest`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
@@ -463,7 +487,6 @@ talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe 
 ```
 
 Existing configs can be replaced with `--force`; Talos writes a backup first.
-Ollama can still be selected explicitly as a legacy backend when needed.
 On Linux, use the real path to the local `llama-server` binary instead of the
 Windows `.exe` example path.
 
@@ -537,8 +560,11 @@ Run the approved Gradle test command profile.
 |---|---|
 | `/help` | show commands |
 | `/mode <mode>` | switch active mode |
-| `/models` | list available models |
-| `/set model <backend/model>` | switch active model |
+| `/models` | list managed aliases, local candidates and catalog dispositions |
+| `/models --verbose` | show model filenames, availability and switching details |
+| `/models add <alias> "<absolute GGUF path>"` | register a local GGUF for this session without starting it |
+| `/models use <alias>` | select a local managed model and restart the owned backend |
+| `/set model <alias>` | compatibility form of managed selection, or use `<backend/model>` for another configured backend |
 | `/reindex` | rebuild the current workspace index |
 | `/workspace` | show current workspace status |
 | `/status` | show runtime and indexing details |
@@ -561,6 +587,16 @@ Run the approved Gradle test command profile.
 | `/<template>` | workspace template commands from `.talos/commands/*.md` (`$ARGS` substitution; restart to reload) |
 | `/q` | exit |
 
+In Unreleased current source, managed model selection keeps Talos open. Local
+files are checked before the owned backend is stopped, and the target is reported
+as active only after startup and served-identity checks succeed. No model is
+downloaded by `/models` or `/set model`. Connect-only servers are not restarted.
+Imports and selections apply to the current session. Saved defaults, conversation
+history, sampling and global tool/privacy policy are preserved. A local candidate
+or catalog disposition is not proof of current readiness or qualification. See
+[session model selection](docs/getting-started/model-setup.md#select-a-model-in-the-current-session)
+for discovery, registration and failure behavior.
+
 ## The Talos Work Cycle
 
 Talos has a structured development and review cycle:
@@ -571,18 +607,21 @@ Talos has a structured development and review cycle:
 - larger full E2E audits before important release decisions
 
 ```text
-    change code
+    scoped change
          |
          v
-    .----------------------.
-    | versioned candidate  |
-    '----------+-----------'
-               |
-               v
-    build -> test -> e2e -> audit -> review
-               ^                         |
-               |                         |
-               '---- change code if needed
+    focused checks -> affected integration and E2E -> diff review
+         ^                                               |
+         '------------ corrections if needed ------------'
+                                                         |
+                                                         v
+                                      required local gates and batch review
+                                                         |
+                                                         v
+                                      separate candidate authorization
+                                                         |
+                                                         v
+                                      exact-candidate release QA and review
 ```
 
 The work-cycle documentation lives here:
@@ -604,7 +643,8 @@ time.
 
 Practical guidance:
 
-- small local models are comfortable on typical developer machines
+- the accepted beta profiles are large local-model lanes, not weak-PC defaults
+- CPU-only turns can be slow even when `talos doctor --start` passes
 - larger local models benefit from more RAM and faster CPUs/GPUs
 - SSD storage is strongly recommended for smoother indexing and model work
 
@@ -619,7 +659,6 @@ Current practical setup:
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles
 - `talos setup wizard` for the Ubuntu/WSL guided setup lane
-- Ollama as an optional legacy backend
 
 Public install targets:
 

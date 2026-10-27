@@ -29,6 +29,22 @@ class CommandArgumentPolicyTest {
     }
 
     @Test
+    void gradleTestSelectorMayContainDestructiveWordsAsClassNameText(@TempDir Path workspace) {
+        CommandPlan plan = CommandProfileRegistry.defaultRegistry().plan(
+                "gradle_test",
+                List.of("--tests", "com.acme.DeleteUserServiceTest"),
+                workspace,
+                ".");
+
+        assertEquals(List.of(
+                        "--no-daemon",
+                        "test",
+                        "--tests",
+                        "com.acme.DeleteUserServiceTest"),
+                plan.argv());
+    }
+
+    @Test
     void gradleRejectsExtraTasksAndNetworkScan(@TempDir Path workspace) {
         assertRejected(workspace, "gradle_test", List.of("clean"), "destructive");
         assertRejected(workspace, "gradle_test", List.of("--scan"), "network");

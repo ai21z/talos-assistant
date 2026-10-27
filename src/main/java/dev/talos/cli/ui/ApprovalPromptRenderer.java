@@ -44,7 +44,11 @@ public final class ApprovalPromptRenderer {
                 if (!inDiffBlock && stripped.startsWith("diff (+") && stripped.contains("):")) {
                     inDiffBlock = true;
                 }
-                for (String wrapped : wrap(line, contentWidth() - 2)) {
+                // Diff lines are file content, so they are sliced character for character with their indent
+                // kept and continuation rows hanging deeper, never word-wrapped with collapsed whitespace.
+                List<String> rows = inDiffBlock && !stripped.startsWith("diff (+")
+                        ? sliceDiffLine(line, contentWidth() - 2) : wrap(line, contentWidth() - 2);
+                for (String wrapped : rows) {
                     sb.append(rail())
                             .append(inDiffBlock ? colorizeDiffLine(wrapped, stripped) : wrapped)
                             .append(System.lineSeparator());
@@ -110,6 +114,32 @@ public final class ApprovalPromptRenderer {
             return theme.metadata(renderedLine);
         }
         return renderedLine;
+    }
+
+    private static final String DIFF_INDENT = "    ";
+    /** A continuation row is marked, so it cannot read as a diff line of its own. */
+    static final String CONTINUATION = DIFF_INDENT + "~ ";
+
+    private static List<String> sliceDiffLine(String line, int maxWidth) {
+        if (line == null || line.isEmpty()) return List.of("");
+        if (line.length() <= maxWidth) return List.of(line);
+        String body = line.startsWith(DIFF_INDENT) ? line.substring(DIFF_INDENT.length()) : line;
+        List<String> out = new ArrayList<>();
+        int at = cutBefore(body, Math.max(1, maxWidth - DIFF_INDENT.length()));
+        out.add(DIFF_INDENT + body.substring(0, at));
+        int rest = Math.max(1, maxWidth - CONTINUATION.length());
+        while (at < body.length()) {
+            int end = cutBefore(body, Math.min(at + rest, body.length()));
+            out.add(CONTINUATION + body.substring(at, end));
+            at = end;
+        }
+        return out;
+    }
+
+    /** A cut never splits a surrogate pair. */
+    private static int cutBefore(String text, int index) {
+        int end = Math.min(index, text.length());
+        return end > 0 && end < text.length() && Character.isLowSurrogate(text.charAt(end)) ? end - 1 : end;
     }
 
     private static List<String> wrap(String line, int maxWidth) {

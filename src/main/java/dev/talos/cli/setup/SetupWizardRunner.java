@@ -158,7 +158,8 @@ public final class SetupWizardRunner {
             Path serverPath = chooseServer(snapshot, reader, out, log, userHome, engineInstaller);
             if (serverPath == null) {
                 line(out, log, "Model setup skipped. No config written.");
-                line(out, log, "Next: provide a Linux-compatible llama-server path, then rerun `talos setup wizard`.");
+                line(out, log, "Next: provide a " + serverPathDescription(snapshot)
+                        + ", then rerun `talos setup wizard`.");
                 return new Result(0, false, snapshot.configPath(), null, log.toString());
             }
 
@@ -224,6 +225,11 @@ public final class SetupWizardRunner {
         line(out, log, "  llama-server: " + (snapshot.llamaServerPath() == null
                 ? "not detected"
                 : snapshot.llamaServerPath() + (snapshot.llamaServerExists() ? " (file found)" : " (not a file)")));
+        if (snapshot.gpuDetected()) {
+            line(out, log, "  GPU: " + snapshot.gpuName() + " (driver " + snapshot.gpuDriverVersion()
+                    + (snapshot.gpuVramTotalMb() > 0 ? ", VRAM " + snapshot.gpuVramTotalMb() + " MB" : "")
+                    + "; source nvidia-smi)");
+        }
         line(out, log, "");
     }
 
@@ -269,6 +275,15 @@ public final class SetupWizardRunner {
         line(out, log, "  asset: " + entry.assetName());
         line(out, log, "  size: ~" + Math.max(1, entry.sizeBytes() / (1024 * 1024)) + " MB");
         line(out, log, "  SHA-256: " + entry.sha256());
+        if (entry.companion() != null) {
+            line(out, log, "  driver runtime asset: " + entry.companion().assetName());
+            line(out, log, "  driver runtime size: ~" + Math.max(1, entry.companion().sizeBytes() / (1024 * 1024)) + " MB");
+            line(out, log, "  driver runtime SHA-256: " + entry.companion().sha256());
+        }
+        if (!entry.minNvidiaDriver().isBlank()) {
+            line(out, log, "  driver floor: NVIDIA >= " + entry.minNvidiaDriver()
+                    + " (detected " + (snapshot.gpuDriverVersion().isBlank() ? "none" : snapshot.gpuDriverVersion()) + ")");
+        }
         line(out, log, "  install dir: " + entry.installDir(talosHome));
         if (!askYes(reader, out, log, "Install this pinned llama.cpp engine now? [y/N] ")) {
             return null;
@@ -280,7 +295,8 @@ public final class SetupWizardRunner {
                 || install.status() == LlamaCppEngineInstaller.Status.REUSED) {
             return install.serverPath();
         }
-        line(out, log, "Pinned engine install failed; you can provide a Linux-compatible llama-server path or skip.");
+        line(out, log, "Pinned engine install failed; you can provide a "
+                + serverPathDescription(snapshot) + " or skip.");
         return null;
     }
 
@@ -290,7 +306,8 @@ public final class SetupWizardRunner {
             StringBuilder log,
             SetupWizardSnapshot snapshot) throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
-            String raw = ask(reader, out, log, "Enter Linux-compatible llama-server path, or press Enter to skip model setup: ");
+            String raw = ask(reader, out, log, "Enter " + serverPathDescription(snapshot)
+                    + ", or press Enter to skip model setup: ");
             if (raw.isBlank()) {
                 return null;
             }
@@ -313,6 +330,12 @@ public final class SetupWizardRunner {
         }
         line(out, log, "No compatible llama-server selected after 3 attempts.");
         return null;
+    }
+
+    private static String serverPathDescription(SetupWizardSnapshot snapshot) {
+        return snapshot != null && snapshot.wsl()
+                ? "Linux-compatible llama-server path"
+                : "llama-server path";
     }
 
     private static LlamaCppModelManifest.Entry chooseProfile(BufferedReader reader, PrintStream out, StringBuilder log) throws Exception {

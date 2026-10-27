@@ -106,7 +106,11 @@ final class CommandTraceEventFactory {
         data.put("stderrLimitBytes", plan.outputLimits().stderrLimitBytes());
         data.put("expectedWriteCount", plan.expectedWrites().size());
         data.put("requiresCheckpoint", plan.requiresCheckpoint());
+        // Retain the legacy field for trace readers; it is declaration metadata,
+        // never evidence that ordinary host execution was network-contained.
         data.put("networkAccess", plan.networkAccess());
+        data.put("networkRequirementDeclared", plan.networkAccess());
+        data.put("networkIsolation", "NOT_ENFORCED");
         data.put("interactive", plan.interactive());
         return data;
     }

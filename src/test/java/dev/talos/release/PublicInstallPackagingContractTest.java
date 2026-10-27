@@ -2,20 +2,29 @@ package dev.talos.release;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Public install packaging contract")
 class PublicInstallPackagingContractTest {
 
     private static final Path ROOT = Path.of("").toAbsolutePath().normalize();
+
+    @TempDir
+    Path tempDir;
 
     @Test
     @DisplayName("jpackage uses a Windows console, per-user install, and publisher identity")
@@ -271,6 +280,10 @@ class PublicInstallPackagingContractTest {
                 "developer installer must point Windows users at the supported model setup path");
         assertTrue(script.contains("talos status --verbose"),
                 "developer installer must point users at verbose status diagnostics");
+        assertTrue(script.contains("Talos installed successfully!"),
+                "developer installer success line must be ASCII-safe in default PowerShell output");
+        assertFalse(script.contains("✅"),
+                "developer installer must not use Unicode glyphs that mojibake in default PowerShell output");
         assertFalse(script.contains("talos setup wizard"),
                 "developer Windows installer must not advertise the Ubuntu/WSL-only setup wizard");
         assertFalse(script.contains("rag-index"),
@@ -342,6 +355,7 @@ class PublicInstallPackagingContractTest {
     @DisplayName("setup wizard owns pinned engine and model manifests with explicit model download prompt")
     void setupWizardOwnsPinnedEngineAndExplicitModelDownloadManifest() throws Exception {
         String engineManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java");
+        String modelCatalog = read("src/main/java/dev/talos/engine/llamacpp/LlamaCppModelCatalog.java");
         String modelManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppModelManifest.java");
         String installer = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineInstaller.java");
         String runner = read("src/main/java/dev/talos/cli/setup/SetupWizardRunner.java");
@@ -353,14 +367,16 @@ class PublicInstallPackagingContractTest {
                 "manifest must pin the artifact SHA-256");
         assertFalse(engineManifest.contains("releases/latest"),
                 "manifest must not follow upstream latest");
-        assertTrue(modelManifest.contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
-                "model manifest must pin the accepted beta Qwen GGUF filename");
-        assertTrue(modelManifest.contains("gpt-oss-20b-mxfp4.gguf"),
-                "model manifest must pin the accepted beta GPT-OSS GGUF filename");
-        assertTrue(modelManifest.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"),
-                "model manifest must pin Qwen SHA-256");
-        assertTrue(modelManifest.contains("be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935"),
-                "model manifest must pin GPT-OSS SHA-256");
+        assertTrue(modelManifest.contains("LlamaCppModelCatalog.selectableProfiles()"),
+                "wizard downloads must derive from the canonical model catalog");
+        assertTrue(modelCatalog.contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
+                "canonical catalog must pin the accepted beta Qwen GGUF filename");
+        assertTrue(modelCatalog.contains("gpt-oss-20b-mxfp4.gguf"),
+                "canonical catalog must pin the accepted beta GPT-OSS GGUF filename");
+        assertTrue(modelCatalog.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"),
+                "canonical catalog must pin Qwen SHA-256");
+        assertTrue(modelCatalog.contains("be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935"),
+                "canonical catalog must pin GPT-OSS SHA-256");
         assertTrue(installer.contains("SHA-256 mismatch"),
                 "installer must fail closed on checksum mismatch");
         assertTrue(runner.contains("Install this pinned llama.cpp engine now? [y/N]"),
@@ -409,6 +425,186 @@ class PublicInstallPackagingContractTest {
                 "Linux public bootstrap must not download llama.cpp; the setup wizard owns prompted engine setup");
         assertFalse(script.matches("(?is).*(?:curl|wget|huggingface-cli|hf download).*(?:qwen|gpt-oss|gguf).*"),
                 "Linux public bootstrap must not download model weights; the setup wizard owns prompted model setup");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap preserves release-input failures")
+    void linuxPublicBootstrapPreservesReleaseInputFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(artifact, "not a real tarball\n", StandardCharsets.UTF_8);
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other-file.tar.gz\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("No SHA256 entry for talos-0.10.8-linux-x64-app.tar.gz in checksums.txt"),
+                output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must preserve the release-input failure, not mask it with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after release-input preparation fails");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap preserves checksum mismatch failures")
+    void linuxPublicBootstrapPreservesChecksumMismatchFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(artifact, "not the expected release bytes\n", StandardCharsets.UTF_8);
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                        + artifact.getFileName() + "\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("Checksum mismatch for"),
+                "installer must preserve checksum mismatch diagnostics: " + output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must not mask checksum mismatch with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after checksum mismatch");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap preserves missing artifact failures")
+    void linuxPublicBootstrapPreservesMissingArtifactFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                        + artifact.getFileName() + "\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("Artifact file not found: " + bashPath(artifact)),
+                "installer must preserve missing artifact diagnostics: " + output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must not mask missing artifact with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after missing artifact failure");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap accepts CRLF release checksums")
+    void linuxPublicBootstrapAcceptsCrlfReleaseChecksums() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path payloadRoot = tempDir.resolve("payload");
+        Path appHome = payloadRoot.resolve("talos-0.10.8");
+        Path launcher = appHome.resolve("bin").resolve("talos");
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.createDirectories(launcher.getParent());
+        Files.writeString(launcher, "#!/usr/bin/env bash\nprintf 'talos 0.10.8\\n'\n", StandardCharsets.UTF_8);
+        runBash("chmod +x " + shQuote(bashPath(launcher))
+                + " && tar -czf " + shQuote(bashPath(artifact))
+                + " -C " + shQuote(bashPath(payloadRoot)) + " .");
+
+        String digest = sha256Hex(artifact);
+        Files.writeString(checksums, digest + "  " + artifact.getFileName() + "\r\n", StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(0, process.exitValue(), output);
+        assertTrue(output.contains("Installed Talos from talos-0.10.8-linux-x64-app.tar.gz"),
+                output);
+        assertFalse(output.contains("No SHA256 entry"),
+                "installer must parse CRLF checksum manifests: " + output);
+        assertTrue(Files.exists(installRoot.resolve("app").resolve("bin").resolve("talos")),
+                "installer should copy the release app image");
     }
 
     @Test
@@ -486,7 +682,7 @@ class PublicInstallPackagingContractTest {
         assertTrue(site.contains("Installs from GitHub Release assets"),
                 "site install preview must describe the live GitHub Release artifact path");
         String normalizedSite = site.replaceAll("\\s+", " ");
-        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with --force and the pinned version"),
+        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with -Force on Windows or --force on Linux and the pinned version"),
                 "site install preview must explain beta upgrades without implying an automatic updater");
         assertFalse(site.toLowerCase(Locale.ROOT).contains("winget"),
                 "site homepage must stay off winget until that lane is real");
@@ -513,12 +709,64 @@ class PublicInstallPackagingContractTest {
                 "public installation doc must name the release artifact host");
         assertTrue(doc.contains("WiX"),
                 "public installation doc must record the Windows MSI builder prerequisite");
-        assertTrue(readme.contains("rerun the installer with `--force` and the pinned"),
+        assertTrue(normalizedReadme.contains("rerun the installer with `-Force` on Windows or `--force` on Linux and the pinned version"),
                 "README must document explicit-version upgrade behavior");
     }
 
     private static String read(String relative) throws IOException {
         return Files.readString(ROOT.resolve(relative), StandardCharsets.UTF_8);
+    }
+
+    private static String bashPath(Path path) {
+        String absolute = path.toAbsolutePath().normalize().toString();
+        if (absolute.length() >= 3
+                && Character.isLetter(absolute.charAt(0))
+                && absolute.charAt(1) == ':'
+                && (absolute.charAt(2) == '\\' || absolute.charAt(2) == '/')) {
+            char drive = Character.toLowerCase(absolute.charAt(0));
+            String rest = absolute.substring(2).replace('\\', '/');
+            return "/mnt/" + drive + rest;
+        }
+        return absolute.replace('\\', '/');
+    }
+
+    private static void runBash(String script) throws Exception {
+        ProcessBuilder builder = new ProcessBuilder("bash", "-lc", script);
+        builder.directory(ROOT.toFile());
+        builder.redirectErrorStream(true);
+        Process process = builder.start();
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(exited, "bash helper did not exit: " + output);
+        assertEquals(0, process.exitValue(), output);
+    }
+
+    private static String shQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private static boolean linuxBashAvailable() {
+        try {
+            Process process = new ProcessBuilder("bash", "-lc", "uname -s")
+                    .redirectErrorStream(true)
+                    .start();
+            boolean exited = process.waitFor(5, TimeUnit.SECONDS);
+            if (!exited || process.exitValue() != 0) {
+                return false;
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return "Linux".equals(output);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private static String sha256Hex(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
     }
 
     private static int countOccurrences(String haystack, String needle) {

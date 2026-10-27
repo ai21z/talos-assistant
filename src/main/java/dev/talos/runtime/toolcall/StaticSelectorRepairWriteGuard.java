@@ -4,6 +4,7 @@ import dev.talos.runtime.repair.StaticSelectorRepairGuard;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,10 +19,14 @@ final class StaticSelectorRepairWriteGuard {
     }
 
     static Optional<Failure> evaluate(List<ChatMessage> messages, List<ToolCall> calls) {
+        return evaluate(messages, calls, null);
+    }
+
+    static Optional<Failure> evaluate(List<ChatMessage> messages, List<ToolCall> calls, Path workspace) {
         if (calls == null || calls.isEmpty()) return Optional.empty();
         for (ToolCall call : calls) {
             if (call == null) continue;
-            var violation = StaticSelectorRepairGuard.violationForWrite(messages, call);
+            var violation = StaticSelectorRepairGuard.violationForWrite(messages, call, workspace);
             if (violation.isEmpty()) continue;
             return Optional.of(failureFor(violation.get()));
         }

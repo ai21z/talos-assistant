@@ -165,7 +165,7 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
     }
 
     @Test
-    void compoundWorkspaceTurnSendsCompleteWorkspaceOperationSurface() {
+    void compoundWorkspaceTurnExposesNoWorkspaceOperationSurface() {
         RecordingResolver resolver = new RecordingResolver();
         Context ctx = context(resolver);
 
@@ -176,14 +176,8 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        assertEquals(
-                List.of(
-                        "talos.apply_workspace_batch",
-                        "talos.copy_path",
-                        "talos.mkdir",
-                        "talos.move_path",
-                        "talos.rename_path"),
-                toolNames(resolver.lastRequest));
+        assertTrue(toolNames(resolver.lastRequest).isEmpty(),
+                toolNames(resolver.lastRequest).toString());
     }
 
     private static Context context(RecordingResolver resolver) {
@@ -237,12 +231,9 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
+        llm.put("model", "qwen2.5-coder:14b");
         cfg.data.put("llm", llm);
-
-        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen2.5-coder:14b");
-        cfg.data.put("ollama", ollama);
         return cfg;
     }
 

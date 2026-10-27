@@ -96,6 +96,7 @@ class BatchWorkspaceApplyToolTest {
         ToolResult result = tool.execute(
                 new ToolCall("talos.apply_workspace_batch", Map.of("operations", """
                         [
+                          {"op":"mkdir","path":"docs"},
                           {"op":"mkdir","path":"docs/reports"},
                           {"op":"copy_path","from":"source.txt","to":"docs/reports/source.txt"}
                         ]
@@ -147,6 +148,9 @@ class BatchWorkspaceApplyToolTest {
         assertTrue(Files.isDirectory(workspace.resolve("docs")),
                 "the already-applied operation should remain applied after a partial failure");
         assertTrue(result.errorMessage().contains("Batch partially applied"), result.errorMessage());
+        assertEquals(List.of("docs"), result.mutationEffects().appliedPaths());
+        assertFalse(result.mutationEffects().affectedPaths().contains("missing.txt"),
+                "a not-found precondition is not an applied source mutation");
         assertTrue(result.errorMessage().contains("Applied: docs"), result.errorMessage());
         assertTrue(result.errorMessage().contains("Failed: missing.txt -> docs/missing.txt"),
                 result.errorMessage());

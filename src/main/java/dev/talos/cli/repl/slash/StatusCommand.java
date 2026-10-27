@@ -5,14 +5,17 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
+import dev.talos.cli.ui.ModelIdentityPresentation;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.core.extract.DocumentExtractionPreflight;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -39,7 +42,7 @@ public final class StatusCommand implements Command {
 
     @Override public CommandSpec spec() {
         return new CommandSpec("status",
-                java.util.List.of("--verbose", "-v"),
+                java.util.List.of(),
                 "/status [--verbose]",
                 "Show configuration.",
                 CommandGroup.SESSION);
@@ -60,13 +63,15 @@ public final class StatusCommand implements Command {
                 ? CliStatusDashboard.resolveModel(cfg)
                 : ctx.llm().getModel();
         var activeRuntime = EngineRuntimeConfig.fromActiveModel(cfg, activeModel);
+        boolean unavailable = ctx.llm() != null && ctx.llm().modelSelectionUnavailable();
+        String displayedModel = activeModel + (unavailable ? " (unavailable)" : "");
 
         if (!verbose) {
             var snapshot = CliStatusDashboard.snapshot(
                     workspace,
                     cfg,
                     modes.getActiveName(),
-                    activeModel,
+                    displayedModel,
                     ctx.session() == null ? "off" : ctx.session().getDebugLevel().label(),
                     "/status --verbose for diagnostics",
                     activeRuntime);
@@ -106,8 +111,25 @@ public final class StatusCommand implements Command {
         String retrievalMode = retrievalMode(cfg, vectors, activeRuntime.embeddingProvider(), embedHost);
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
-        sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
-        sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
+        sb.append(AnsiColor.grey("  Model     ")).append(displayedModel).append("\n");
+        if (!EngineRuntimeConfig.MANAGED_BACKEND.equals(activeRuntime.backend())) {
+            sb.append(AnsiColor.grey("  Engine    ")).append(activeRuntime.backend()).append(" (not supported)\n");
+        }
+        ModelIdentitySnapshot identity = "llama_cpp".equals(activeRuntime.backend()) && !unavailable
+                ? resolvedIdentity(ctx, cfg) : ModelIdentitySnapshot.empty();
+        String modelFile = identity.available() ? identity.configuredModelFile() : activeRuntime.modelSourceLabel();
+        if (!unavailable && !modelFile.isBlank()) {
+            sb.append(AnsiColor.grey("  ModelFile ")).append(modelFile).append("\n");
+        }
+        if ("llama_cpp".equals(activeRuntime.backend())) {
+            var identityRows = ModelIdentityPresentation.statusRows(identity);
+            int labelWidth = identityRows.stream().mapToInt(row -> row.label().length()).max().orElse(0) + 2;
+            for (ModelIdentityPresentation.Row row : identityRows) {
+                sb.append(AnsiColor.grey("  " + row.label() + " ".repeat(labelWidth - row.label().length())))
+                        .append(row.value()).append("\n");
+            }
+        }
+        sb.append(AnsiColor.grey("  Scope     ")).append(dev.talos.cli.CliUtil.folderName(workspace)).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
 
         sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");
@@ -196,16 +218,24 @@ public final class StatusCommand implements Command {
         return new Result.TrustedInfo(sb.toString());
     }
 
+    private static ModelIdentitySnapshot resolvedIdentity(Context ctx, dev.talos.core.Config cfg) {
+        ModelIdentitySnapshot current = ctx == null || ctx.llm() == null
+                ? ModelIdentitySnapshot.empty()
+                : ctx.llm().modelIdentity();
+        if (current.available()) {
+            return current;
+        }
+        Path talosHome = Path.of(System.getProperty("user.home", "."), ".talos")
+                .toAbsolutePath().normalize();
+        return LlamaCppProfileIdentity.inspectAvailable(cfg, talosHome);
+    }
+
     private static String embeddingHost(dev.talos.core.Config cfg, EngineRuntimeConfig runtime) {
         var embed = CfgUtil.map(cfg.data.get("embed"));
         String configured = Objects.toString(embed.getOrDefault("host", "")).trim();
         if (!configured.isBlank()) return configured;
         ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
         if (managed.enabled()) return managed.baseUrl();
-        if ("ollama".equals(runtime.embeddingProvider())) {
-            return Objects.toString(CfgUtil.map(cfg.data.get("ollama"))
-                    .getOrDefault("host", "http://127.0.0.1:11434"));
-        }
         return runtime.hostLabel();
     }
 

@@ -9,7 +9,6 @@ import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.capability.SourceDerivedCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -51,14 +50,14 @@ final class SourceDerivedArtifactVerifier {
         String targetPath = firstPath(contract.expectedTargets());
         if (targetPath.isBlank()) return Result.notRequired();
         Path target = resolveWorkspaceFile(root, targetPath);
-        if (target == null || !Files.isRegularFile(target)) {
+        if (target == null || !StaticWebFileAccess.isRegularFile(root, target)) {
             problems.add(targetPath + ": source-derived target is not a readable file after apply.");
             return new Result(true, facts, problems);
         }
 
         String targetContent;
         try {
-            targetContent = Files.readString(target);
+            targetContent = StaticWebFileAccess.readString(root, target);
         } catch (Exception e) {
             problems.add(targetPath + ": source-derived target could not be read after apply (" + e.getMessage() + ")");
             return new Result(true, facts, problems);
@@ -172,7 +171,8 @@ final class SourceDerivedArtifactVerifier {
             if (sourceTarget == null || sourceTarget.isBlank()) continue;
             String normalized = normalizePath(sourceTarget);
             Path source = resolveWorkspaceFile(root, normalized);
-            if (source == null || !Files.isRegularFile(source)) {
+            if (source == null
+                    || !StaticWebFileAccess.isRegularFile(root, source)) {
                 problems.add(normalized + ": source evidence file is not readable for derived artifact verification.");
                 continue;
             }
@@ -183,7 +183,9 @@ final class SourceDerivedArtifactVerifier {
                 continue;
             }
             try {
-                out.add(new SourceEvidence(normalized, Files.readString(source)));
+                out.add(new SourceEvidence(
+                        normalized,
+                        StaticWebFileAccess.readString(root, source)));
             } catch (Exception e) {
                 problems.add(normalized + ": source evidence file could not be read for derived artifact verification ("
                         + e.getMessage() + ")");

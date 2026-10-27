@@ -13,6 +13,8 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReadEvidenceStateAccountingTest {
@@ -38,7 +40,7 @@ class ReadEvidenceStateAccountingTest {
             assertFalse(state.staleEditFailuresByPath.containsKey("docs/notes.md"));
             assertFalse(state.staleEditRepairPromptedPaths.contains("docs/notes.md"));
             assertEquals(null, state.staleEditRereadIgnoredPath);
-            assertEquals("1 | # Notes", state.readFileBodiesThisTurn.get("docs/notes.md"));
+            assertEquals("1 | # Notes", state.readEvidence.latestReadFileForPath("docs/notes.md", true).body());
             assertEquals(Set.of("docs/notes.md"), TurnSourceEvidenceCapture.readPaths());
         } finally {
             TurnSourceEvidenceCapture.clear();
@@ -56,11 +58,11 @@ class ReadEvidenceStateAccountingTest {
                 "src",
                 ToolResult.ok("src/Main.java:7: TODO"));
 
-        String signature = ToolCallSupport.buildReadCallSignature(grep);
         assertFalse(state.pathsReadThisTurn.contains("src"));
-        assertEquals("src/Main.java:7: TODO", state.successfulReadCalls.get(signature));
-        assertEquals("src/Main.java:7: TODO", state.successfulReadCallBodies.get(signature));
-        assertTrue(state.readFileBodiesThisTurn.isEmpty());
+        ReadEvidence recorded = state.readEvidence.latestIdenticalCall(grep, true);
+        assertNotNull(recorded);
+        assertEquals("src/Main.java:7: TODO", recorded.body());
+        assertTrue(state.readEvidence.latestReadFileBodiesByNormalizedPath().isEmpty());
     }
 
     @Test
@@ -77,8 +79,7 @@ class ReadEvidenceStateAccountingTest {
                     ToolResult.fail(ToolError.notFound("missing")));
 
             assertTrue(state.pathsReadThisTurn.isEmpty());
-            assertTrue(state.successfulReadCalls.isEmpty());
-            assertTrue(state.successfulReadCallBodies.isEmpty());
+            assertTrue(state.readEvidence.isEmpty());
             assertTrue(TurnSourceEvidenceCapture.readPaths().isEmpty());
         } finally {
             TurnSourceEvidenceCapture.clear();
@@ -88,13 +89,16 @@ class ReadEvidenceStateAccountingTest {
     @Test
     void clearSuccessfulReadCachesRemainsExplicit() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("read_file:path=README.md;", "1 | # Demo");
-        state.successfulReadCallBodies.put("read_file:path=README.md;", "1 | # Demo");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Demo"));
 
         ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
 
-        assertTrue(state.successfulReadCalls.isEmpty());
-        assertTrue(state.successfulReadCallBodies.isEmpty());
+        assertNull(state.readEvidence.latestReadFileForPath("README.md", true));
+        assertFalse(state.readEvidence.readFileEntriesForPath("README.md", false).isEmpty());
     }
 
     @Test

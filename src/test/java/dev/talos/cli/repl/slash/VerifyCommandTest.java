@@ -12,6 +12,8 @@ import dev.talos.runtime.command.WorkspaceCommandProfilesLoader;
 import dev.talos.runtime.command.WorkspaceProfileTrustStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -120,6 +122,91 @@ class VerifyCommandTest {
 
         assertTrue(text(result).contains("Verification failed: ws:check exited 3"), text(result));
         assertTrue(text(result).contains("compile failed"), text(result));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"revoke", "edit"})
+    void directVerifyRejectsTrustChangesDuringApproval(String change) throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = store();
+        pin(ws, store);
+        VerifyCommand command = new VerifyCommand(ws, store, plan -> {
+            throw new AssertionError("trust changed during approval must stop before execution");
+        });
+        Result result = command.execute("ws:check", ctxWithGate(new AtomicReference<>(), () -> {
+            if (change.equals("revoke")) {
+                store.unpin(ws);
+            } else {
+                try {
+                    Path declaration = ws.resolve(".talos/profiles.yaml");
+                    Files.writeString(declaration, Files.readString(declaration) + "# changed\n");
+                } catch (IOException e) {
+                    throw new AssertionError(e);
+                }
+            }
+        }));
+        assertInstanceOf(Result.Error.class, result);
+        assertTrue(text(result).contains("No command was executed"), text(result));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void timeoutRetainsUnconfirmedCleanupDiagnostic(boolean terminationAttempted) throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = store();
+        pin(ws, store);
+        String diagnostic = "Command process termination did not settle; process-tree quiescence is unconfirmed.";
+        VerifyCommand command = new VerifyCommand(ws, store, plan -> new CommandResult(
+                plan, -1, 1_001, true, terminationAttempted, "", "", false, false, false, diagnostic));
+
+        String message = text(command.execute("ws:check", ctxWithGate(new AtomicReference<>(), null)));
+
+        assertTrue(message.contains("Verification timed out: ws:check"), message);
+        assertTrue(message.contains(diagnostic), message);
+        assertEquals(terminationAttempted, message.contains("termination attempted"));
+        assertFalse(message.contains("Verification passed"));
+        assertFalse(message.contains("process killed"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void timeoutWithoutCleanupDiagnosticDoesNotInventOne(boolean terminationAttempted) throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = store();
+        pin(ws, store);
+        VerifyCommand command = new VerifyCommand(ws, store, plan -> new CommandResult(
+                plan, -1, 1_001, true, terminationAttempted, "", "", false, false, false, ""));
+
+        String message = text(command.execute("ws:check", ctxWithGate(new AtomicReference<>(), null)));
+
+        assertTrue(message.contains("Verification timed out: ws:check"), message);
+        assertEquals(terminationAttempted, message.contains("termination attempted"));
+        assertFalse(message.contains("diagnostic:"));
+        assertFalse(message.contains("process killed"));
+    }
+
+    @Test
+    void timeoutDiagnosticIsSanitizedAndBoundedWithoutLosingUncertaintyTail() throws IOException {
+        Path ws = workspace();
+        declare(ws);
+        WorkspaceProfileTrustStore store = store();
+        pin(ws, store);
+        String diagnostic = "discarded-prefix " + "x".repeat(3_000)
+                + " API_TOKEN=fixture-secret; process-tree quiescence is unconfirmed.";
+        VerifyCommand command = new VerifyCommand(ws, store, plan -> new CommandResult(
+                plan, -1, 1_001, true, true, "", "", false, false, false, diagnostic));
+
+        String message = text(command.execute("ws:check", ctxWithGate(new AtomicReference<>(), null)));
+
+        assertTrue(message.contains("Verification timed out: ws:check"));
+        assertTrue(message.contains("process-tree quiescence is unconfirmed."), message);
+        assertTrue(message.contains("diagnostic:\n..."));
+        assertFalse(message.contains("fixture-secret"));
+        assertFalse(message.contains("discarded-prefix"));
+        assertTrue(message.length() < 2_200, "diagnostic must not include the full unbounded message");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

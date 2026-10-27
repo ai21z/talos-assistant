@@ -1,0 +1,5 @@
+Textual tool-call format:
+- Put each tool call in its own closed JSON code block, opened with ```json and closed with ```.
+- Each block must contain exactly one complete JSON object with "name" and "parameters" keys.
+- For multiple calls, use separate closed JSON code blocks, one per call.
+- Do not put multiple top-level JSON objects or an array of calls in one block.

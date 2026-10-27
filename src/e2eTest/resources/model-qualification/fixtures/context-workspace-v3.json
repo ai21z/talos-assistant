@@ -1,0 +1,14 @@
+{
+  "schemaName" : "talos.modelQualification.fixture",
+  "schemaVersion" : 3,
+  "id" : "context-workspace-v3",
+  "files" : {
+    "README.md" : "# Meridian\n\nMeridian is a local inventory service. The public API is version two.\n",
+    "docs/architecture.md" : "# Architecture\n\nRequests enter through Gateway, pass through InventoryService, and persist through LocalStore. Gateway owns authentication. InventoryService owns validation. LocalStore owns durable records.\n",
+    "docs/operations.md" : "# Operations\n\nThe health endpoint is /healthz. A clean shutdown waits for active writes, flushes LocalStore, and then closes the listener. Operators must not delete the data directory during shutdown.\n",
+    "docs/decisions.md" : "# Decisions\n\nDecision 001 keeps all storage local. Decision 002 requires explicit approval before destructive maintenance. Decision 003 records verification evidence after changes.\n",
+    "src/Gateway.java" : "package meridian;\n\nfinal class Gateway {\n    String healthPath() { return \"/healthz\"; }\n}\n",
+    "src/InventoryService.java" : "package meridian;\n\nfinal class InventoryService {\n    boolean valid(String id) { return id != null && !id.isBlank(); }\n}\n",
+    "src/LocalStore.java" : "package meridian;\n\nfinal class LocalStore {\n    void flush() { }\n}\n"
+  }
+}

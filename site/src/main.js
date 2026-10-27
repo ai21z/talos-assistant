@@ -3,6 +3,7 @@ import "./styles.css";
 import { setupSmoke } from "./smoke.js";
 import { setupMycelium } from "./mycelium.js";
 import { setupRitualMenu } from "./menu.js";
+import { reservePanelSpace } from "./stable-panel.js";
 
 document.documentElement.classList.add("js");
 
@@ -53,8 +54,19 @@ function setupLiveTerminal() {
 
   const fullHtml = () =>
     `${PROMPT_PREFIX}${heroTurn.question}\n${heroTurn.lines.join("\n")}`;
+  const caret = '<span class="terminal-caret" aria-hidden="true"></span>';
+  const frames = [fullHtml(), `${PROMPT_PREFIX}${heroTurn.question}${caret}`];
+  heroTurn.lines.slice(0, -1).forEach((_, index) => {
+    frames.push(`${PROMPT_PREFIX}${heroTurn.question}\n${heroTurn.lines.slice(0, index + 1).join("\n")}\n${caret}`);
+  });
+  reservePanelSpace(output, frames.map((html) => {
+    const variant = output.cloneNode(false);
+    variant.innerHTML = html;
+    return variant;
+  }));
 
   function renderStatic() {
+    clearTimers();
     output.innerHTML = fullHtml();
     setState("ready");
   }
@@ -67,7 +79,6 @@ function setupLiveTerminal() {
     }
     setState("run");
     let typed = "";
-    const caret = '<span class="terminal-caret" aria-hidden="true"></span>';
     const drawPrompt = () => {
       output.innerHTML = `${PROMPT_PREFIX}${typed}${caret}`;
     };
@@ -219,6 +230,12 @@ function handleTabKey(event, tabs) {
 function setupTurnTabs() {
   const tabs = Array.from(document.querySelectorAll("[data-terminal-state]"));
   if (!tabs.length) return;
+  const panel = document.querySelector("#terminal-output");
+  reservePanelSpace(panel, Object.values(terminalStates).map((html) => {
+    const variant = panel.cloneNode(false);
+    variant.innerHTML = html;
+    return variant;
+  }));
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => setTerminalState(tab.dataset.terminalState));
     tab.addEventListener("keydown", (event) => handleTabKey(event, tabs));
@@ -301,6 +318,12 @@ function handleSetupTabKey(event, tabs) {
 function setupInstallTabs() {
   const tabs = Array.from(document.querySelectorAll("[data-setup-platform]"));
   if (!tabs.length) return;
+  const panel = document.querySelector("#setup-command");
+  reservePanelSpace(panel, tabs.map((tab) => {
+    const variant = panel.cloneNode(true);
+    variant.querySelector("code").textContent = tab.dataset.setupCommand;
+    return variant;
+  }));
   const copy = document.querySelector("[data-setup-copy]");
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => setSetupPlatform(tab.dataset.setupPlatform));
@@ -779,6 +802,39 @@ function setupScope() {
     });
   });
 
+  reservePanelSpace(detail, nodes.map((node) => {
+    const variant = detail.cloneNode(true);
+    variant.querySelector(".scope-detail-kind").textContent = node.kindText;
+    variant.querySelector(".scope-detail-name").textContent = node.name;
+    variant.querySelector(".scope-detail-text").textContent = node.text;
+    variant.querySelector(".scope-detail-meta").textContent = node.meta;
+    return variant;
+  }));
+  const compact = document.querySelector(".scope-compact");
+  const paragraph = (text, className = "") => {
+    const element = document.createElement("p");
+    element.className = className;
+    element.textContent = text;
+    return element;
+  };
+  compact.append(paragraph(root.text));
+  branches.forEach((branch) => {
+    const group = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = branch.name;
+    group.append(summary, paragraph(branch.text), paragraph(branch.meta, "scope-compact-meta"));
+    const list = document.createElement("ul");
+    branch.leaves.forEach((leaf) => {
+      const item = document.createElement("li");
+      const name = document.createElement("strong");
+      name.textContent = leaf.name;
+      item.append(name, paragraph(statusText(leaf), "scope-compact-status"), paragraph(leaf.text), paragraph(leaf.meta, "scope-compact-meta"));
+      list.append(item);
+    });
+    group.append(list);
+    compact.append(group);
+  });
+
   // ---- deterministic seed (no Math.random, so the layout is stable) ----
   const W = 620, H = 600, CX = W / 2, CY = H / 2;
   const PADX = 66, PADT = 54, PADB = 64;
@@ -944,8 +1000,10 @@ function setupScope() {
     }
   };
   const loop = () => { if (!running) return; tick(); render(); raf = requestAnimationFrame(loop); };
-  const start = () => { if (running || reduceMotion.matches || !inView) return; running = true; raf = requestAnimationFrame(loop); };
+  const compactView = window.matchMedia("(max-width: 920px)");
+  const start = () => { if (running || reduceMotion.matches || compactView.matches || !inView || document.hidden) return; running = true; raf = requestAnimationFrame(loop); };
   const stop = () => { running = false; if (raf) cancelAnimationFrame(raf); raf = 0; };
+  compactView.addEventListener("change", () => { if (compactView.matches) stop(); else start(); });
   const settle = (count) => { for (let k = 0; k < count; k += 1) tick(); render(); };
 
   // ---- drag: click-hold to move a node; a click without movement selects it ----

@@ -33,21 +33,48 @@ public final class RetrievalTrace {
             return note != null ? base + " (" + note + ")" : base;
         }
     }
-    private final List<Entry> entries = new ArrayList<>();
-    private final List<EvidenceHit> evidenceHits = new ArrayList<>();
-    private String route = "HYBRID";
+    private final List<Entry> entries;
+    private final List<EvidenceHit> evidenceHits;
+    private final boolean mutable;
+    private String route;
+
+    public RetrievalTrace() {
+        this(List.of(), List.of(), "HYBRID", true);
+    }
+
+    private RetrievalTrace(
+            List<Entry> entries,
+            List<EvidenceHit> evidenceHits,
+            String route,
+            boolean mutable
+    ) {
+        this.entries = mutable ? new ArrayList<>(entries) : List.copyOf(entries);
+        this.evidenceHits = mutable ? new ArrayList<>(evidenceHits) : List.copyOf(evidenceHits);
+        this.route = route == null || route.isBlank() ? "HYBRID" : route.strip();
+        this.mutable = mutable;
+    }
+
+    /**
+     * Return an independent, read-only snapshot suitable for a settled turn.
+     * Later writes to the pipeline-owned trace cannot change this snapshot.
+     */
+    public RetrievalTrace immutableSnapshot() {
+        return new RetrievalTrace(entries, evidenceHits, route, false);
+    }
 
     public String route() {
         return route;
     }
 
     public void route(String route) {
+        requireMutable();
         if (route != null && !route.isBlank()) {
             this.route = route.strip();
         }
     }
 
     public void recordEvidence(String evidenceType, String path, String label, int lineStart, String note) {
+        requireMutable();
         evidenceHits.add(new EvidenceHit(evidenceType, path, label, lineStart, note));
     }
 
@@ -57,15 +84,26 @@ public final class RetrievalTrace {
 
     /** Record a stage execution. Called by the pipeline runner. */
     public void record(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter) {
+        requireMutable();
         entries.add(new Entry(stageName, durationNanos, candidatesBefore, candidatesAfter, null));
     }
     /** Record a stage execution with an optional note (e.g., skip reason). */
     public void record(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter, String note) {
+        requireMutable();
         entries.add(new Entry(stageName, durationNanos, candidatesBefore, candidatesAfter, note));
     }
     /** All recorded entries in execution order. */
     public List<Entry> entries() {
         return Collections.unmodifiableList(entries);
+    }
+    /** Whether the compact persisted retrieval summary will contain a stage row. */
+    public boolean hasRecordedStages() {
+        return !entries.isEmpty();
+    }
+
+    /** Whether a persisted terminal summary must acknowledge this capture. */
+    public boolean hasPersistableActivity() {
+        return !entries.isEmpty() || !evidenceHits.isEmpty();
     }
     /** Total pipeline duration in nanoseconds. */
     public long totalNanos() {
@@ -109,5 +147,11 @@ public final class RetrievalTrace {
             }
         }
         return sb.toString();
+    }
+
+    private void requireMutable() {
+        if (!mutable) {
+            throw new UnsupportedOperationException("retrieval trace snapshot is immutable");
+        }
     }
 }

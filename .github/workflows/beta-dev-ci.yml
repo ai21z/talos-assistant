@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - v0.9.0-beta-dev
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,7 +24,7 @@ jobs:
   gradle-check:
     name: Gradle check (Java 21)
     runs-on: windows-2025-vs2026
-    timeout-minutes: 45
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -130,3 +131,18 @@ jobs:
 
       - name: Run command portability tests
         run: ./gradlew test --tests "dev.talos.runtime.command.*" --no-daemon
+
+      - name: Run workspace path identity tests
+        run: |
+          ./gradlew test \
+            --tests "dev.talos.tools.WorkspacePathIdentityTest" \
+            --tests "dev.talos.runtime.policy.EvidenceObligationVerifierTest" \
+            --tests "dev.talos.runtime.toolcall.EditFilePreApprovalGuardTest" \
+            --tests "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest" \
+            --tests "dev.talos.runtime.toolcall.PendingActionObligationBreachGuardTest" \
+            --tests "dev.talos.runtime.toolcall.SourceDerivedEvidenceGuardTest" \
+            --tests "dev.talos.runtime.toolcall.StaticWebRewriteGroundingGuardTest" \
+            --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" \
+            --tests "dev.talos.runtime.verification.TargetScopeStaticVerifierTest" \
+            --tests "dev.talos.cli.modes.EvidencePathIdentityTurnTest" \
+            --no-daemon

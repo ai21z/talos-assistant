@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -39,10 +40,11 @@ final class EditFailureRepairStateAccounting {
             ToolResult result,
             boolean strict
     ) {
-        if (state == null || call == null || result == null || result.success()) {
+        if (state == null || call == null || result == null || result.success()
+                || result.mutationEffects().hasEffects()) {
             return new Result(result);
         }
-        if (!"talos.edit_file".equals(call.toolName())) {
+        if (!"talos.edit_file".equals(call.canonicalToolName())) {
             return new Result(result);
         }
 
@@ -99,11 +101,14 @@ final class EditFailureRepairStateAccounting {
         String path = normalizePath(pathHint);
         if (!StaticWebCapabilityProfile.isSmallWebFile(path)) return false;
         if (!state.pathsReadThisTurn.contains(path)) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
             return false;
         }
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (!looksLikeStaticWebWork(userTask)) return false;
         if (contract.expectedTargets().isEmpty()) return true;
         return contract.expectedTargets().stream()

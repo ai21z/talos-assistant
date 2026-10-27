@@ -34,4 +34,31 @@ class ProgressLineRendererTest {
         assertTrue(rendered.codePoints().allMatch(cp -> cp == '\n' || (cp >= 0x20 && cp <= 0x7E)),
                 "ASCII progress output must be terminal-safe: " + rendered);
     }
+
+    @Test
+    void blockedAndUnverifiedOutcomesNeverUseASuccessGlyph() {
+        for (var capabilities : java.util.List.of(UNICODE, ASCII)) {
+            var renderer = new ProgressLineRenderer(CliTheme.forCapabilities(capabilities));
+            for (var outcome : ProgressLineRenderer.TurnOutcome.values()) {
+                String footer = renderer.turnStats(7, 12836, 215, outcome);
+                assertTrue(footer.contains(outcome.name()), footer);
+                assertEquals(outcome == ProgressLineRenderer.TurnOutcome.COMPLETED_VERIFIED,
+                        footer.startsWith(capabilities.unicodeSafe() ? "  ✓ " : "  ok "), footer);
+            }
+        }
+    }
+
+    @Test
+    void terminalFailureAndBlockStatusOverrideAnInconsistentCompletionLabel() {
+        assertEquals(ProgressLineRenderer.TurnOutcome.FAILED,
+                ProgressLineRenderer.TurnOutcome.from("ERROR", "COMPLETED_VERIFIED"));
+        assertEquals(ProgressLineRenderer.TurnOutcome.CANCELLED,
+                ProgressLineRenderer.TurnOutcome.from("ABORTED", "COMPLETED_VERIFIED"));
+        assertEquals(ProgressLineRenderer.TurnOutcome.BLOCKED_BY_POLICY,
+                ProgressLineRenderer.TurnOutcome.from("BLOCKED", "COMPLETED_VERIFIED"));
+        assertEquals(ProgressLineRenderer.TurnOutcome.BLOCKED_BY_APPROVAL,
+                ProgressLineRenderer.TurnOutcome.from("BLOCKED", "BLOCKED_BY_APPROVAL"));
+        assertEquals(ProgressLineRenderer.TurnOutcome.UNKNOWN,
+                ProgressLineRenderer.TurnOutcome.from("", "arbitrary provider prose"));
+    }
 }

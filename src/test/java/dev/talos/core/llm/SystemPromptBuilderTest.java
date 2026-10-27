@@ -419,6 +419,30 @@ class SystemPromptBuilderTest {
                 "Native mode should reinforce file creation capability");
     }
 
+    /**
+     * T1007: both writable preambles must teach the append anchor idiom so a
+     * weak model never encodes an append as an empty old_string.
+     */
+    @Test
+    void writablePreamblesTeachTheAppendAnchorIdiom() {
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", true));
+
+        String fallbackPrompt = SystemPromptBuilder.forUnified()
+                .withPromptTools(registry)
+                .withNativeTools(false)
+                .build();
+        String nativePrompt = SystemPromptBuilder.forUnified()
+                .withPromptTools(registry)
+                .withNativeTools(true)
+                .build();
+
+        assertTrue(fallbackPrompt.toLowerCase(java.util.Locale.ROOT).contains("anchor line"),
+                "fallback tools preamble must teach the append anchor idiom");
+        assertTrue(nativePrompt.toLowerCase(java.util.Locale.ROOT).contains("anchor line"),
+                "native tools preamble must teach the append anchor idiom");
+    }
+
     @Test
     void readOnlyToolModeOmitsMutatingToolDescriptors() {
         var registry = new PromptToolSet();

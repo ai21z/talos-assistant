@@ -7,6 +7,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.checkpoint.CheckpointRestoreResult;
 import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.checkpoint.FileBundleCheckpointStore;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
@@ -21,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -63,20 +66,15 @@ class WorkspaceBatchTurnProcessorTest {
                         """)),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals(1, approvals.get(), "batch should ask for approval once");
-        assertTrue(Files.isDirectory(workspace.resolve("docs")));
-        assertFalse(Files.exists(workspace.resolve("source.txt")));
-        assertEquals("source-before", Files.readString(workspace.resolve("dest.txt")));
-
-        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        assertEquals("CREATED", trace.checkpoint().status());
-
-        CheckpointRestoreResult restore = checkpoints.restore(workspace, trace.checkpoint().checkpointId());
-        assertTrue(restore.success(), restore.message());
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertEquals(0, approvals.get());
         assertFalse(Files.exists(workspace.resolve("docs")));
         assertEquals("source-before", Files.readString(workspace.resolve("source.txt")));
         assertEquals("dest-before", Files.readString(workspace.resolve("dest.txt")));
+        LocalTurnTraceCapture.complete();
     }
 
     @Test
@@ -99,13 +97,14 @@ class WorkspaceBatchTurnProcessorTest {
                             """)),
                     context(workspace, config));
 
-            assertTrue(result.success(), result.errorMessage());
+            assertFalse(result.success());
+            assertFalse(Files.exists(workspace.resolve("batch-one")));
+            assertFalse(Files.exists(workspace.resolve("batch-two")));
             TurnAudit audit = TurnAuditCapture.end();
             assertEquals(1, audit.toolCalls().size());
             TurnRecord.ToolCallSummary call = audit.toolCalls().getFirst();
             assertEquals("talos.apply_workspace_batch", call.name());
-            assertEquals("batch-one", call.pathHint());
-            assertEquals(List.of("batch-one", "batch-two", "batch-one/styles-copy.css"), call.pathHints());
+            assertFalse(call.success());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
         }
@@ -134,16 +133,10 @@ class WorkspaceBatchTurnProcessorTest {
                         """)),
                 context(workspace, config));
 
-        assertTrue(result.success(), result.errorMessage());
-        assertEquals("destructive operation: talos.apply_workspace_batch", approvalDescription.get());
-        assertFalse(Files.exists(workspace.resolve("old-plan.md")));
-
-        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        assertEquals("CREATED", trace.checkpoint().status());
-
-        CheckpointRestoreResult restore = checkpoints.restore(workspace, trace.checkpoint().checkpointId());
-        assertTrue(restore.success(), restore.message());
+        assertFalse(result.success());
+        assertEquals("", approvalDescription.get());
         assertEquals("delete me", Files.readString(workspace.resolve("old-plan.md")));
+        LocalTurnTraceCapture.complete();
     }
 
     @Test
@@ -163,10 +156,88 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("protected path"), result.errorMessage());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
         assertEquals(0, approvals.get(), "protected batch mutation must be denied before approval");
         assertTrue(Files.exists(workspace.resolve("public.txt")));
         assertFalse(Files.exists(workspace.resolve(".env")));
+    }
+
+    @Test
+    void batchExtraNestedMutationOutsideExpectedTargetsIsRejectedBeforeApproval(@TempDir Path workspace) throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        TurnProcessor processor = processor(gateApproves(approvals),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnUserRequestCapture.set("Create batch-one.");
+        TurnTaskContractCapture.set(new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("batch-one"),
+                Set.of(),
+                "Create batch-one.",
+                "test"));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"batch-one"},
+                          {"op":"mkdir","path":"extra"}
+                        ]
+                        """)),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertFalse(Files.exists(workspace.resolve("batch-one")));
+        assertFalse(Files.exists(workspace.resolve("extra")));
+    }
+
+    @Test
+    void batchMentioningOperationsJsonWithoutWorkspaceOperationIntentStillValidatesExpectedTargets(
+            @TempDir Path workspace
+    ) throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        TurnProcessor processor = processor(gateApproves(approvals),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnUserRequestCapture.set("Create batch-one. Mention operations_json in the notes if useful.");
+        TurnTaskContractCapture.set(new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("batch-one"),
+                Set.of(),
+                "Create batch-one. Mention operations_json in the notes if useful.",
+                "test"));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"batch-one"},
+                          {"op":"mkdir","path":"extra"}
+                        ]
+                        """)),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertFalse(Files.exists(workspace.resolve("batch-one")));
+        assertFalse(Files.exists(workspace.resolve("extra")));
     }
 
     @Test
@@ -187,10 +258,10 @@ class WorkspaceBatchTurnProcessorTest {
                 context(workspace, config));
 
         assertFalse(result.success());
-        assertTrue(result.errorMessage().contains("Batch partially applied."), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Applied: docs"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Failed: missing.txt -> docs/missing.txt"), result.errorMessage());
-        assertTrue(Files.isDirectory(workspace.resolve("docs")));
+        assertTrue(result.errorMessage().contains(
+                "No executable typed workspace-operation authority"),
+                result.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs")));
     }
 
     private static TurnProcessor processor(ApprovalGate gate, CheckpointService checkpointService) {

@@ -20,7 +20,7 @@ import java.util.List;
  * from the front when the window overflows.
  *
  * <p>Also maintains a parallel structured list of {@link ChatMessage}
- * turns for use with the {@code /api/chat} conversation endpoint.
+ * turns for use in structured chat requests.
  * When the flat buffer overflows, the oldest structured turns are
  * also pruned to stay in sync.
  *
@@ -45,6 +45,14 @@ public final class SessionMemory implements ConversationMemory {
     private String buffer;
     private final List<ChatMessage> turns = new ArrayList<>();
     private final List<ToolEvidence> toolEvidence = new ArrayList<>();
+    private final List<WorkStatusEvidence.Turn> workStatusTurns = new ArrayList<>();
+    private int workStatusTurnsEvicted;
+    private final List<HistoricalAttributionEvidence.Turn> historicalAttributionTurns = new ArrayList<>();
+    private int historicalAttributionTurnsEvicted;
+    private java.util.UUID typedLifetimeId = java.util.UUID.randomUUID();
+    private final List<TypedResultHistory.Turn> typedResultTurns = new ArrayList<>();
+    private int typedResultTurnsEvicted;
+    private static final int MAX_TYPED_CHARACTERS = 256_000;
     private int rawTurnMessagesEvictedWithoutSketch;
     private int toolEvidenceEntriesEvicted;
     private ActiveTaskContext activeTaskContext;
@@ -52,11 +60,23 @@ public final class SessionMemory implements ConversationMemory {
     private ChangeSummaryContext changeSummaryContext;
     private FailedWorkspaceSwitch failedWorkspaceSwitch;
     private PendingWorkspaceMutationConfirmation pendingWorkspaceMutationConfirmation;
+    private dev.talos.runtime.context.PendingContentSave pendingContentSave;
+    private dev.talos.runtime.context.PendingContentDraft pendingContentDraft;
 
-    public record ToolEvidence(int turnNumber, String toolName, String pathHint, boolean success) {
+    public record ToolEvidence(int turnNumber, String toolName, String pathHint, boolean success,
+                               TurnRecord.ToolCallDisposition executionDisposition) {
         public ToolEvidence {
             toolName = toolName == null ? "" : toolName;
             pathHint = pathHint == null ? "" : pathHint;
+            executionDisposition = executionDisposition == null
+                    ? TurnRecord.ToolCallDisposition.UNKNOWN : executionDisposition;
+            if (executionDisposition == TurnRecord.ToolCallDisposition.BLOCKED && success) {
+                throw new IllegalArgumentException("A blocked call cannot report success");
+            }
+        }
+
+        public ToolEvidence(int turnNumber, String toolName, String pathHint, boolean success) {
+            this(turnNumber, toolName, pathHint, success, TurnRecord.ToolCallDisposition.UNKNOWN);
         }
     }
 
@@ -114,8 +134,44 @@ public final class SessionMemory implements ConversationMemory {
         return List.copyOf(toolEvidence);
     }
 
+    public synchronized WorkStatusEvidence workStatusEvidence() {
+        return new WorkStatusEvidence(workStatusTurns, workStatusTurnsEvicted, hasContent());
+    }
+
+    synchronized void recordWorkStatus(TurnResult result) {
+        workStatusTurns.add(WorkStatusEvidence.from(result));
+        while (workStatusTurns.size() > MAX_TURNS) {
+            workStatusTurns.removeFirst();
+            workStatusTurnsEvicted++;
+        }
+        historicalAttributionTurns.add(HistoricalAttributionEvidence.from(result));
+        while (historicalAttributionTurns.size() > HistoricalAttributionEvidence.MAX_TURNS) {
+            historicalAttributionTurns.removeFirst();
+            if (historicalAttributionTurnsEvicted < Integer.MAX_VALUE) historicalAttributionTurnsEvicted++;
+        }
+    }
+
+    public synchronized HistoricalAttributionEvidence historicalAttributionEvidence() {
+        return new HistoricalAttributionEvidence(historicalAttributionTurns,
+                historicalAttributionTurnsEvicted, true);
+    }
+
     public synchronized RetentionEvictionStats retentionEvictionStats() {
         return new RetentionEvictionStats(rawTurnMessagesEvictedWithoutSketch, toolEvidenceEntriesEvicted);
+    }
+
+    public synchronized TypedResultHistory typedResultHistory() {
+        return new TypedResultHistory(typedResultTurns, typedResultTurnsEvicted, hasContent());
+    }
+
+    synchronized void recordTypedResults(TurnResult result) {
+        typedResultTurns.add(new TypedResultHistory.Turn(typedLifetimeId, result.turnNumber(),
+                result.audit().typedResults()));
+        while (typedResultTurns.size() > MAX_TURNS || typedResultTurns.stream()
+                .mapToLong(turn -> turn.settlement().characters()).sum() > MAX_TYPED_CHARACTERS) {
+            typedResultTurns.removeFirst();
+            if (typedResultTurnsEvicted < Integer.MAX_VALUE) typedResultTurnsEvicted++;
+        }
     }
 
     public synchronized FailedWorkspaceSwitch failedWorkspaceSwitch() {
@@ -158,6 +214,22 @@ public final class SessionMemory implements ConversationMemory {
     public synchronized void clearActiveTaskContext() {
         activeTaskContext = ActiveTaskContext.none();
         artifactGoal = ArtifactGoal.none();
+        pendingContentSave = null;
+        pendingContentDraft = null;
+    }
+
+    public synchronized dev.talos.runtime.context.PendingContentSave pendingContentSave() {
+        return pendingContentSave;
+    }
+
+    public synchronized void setPendingContentSave(dev.talos.runtime.context.PendingContentSave pending) {
+        pendingContentSave = pending;
+    }
+
+    public synchronized dev.talos.runtime.context.PendingContentDraft pendingContentDraft() { return pendingContentDraft; }
+
+    public synchronized void setPendingContentDraft(dev.talos.runtime.context.PendingContentDraft draft) {
+        pendingContentDraft = draft;
     }
 
     /** Clears all memory. */
@@ -165,6 +237,13 @@ public final class SessionMemory implements ConversationMemory {
         buffer = null;
         turns.clear();
         toolEvidence.clear();
+        workStatusTurns.clear();
+        workStatusTurnsEvicted = 0;
+        historicalAttributionTurns.clear();
+        historicalAttributionTurnsEvicted = 0;
+        typedResultTurns.clear();
+        typedResultTurnsEvicted = 0;
+        typedLifetimeId = java.util.UUID.randomUUID();
         rawTurnMessagesEvictedWithoutSketch = 0;
         toolEvidenceEntriesEvicted = 0;
         clearActiveTaskContext();
@@ -242,7 +321,8 @@ public final class SessionMemory implements ConversationMemory {
         if (calls == null || calls.isEmpty()) return;
         for (TurnRecord.ToolCallSummary call : calls) {
             if (call == null) continue;
-            toolEvidence.add(new ToolEvidence(turnNumber, call.name(), call.pathHint(), call.success()));
+            toolEvidence.add(new ToolEvidence(turnNumber, call.name(), call.pathHint(), call.success(),
+                    call.executionDisposition()));
         }
         while (toolEvidence.size() > MAX_TURNS * 4) {
             toolEvidence.removeFirst();

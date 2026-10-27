@@ -26,7 +26,7 @@ class LlmClientRetryTest {
         Config cfg = new Config();
         Map<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "placeholder");
-        llm.put("default_backend", "ollama");
+        llm.put("default_backend", "llama_cpp");
         cfg.data.put("llm", llm);
         return cfg;
     }

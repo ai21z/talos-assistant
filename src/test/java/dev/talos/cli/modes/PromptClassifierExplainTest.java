@@ -83,6 +83,56 @@ class PromptClassifierExplainTest {
     }
 
     @Test
+    void compoundOpenThenMutationRoutesToAssistantToolPath() {
+        var r = PromptClassifier.explainRoute("open config.json and change the port to 8080", null, null);
+
+        assertEquals(ASSIST, r.route());
+        assertEquals("action intent (tool-calling)", r.trigger());
+        assertTrue(r.steps().contains("structural command prefix contains mutation intent"),
+                r.steps().toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "generate the missing section",
+            "make the wording shorter",
+            "put the new value in retries",
+            "rename the heading",
+            "move the section to the top",
+            "improve the explanation",
+            "overwrite the stale block"
+    })
+    void compoundOpenThenAllMutationVerbsRouteToAssistantToolPath(String action) {
+        var r = PromptClassifier.explainRoute("open config.json and " + action, null, null);
+
+        assertEquals(ASSIST, r.route(), action);
+        assertEquals("action intent (tool-calling)", r.trigger());
+        assertTrue(r.steps().contains("structural command prefix contains mutation intent"),
+                r.steps().toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "open config.json and search for port",
+            "open config.json and list the keys"
+    })
+    void compoundOpenThenInspectionStaysStructuralCommand(String prompt) {
+        var r = PromptClassifier.explainRoute(prompt, null, null);
+
+        assertEquals(COMMAND, r.route(), prompt);
+        assertEquals("dev command", r.trigger());
+        assertTrue(r.steps().contains("matched dev command pattern"), r.steps().toString());
+    }
+
+    @Test
+    void plainOpenFileStillRoutesToStructuralCommand() {
+        var r = PromptClassifier.explainRoute("open config.json", null, null);
+
+        assertEquals(COMMAND, r.route());
+        assertEquals("dev command", r.trigger());
+    }
+
+    @Test
     void show_me_file_trigger() {
         var r = PromptClassifier.explainRoute("show me build.gradle.kts", null, null);
         assertEquals(COMMAND, r.route());

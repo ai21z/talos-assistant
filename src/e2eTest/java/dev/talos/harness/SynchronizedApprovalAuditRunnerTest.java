@@ -1,9 +1,17 @@
 package dev.talos.harness;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
+import dev.talos.core.llm.ForegroundProviderScriptedLlmClient;
 import dev.talos.runtime.ApprovalResponse;
+import dev.talos.runtime.JsonSessionStore;
+import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnEnvelopePersistenceReceipt;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LexicalPlanEvidenceTraceEvent;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.spi.types.PromptDebugCapture;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -16,18 +24,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SynchronizedApprovalAuditRunnerTest {
+    // Unlike the legacy name canary, this prose survives extraction sanitization.
+    private static final String PRIVATE_DOCUMENT_HANDOFF_PROBE = "Amber heron 6418.";
 
     @TempDir
     Path workspace;
@@ -164,12 +177,17 @@ class SynchronizedApprovalAuditRunnerTest {
         assertFalse(result.finalAnswer().contains("Eleni Nikolaou"), result.finalAnswer());
         assertTrue(result.finalAnswer().contains("Private document content was read locally but withheld from model context"),
                 result.finalAnswer());
+        assertTrue(result.finalAnswer().contains("[Evidence incomplete:"), result.finalAnswer());
+        assertEquals("ADVISORY_ONLY", result.trace().outcome().classification());
+        assertTrue(result.trace().warnings().stream().anyMatch(warning -> "MISSING_EVIDENCE".equals(warning.code())),
+                result.trace().warnings().toString());
     }
 
     @Test
     void private_mode_extracted_docx_send_to_model_opt_in_allows_handoff_but_artifacts_redact(
             @TempDir Path artifacts) throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Eleni Nikolaou");
+        writeDocx(workspace.resolve("medical-notes.docx"),
+                "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE);
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "private extracted docx send to model opt in",
@@ -180,11 +198,12 @@ class SynchronizedApprovalAuditRunnerTest {
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                         "The extracted patient name is [redacted-private-document-canary]."),
                 List.of());
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertTrue(result.approvals().isEmpty(), result.approvals().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
         assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
@@ -204,6 +223,7 @@ class SynchronizedApprovalAuditRunnerTest {
                     .reduce("", (left, right) -> left + "\n" + right);
         }
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
     }
@@ -211,7 +231,8 @@ class SynchronizedApprovalAuditRunnerTest {
     @Test
     void private_mode_extracted_docx_per_turn_approval_allows_handoff_and_records_prompt(
             @TempDir Path artifacts) throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Eleni Nikolaou");
+        writeDocx(workspace.resolve("medical-notes.docx"),
+                "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE);
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "private extracted docx per turn handoff approved",
@@ -224,7 +245,7 @@ class SynchronizedApprovalAuditRunnerTest {
                 List.of(ScriptedApprovalGate.Step.approve(
                         "private document model handoff",
                         "medical-notes.docx")));
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertEquals(1, result.approvals().size(), result.approvals().toString());
         assertEquals(ApprovalResponse.APPROVED, result.approvals().getFirst().response());
@@ -236,10 +257,16 @@ class SynchronizedApprovalAuditRunnerTest {
                         .containsKey("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED"),
                 result.trace().contextLedgerSummary().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
+        String allArtifacts = readAllArtifacts(bundle.root());
+        assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
+        assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
     }
 
@@ -306,13 +333,15 @@ class SynchronizedApprovalAuditRunnerTest {
                 "private extracted pdf send to model opt in",
                 "medical-notes.pdf",
                 "Read medical-notes.pdf and tell me the patient name.",
-                () -> writePdf(workspace.resolve("medical-notes.pdf"), "Patient name: Eleni Nikolaou"));
+                () -> writePdf(workspace.resolve("medical-notes.pdf"),
+                        "Patient name: Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE));
         assertPrivateExtractedDocumentOptInArtifactsRedact(
                 artifacts,
                 "private extracted xlsx send to model opt in",
                 "medical-notes.xlsx",
                 "Read medical-notes.xlsx and tell me the patient name.",
-                () -> writeXlsx(workspace.resolve("medical-notes.xlsx"), "Patient name", "Eleni Nikolaou"));
+                () -> writeXlsx(workspace.resolve("medical-notes.xlsx"), "Patient name",
+                        "Eleni Nikolaou. " + PRIVATE_DOCUMENT_HANDOFF_PROBE));
     }
 
     @Test
@@ -477,6 +506,50 @@ class SynchronizedApprovalAuditRunnerTest {
                 error.partialResult().finalAnswer());
         assertTrue(error.partialResult().approvals().isEmpty(), error.partialResult().approvals().toString());
         assertFalse(error.partialResult().traceText().isBlank());
+    }
+
+    @Test
+    void successful_run_releases_prompt_debug_scope() {
+        PromptDebugCapture.clear();
+        try {
+            SynchronizedApprovalAuditRunner.runScripted(
+                    new SynchronizedApprovalAuditRunner.Request(
+                            "prompt debug success scope",
+                            workspace,
+                            new Config(null),
+                            "Answer without tools.",
+                            List.of("No tool is needed."),
+                            List.of()));
+
+            assertTrue(PromptDebugCapture.latest().isPresent());
+            assertFalse(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertFreshPromptDebugScopeCanBeOwned();
+        } finally {
+            PromptDebugCapture.clear();
+        }
+    }
+
+    @Test
+    void failed_run_releases_prompt_debug_scope() {
+        PromptDebugCapture.clear();
+        try {
+            assertThrows(SynchronizedApprovalAuditRunner.AuditFailure.class, () ->
+                    SynchronizedApprovalAuditRunner.runScripted(
+                            new SynchronizedApprovalAuditRunner.Request(
+                                    "prompt debug failure scope",
+                                    workspace,
+                                    new Config(null),
+                                    "Answer without tools.",
+                                    List.of("No tool is needed."),
+                                    List.of(ScriptedApprovalGate.Step.remember(
+                                            "talos.edit_file", "never-used.md")))));
+
+            assertTrue(PromptDebugCapture.latest().isPresent());
+            assertFalse(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertFreshPromptDebugScopeCanBeOwned();
+        } finally {
+            PromptDebugCapture.clear();
+        }
     }
 
     @Test
@@ -680,6 +753,226 @@ class SynchronizedApprovalAuditRunnerTest {
     }
 
     @Test
+    void artifact_bundle_persists_coordinated_tail_row_and_trace_as_one_exact_span_envelope(
+            @TempDir Path artifacts
+    ) throws Exception {
+        for (String lineEnding : List.of("\n", "\r\n")) {
+            String label = "\n".equals(lineEnding) ? "lf" : "crlf";
+            String requestText = " \t" + lineEnding
+                    + "Edit index.html so it works," + lineEnding
+                    + "then update style.css." + lineEnding + " ";
+            String canonicalRequest = requestText.strip();
+            String sourceText = "update style.css.";
+            int startOffset = canonicalRequest.indexOf(sourceText);
+            int authorityEndOffset =
+                    canonicalRequest.indexOf("style.css", startOffset)
+                            + "style.css".length();
+            CoordinatedTailFixture fixture = coordinatedTailTrace(
+                    "trc-t1196-exact-span-" + label,
+                    canonicalRequest);
+            LocalTurnTrace trace = fixture.trace();
+            SynchronizedApprovalAuditRunner.Request request =
+                    artifactRequest(
+                            "artifact bundle t1196 exact span " + label,
+                            requestText);
+
+            SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                    SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                            artifacts,
+                            request,
+                            new SynchronizedApprovalAuditRunner.Result(
+                                    "The coordinated edit is complete.",
+                                    List.of(),
+                                    "",
+                                    trace,
+                                    "",
+                                    fixture.policyTrace()));
+
+            String sessionId = JsonSessionStore.sessionIdFor(workspace);
+            JsonSessionStore store =
+                    new JsonSessionStore(bundle.sessionSnapshot().getParent());
+            var turns = store.loadTurns(sessionId);
+            assertEquals(1, turns.size(), turns.toString());
+            var row = turns.getFirst();
+            assertEquals(trace.traceId(), row.traceId());
+            assertEquals(requestText, row.userInput());
+            var rowTarget = row.policyTrace().rolefulTargets().stream()
+                    .filter(target -> "style.css".equals(target.path()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("USER_REQUEST", rowTarget.source());
+            assertEquals(startOffset, rowTarget.startOffset());
+            assertEquals(authorityEndOffset, rowTarget.authorityEndOffset());
+            assertEquals(startOffset + sourceText.length(), rowTarget.endOffset());
+            assertEquals(
+                    rowTarget.sourceText(),
+                    row.userInput().strip().substring(
+                            rowTarget.startOffset(),
+                            rowTarget.endOffset()));
+
+            LocalTurnTrace persistedTrace =
+                    store.loadTrace(sessionId, row.traceId()).orElseThrow();
+            assertEquals(sessionId, persistedTrace.sessionId());
+            var traceTarget = rolefulTarget(persistedTrace, "style.css");
+            assertEquals("USER_REQUEST", traceTarget.source());
+            assertEquals(rowTarget.startOffset(), traceTarget.startOffset());
+            assertEquals(
+                    rowTarget.authorityEndOffset(),
+                    traceTarget.authorityEndOffset());
+            assertEquals(rowTarget.endOffset(), traceTarget.endOffset());
+            assertEquals(
+                    traceTarget.sourceText(),
+                    row.userInput().strip().substring(
+                            traceTarget.startOffset(),
+                            traceTarget.endOffset()));
+            assertArrayEquals(
+                    persistedSessionTraceBytes(bundle, sessionId),
+                    Files.readAllBytes(bundle.traceJson()),
+                    "last-trace.json must be the exact coordinate-aware session-trace bytes");
+        }
+    }
+
+    @Test
+    void artifact_bundle_invalidates_user_request_coordinates_when_a_prefix_is_redacted(
+            @TempDir Path artifacts
+    ) throws Exception {
+        String rawCanary = "USER_SUPPLIED_CANARY_T1196_PREFIX";
+        String requestText = rawCanary
+                + " Edit index.html so it works, then update style.css.";
+        String sourceText = "update style.css.";
+        int startOffset = requestText.indexOf(sourceText);
+        int authorityEndOffset = requestText.indexOf("style.css", startOffset)
+                + "style.css".length();
+        CoordinatedTailFixture fixture = coordinatedTailTrace(
+                "trc-t1196-redacted-prefix",
+                requestText);
+        LocalTurnTrace trace = fixture.trace();
+        SynchronizedApprovalAuditRunner.Request request =
+                artifactRequest("artifact bundle t1196 redacted prefix", requestText);
+
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                        artifacts,
+                        request,
+                        new SynchronizedApprovalAuditRunner.Result(
+                                "The coordinated edit is complete.",
+                                List.of(),
+                                "",
+                                trace,
+                                "",
+                                fixture.policyTrace()));
+
+        assertByteSequenceAbsent(bundle.root(), rawCanary);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        JsonSessionStore store =
+                new JsonSessionStore(bundle.sessionSnapshot().getParent());
+        var row = store.loadTurns(sessionId).getFirst();
+        assertFalse(row.userInput().contains(rawCanary), row.userInput());
+        var rowTarget = row.policyTrace().rolefulTargets().stream()
+                .filter(target -> "style.css".equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("USER_REQUEST", rowTarget.source());
+        assertEquals(-1, rowTarget.startOffset());
+        assertEquals(-1, rowTarget.authorityEndOffset());
+        assertEquals(-1, rowTarget.endOffset());
+
+        LocalTurnTrace sessionTrace =
+                store.loadTrace(sessionId, row.traceId()).orElseThrow();
+        assertEquals(sessionId, sessionTrace.sessionId());
+        var sessionTarget = rolefulTarget(sessionTrace, "style.css");
+        assertEquals("USER_REQUEST", sessionTarget.source());
+        assertEquals(-1, sessionTarget.startOffset());
+        assertEquals(-1, sessionTarget.authorityEndOffset());
+        assertEquals(-1, sessionTarget.endOffset());
+
+        LocalTurnTrace lastTrace = new ObjectMapper().readValue(
+                Files.readAllBytes(bundle.traceJson()),
+                LocalTurnTrace.class);
+        var lastTraceTarget = rolefulTarget(lastTrace, "style.css");
+        assertEquals("USER_REQUEST", lastTraceTarget.source());
+        assertEquals(-1, lastTraceTarget.startOffset());
+        assertEquals(-1, lastTraceTarget.authorityEndOffset());
+        assertEquals(-1, lastTraceTarget.endOffset());
+        assertArrayEquals(
+                persistedSessionTraceBytes(bundle, sessionId),
+                Files.readAllBytes(bundle.traceJson()),
+                "redacted last-trace.json must be the exact session-trace bytes");
+    }
+
+    @Test
+    void artifact_bundle_accepts_only_complete_observed_turn_envelopes() throws Exception {
+        SynchronizedApprovalAuditRunner.requireCompleteAuditEnvelope(
+                new TurnEnvelopePersistenceReceipt(
+                        TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED),
+                true);
+        SynchronizedApprovalAuditRunner.requireCompleteAuditEnvelope(
+                new TurnEnvelopePersistenceReceipt(
+                        TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY),
+                false);
+
+        for (TurnEnvelopePersistenceReceipt.State incomplete :
+                TurnEnvelopePersistenceReceipt.State.values()) {
+            if (incomplete
+                    != TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED) {
+                assertThrows(
+                        IOException.class,
+                        () -> SynchronizedApprovalAuditRunner
+                                .requireCompleteAuditEnvelope(
+                                        new TurnEnvelopePersistenceReceipt(incomplete),
+                                        true),
+                        incomplete.name());
+            }
+            if (incomplete
+                    != TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY) {
+                assertThrows(
+                        IOException.class,
+                        () -> SynchronizedApprovalAuditRunner
+                                .requireCompleteAuditEnvelope(
+                                        new TurnEnvelopePersistenceReceipt(incomplete),
+                                        false),
+                        incomplete.name());
+            }
+        }
+        assertThrows(
+                IOException.class,
+                () -> SynchronizedApprovalAuditRunner
+                        .requireCompleteAuditEnvelope(null, true));
+    }
+
+    @Test
+    void artifact_bundle_rejects_foreign_trace_session_before_publication(
+            @TempDir Path artifacts
+    ) {
+        String scenario = "artifact-session-mismatch";
+        SynchronizedApprovalAuditRunner.Request request =
+                artifactRequest(scenario, "Inspect index.html.");
+        LocalTurnTrace foreignTrace = LocalTurnTrace.builder(
+                        "trc-t1196-foreign-session",
+                        "foreign-session-id",
+                        1,
+                        "2026-07-31T00:00:00Z")
+                .build();
+
+        IOException failure = assertThrows(
+                IOException.class,
+                () -> SynchronizedApprovalAuditRunner.writeAuditArtifacts(
+                        artifacts,
+                        request,
+                        new SynchronizedApprovalAuditRunner.Result(
+                                "Inspection complete.",
+                                List.of(),
+                                "",
+                                foreignTrace,
+                                "")));
+
+        assertTrue(failure.getMessage().contains("session identity"));
+        assertFalse(
+                Files.exists(artifacts.toAbsolutePath().normalize().resolve(scenario)),
+                "a foreign trace must be rejected before any bundle path is published");
+    }
+
+    @Test
     void artifact_bundle_writes_redacted_workspace_diff_for_mutation(@TempDir Path artifacts) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "status=old\n");
 
@@ -753,20 +1046,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
 
-        String allArtifacts;
-        try (var paths = Files.walk(bundle.root())) {
-            allArtifacts = paths
-                    .filter(Files::isRegularFile)
-                    .map(path -> {
-                        try {
-                            return Files.readString(path);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .reduce("", (left, right) -> left + "\n" + right);
-        }
-        assertFalse(allArtifacts.contains("private-mode-opt-in-handoff-ok"), allArtifacts);
+        assertByteSequenceAbsent(bundle.root(), "private-mode-opt-in-handoff-ok");
         assertTrue(Files.readString(bundle.finalAnswer()).contains("protected read answer redacted"),
                 Files.readString(bundle.finalAnswer()));
     }
@@ -775,10 +1055,16 @@ class SynchronizedApprovalAuditRunnerTest {
     void artifact_bundle_replaces_stale_files_from_prior_run(@TempDir Path artifacts) throws Exception {
         Files.writeString(workspace.resolve(".env"),
                 "VISIBLE_OPT_IN_VALUE=private-mode-opt-in-handoff-ok\n");
-        Path staleDir = Files.createDirectories(
-                artifacts.resolve("artifact-bundle-explicit-send-to-model").resolve("sessions"));
+        Path staleRoot = artifacts.resolve("artifact-bundle-explicit-send-to-model");
+        Path staleDir = Files.createDirectories(staleRoot.resolve("sessions"));
+        Path stalePrompt = Files.createDirectories(staleRoot.resolve("prompt-debug"))
+                .resolve("prompt-debug.md");
+        Path staleProvider = Files.createDirectories(staleRoot.resolve("provider-bodies"))
+                .resolve("provider-body.json");
         Files.writeString(staleDir.resolve("stale.turns.jsonl"),
                 "private-mode-opt-in-handoff-ok\n");
+        Files.writeString(stalePrompt, "private-mode-opt-in-handoff-ok\n");
+        Files.writeString(staleProvider, "private-mode-opt-in-handoff-ok\n");
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "artifact bundle explicit send to model",
@@ -794,22 +1080,11 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
 
-        String allArtifacts;
-        try (var paths = Files.walk(bundle.root())) {
-            allArtifacts = paths
-                    .filter(Files::isRegularFile)
-                    .map(path -> {
-                        try {
-                            return Files.readString(path);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .reduce("", (left, right) -> left + "\n" + right);
-        }
         assertFalse(Files.exists(staleDir.resolve("stale.turns.jsonl")),
                 staleDir.resolve("stale.turns.jsonl").toString());
-        assertFalse(allArtifacts.contains("private-mode-opt-in-handoff-ok"), allArtifacts);
+        assertTrue(Files.exists(stalePrompt), stalePrompt.toString());
+        assertTrue(Files.exists(staleProvider), staleProvider.toString());
+        assertByteSequenceAbsent(bundle.root(), "private-mode-opt-in-handoff-ok");
     }
 
     @Test
@@ -877,7 +1152,8 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("workspace-move-path-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-rename-path-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-delete-path-approved"));
-        assertTrue(Files.readString(run.summary()).contains("workspace-batch-apply-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-batch-no-typed-authority"));
+        assertFalse(Files.readString(run.summary()).contains("workspace-batch-apply-approved"));
         String appendLineTrace = Files.readString(artifacts
                 .resolve("mutation-append-line-verified")
                 .resolve("traces")
@@ -1013,8 +1289,11 @@ class SynchronizedApprovalAuditRunnerTest {
                 .resolve("delete-me.tmp")));
         assertEquals("batch source\n",
                 Files.readString(workspaces
-                        .resolve("workspace-batch-apply-approved")
-                        .resolve("source-copy.md")));
+                        .resolve("workspace-batch-no-typed-authority")
+                        .resolve("source.md")));
+        assertFalse(Files.exists(workspaces
+                .resolve("workspace-batch-no-typed-authority")
+                .resolve("source-copy.md")));
         assertTrue(run.findings().isEmpty(), run.findings().toString());
         for (SynchronizedApprovalAuditRunner.ArtifactBundle bundle : run.bundles()) {
             assertTrue(Files.exists(bundle.summary()), bundle.summary().toString());
@@ -1030,11 +1309,18 @@ class SynchronizedApprovalAuditRunnerTest {
                 "workspace-copy-path-approved",
                 "workspace-move-path-approved",
                 "workspace-rename-path-approved",
-                "workspace-delete-path-approved",
-                "workspace-batch-apply-approved");
+                "workspace-delete-path-approved");
 
         assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames().containsAll(workspaceOperations));
         assertTrue(SynchronizedApprovalAuditMain.supportedLiveScenarioNames().containsAll(workspaceOperations));
+        assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames()
+                .contains("workspace-batch-no-typed-authority"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedLiveScenarioNames()
+                .contains("workspace-batch-no-typed-authority"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames()
+                .contains("workspace-batch-apply-approved"));
+        assertFalse(SynchronizedApprovalAuditMain.supportedLiveScenarioNames()
+                .contains("workspace-batch-apply-approved"));
     }
 
     @Test
@@ -1111,8 +1397,7 @@ class SynchronizedApprovalAuditRunnerTest {
                 "workspace-copy-path-approved",
                 "workspace-move-path-approved",
                 "workspace-rename-path-approved",
-                "workspace-delete-path-approved",
-                "workspace-batch-apply-approved")) {
+                "workspace-delete-path-approved")) {
             Path artifacts = tempDir.resolve("manual-testing-" + scenario);
             Path workspaces = tempDir.resolve("manual-workspaces-" + scenario);
 
@@ -1141,6 +1426,36 @@ class SynchronizedApprovalAuditRunnerTest {
             assertFalse(outcomeLine.isBlank(), scenario + ": trace has no OUTCOME_RENDERED line");
             assertFalse(outcomeLine.contains("BLOCKED"), scenario + ": " + outcomeLine);
         }
+    }
+
+    @Test
+    void deterministic_audit_entrypoint_proves_batch_has_no_typed_provider_authority(
+            @TempDir Path tempDir
+    ) throws Exception {
+        String scenario = "workspace-batch-no-typed-authority";
+        Path artifacts = tempDir.resolve("manual-testing-" + scenario);
+        Path workspaces = tempDir.resolve("manual-workspaces-" + scenario);
+
+        SynchronizedApprovalAuditMain.RunResult run = SynchronizedApprovalAuditMain.run(
+                new SynchronizedApprovalAuditMain.Arguments(
+                        SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                        artifacts,
+                        workspaces,
+                        null,
+                        "",
+                        scenario));
+
+        assertEquals(1, run.bundles().size());
+        var bundle = run.bundles().getFirst();
+        assertTrue(Files.readString(run.summary()).contains(scenario));
+        assertTrue(Files.readString(bundle.approvalsJsonl()).isBlank());
+        String traceText = Files.readString(bundle.traceText());
+        assertTrue(traceText.contains("TOOL_CALL_AUTHORITY_REJECTED"), traceText);
+        assertFalse(traceText.contains("APPROVAL_REQUIRED"), traceText);
+        assertFalse(traceText.contains("TOOL_EXECUTED"), traceText);
+        assertEquals("batch source\n",
+                Files.readString(workspaces.resolve(scenario).resolve("source.md")));
+        assertFalse(Files.exists(workspaces.resolve(scenario).resolve("source-copy.md")));
     }
 
     @Test
@@ -1265,6 +1580,43 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(result.traceText().contains("TOOL_EXECUTED talos.edit_file"), result.traceText());
         assertTrue(result.trace().verification().summary().contains("Append line verification passed"),
                 result.trace().verification().summary());
+        var transformed = result.trace().events().stream()
+                .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                .filter(event -> "APPEND_WRITE_TO_EDIT".equals(
+                        event.data().get("reasonCode")))
+                .findFirst()
+                .orElseThrow();
+        String toolCallId = String.valueOf(transformed.data().get("toolCallId"));
+        var parsed = result.trace().events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        var approval = result.trace().events().stream()
+                .filter(event -> "APPROVAL_GRANTED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        var executed = result.trace().events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(parsed.data().get("toolNameHash"),
+                transformed.data().get("fromToolNameHash"));
+        assertEquals(parsed.data().get("argumentsHash"),
+                transformed.data().get("fromArgumentsHash"));
+        assertEquals(transformed.data().get("toolNameHash"),
+                approval.data().get("toolNameHash"));
+        assertEquals(transformed.data().get("argumentsHash"),
+                approval.data().get("argumentsHash"));
+        assertEquals(transformed.data().get("toolNameHash"),
+                executed.data().get("toolNameHash"));
+        assertEquals(transformed.data().get("argumentsHash"),
+                executed.data().get("argumentsHash"));
     }
 
     @Test
@@ -1474,6 +1826,13 @@ class SynchronizedApprovalAuditRunnerTest {
                 Files.readString(workspace.resolve("scripts.js")));
     }
 
+    private static void assertFreshPromptDebugScopeCanBeOwned() {
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertTrue(PromptDebugCapture.latest().isEmpty());
+        }
+    }
+
     private static Map<String, Object> privateModeSendToModelPrivacy() {
         Map<String, Object> protectedRead = new LinkedHashMap<>();
         protectedRead.put("default_scope", "SEND_TO_MODEL_CONTEXT");
@@ -1544,10 +1903,6 @@ class SynchronizedApprovalAuditRunnerTest {
             }
             case "workspace-delete-path-approved" ->
                     assertFalse(Files.exists(workspace.resolve("delete-me.tmp")));
-            case "workspace-batch-apply-approved" -> {
-                assertEquals("batch source\n", Files.readString(workspace.resolve("source.md")));
-                assertEquals("batch source\n", Files.readString(workspace.resolve("source-copy.md")));
-            }
             default -> throw new AssertionError("unknown workspace operation scenario: " + scenario);
         }
     }
@@ -1597,19 +1952,155 @@ class SynchronizedApprovalAuditRunnerTest {
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + fileName + "\"}}",
                         "The extracted patient name is [redacted-private-document-canary]."),
                 List.of());
-        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.Result result = runWithPrivateExtractedDocumentObservation(request);
 
         assertTrue(result.approvals().isEmpty(), result.approvals().toString());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("ChatMessage[content withheld]"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
         assertTrue(result.finalAnswer().contains("[redacted-private-document-canary]"), result.finalAnswer());
 
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
         String allArtifacts = readAllArtifacts(bundle.root());
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
+        assertFalse(allArtifacts.contains(PRIVATE_DOCUMENT_HANDOFF_PROBE), "document probe must not enter artifacts");
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
+    }
+
+    private static SynchronizedApprovalAuditRunner.Result runWithPrivateExtractedDocumentObservation(
+            SynchronizedApprovalAuditRunner.Request request) {
+        AtomicInteger dispatchedRequests = new AtomicInteger();
+        AtomicInteger admittedReadRequests = new AtomicInteger();
+        try (var llm = ForegroundProviderScriptedLlmClient.create(
+                request.config(), request.scriptedModelResponses(), modelRequest -> {
+                    int ordinal = dispatchedRequests.incrementAndGet();
+                    var extractedMessages = modelRequest.messages.stream()
+                            .filter(message -> !"assistant".equals(message.role()))
+                            .filter(message -> message.content() != null
+                                    && message.content().contains("[tool_result: talos.read_file]")
+                                    && message.content().contains(PRIVATE_DOCUMENT_HANDOFF_PROBE))
+                            .toList();
+                    if (extractedMessages.isEmpty()) return;
+                    admittedReadRequests.incrementAndGet();
+                    assertEquals(2, ordinal, "extracted content must reach the post-read provider request");
+                    assertEquals(1, extractedMessages.size(), "one extracted tool result must be admitted");
+                    assertTrue(extractedMessages.getFirst().content().contains("[redacted-private-document-canary]"),
+                            "the legacy name canary must retain extraction's existing redaction");
+                    assertFalse(extractedMessages.getFirst().content().contains("Eleni Nikolaou"),
+                            "the original name canary must already be sanitized by extraction");
+                    assertTrue(modelRequest.contentRestrictions.modelAllowed(), "model handoff remains allowed");
+                    assertFalse(modelRequest.contentRestrictions.artifactAllowed(), "raw artifacts remain denied");
+                    assertFalse(modelRequest.contentRestrictions.historyAllowed(), "private history remains denied");
+                    var restrictions = extractedMessages.getFirst().contentRestrictions();
+                    assertTrue(restrictions.modelAllowed(), "extracted message remains model-readable");
+                    assertFalse(restrictions.artifactAllowed(), "extracted message cannot enter raw artifacts");
+                    assertFalse(restrictions.historyAllowed(), "extracted message cannot enter history");
+                })) {
+            var result = SynchronizedApprovalAuditRunner.run(request, llm);
+            assertEquals(2, dispatchedRequests.get(), "one initial and one post-read scripted provider request");
+            assertEquals(1, admittedReadRequests.get(), "the provider must receive the actual extracted canary once");
+            assertFalse(result.modelTranscript().contains(PRIVATE_DOCUMENT_HANDOFF_PROBE),
+                    "diagnostic transcript must withhold admitted document prose");
+            return result;
+        }
+    }
+
+    private SynchronizedApprovalAuditRunner.Request artifactRequest(
+            String name,
+            String userPrompt
+    ) {
+        return new SynchronizedApprovalAuditRunner.Request(
+                name,
+                workspace,
+                new Config(null),
+                userPrompt,
+                List.of(),
+                List.of());
+    }
+
+    private CoordinatedTailFixture coordinatedTailTrace(
+            String traceId,
+            String canonicalRequest
+    ) {
+        var resolution = TaskContractResolver.resolveFromUserRequest(
+                canonicalRequest);
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                resolution,
+                "unknown",
+                List.of(),
+                List.of());
+        LocalTurnTrace trace = LocalTurnTrace
+                .builder(
+                        traceId,
+                        JsonSessionStore.sessionIdFor(workspace),
+                        1,
+                        "2026-07-31T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                        policyTrace.taskType(),
+                        policyTrace.mutationAllowed(),
+                        policyTrace.verificationRequired(),
+                        policyTrace.mutationRequested(),
+                        policyTrace.expectedTargets(),
+                        policyTrace.forbiddenTargets(),
+                        policyTrace.classificationReason(),
+                        policyTrace.rolefulTargets().stream()
+                                .map(target -> new LocalTurnTrace
+                                        .RolefulTargetSummary(
+                                        target.path(),
+                                        target.role(),
+                                        target.source(),
+                                        target.reason(),
+                                        target.sourceText(),
+                                        target.confidence(),
+                                        target.startOffset(),
+                                        target.authorityEndOffset(),
+                                        target.endOffset()))
+                                .toList()))
+                .event(LexicalPlanEvidenceTraceEvent.create(
+                        "2026-07-31T00:00:00Z",
+                        policyTrace))
+                .outcome(
+                        "COMPLETE",
+                        "PASSED",
+                        "GRANTED_OR_NOT_REQUIRED",
+                        "SUCCEEDED",
+                        "COMPLETED_VERIFIED")
+                .build();
+        return new CoordinatedTailFixture(trace, policyTrace);
+    }
+
+    private record CoordinatedTailFixture(
+            LocalTurnTrace trace,
+            TurnPolicyTrace policyTrace
+    ) {}
+
+    private static LocalTurnTrace.RolefulTargetSummary rolefulTarget(
+            LocalTurnTrace trace,
+            String path
+    ) {
+        return trace.taskContract().rolefulTargets().stream()
+                .filter(target -> path.equals(target.path()))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static byte[] persistedSessionTraceBytes(
+            SynchronizedApprovalAuditRunner.ArtifactBundle bundle,
+            String sessionId
+    ) throws IOException {
+        Path traceDirectory = bundle.sessionSnapshot()
+                .getParent()
+                .resolve("traces")
+                .resolve(sessionId);
+        try (var traces = Files.list(traceDirectory)) {
+            var paths = traces
+                    .filter(Files::isRegularFile)
+                    .toList();
+            assertEquals(1, paths.size(), paths.toString());
+            return Files.readAllBytes(paths.getFirst());
+        }
     }
 
     private static String readAllArtifacts(Path root) throws IOException {
@@ -1637,6 +2128,27 @@ class SynchronizedApprovalAuditRunnerTest {
             count++;
             from = index + needle.length();
         }
+    }
+
+    private static void assertByteSequenceAbsent(Path root, String value) throws IOException {
+        byte[] needle = value.getBytes(StandardCharsets.UTF_8);
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                assertFalse(containsBytes(Files.readAllBytes(path), needle), path.toString());
+            }
+        }
+    }
+
+    private static boolean containsBytes(byte[] haystack, byte[] needle) {
+        if (needle.length == 0) return true;
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            int j = 0;
+            while (j < needle.length && haystack[i + j] == needle[j]) {
+                j++;
+            }
+            if (j == needle.length) return true;
+        }
+        return false;
     }
 
     private static void writeDocx(Path path, String text) throws IOException {

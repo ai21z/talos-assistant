@@ -1,6 +1,8 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.obligation.RequestObligation;
+import dev.talos.runtime.obligation.RequestObligationCompiler;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -9,6 +11,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,6 +81,97 @@ class StaticTaskVerifierTest {
         assertTrue(result.summary().contains("Exact content verification failed"), result.summary());
         assertTrue(result.problems().stream()
                 .anyMatch(p -> p.contains("index.html: exact content mismatch")));
+    }
+
+    @Test
+    void linkedExternalMutationTargetCannotSatisfyVerification() throws Exception {
+        String canary = "T1170_EXTERNAL_VERIFICATION_CANARY";
+        Path external = Files.writeString(
+                Files.createTempFile(
+                        workspace.getParent(),
+                        "t1170-external-verification-",
+                        ".txt"),
+                canary);
+        createSymbolicLinkOrAbort(workspace.resolve("result.txt"), external);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite result.txt with exactly " + canary + ".",
+                loopResult(List.of(
+                        successfulWrite("result.txt", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.problems().stream().anyMatch(problem ->
+                        problem.contains("result.txt")
+                                && problem.contains("not a readable file")),
+                result.problems().toString());
+        assertFalse(result.facts().stream().anyMatch(fact -> fact.contains(canary)));
+    }
+
+    @Test
+    void windowsJunctionMutationTargetCannotSatisfyVerification() throws Exception {
+        assumeTrue(System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT).contains("win"));
+        String canary = "T1170_WINDOWS_VERIFICATION_JUNCTION_CANARY";
+        Path external = Files.createTempDirectory(
+                workspace.getParent(),
+                "t1170-external-verification-directory-");
+        Files.writeString(external.resolve("result.txt"), canary);
+        Path junction = workspace.resolve("linked");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite linked/result.txt with exactly " + canary + ".",
+                loopResult(List.of(successfulWrite(
+                        "linked/result.txt", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertFalse(result.facts().stream().anyMatch(fact -> fact.contains(canary)));
+    }
+
+    @Test
+    void colonDelimitedExactCreatePassesTaskVerificationWithTerminalPunctuation() throws Exception {
+        Files.writeString(workspace.resolve("todo.md"), "Review the local setup.");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create todo.md containing exactly: Review the local setup. "
+                        + "Do not change any other file.",
+                loopResult(List.of(successfulWrite("todo.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Exact content verification passed"), result.summary());
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("todo.md: literal content matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void colonDelimitedExactCreateMismatchFailsTaskVerification() throws Exception {
+        Files.writeString(workspace.resolve("todo.md"), "Review the local setup");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create todo.md containing exactly: Review the local setup. "
+                        + "Do not change any other file.",
+                loopResult(List.of(successfulWrite("todo.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Exact content verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("todo.md: exact content mismatch")), result.problems().toString());
     }
 
     @Test
@@ -367,6 +461,656 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void appendSectionFieldWordingPassesWithExactPostStateAndPreservationEvidence() throws Exception {
+        String before = "# Atlas Notes\n\nA small local project for qualification tests.\n\n"
+                + "## Setup\n\nRun the local checks before committing.\n";
+        String after = before + "\n### Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.");
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                obligation,
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(evidence.requestObligationReceipt().proves(obligation));
+        assertTrue(result.summary().contains("Append section verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("README.md: requested appended section matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void appendStatementFieldWordingPassesWithFullWritePreservationEvidence() throws Exception {
+        String before = "# Decisions\n\n"
+                + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("docs/decisions.md: appended statement matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void appendStatementVerifierRejectsAConflictingSuppliedObligationAuthority()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.";
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        var exact = dev.talos.runtime.obligation.RequestObligationCompiler.compile(contract);
+        var forged = new dev.talos.runtime.obligation.RequestObligation(
+                exact.schemaVersion(),
+                exact.derivationStatus(),
+                exact.responseOwner(),
+                exact.actionKind(),
+                exact.mutationScope(),
+                exact.requiredMutationTargets(),
+                exact.requiredSourceTargets(),
+                exact.forbiddenTargets(),
+                exact.preservationConstraints(),
+                new dev.talos.runtime.obligation.RequestObligation.OutputShape(
+                        exact.outputShape().kind(),
+                        "docs/decisions.md",
+                        "Decision 999",
+                        "mutations remain unrestricted"),
+                exact.verificationPostconditions());
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                forged,
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md",
+                        before,
+                        after,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(
+                TaskVerificationStatus.FAILED,
+                evidence.compatibilityResult().status());
+        assertTrue(evidence.compatibilityResult().problems().stream()
+                .anyMatch(problem ->
+                        problem.contains("differs from production compilation")));
+    }
+
+    @Test
+    void appendStatementAllowsCaseAndOneFinalTerminatorOnly() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004 says Health checks remain read-only!\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementPassesWithExactEditEvidence() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 001 remains.\n",
+                        "Decision 001 remains.\n\nDecision 004: health checks remain read-only.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementExactEditUsesSharedLineEndingMatchingForPriorState()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.";
+        String beforeLf = "# Decisions\n\nDecision 001 remains.\n";
+        String afterLf =
+                beforeLf + "\nDecision 004: health checks remain read-only.\n";
+        String beforeCrlf = beforeLf.replace("\n", "\r\n");
+        String afterCrlf = afterLf.replace("\n", "\r\n");
+        Files.createDirectories(workspace.resolve("docs"));
+
+        Files.writeString(workspace.resolve("docs/decisions.md"), afterCrlf);
+        TaskVerificationResult lfEvidenceForCrlfFile = StaticTaskVerifier.verify(
+                workspace,
+                request,
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        beforeLf,
+                        afterLf,
+                        VerificationStatus.PASS))),
+                0);
+        assertEquals(
+                TaskVerificationStatus.PASSED,
+                lfEvidenceForCrlfFile.status(),
+                lfEvidenceForCrlfFile.toString());
+
+        Files.writeString(workspace.resolve("docs/decisions.md"), afterLf);
+        TaskVerificationResult crlfEvidenceForLfFile = StaticTaskVerifier.verify(
+                workspace,
+                request,
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        beforeCrlf,
+                        afterCrlf,
+                        VerificationStatus.PASS))),
+                0);
+        assertEquals(
+                TaskVerificationStatus.PASSED,
+                crlfEvidenceForLfFile.status(),
+                crlfEvidenceForLfFile.toString());
+    }
+
+    @Test
+    void appendStatementAllowsExactWhitespaceBoundaryFromFieldReplay() throws Exception {
+        String before = "# Decisions\n\n"
+                + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+        String appended = "Decision 004 health checks remain read-only.";
+        String after = before + "\n" + appended + "\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 003 records verification evidence after changes.\n",
+                        "Decision 003 records verification evidence after changes.\n\n" + appended + "\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementFailsClosedForWrongOrUnboundedPostState() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        List<String> invalidAfterStates = List.of(
+                before + "\nDecision 005: Health checks remain read-only.\n",
+                before + "\nDecision 004a health checks remain read-only.\n",
+                before + "\nDecision 004: Health checks may mutate files.\n",
+                before + "\nDecision 004: Health checks remain read-only for now.\n",
+                before + "\nDecision 004 health checks remain read-only for now.\n",
+                before + "\nDecision 004: Health checks remain read-only..\n",
+                before + "\nDecision 004, Health checks remain read-only.\n",
+                before + "\nDecision 004: Health checks remain read-only.\nExtra content.\n",
+                "Decision 004: Health checks remain read-only.\n" + before);
+        Files.createDirectories(workspace.resolve("docs"));
+
+        for (String after : invalidAfterStates) {
+            Files.writeString(workspace.resolve("docs/decisions.md"), after);
+            TaskVerificationResult result = StaticTaskVerifier.verify(
+                    workspace,
+                    "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                            + "Preserve Decision 001 and change no code.",
+                    loopResult(List.of(successfulFullWrite(
+                            "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                    0);
+            assertEquals(TaskVerificationStatus.FAILED, result.status(), after + "\n" + result);
+        }
+    }
+
+    @Test
+    void appendStatementRejectsExactEditThatChangesItsAnchor() throws Exception {
+        String after = "# Decisions\n\nChanged decision.\n\n"
+                + "Decision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 001 remains.\n",
+                        "Changed decision.\n\nDecision 004: Health checks remain read-only.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendStatementFailsWithoutStructuredEvidenceOrWithUnrelatedMutation() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        Files.writeString(workspace.resolve("other.md"), "changed\n");
+        String prompt = "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                + "Preserve Decision 001 and change no code.";
+
+        TaskVerificationResult missingEvidence = StaticTaskVerifier.verify(
+                workspace,
+                prompt,
+                loopResult(List.of(successfulWrite("docs/decisions.md", VerificationStatus.PASS))),
+                0);
+        assertEquals(TaskVerificationStatus.FAILED, missingEvidence.status(), missingEvidence.toString());
+
+        TaskVerificationResult unrelatedMutation = StaticTaskVerifier.verify(
+                workspace,
+                prompt,
+                loopResult(List.of(
+                        successfulFullWrite("docs/decisions.md", before, after, VerificationStatus.PASS),
+                        successfulFullWrite("other.md", "before\n", "changed\n", VerificationStatus.PASS))),
+                0);
+        assertNotEquals(TaskVerificationStatus.PASSED, unrelatedMutation.status(), unrelatedMutation.toString());
+    }
+
+    @Test
+    void verificationCommandCannotUpgradeAnUncoveredCompleteObligation()
+            throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after =
+                before + "\nDecision 004: health checks remain read-only.\n";
+        String gateway = "final class Gateway {}\n";
+        String changedGateway = "final class Gateway { int temporary; }\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.createDirectories(workspace.resolve("src"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        Files.writeString(workspace.resolve("src/Gateway.java"), gateway);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(
+                        successfulFullWrite(
+                                "docs/decisions.md",
+                                before,
+                                after,
+                                VerificationStatus.PASS),
+                        successfulFullWrite(
+                                "src/Gateway.java",
+                                gateway,
+                                changedGateway,
+                                VerificationStatus.PASS),
+                        successfulFullWrite(
+                                "src/Gateway.java",
+                                changedGateway,
+                                gateway,
+                                VerificationStatus.PASS),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.run_command",
+                                "",
+                                true,
+                                false,
+                                false,
+                                "Command succeeded: gradle_check exited with code 0 after 1234ms.",
+                                ""))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(problem -> problem.contains(
+                        "did not cover every successful mutation")));
+    }
+
+    @Test
+    void completeObligationCannotPassWithAnUnstructuredMutationSuccess()
+            throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after =
+                before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md",
+                        before,
+                        after,
+                        VerificationStatus.PASS))),
+                1);
+
+        assertEquals(
+                TaskVerificationStatus.UNAVAILABLE,
+                result.status(),
+                result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(problem -> problem.contains(
+                        "does not cover every successful mutation")));
+    }
+
+    @Test
+    void appendStatementExpectationTraceIsRedacted() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        String prompt = "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                + "Preserve Decision 001 and change no code.";
+        LocalTurnTraceCapture.begin(
+                "trc-test-append-statement", "session-test", 1, "2026-07-13T00:00:00Z",
+                "workspace-hash", "auto", "llama_cpp", "granite-4.1-3b", prompt);
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    prompt,
+                    loopResult(List.of(successfulFullWrite(
+                            "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("APPEND_STATEMENT", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertFalse(event.data().containsValue("Decision 004"));
+            assertFalse(event.data().containsValue("health checks remain read-only"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void provisionalVerificationDoesNotReplaceTheTurnOwnedRequestObligation()
+            throws Exception {
+        String request =
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.";
+        var turnObligation =
+                dev.talos.runtime.obligation.RequestObligationCompiler.compile(
+                        TaskContractResolver.fromUserRequest(request));
+        Files.writeString(workspace.resolve("notes.txt"), "updated");
+        LocalTurnTraceCapture.begin(
+                "trc-request-obligation-provisional-verification",
+                "session-test",
+                1,
+                "2026-07-28T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                request);
+        try {
+            LocalTurnTraceCapture.recordRequestObligation(turnObligation);
+            StaticTaskVerifier.verifyWithoutTraceEvents(
+                    workspace,
+                    TaskContractResolver.fromUserRequest("Update notes.txt."),
+                    loopResult(List.of(successfulWrite(
+                            "notes.txt",
+                            VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            List<dev.talos.runtime.trace.TurnTraceEvent> obligations =
+                    trace.events().stream()
+                            .filter(event -> event.type().equals(
+                                    "REQUEST_OBLIGATION_COMPILED"))
+                            .toList();
+            assertEquals(1, obligations.size());
+            assertEquals(
+                    turnObligation.canonicalSha256(),
+                    obligations.getFirst().data().get("canonicalSha256"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenHeadingIsMissing() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: requested Markdown section heading was not found")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenExactSentenceIsMissing() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\n## Contributing\nRun checks before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: requested section sentence was not found")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenPriorContentWasRewritten() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = "# Changed Notes\n\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: append-section mutation did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingPassesWithExactEditEvidence() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Existing text.\n",
+                        "Existing text.\n\n## Contributing\nRun tests before review.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenExactEditChangesItsAnchor() throws Exception {
+        String after = "# Atlas Notes\n\nChanged text.\n\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Existing text.\n",
+                        "Changed text.\n\n## Contributing\nRun tests before review.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("append-section mutation did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWithoutStructuredMutationEvidence() throws Exception {
+        Files.writeString(workspace.resolve("README.md"),
+                "# Atlas Notes\n\n## Contributing\nRun tests before review.\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("cannot prove append-section preservation")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenRequestedSectionIsNotLast() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before
+                + "\n## Contributing\nRun tests before review.\n"
+                + "\n## Later section\nLater content.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("was not appended as the final document section")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsForDuplicateRequestedHeadings() throws Exception {
+        String before = "# Atlas Notes\n\n## Contributing\nOld guidance.\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("heading was not unique")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionExpectationTraceEventIsRedacted() throws Exception {
+        String before = "# Atlas Notes\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+        String request = "Append a Contributing section to README.md with one sentence saying "
+                + "Run tests before review. Preserve all current text.";
+        LocalTurnTraceCapture.begin(
+                "trc-test-append-section",
+                "session-test",
+                1,
+                "2026-07-13T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                request);
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    request,
+                    loopResult(List.of(successfulFullWrite(
+                            "README.md", before, after, VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("APPEND_SECTION", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertFalse(event.data().containsValue("Contributing"),
+                    "default trace must not store the raw section heading");
+            assertFalse(event.data().containsValue("Run tests before review."),
+                    "default trace must not store the raw requested sentence");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void appendLineExpectationFailsWhenFullWriteEvidenceRewritesPriorContent() throws Exception {
         Files.writeString(workspace.resolve("README.md"), """
                 Different intro
@@ -478,7 +1222,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
 
@@ -519,7 +1263,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Append exactly this line to README.md: Release gate note");
 
@@ -561,7 +1305,7 @@ class StaticTaskVerifierTest {
                 "2026-04-29T00:00:00Z",
                 "workspace-hash",
                 "auto",
-                "ollama",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 "Replace .missing-button with #submit in script.js.");
 
@@ -1887,7 +2631,7 @@ class StaticTaskVerifierTest {
 
         TaskVerificationResult result = StaticTaskVerifier.verify(
                 workspace,
-                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed.",
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files.",
                 loopResult(List.of(successfulWrite("style.css", VerificationStatus.PASS))),
                 0);
 
@@ -2449,9 +3193,9 @@ class StaticTaskVerifierTest {
         Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -2505,7 +3249,7 @@ class StaticTaskVerifierTest {
 
         assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
                 evidence.compatibilityResult().summary());
-        assertTrue(evidence.compatibilityResult().summary().contains("Required interaction verification passed"),
+        assertTrue(evidence.compatibilityResult().summary().contains("Required verification passed"),
                 evidence.compatibilityResult().summary());
         assertEquals(1, evidence.report().requiredClaimCount(), evidence.report().toString());
         assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
@@ -2867,9 +3611,9 @@ class StaticTaskVerifierTest {
                 """);
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -2942,9 +3686,9 @@ class StaticTaskVerifierTest {
         Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
         Files.writeString(workspace.resolve("scripts.js"), """
                 const trigger = document.getElementById('teaser-button');
-                const status = document.getElementById('teaser-status');
+                const statusOutput = document.getElementById('teaser-status');
                 trigger.addEventListener('click', function() {
-                  status.textContent = 'Teaser ready';
+                  statusOutput.textContent = 'Teaser ready';
                 });
                 """);
 
@@ -3408,6 +4152,29 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactQuotedReplacementPassesForTheInstalledSmokeWording() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Smoke
+
+                The profile smoke passed.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "In README.md, replace the exact text \"The profile smoke is pending.\" "
+                        + "with \"The profile smoke passed.\" Change nothing else.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "The profile smoke is pending.",
+                        "The profile smoke passed.",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+    }
+
+    @Test
     void replacementExpectationFailsWhenOldTextRemains() throws Exception {
         Files.writeString(workspace.resolve("script.js"), """
                 document.querySelector('.missing-button');
@@ -3464,6 +4231,80 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void explicitStaticWebContentClaimsFailWhenOneRequestedClauseIsMissing() throws Exception {
+        writeAtlasControlWebFiles("""
+                <h1>Atlas Control</h1>
+                <button id="status">Check status</button>
+                <p id="message">Waiting</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(1, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+        assertTrue(evidence.report().problems().stream()
+                        .anyMatch(problem -> problem.contains("requested status paragraph prefix")),
+                evidence.report().problems().toString());
+        assertFalse(evidence.compatibilityResult().summary().contains("Static web coherence checks passed"),
+                evidence.compatibilityResult().summary());
+    }
+
+    @Test
+    void explicitStaticWebContentClaimsPassOnlyWhenEveryRequestedClauseIsSatisfied() throws Exception {
+        writeAtlasControlWebFiles("""
+                <h1>Atlas Control</h1>
+                <button id="status">Check status</button>
+                <p id="message">Offline. Last checked locally.</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(0, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+    }
+
+    @Test
+    void explicitStaticWebContentClaimsDoNotPassFromCommentsOrUnrelatedParagraphs() throws Exception {
+        writeAtlasControlWebFiles("""
+                <!-- Atlas Control -->
+                <h1>Atlas workspace</h1>
+                <p>Offline information for support.</p>
+                <button id="status">Check status</button>
+                <p id="message">Waiting</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(2, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+    }
+
+    @Test
     void replacementPreserveRestPassesWhenFullWriteEvidenceOnlyReplacesRequestedText() throws Exception {
         String previous = """
                 <html>
@@ -3488,6 +4329,64 @@ class StaticTaskVerifierTest {
         assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
         assertTrue(result.facts().stream()
                 .anyMatch(f -> f.contains("index.html: replacement preservation matched prior content")));
+    }
+
+    @Test
+    void f17ScopedChangeUsesTheCompiledPreserveRestObligation() throws Exception {
+        String previous = "Status: draft\nKeep this final line unchanged.\n";
+        String updated = "Status: final\nKeep this final line unchanged.\n";
+        Files.writeString(workspace.resolve("notes.md"), updated);
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, change draft to final. If an exact edit fails, "
+                        + "recover without deleting any other line.");
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                obligation,
+                loopResult(List.of(successfulExactEdit(
+                        "notes.md",
+                        "Status: draft",
+                        "Status: final",
+                        VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(evidence.requestObligationReceipt().proves(obligation));
+        assertTrue(result.summary().contains("Replacement verification passed"),
+                result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains(
+                        "notes.md: replacement text observed and old text absent.")),
+                result.facts().toString());
+    }
+
+    @Test
+    void f17CompiledObligationRejectsDeletionOfAnUnrelatedLine() throws Exception {
+        String previous = "Status: draft\nKeep this final line unchanged.\n";
+        String updated = "Status: final\n";
+        Files.writeString(workspace.resolve("notes.md"), updated);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "In notes.md, change draft to final. If an exact edit fails, "
+                        + "recover without deleting any other line.",
+                loopResult(List.of(successfulFullWrite(
+                        "notes.md",
+                        previous,
+                        updated,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Replacement verification failed"),
+                result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains(
+                                "replacement preservation changed content beyond the requested text")),
+                result.problems().toString());
     }
 
     @Test
@@ -4171,6 +5070,27 @@ class StaticTaskVerifierTest {
                 """);
     }
 
+    private void writeAtlasControlWebFiles(String bodyContent) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main>
+                """ + bodyContent + """
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('status').addEventListener('click', () => {
+                  document.getElementById('message').textContent = 'Checked';
+                });
+                """);
+    }
+
     private void writeValidBmiWebFiles() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
@@ -4291,7 +5211,10 @@ class StaticTaskVerifierTest {
                 toolName, path, true, true, false,
                 "edited " + path, "", verificationStatus, "",
                 null,
-                ToolMutationEvidence.exactEdit(oldString, newString));
+                ToolMutationEvidence.exactEdit(oldString, newString),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
     }
 
     private static ToolCallLoop.ToolOutcome successfulFullWrite(
@@ -4303,7 +5226,10 @@ class StaticTaskVerifierTest {
                 "talos.write_file", path, true, true, false,
                 "wrote " + path, "", verificationStatus, "",
                 null,
-                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent));
+                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent),
+                ToolFailureReason.NONE,
+                List.of(),
+                "call-1-1");
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {
@@ -4321,5 +5247,55 @@ class StaticTaskVerifierTest {
                 "Done.", 1, outcomes.size(), List.of("talos.edit_file"), List.of(),
                 0, 0, false, successes, List.of(),
                 0, 0, 0, 0, outcomes);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aWriteToAFileWhoseNameHoldsABackslashDoesNotSatisfyTheNestedTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "unchanged\n");
+        Path literal = Files.writeString(root.resolve("docs\\a.md"), "changed\n");
+        assumeTrue(root.equals(literal.getParent()), "this file system reads the backslash as a separator");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                root,
+                new TaskContract(TaskType.FILE_EDIT, true, true, true,
+                        Set.of("docs/a.md"), Set.of(), "Update docs/a.md."),
+                loopResult(List.of(successfulWrite(literal.toString(), VerificationStatus.PASS))),
+                0);
+
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("docs/a.md: expected target was not successfully mutated")),
+                result.problems().toString());
+    }
+
+    @Test
+    void aWriteThroughTheAbsolutePathSatisfiesTheNestedTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("a.md"), "changed\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                root,
+                new TaskContract(TaskType.FILE_EDIT, true, true, true,
+                        Set.of("docs/a.md"), Set.of(), "Update docs/a.md."),
+                loopResult(List.of(successfulWrite(
+                        root.resolve("docs").resolve("a.md").toString(), VerificationStatus.PASS))),
+                0);
+
+        assertTrue(result.problems().stream()
+                        .noneMatch(problem -> problem.contains("expected target was not successfully mutated")),
+                result.problems().toString());
     }
 }

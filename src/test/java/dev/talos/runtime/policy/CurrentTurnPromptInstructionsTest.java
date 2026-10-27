@@ -66,7 +66,7 @@ class CurrentTurnPromptInstructionsTest {
     }
 
     @Test
-    void noArgTaskContractInstructionPreservesDefaultMutationTools() {
+    void noArgTaskContractInstructionDoesNotAdvertiseWorkspaceAuthority() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Create README.md."));
@@ -82,17 +82,18 @@ class CurrentTurnPromptInstructionsTest {
 
         assertTrue(frame.contains("type: FILE_CREATE"));
         assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
-        assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
-        assertTrue(frame.contains("talos.copy_path"));
-        assertTrue(frame.contains("talos.mkdir"));
-        assertTrue(frame.contains("talos.move_path"));
-        assertTrue(frame.contains("talos.rename_path"));
+        assertFalse(frame.contains("talos.apply_workspace_batch"), frame);
+        assertFalse(frame.contains("talos.copy_path"), frame);
+        assertFalse(frame.contains("talos.mkdir"), frame);
+        assertFalse(frame.contains("talos.move_path"), frame);
+        assertFalse(frame.contains("talos.rename_path"), frame);
+        assertFalse(frame.contains("talos.delete_path"), frame);
         assertTrue(frame.contains("talos.write_file"));
         assertTrue(frame.contains("talos.edit_file"));
     }
 
     @Test
-    void nullPlanInstructionFallbackKeepsDefaultMutationTools() {
+    void nullPlanInstructionFallbackDoesNotAdvertiseWorkspaceAuthority() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Create README.md."));
@@ -108,11 +109,12 @@ class CurrentTurnPromptInstructionsTest {
 
         assertTrue(frame.contains("type: FILE_CREATE"));
         assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
-        assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
-        assertTrue(frame.contains("talos.copy_path"));
-        assertTrue(frame.contains("talos.mkdir"));
-        assertTrue(frame.contains("talos.move_path"));
-        assertTrue(frame.contains("talos.rename_path"));
+        assertFalse(frame.contains("talos.apply_workspace_batch"), frame);
+        assertFalse(frame.contains("talos.copy_path"), frame);
+        assertFalse(frame.contains("talos.mkdir"), frame);
+        assertFalse(frame.contains("talos.move_path"), frame);
+        assertFalse(frame.contains("talos.rename_path"), frame);
+        assertFalse(frame.contains("talos.delete_path"), frame);
         assertTrue(frame.contains("talos.write_file"));
         assertTrue(frame.contains("talos.edit_file"));
     }
@@ -129,10 +131,15 @@ class CurrentTurnPromptInstructionsTest {
         assertEquals(3, messages.size());
         assertEquals("system", messages.get(1).role());
         String instruction = messages.get(1).content();
+        assertTrue(instruction.contains("[CurrentTurnCapability]"));
         assertTrue(instruction.contains("[TaskContract]"));
+        assertTrue(instruction.contains("type: DIAGNOSE_ONLY"));
         assertTrue(instruction.contains("mutationAllowed: false"));
-        assertTrue(instruction.contains("Do not call talos.write_file or talos.edit_file"));
+        assertTrue(instruction.contains("obligation: INSPECT_REQUIRED"));
+        assertTrue(instruction.contains("Do not call mutating tools"));
         assertTrue(instruction.contains("wait for an explicit change request"));
+        assertFalse(instruction.contains("talos.write_file"));
+        assertFalse(instruction.contains("talos.edit_file"));
     }
 
     @Test
@@ -201,7 +208,8 @@ class CurrentTurnPromptInstructionsTest {
         assertEquals(3, messages.size());
         String instruction = messages.get(1).content();
         assertTrue(instruction.contains("type: SMALL_TALK"));
-        assertTrue(instruction.contains("Answer directly"));
+        assertTrue(instruction.contains("Answer the user's requested topic directly"));
+        assertFalse(instruction.contains("Talos product identity/capability only"));
         assertTrue(instruction.contains("Do not call tools"));
         assertFalse(instruction.contains("Use talos.list_dir"));
     }

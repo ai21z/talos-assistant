@@ -2,7 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskContract;
@@ -26,6 +26,28 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExactWriteContextFallbackTest {
+    @Test
+    void compactWritePreservesItsLiteralWhileProjectingTheCapturedIdentityTask() {
+        String original = "Who are you? Overwrite index.html with exactly AFTER. Use talos.write_file.";
+        var contract = new TaskContract(TaskType.FILE_EDIT, true, true, true, Set.of("index.html"), Set.of(), original);
+        var baseline = exactWritePlan();
+        var plan = new CurrentTurnPlan(contract, original, ExecutionPhase.APPLY, ExecutionPhase.APPLY,
+                ActionObligation.MUTATING_TOOL_REQUIRED, baseline.taskExpectations(), List.of("talos.write_file"),
+                List.of("talos.write_file"), List.of(), CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NOT_DERIVED,
+                "", CurrentTurnPlan.NONE_OR_NOT_DERIVED, CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+        var messages = List.of(ChatMessage.system("system"), ChatMessage.user(original));
+        dev.talos.runtime.TurnTaskContractCapture.set(dev.talos.runtime.task.TaskResolution.contractOnly(contract), messages,
+                dev.talos.spi.types.ModelIdentitySnapshot.empty(), true);
+        try {
+            var request = ExactWriteContextFallback.prepare(Context.builder(new Config()).nativeToolSpecs(List.of(writeFile())).build(),
+                    plan, (ctx, selected, tools) -> ChatRequestControls.defaults()).orElseThrow();
+            assertEquals("Overwrite index.html with exactly AFTER. Use talos.write_file.", request.messages().getLast().content().strip());
+            assertTrue(request.messages().stream().anyMatch(message -> message.content().contains("AFTER")));
+            assertEquals(original, dev.talos.runtime.TurnTaskContractCapture.get().originalUserRequest());
+            assertEquals(baseline.taskExpectations(), plan.taskExpectations());
+        } finally { dev.talos.runtime.TurnTaskContractCapture.clear(); }
+    }
+
     @Test
     void preparesCompactExactWriteFallbackWithWriteFileOnly() {
         Context ctx = Context.builder(new Config())
@@ -57,6 +79,26 @@ class ExactWriteContextFallbackTest {
         assertEquals(ToolChoiceMode.REQUIRED, request.controls().toolChoice());
         assertTrue(request.controls().debugTags().contains("existing-tag"));
         assertTrue(request.controls().debugTags().contains("context-budget-current-turn-fallback"));
+    }
+
+    @Test
+    void compactExactWriteFallbackClearsInitialOutputCap() {
+        Context ctx = Context.builder(new Config())
+                .nativeToolSpecs(List.of(writeFile()))
+                .build();
+        CurrentTurnPlan plan = exactWritePlan();
+
+        ExactWriteContextFallback.Request request = ExactWriteContextFallback
+                .prepare(ctx, plan, (ignoredCtx, ignoredPlan, ignoredTools) -> new ChatRequestControls(
+                        ToolChoiceMode.REQUIRED,
+                        "talos.write_file",
+                        ResponseFormatMode.TEXT,
+                        "",
+                        List.of()).withMaxOutputTokens(1024))
+                .orElseThrow();
+
+        assertEquals(0, request.controls().maxOutputTokens(),
+                "compact exact-write fallback must be allowed to emit complete file bodies");
     }
 
     @Test
@@ -138,11 +180,7 @@ class ExactWriteContextFallbackTest {
                 ExecutionPhase.APPLY,
                 ExecutionPhase.APPLY,
                 ActionObligation.MUTATING_TOOL_REQUIRED,
-                List.of(new LiteralContentExpectation(
-                        "index.html",
-                        "AFTER",
-                        LiteralContentExpectation.MatchMode.EXACT,
-                        "with exactly")),
+                TaskExpectationResolver.resolve(contract),
                 List.of("talos.write_file"),
                 List.of("talos.write_file"),
                 List.of(),

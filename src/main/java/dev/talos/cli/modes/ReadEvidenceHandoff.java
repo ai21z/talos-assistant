@@ -9,7 +9,6 @@ import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.safety.SafeLogFormatter;
@@ -30,8 +29,13 @@ final class ReadEvidenceHandoff {
     record Result(
             String answer,
             ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
+            String extraSummary,
+            AnswerOutputLimit outputLimit
+    ) {
+        Result(String answer, ToolCallLoop.LoopResult loopResult, String extraSummary) {
+            this(answer, loopResult, extraSummary, AnswerOutputLimit.KEEP_ORIGINAL);
+        }
+    }
 
     static Result unsupportedCapabilityPreflightIfNeeded(
             List<ChatMessage> messages,
@@ -100,8 +104,11 @@ final class ReadEvidenceHandoff {
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
         try {
-            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().run(
+            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().runRuntimeDeterministic(
                     handoffCalls,
+                    List.of(),
+                    dev.talos.runtime.trace.LocalTurnTraceCapture
+                            .RuntimeToolAuthorityReason.READ_EVIDENCE_HANDOFF,
                     messages,
                     workspace,
                     ctx);
@@ -109,8 +116,14 @@ final class ReadEvidenceHandoff {
             return new Result(
                     mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
                     loop,
-                    loop.summary());
+                    loop.summary(),
+                    mergedAnswer == null || mergedAnswer.isBlank() ? AnswerOutputLimit.KEEP_ORIGINAL
+                            : AnswerOutputLimit.selected(loop.finalAnswerOutputLimitReached()));
         } catch (Exception e) {
+            if (dev.talos.runtime.TurnFailureClassifier.isCancellation(e)
+                    || dev.talos.runtime.TurnFailureClassifier.isInterruption(e)) {
+                throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(e);
+            }
             LOG.warn("Read evidence handoff failed: {}", SafeLogFormatter.throwableMessage(e));
             return new Result(answer, null, null);
         }
@@ -242,7 +255,7 @@ final class ReadEvidenceHandoff {
 
     private static CurrentTurnPlan safePlan(CurrentTurnPlan plan, List<ChatMessage> messages) {
         if (plan != null) return plan;
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = TurnTaskContractCapture.currentOrResolve(messages);
         return CurrentTurnPlan.compatibility(contract, ExecutionPhase.INSPECT, List.of(), List.of(), List.of());
     }
 }

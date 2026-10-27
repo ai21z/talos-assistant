@@ -87,20 +87,16 @@ public final class ToolCallParser {
             Pattern.DOTALL
     );
 
-    /** Code-fenced JSON blocks containing any of the recognized name-key aliases.
-     *  The alias set ({@code name | function | function_name | tool_name | tool}) is kept in sync with
-     *  {@link #extractName(JsonNode)} so the detection gate is not narrower than the
-     *  alias-aware extractor. Without this, a model emitting {@code ```json { "tool_name": ... }```}
-     *  has its fallback tool call silently dropped before extraction. */
-    private static final Pattern CODE_FENCE_PATTERN = Pattern.compile(
+    /**
+     * Exact predecessor discovery grammars retained only to preserve which
+     * payload identities could suppress a later deprecated XML duplicate.
+     * Canonical JSON execution does not consume either pattern.
+     */
+    private static final Pattern LEGACY_XML_IDENTITY_CODE_FENCE_PATTERN = Pattern.compile(
             "```(?:json)?[ \\t]*\\R([\\s\\S]*?\"(?:name|function|function_name|tool_name|tool)\"[\\s\\S]*?)\\R?```"
     );
-
-    /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper).
-     *  Owned by {@link ToolProtocolText#bareToolJsonPattern()} so the parser and the
-     *  protocol stripper cannot drift; see that field for the possessive-quantifier
-     *  backtracking rationale (T754). */
-    private static final Pattern BARE_JSON_PATTERN = ToolProtocolText.bareToolJsonPattern();
+    private static final Pattern LEGACY_XML_IDENTITY_BARE_JSON_PATTERN =
+            ToolProtocolText.bareToolJsonPattern();
 
     private ToolCallParser() {} // utility class
 
@@ -114,41 +110,38 @@ public final class ToolCallParser {
         }
 
         List<ToolCall> calls = new ArrayList<>();
-        Set<String> consumedPayloads = new HashSet<>();
+        boolean hasDeprecatedXmlEnvelope =
+                VARIANT_TAG_PATTERN.matcher(llmResponse).find();
+        Set<String> consumedLegacyXmlPayloads = hasDeprecatedXmlEnvelope
+                ? predecessorLegacyXmlPayloadIdentities(llmResponse)
+                : new HashSet<>();
 
-        // Pass 1: code-fenced JSON blocks - ACTIVE fallback format (instructed)
-        extractFromPattern(CODE_FENCE_PATTERN, 1, llmResponse, calls, consumedPayloads);
-
-        // Pass 2: bare JSON (only if no code-fenced blocks were found - avoids
-        // double-parsing when the model wraps AND bare-emits the same call)
-        if (calls.isEmpty()) {
-            extractFromPattern(BARE_JSON_PATTERN, 1, llmResponse, calls, consumedPayloads);
+        // JSON candidate discovery, fenced-first priority, leading-adjacent
+        // compatibility, and exact-root deduplication have one canonical owner.
+        // The parser consumes its immutable execution order without selecting
+        // JSON a second time.
+        ToolProtocolText.JsonProposalSelection selection =
+                ToolProtocolText.selectExecutableJsonProposals(llmResponse);
+        for (ToolProtocolText.SelectedExecutableJsonSpan span
+                : selection.executionOrder()) {
+            String root = span.rootFrom(llmResponse);
+            extractSelectedJsonPayload(root, calls);
         }
-
-        // Pass 2b: Jackson-based adjacent standalone JSON objects.
-        // Supplements Pass 2 when BARE_JSON_PATTERN misses objects whose string values
-        // contain literal brace characters (e.g. CSS rules in old_string/new_string,
-        // JavaScript function bodies in content). Uses call-identity deduplication to
-        // avoid re-adding anything Pass 2 already found.
-        // Only runs for responses that start with '{' - i.e. raw-JSON-only model output.
-        extractAdjacentStandaloneToolJsons(llmResponse, calls);
 
         // Pass 3: XML-tagged blocks - DEPRECATED COMPATIBILITY ONLY (checked last).
         //         Not actively instructed. Retained only for models that still emit
         //         XML from training habits. Will be removed once native calling is stable.
         int preXmlCount = calls.size();
-        extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
+        extractFromPattern(
+                VARIANT_TAG_PATTERN,
+                2,
+                llmResponse,
+                calls,
+                consumedLegacyXmlPayloads);
         if (calls.size() > preXmlCount) {
             XmlCompatTelemetry.recordParserFallback(calls.subList(preXmlCount, calls.size()));
             LOG.warn("XML tool-call format detected - this is deprecated. "
                     + "The model should use native tool calling or JSON code-fence format.");
-        }
-
-        if (calls.isEmpty()) {
-            ToolCall standalone = tryParseStandaloneToolJson(llmResponse);
-            if (standalone != null) {
-                calls.add(standalone);
-            }
         }
 
         return Collections.unmodifiableList(calls);
@@ -158,21 +151,12 @@ public final class ToolCallParser {
      * Returns true if the response contains at least one recognizable
      * tool-call block (tagged, code-fenced, bare JSON, or adjacent standalone JSON).
      *
-     * <p>The final check mirrors Pass 2b in {@link #parse}: uses Jackson streaming
-     * to detect adjacent raw JSON objects whose string values contain brace characters
-     * that {@link #BARE_JSON_PATTERN} cannot traverse.
+     * <p>JSON containment delegates to the same structural span contract
+     * consumed by {@link #parse}; deprecated XML compatibility remains a
+     * separate last-priority format.
      */
     public static boolean containsToolCalls(String llmResponse) {
-        if (llmResponse == null || llmResponse.isBlank()) return false;
-        if (VARIANT_TAG_PATTERN.matcher(llmResponse).find()) return true;
-        if (CODE_FENCE_PATTERN.matcher(llmResponse).find()) return true;
-        if (BARE_JSON_PATTERN.matcher(llmResponse).find()) return true;
-        if (tryParseStandaloneToolJson(llmResponse) != null) return true;
-        // Align with Pass 2b: detect adjacent standalone raw JSON objects that
-        // BARE_JSON_PATTERN misses when string values contain literal brace chars.
-        var probe = new ArrayList<ToolCall>(1);
-        extractAdjacentStandaloneToolJsons(llmResponse, probe);
-        return !probe.isEmpty();
+        return ToolProtocolText.containsToolCalls(llmResponse);
     }
 
     /** Strip all recognized tool-call blocks, returning only the LLM's prose. */
@@ -180,7 +164,8 @@ public final class ToolCallParser {
         return ToolProtocolText.stripToolCalls(llmResponse);
     }
 
-    static boolean looksLikeUnfinishedToolPayload(String llmResponse) {
+    /** Non-executing guard shared by loop completion and bounded response-only synthesis. */
+    public static boolean looksLikeUnfinishedToolPayload(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
             return false;
         }
@@ -261,60 +246,79 @@ public final class ToolCallParser {
     }
 
     static boolean isRecognizedToolName(String rawName) {
-        return ToolAliasPolicy.resolve(rawName).accepted();
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(rawName);
+        return decision.accepted()
+                || (decision.status() == ToolAliasPolicy.AliasDecisionStatus.UNKNOWN
+                && decision.canonicalToolName().startsWith("talos."));
     }
 
     // ── Internal extraction helpers ──────────────────────────────────
 
-    /**
-     * Pass 2b: Jackson streaming extractor for adjacent standalone raw JSON tool objects.
-     *
-     * <p>The regex-based {@link #BARE_JSON_PATTERN} uses {@code [^{}]*} for inner
-     * content and therefore misses JSON objects whose string values contain literal
-     * brace characters (for example CSS rules in {@code old_string}, or JavaScript
-     * function bodies in {@code content}). This pass uses Jackson's streaming
-     * {@code MappingIterator} which correctly handles braces inside string values.
-     *
-     * <p>Runs after Pass 2 and supplements it: any valid {@code talos.*} calls not
-     * already present in {@code calls} are appended. Deduplication is by call identity
-     * (toolName + parameters) so the key format is independent of the raw-text
-     * normalization used by {@link #extractFromPattern}.
-     *
-     * <p>Restricted to raw-JSON-only model output: only runs when the trimmed text
-     * starts with an open brace, ensuring prose, code-fenced, and XML-tagged
-     * responses are never affected.
-     */
-    private static void extractAdjacentStandaloneToolJsons(String text, List<ToolCall> calls) {
-        String trimmed = text == null ? "" : text.strip();
-        if (!trimmed.startsWith("{")) {
-            return;
-        }
-        try (var jp = MAPPER.createParser(trimmed)) {
-            var iter = MAPPER.readerFor(JsonNode.class).<JsonNode>readValues(jp);
-            while (iter.hasNextValue()) {
-                JsonNode node;
-                try {
-                    node = iter.nextValue();
-                } catch (Exception e) {
-                    LOG.debug("Adjacent JSON pass: stopping at non-JSON boundary: {}",
-                            SafeLogFormatter.throwableMessage(e));
-                    break;
-                }
-                if (!node.isObject()) continue;
-                ToolCall call = parseJsonNode(node);
-                if (call == null || call.toolName() == null || !isRecognizedToolName(call.toolName())) {
-                    continue;
-                }
-                boolean duplicate = calls.stream().anyMatch(c ->
-                        c.toolName().equals(call.toolName()) &&
-                        c.parameters().equals(call.parameters()));
-                if (!duplicate) {
-                    calls.add(call);
-                }
+    private static void extractSelectedJsonPayload(
+            String jsonPayload,
+            List<ToolCall> calls) {
+        try {
+            ToolCall call = parseJson(jsonPayload);
+            if (call != null && isRecognizedToolName(call.toolName())) {
+                calls.add(call);
             }
         } catch (Exception e) {
-            LOG.debug("Adjacent JSON pass: extraction failed: {}", SafeLogFormatter.throwableMessage(e));
+            // Canonical extraction already validated this exact payload. Keep
+            // the parser fail-closed if an internal contract ever drifts.
+            LOG.warn("Failed to parse validated tool_call JSON: {}",
+                    SafeLogFormatter.throwableMessage(e));
+            LOG.debug("Rejected validated payload: {}",
+                    SafeLogFormatter.value(jsonPayload));
         }
+    }
+
+    private static Set<String> predecessorLegacyXmlPayloadIdentities(
+            String response) {
+        Set<String> consumed = new HashSet<>();
+        boolean fencedCallWasRecognized = collectPredecessorLegacyXmlIdentities(
+                LEGACY_XML_IDENTITY_CODE_FENCE_PATTERN,
+                response,
+                consumed);
+        if (!fencedCallWasRecognized) {
+            collectPredecessorLegacyXmlIdentities(
+                    LEGACY_XML_IDENTITY_BARE_JSON_PATTERN,
+                    response,
+                    consumed);
+        }
+        return consumed;
+    }
+
+    /**
+     * Mirrors only the predecessor's identity side effect. The returned flag
+     * reproduces its {@code calls.isEmpty()} gate between fenced and bare JSON;
+     * canonical selection remains the sole owner of executable JSON calls.
+     */
+    private static boolean collectPredecessorLegacyXmlIdentities(
+            Pattern pattern,
+            String response,
+            Set<String> consumed) {
+        boolean recognizedCall = false;
+        Matcher matcher = pattern.matcher(response);
+        while (matcher.find()) {
+            String payload = matcher.group(1).strip();
+            if (payload.isEmpty()) continue;
+            String identity = legacyXmlPayloadIdentity(payload);
+            if (!consumed.add(identity)) continue;
+            try {
+                ToolCall call = parseJson(payload);
+                if (call != null && isRecognizedToolName(call.toolName())) {
+                    recognizedCall = true;
+                }
+            } catch (Exception e) {
+                // The predecessor retained this identity before attempting
+                // to parse it, so malformed payloads remain consumed here.
+                LOG.warn("Failed to parse tool_call JSON: {}",
+                        SafeLogFormatter.throwableMessage(e));
+                LOG.debug("Malformed payload: {}",
+                        SafeLogFormatter.value(payload));
+            }
+        }
+        return recognizedCall;
     }
 
     /** Extract tool calls from all matches of a pattern, deduplicating by payload. */
@@ -326,13 +330,14 @@ public final class ToolCallParser {
             String jsonPayload = matcher.group(group).strip();
             if (jsonPayload.isEmpty()) continue;
 
-            // Deduplicate: skip if we already parsed an identical payload
-            String normalized = jsonPayload.replaceAll("\\s+", " ");
-            if (!consumed.add(normalized)) continue;
+            // This path owns only the deprecated XML wrapper. Preserve its
+            // predecessor's whitespace-normalized deduplication identity,
+            // while parsing and executing the original payload bytes.
+            if (!consumed.add(legacyXmlPayloadIdentity(jsonPayload))) continue;
 
             try {
                 ToolCall call = parseJson(jsonPayload);
-                if (call != null) {
+                if (call != null && isRecognizedToolName(call.toolName())) {
                     calls.add(call);
                 }
             } catch (Exception e) {
@@ -342,22 +347,8 @@ public final class ToolCallParser {
         }
     }
 
-    private static ToolCall tryParseStandaloneToolJson(String text) {
-        String trimmed = text == null ? "" : text.strip();
-        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-            return null;
-        }
-        try {
-            ToolCall call = parseJson(trimmed);
-            if (call == null) {
-                return null;
-            }
-            return call.toolName() != null && isRecognizedToolName(call.toolName())
-                    ? call
-                    : null;
-        } catch (Exception ignored) {
-            return null;
-        }
+    private static String legacyXmlPayloadIdentity(String payload) {
+        return Objects.toString(payload, "").replaceAll("\\s+", " ");
     }
 
     /** Parse a single JSON payload into a ToolCall (handles key aliases and nested wrappers). */

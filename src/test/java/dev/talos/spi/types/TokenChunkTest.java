@@ -32,6 +32,35 @@ class TokenChunkTest {
             assertTrue(ch.done());
             assertNull(ch.toolCalls());
             assertFalse(ch.hasToolCalls());
+            assertEquals(TokenChunk.TerminalSignal.PROVIDER_SENTINEL, ch.terminalSignal());
+        }
+
+        @Test
+        void transportEofIsMechanicallyDistinctFromProviderSentinel() {
+            TokenChunk ch = TokenChunk.transportEof("stop");
+            assertTrue(ch.done());
+            assertEquals("stop", ch.finishReason());
+            assertEquals(TokenChunk.TerminalSignal.TRANSPORT_EOF, ch.terminalSignal());
+        }
+
+        @Test
+        void terminalEvidenceDoesNotExpandOrRedefineThePublicRecordContract() {
+            assertArrayEquals(
+                    new String[]{"text", "done", "toolCalls", "finishReason"},
+                    java.util.Arrays.stream(TokenChunk.class.getRecordComponents())
+                            .map(java.lang.reflect.RecordComponent::getName)
+                            .toArray(String[]::new));
+
+            TokenChunk historical = new TokenChunk("", true, null, "stop");
+            TokenChunk transportEof = TokenChunk.transportEof("stop");
+            assertEquals(historical, transportEof,
+                    "typed evidence must not change established record equality");
+            assertEquals(historical.hashCode(), transportEof.hashCode());
+            assertEquals(historical.toString(), transportEof.toString());
+            assertEquals(TokenChunk.TerminalSignal.PROVIDER_SENTINEL,
+                    historical.terminalSignal());
+            assertEquals(TokenChunk.TerminalSignal.TRANSPORT_EOF,
+                    transportEof.terminalSignal());
         }
 
         @Test

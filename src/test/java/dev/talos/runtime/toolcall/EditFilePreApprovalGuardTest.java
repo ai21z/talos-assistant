@@ -48,6 +48,54 @@ class EditFilePreApprovalGuardTest {
     }
 
     @Test
+    void anEditRecoveryTargetGetsARecoveryDiagnosticNotStaticWebWording() {
+        // T1003 targets are merged into the same redirect set as static-web
+        // repair targets, but the blocked-edit reason must name the actual
+        // mechanism: claiming "Static verification repair ... small web
+        // file" for a Markdown recovery target is false and that false
+        // reason is rendered verbatim in the terminal answer.
+        LoopState state = loopState();
+        state.editRecoveryFullRewriteTargets.add("README.md");
+        ToolCall edit = editFile("README.md", "old", "new");
+
+        EditFilePreApprovalGuard.Decision decision = EditFilePreApprovalGuard.decision(
+                edit,
+                state,
+                "README.md",
+                false,
+                Set.of(),
+                Set.of("README.md"));
+
+        assertNotNull(decision);
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, decision.kind());
+        assertFalse(decision.diagnostic().contains("Static verification repair"),
+                decision.diagnostic());
+        assertFalse(decision.diagnostic().contains("small web file"), decision.diagnostic());
+        assertTrue(decision.diagnostic().contains("invalid-edit recovery"), decision.diagnostic());
+        assertTrue(decision.diagnostic().contains("no file was changed"), decision.diagnostic());
+    }
+
+    @Test
+    void fullRewriteRepairTargetRecognizesEditFileAlias() {
+        LoopState state = loopState();
+        ToolCall edit = new ToolCall("file_utils:edit_file", Map.of(
+                "path", "script.js",
+                "old_string", "old",
+                "new_string", "new"));
+
+        EditFilePreApprovalGuard.Decision decision = EditFilePreApprovalGuard.decision(
+                edit,
+                state,
+                "script.js",
+                false,
+                Set.of(),
+                Set.of("script.js"));
+
+        assertNotNull(decision);
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, decision.kind());
+    }
+
+    @Test
     void staleRereadRequiredPathReturnsExactDiagnostic() {
         LoopState state = loopState();
         ToolCall edit = editFile("index.html", "beta\n", "beta-fixed\n");
@@ -174,5 +222,38 @@ class EditFilePreApprovalGuardTest {
                 "path", path,
                 "old_string", oldString,
                 "new_string", newString));
+    }
+
+    /** Both decisions block, so identity applies on every platform, including POSIX. */
+    @Test
+    void anEditUnderAnotherSpellingOfARepairOrStaleTargetGetsTheSameDiagnostic() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.writeString(root.resolve("script.js"), "old\n");
+        LoopState state = new LoopState("", List.of(), new ArrayList<>(List.of(ChatMessage.user("Fix script.js."))),
+                root, null, null, 5, 0);
+        String absolute = root.resolve("script.js").toString();
+
+        var repair = EditFilePreApprovalGuard.decision(
+                editFile(absolute, "old", "new"), state, absolute, false, Set.of(), Set.of("script.js"));
+        var stale = EditFilePreApprovalGuard.decision(
+                editFile(absolute, "old", "new"), state, absolute, false, Set.of("script.js"), Set.of());
+
+        assertNotNull(repair, "a full-rewrite target edited under its absolute spelling must be redirected");
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, repair.kind());
+        assertNotNull(stale, "a stale target edited under its absolute spelling must be re-read first");
+        assertEquals(EditFilePreApprovalGuard.Kind.STALE_REREAD_REQUIRED, stale.kind());
+    }
+
+    @Test
+    void anEditOfAFileWithTheSameNameElsewhereIsNotARepairTarget() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("old"));
+        Files.writeString(root.resolve("old").resolve("script.js"), "old\n");
+        LoopState state = new LoopState("", List.of(), new ArrayList<>(List.of(ChatMessage.user("Fix script.js."))),
+                root, null, null, 5, 0);
+        String other = root.resolve("old").resolve("script.js").toString();
+
+        assertNull(EditFilePreApprovalGuard.decision(
+                editFile(other, "old", "new"), state, other, false, Set.of("script.js"), Set.of("script.js")));
     }
 }

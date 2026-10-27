@@ -1,6 +1,15 @@
 import java.io.File
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.nio.charset.CodingErrorAction
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
 import java.util.UUID
 import org.gradle.api.tasks.bundling.Compression
 
@@ -11,6 +20,8 @@ plugins {
 
 val talosReportsDir = layout.buildDirectory.dir("reports/talos")
 val qodanaCommunityImage = "jetbrains/qodana-jvm-community:2026.1"
+val qodanaExpectedLinter = "QDJVM"
+val qodanaExpectedLinterVersion = Regex("261(?:\\.[0-9]+)+")
 val gitleaksImage = "ghcr.io/gitleaks/gitleaks:v8.30.1"
 val qodanaDockerCacheVolume = "talos-qodana-cache"
 val qodanaDockerGradleVolume = "talos-qodana-gradle-cache"
@@ -161,6 +172,712 @@ fun sha256Hex(file: java.io.File): String {
     return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }
 
+fun sha256Hex(bytes: ByteArray): String {
+    return MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+}
+
+data class QodanaSourceSnapshot(
+    val algorithm: String,
+    val gitHead: String,
+    val trackedFiles: Int,
+    val trackedBytes: Long,
+    val changedTrackedFiles: Int,
+    val diffBytes: Int,
+    val diffSha256: String,
+    val snapshotSha256: String
+) {
+    fun asMap(): Map<String, Any> = linkedMapOf(
+        "algorithm" to algorithm,
+        "gitHead" to gitHead,
+        "trackedFiles" to trackedFiles,
+        "trackedBytes" to trackedBytes,
+        "changedTrackedFiles" to changedTrackedFiles,
+        "diffBytes" to diffBytes,
+        "diffSha256" to diffSha256,
+        "snapshotSha256" to snapshotSha256
+    )
+}
+
+fun requiredGitBytes(vararg args: String): ByteArray {
+    return providers.exec {
+        workingDir(projectDir)
+        commandLine("git", *args)
+    }.standardOutput.asBytes.get()
+}
+
+fun splitNulTerminatedGitPaths(raw: ByteArray, label: String): List<ByteArray> {
+    if (raw.isEmpty()) return emptyList()
+    if (raw.last() != 0.toByte()) {
+        throw GradleException("$label is not NUL-terminated")
+    }
+    val paths = mutableListOf<ByteArray>()
+    var start = 0
+    raw.indices.forEach { index ->
+        if (raw[index] == 0.toByte()) {
+            if (index == start) throw GradleException("$label contains an empty path")
+            paths += raw.copyOfRange(start, index)
+            start = index + 1
+        }
+    }
+    return paths
+}
+
+fun decodeStrictUtf8Path(raw: ByteArray, label: String): String {
+    return try {
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(raw))
+            .toString()
+    } catch (_: Throwable) {
+        throw GradleException("$label contains a path that is not strict UTF-8")
+    }
+}
+
+fun compareUnsignedBytes(left: ByteArray, right: ByteArray): Int {
+    val common = minOf(left.size, right.size)
+    for (index in 0 until common) {
+        val comparison = (left[index].toInt() and 0xff).compareTo(right[index].toInt() and 0xff)
+        if (comparison != 0) return comparison
+    }
+    return left.size.compareTo(right.size)
+}
+
+fun qodanaSourceSnapshotOnce(): QodanaSourceSnapshot {
+    val head = String(
+        requiredGitBytes("rev-parse", "--verify", "HEAD"),
+        StandardCharsets.US_ASCII
+    ).trim()
+    if (!head.matches(Regex("[0-9a-fA-F]{40}"))) {
+        throw GradleException("Qodana source snapshot requires an exact Git HEAD")
+    }
+
+    val stagedDiff = requiredGitBytes(
+        "diff", "--cached", "--binary", "--full-index", "--no-ext-diff",
+        "--no-textconv", "--no-renames", "HEAD", "--"
+    )
+    if (stagedDiff.isNotEmpty()) {
+        throw GradleException("Qodana source snapshot rejects staged changes")
+    }
+    val untracked = requiredGitBytes("ls-files", "--others", "--exclude-standard", "-z")
+    if (untracked.isNotEmpty()) {
+        throw GradleException("Qodana source snapshot rejects untracked files")
+    }
+
+    val diff = requiredGitBytes(
+        "diff", "--binary", "--full-index", "--no-ext-diff",
+        "--no-textconv", "--no-renames", "HEAD", "--"
+    )
+    val changedTrackedNameBytes = requiredGitBytes(
+        "diff", "--name-only", "-z", "--no-ext-diff", "--no-renames", "HEAD", "--"
+    )
+    val changedTrackedFiles = splitNulTerminatedGitPaths(
+        changedTrackedNameBytes,
+        "Qodana changed-file list"
+    ).size
+    val trackedPathBytes = splitNulTerminatedGitPaths(
+        requiredGitBytes("ls-files", "-z", "--"),
+        "Qodana tracked-file list"
+    ).sortedWith(Comparator { left, right -> compareUnsignedBytes(left, right) })
+    trackedPathBytes.zipWithNext().forEach { (previous, current) ->
+        if (compareUnsignedBytes(previous, current) == 0) {
+            throw GradleException("Qodana tracked-file list contains a duplicate path")
+        }
+    }
+    val algorithm = "talos-qodana-current-source-v2"
+    val digest = MessageDigest.getInstance("SHA-256")
+    fun updateLength(value: Long) {
+        digest.update(ByteBuffer.allocate(8).putLong(value).array())
+    }
+    fun updateField(bytes: ByteArray) {
+        updateLength(bytes.size.toLong())
+        digest.update(bytes)
+    }
+    updateField(algorithm.toByteArray(StandardCharsets.US_ASCII))
+    updateField(head.lowercase().toByteArray(StandardCharsets.US_ASCII))
+    updateLength(trackedPathBytes.size.toLong())
+
+    val canonicalProjectPath = projectDir.canonicalFile.toPath().toAbsolutePath().normalize()
+    var trackedBytes = 0L
+    trackedPathBytes.forEach { rawPath ->
+        val gitPath = decodeStrictUtf8Path(rawPath, "Qodana tracked-file list")
+        if (gitPath.startsWith('/') || gitPath.startsWith('\\') ||
+            gitPath.contains('\\') ||
+            gitPath.split('/').any { it.isEmpty() || it == "." || it == ".." }) {
+            throw GradleException("Qodana tracked-file path is not a canonical repository-relative path")
+        }
+        if (!gitPath.toByteArray(StandardCharsets.UTF_8).contentEquals(rawPath)) {
+            throw GradleException("Qodana tracked-file path does not round-trip through strict UTF-8")
+        }
+        val path = canonicalProjectPath.resolve(gitPath).normalize()
+        requireNoFollowOrdinaryComponents(canonicalProjectPath, path, "Qodana tracked source")
+        val attributes = readNoFollowAttributesOrNull(path, "Qodana tracked source")
+            ?: throw GradleException("Qodana tracked source is missing: $gitPath")
+        if (!attributes.isRegularFile || attributes.isSymbolicLink || attributes.isOther) {
+            throw GradleException("Qodana tracked source is not an ordinary regular file: $gitPath")
+        }
+        updateField(rawPath)
+        updateLength(attributes.size())
+        var fileBytesRead = 0L
+        Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS).use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+                fileBytesRead = Math.addExact(fileBytesRead, read.toLong())
+            }
+        }
+        if (fileBytesRead != attributes.size()) {
+            throw GradleException("Qodana tracked source changed while it was read: $gitPath")
+        }
+        trackedBytes = Math.addExact(trackedBytes, fileBytesRead)
+    }
+    val snapshotHash = digest.digest().joinToString("") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
+    }
+    return QodanaSourceSnapshot(
+        algorithm,
+        head.lowercase(),
+        trackedPathBytes.size,
+        trackedBytes,
+        changedTrackedFiles,
+        diff.size,
+        sha256Hex(diff),
+        snapshotHash
+    )
+}
+
+fun qodanaSourceSnapshot(): QodanaSourceSnapshot {
+    val first = qodanaSourceSnapshotOnce()
+    val second = qodanaSourceSnapshotOnce()
+    if (first != second) {
+        throw GradleException("Qodana source bytes changed during snapshot authentication")
+    }
+    return first
+}
+
+fun readNoFollowAttributesOrNull(path: Path, label: String): BasicFileAttributes? {
+    return try {
+        Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+    } catch (_: NoSuchFileException) {
+        null
+    } catch (failure: Exception) {
+        throw GradleException("$label state could not be authenticated: $path", failure)
+    }
+}
+
+fun requireNoFollowOrdinaryComponents(
+    trustedBase: Path,
+    requestedTarget: Path,
+    label: String
+) {
+    val base = trustedBase.toAbsolutePath().normalize()
+    val target = requestedTarget.toAbsolutePath().normalize()
+    if (!target.startsWith(base)) {
+        throw GradleException("$label must remain below $base")
+    }
+    var current = base
+    val relative = base.relativize(target)
+    val components = mutableListOf<Path>()
+    components.add(base)
+    relative.forEach { component ->
+        current = current.resolve(component)
+        components.add(current)
+    }
+    components.forEachIndexed { index, component ->
+        val attributes = readNoFollowAttributesOrNull(component, label)
+        if (attributes != null) {
+            if (attributes.isSymbolicLink || attributes.isOther) {
+                throw GradleException("$label must not traverse a symbolic link, junction, or reparse point: $component")
+            }
+            if (index < components.lastIndex && !attributes.isDirectory) {
+                throw GradleException("$label has a non-directory ancestor: $component")
+            }
+        }
+    }
+}
+
+fun requireNoFollowOrdinaryTree(requestedRoot: Path, label: String) {
+    val root = requestedRoot.toAbsolutePath().normalize()
+    if (readNoFollowAttributesOrNull(root, label) == null) return
+    Files.walk(root).use { paths ->
+        paths.forEach { path ->
+            val attributes = readNoFollowAttributesOrNull(path, label)
+                ?: throw GradleException("$label changed while it was inspected: $path")
+            if (attributes.isSymbolicLink || attributes.isOther) {
+                throw GradleException("$label contains a symbolic link, junction, or reparse point: $path")
+            }
+            if (!attributes.isDirectory && !attributes.isRegularFile) {
+                throw GradleException("$label contains a non-ordinary filesystem object: $path")
+            }
+        }
+    }
+}
+
+fun deleteNoFollowOrdinaryTree(
+    trustedBase: Path,
+    requestedRoot: Path,
+    label: String,
+    maxEntries: Int = 1_000_000
+) {
+    val base = trustedBase.toAbsolutePath().normalize()
+    val root = requestedRoot.toAbsolutePath().normalize()
+    requireNoFollowOrdinaryComponents(base, root, label)
+    if (readNoFollowAttributesOrNull(root, label) == null) return
+
+    val entries = mutableListOf<Path>()
+    try {
+        Files.walk(root).use { paths ->
+            val iterator = paths.iterator()
+            while (iterator.hasNext()) {
+                if (entries.size >= maxEntries) {
+                    throw GradleException("$label exceeds the bounded cleanup entry limit")
+                }
+                val entry = iterator.next().toAbsolutePath().normalize()
+                requireNoFollowOrdinaryComponents(base, entry, label)
+                val attributes = readNoFollowAttributesOrNull(entry, label)
+                    ?: throw GradleException("$label changed while it was enumerated: $entry")
+                if (attributes.isSymbolicLink || attributes.isOther ||
+                    (!attributes.isDirectory && !attributes.isRegularFile)) {
+                    throw GradleException("$label contains a non-ordinary or reparse entry: $entry")
+                }
+                entries.add(entry)
+            }
+        }
+    } catch (failure: GradleException) {
+        throw failure
+    } catch (failure: Exception) {
+        throw GradleException("$label could not be enumerated safely", failure)
+    }
+
+    entries.sortedWith(
+        compareByDescending<Path> { it.nameCount }.thenByDescending { it.toString() }
+    ).forEach { entry ->
+        requireNoFollowOrdinaryComponents(base, entry, label)
+        val attributes = readNoFollowAttributesOrNull(entry, label)
+            ?: throw GradleException("$label changed before deletion: $entry")
+        if (attributes.isSymbolicLink || attributes.isOther ||
+            (!attributes.isDirectory && !attributes.isRegularFile)) {
+            throw GradleException("$label contains a non-ordinary or reparse entry before deletion: $entry")
+        }
+        try {
+            Files.delete(entry)
+        } catch (failure: Exception) {
+            throw GradleException("$label could not be deleted safely: $entry", failure)
+        }
+    }
+}
+
+fun requireNoTrackedGitPathsIntersect(cleanupTargets: List<java.io.File>) {
+    val base = projectDir.canonicalFile.toPath().toAbsolutePath().normalize()
+    val normalizedTargets = cleanupTargets.map { target ->
+        val path = target.toPath().toAbsolutePath().normalize()
+        if (!path.startsWith(base)) {
+            throw GradleException("Qodana cleanup target must remain below the project: $path")
+        }
+        path
+    }
+    splitNulTerminatedGitPaths(
+        requiredGitBytes("ls-files", "-z", "--"),
+        "Qodana tracked-file list"
+    ).forEach { rawPath ->
+        val gitPath = decodeStrictUtf8Path(rawPath, "Qodana tracked-file list")
+        if (gitPath.startsWith('/') || gitPath.startsWith('\\') ||
+            gitPath.contains('\\') ||
+            gitPath.split('/').any { it.isEmpty() || it == "." || it == ".." } ||
+            !gitPath.toByteArray(StandardCharsets.UTF_8).contentEquals(rawPath)) {
+            throw GradleException("Qodana tracked-file path is not a canonical repository-relative path")
+        }
+        val trackedPath = base.resolve(gitPath).normalize()
+        val intersectingTarget = normalizedTargets.firstOrNull { target ->
+            trackedPath == target || trackedPath.startsWith(target) || target.startsWith(trackedPath)
+        }
+        if (intersectingTarget != null) {
+            throw GradleException(
+                "Qodana cleanup target intersects tracked Git path `$gitPath`: $intersectingTarget"
+            )
+        }
+    }
+}
+
+data class QodanaBoundArtifactSpec(val relativePath: String)
+
+data class QodanaBoundArtifact(
+    val spec: QodanaBoundArtifactSpec,
+    val bytes: ByteArray
+) {
+    fun asMap(): Map<String, Any> = linkedMapOf(
+        "path" to spec.relativePath,
+        "bytes" to bytes.size.toLong(),
+        "sha256" to sha256Hex(bytes)
+    )
+}
+
+val qodanaBoundArtifactSpecs = listOf(
+    QodanaBoundArtifactSpec("report/results/metaInformation.json"),
+    QodanaBoundArtifactSpec("report/results/result-allProblems.json"),
+    QodanaBoundArtifactSpec("report/results/qodana.sarif.json"),
+    QodanaBoundArtifactSpec("results/log/qodana_directories_inspection_groups.csv")
+)
+
+fun readQodanaBoundArtifacts(
+    qodanaRoot: java.io.File,
+    canonicalProjectDir: java.io.File
+): List<QodanaBoundArtifact> {
+    val projectPath = canonicalProjectDir.toPath().toAbsolutePath().normalize()
+    val rootPath = qodanaRoot.toPath().toAbsolutePath().normalize()
+    requireNoFollowOrdinaryComponents(projectPath, rootPath, "Qodana artifact root")
+    return qodanaBoundArtifactSpecs.map { spec ->
+        val artifactPath = rootPath.resolve(spec.relativePath).normalize()
+        requireNoFollowOrdinaryComponents(projectPath, artifactPath, "Qodana bound artifact")
+        val attributes = readNoFollowAttributesOrNull(artifactPath, "Qodana bound artifact")
+            ?: throw GradleException("Qodana bound artifact is missing: ${spec.relativePath}")
+        if (!attributes.isRegularFile || attributes.isSymbolicLink || attributes.isOther) {
+            throw GradleException("Qodana bound artifact is not an ordinary regular file: ${spec.relativePath}")
+        }
+        val bytes = Files.readAllBytes(artifactPath)
+        if (bytes.size.toLong() != attributes.size()) {
+            throw GradleException("Qodana bound artifact changed while it was read: ${spec.relativePath}")
+        }
+        QodanaBoundArtifact(spec, bytes)
+    }
+}
+
+class StrictJsonSyntaxValidator(
+    private val text: String,
+    private val label: String,
+    private val maxDepth: Int = 256,
+    private val maxValues: Int = 5_000_000
+) {
+    private var index = 0
+    private var values = 0
+
+    fun validate() {
+        skipWhitespace()
+        parseValue(0)
+        skipWhitespace()
+        failIf(index != text.length, "has trailing content")
+    }
+
+    private fun parseValue(depth: Int) {
+        failIf(depth > maxDepth, "exceeds the maximum nesting depth")
+        values = Math.addExact(values, 1)
+        failIf(values > maxValues, "exceeds the maximum value count")
+        failIf(index >= text.length, "ends before a value")
+        when (text[index]) {
+            '{' -> parseObject(depth + 1)
+            '[' -> parseArray(depth + 1)
+            '"' -> parseString()
+            't' -> parseLiteral("true")
+            'f' -> parseLiteral("false")
+            'n' -> parseLiteral("null")
+            '-', in '0'..'9' -> parseNumber()
+            else -> fail("contains an invalid value")
+        }
+    }
+
+    private fun parseObject(depth: Int) {
+        index++
+        skipWhitespace()
+        if (take('}')) return
+        val names = mutableSetOf<String>()
+        while (true) {
+            failIf(index >= text.length || text[index] != '"', "contains a non-string object key")
+            val name = parseString()
+            failIf(!names.add(name), "contains duplicate object key `$name`")
+            skipWhitespace()
+            requireChar(':')
+            skipWhitespace()
+            parseValue(depth)
+            skipWhitespace()
+            if (take('}')) return
+            requireChar(',')
+            skipWhitespace()
+        }
+    }
+
+    private fun parseArray(depth: Int) {
+        index++
+        skipWhitespace()
+        if (take(']')) return
+        while (true) {
+            parseValue(depth)
+            skipWhitespace()
+            if (take(']')) return
+            requireChar(',')
+            skipWhitespace()
+        }
+    }
+
+    private fun parseString(): String {
+        requireChar('"')
+        val result = StringBuilder()
+        while (index < text.length) {
+            val value = text[index++]
+            when {
+                value == '"' -> return result.toString()
+                value == '\\' -> {
+                    failIf(index >= text.length, "ends inside a string escape")
+                    when (val escaped = text[index++]) {
+                        '"', '\\', '/' -> result.append(escaped)
+                        'b' -> result.append('\b')
+                        'f' -> result.append('\u000c')
+                        'n' -> result.append('\n')
+                        'r' -> result.append('\r')
+                        't' -> result.append('\t')
+                        'u' -> appendEscapedCodePoint(result)
+                        else -> fail("contains an invalid string escape")
+                    }
+                }
+                value.code < 0x20 -> fail("contains an unescaped control character")
+                Character.isHighSurrogate(value) -> {
+                    failIf(index >= text.length || !Character.isLowSurrogate(text[index]), "contains an unpaired surrogate")
+                    result.append(value).append(text[index++])
+                }
+                Character.isLowSurrogate(value) -> fail("contains an unpaired surrogate")
+                else -> result.append(value)
+            }
+        }
+        fail("ends inside a string")
+    }
+
+    private fun appendEscapedCodePoint(result: StringBuilder) {
+        val first = parseHexCodeUnit()
+        when {
+            Character.isHighSurrogate(first) -> {
+                failIf(index + 1 >= text.length || text[index] != '\\' || text[index + 1] != 'u', "contains an unpaired escaped surrogate")
+                index += 2
+                val second = parseHexCodeUnit()
+                failIf(!Character.isLowSurrogate(second), "contains an unpaired escaped surrogate")
+                result.append(first).append(second)
+            }
+            Character.isLowSurrogate(first) -> fail("contains an unpaired escaped surrogate")
+            else -> result.append(first)
+        }
+    }
+
+    private fun parseHexCodeUnit(): Char {
+        failIf(index + 4 > text.length, "ends inside a Unicode escape")
+        var value = 0
+        repeat(4) {
+            val character = text[index++]
+            val digit = when (character) {
+                in '0'..'9' -> character - '0'
+                in 'a'..'f' -> character - 'a' + 10
+                in 'A'..'F' -> character - 'A' + 10
+                else -> -1
+            }
+            failIf(digit < 0, "contains an invalid Unicode escape")
+            value = value * 16 + digit
+        }
+        return value.toChar()
+    }
+
+    private fun parseNumber() {
+        take('-')
+        failIf(index >= text.length, "ends inside a number")
+        if (take('0')) {
+            failIf(index < text.length && text[index] in '0'..'9', "contains a number with a leading zero")
+        } else {
+            failIf(index >= text.length || text[index] !in '1'..'9', "contains an invalid number")
+            while (index < text.length && text[index] in '0'..'9') index++
+        }
+        if (take('.')) {
+            failIf(index >= text.length || text[index] !in '0'..'9', "contains an invalid fraction")
+            while (index < text.length && text[index] in '0'..'9') index++
+        }
+        if (index < text.length && (text[index] == 'e' || text[index] == 'E')) {
+            index++
+            if (index < text.length && (text[index] == '+' || text[index] == '-')) index++
+            failIf(index >= text.length || text[index] !in '0'..'9', "contains an invalid exponent")
+            while (index < text.length && text[index] in '0'..'9') index++
+        }
+    }
+
+    private fun parseLiteral(expected: String) {
+        failIf(!text.startsWith(expected, index), "contains an invalid literal")
+        index += expected.length
+    }
+
+    private fun skipWhitespace() {
+        while (index < text.length) {
+            when (text[index]) {
+                ' ', '\t', '\r', '\n' -> index++
+                else -> return
+            }
+        }
+    }
+
+    private fun take(expected: Char): Boolean {
+        if (index < text.length && text[index] == expected) {
+            index++
+            return true
+        }
+        return false
+    }
+
+    private fun requireChar(expected: Char) {
+        failIf(!take(expected), "expected `$expected`")
+    }
+
+    private fun failIf(condition: Boolean, message: String) {
+        if (condition) fail(message)
+    }
+
+    private fun fail(message: String): Nothing {
+        throw GradleException("$label $message at character $index")
+    }
+}
+
+fun parseStrictJson(bytes: ByteArray, label: String, maxBytes: Int): Any? {
+    if (bytes.size > maxBytes) {
+        throw GradleException("$label exceeds the bounded JSON byte limit")
+    }
+    val text = try {
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+    } catch (_: java.nio.charset.CharacterCodingException) {
+        throw GradleException("$label is not strict UTF-8")
+    }
+    StrictJsonSyntaxValidator(text, label).validate()
+    return groovy.json.JsonSlurper().parseText(text)
+}
+
+fun exactJsonNonNegativeInt(raw: Any?): Int? {
+    val text = (raw as? Number)?.toString() ?: return null
+    if (!text.matches(Regex("0|[1-9][0-9]*"))) return null
+    return text.toIntOrNull()
+}
+
+fun exactJsonNonNegativeLong(raw: Any?): Long? {
+    val text = (raw as? Number)?.toString() ?: return null
+    if (!text.matches(Regex("0|[1-9][0-9]*"))) return null
+    return text.toLongOrNull()
+}
+
+fun qodanaSourceSnapshotFromMap(raw: Any?): QodanaSourceSnapshot? {
+    val candidate = raw as? Map<*, *> ?: return null
+    val algorithm = candidate["algorithm"] as? String ?: return null
+    val gitHead = candidate["gitHead"] as? String ?: return null
+    val trackedFiles = exactJsonNonNegativeInt(candidate["trackedFiles"]) ?: return null
+    val trackedBytes = exactJsonNonNegativeLong(candidate["trackedBytes"]) ?: return null
+    val changedTrackedFiles = exactJsonNonNegativeInt(candidate["changedTrackedFiles"]) ?: return null
+    val diffBytes = exactJsonNonNegativeInt(candidate["diffBytes"]) ?: return null
+    val diffSha256 = candidate["diffSha256"] as? String ?: return null
+    val snapshotSha256 = candidate["snapshotSha256"] as? String ?: return null
+    if (candidate.keys != setOf(
+            "algorithm", "gitHead", "trackedFiles", "trackedBytes", "changedTrackedFiles",
+            "diffBytes", "diffSha256", "snapshotSha256"
+        ) ||
+        algorithm != "talos-qodana-current-source-v2" ||
+        !gitHead.matches(Regex("[0-9a-f]{40}")) ||
+        trackedFiles <= 0 || changedTrackedFiles > trackedFiles ||
+        !diffSha256.matches(Regex("[0-9a-f]{64}")) ||
+        !snapshotSha256.matches(Regex("[0-9a-f]{64}"))) {
+        return null
+    }
+    return QodanaSourceSnapshot(
+        algorithm, gitHead, trackedFiles, trackedBytes, changedTrackedFiles,
+        diffBytes, diffSha256, snapshotSha256
+    )
+}
+
+fun qodanaObservedScope(
+    telemetryBytes: ByteArray,
+    canonicalProjectDir: java.io.File
+): Map<String, Any?> {
+    val statusObserved = "inspection-activity-observed"
+    val statusNotObserved = "no-inspection-activity-observed"
+    val telemetryText = try {
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(telemetryBytes))
+            .toString()
+    } catch (_: java.nio.charset.CharacterCodingException) {
+        throw GradleException("Qodana scope telemetry is not strict UTF-8")
+    }
+    val header = "Directory;Absolute Time spent on Inspection Group 'all', s;Percent of Time spent on Inspection Group 'all';Inspections Problem Count in Group 'all';Times Inspection from Group 'all' was Performed"
+    val rawLines = telemetryText.split('\n').toMutableList()
+    if (rawLines.lastOrNull().isNullOrEmpty()) rawLines.removeAt(rawLines.lastIndex)
+    val rows = rawLines.map { line ->
+        val withoutCr = line.removeSuffix("\r")
+        if (withoutCr.contains('\r')) throw GradleException("Qodana scope telemetry contains an unexpected CR")
+        withoutCr
+    }
+    if (rows.firstOrNull() != header) {
+        throw GradleException("Qodana scope telemetry header does not match the five-column schema")
+    }
+    data class ScopeRow(val directory: Path, val performed: Long)
+    val seenDirectories = mutableSetOf<String>()
+    val parsedRows = rows.drop(1).mapIndexed { index, row ->
+        if (row.isEmpty()) throw GradleException("Qodana scope telemetry contains an empty data row")
+        val fields = row.split(';')
+        if (fields.size != 5 || fields[0].isEmpty() ||
+            !fields[1].matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?")) ||
+            !fields[2].matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?%")) ||
+            !fields[3].matches(Regex("0|[1-9][0-9]*")) ||
+            !fields[4].matches(Regex("0|[1-9][0-9]*"))) {
+            throw GradleException("Qodana scope telemetry row ${index + 2} does not match the five-column schema")
+        }
+        val directoryText = fields[0].replace('\\', '/')
+        val directoryPath = try {
+            Path.of(directoryText)
+        } catch (_: Throwable) {
+            throw GradleException("Qodana scope telemetry contains an invalid directory path")
+        }
+        val normalizedDirectory = directoryPath.normalize()
+        val normalizedText = normalizedDirectory.toString().replace('\\', '/')
+        if (!directoryPath.isAbsolute || directoryText != normalizedText) {
+            throw GradleException("Qodana scope telemetry directory must be a canonical absolute path")
+        }
+        if (!seenDirectories.add(normalizedText)) {
+            throw GradleException("Qodana scope telemetry contains a duplicate directory row")
+        }
+        ScopeRow(normalizedDirectory, fields[4].toLongOrNull()
+            ?: throw GradleException("Qodana scope telemetry performed count exceeds the supported range"))
+    }
+    fun observed(relativeRoot: String): Boolean {
+        val expectedRoot = canonicalProjectDir.toPath().toAbsolutePath().normalize()
+            .resolve(relativeRoot).normalize()
+        return parsedRows.any { row ->
+            row.performed > 0L &&
+                (row.directory == expectedRoot || row.directory.startsWith(expectedRoot))
+        }
+    }
+    return linkedMapOf(
+        "telemetryStatus" to "telemetry-present",
+        "telemetryBytes" to telemetryBytes.size.toLong(),
+        "telemetrySha256" to sha256Hex(telemetryBytes),
+        "main" to if (observed("src/main")) statusObserved else statusNotObserved,
+        "unitTest" to if (observed("src/test")) statusObserved else statusNotObserved,
+        "e2eTest" to if (observed("src/e2eTest")) statusObserved else statusNotObserved
+    )
+}
+
+fun qodanaObservedScope(
+    telemetryFile: java.io.File,
+    canonicalProjectDir: java.io.File
+): Map<String, Any?> {
+    if (!telemetryFile.isFile) {
+        return linkedMapOf(
+            "telemetryStatus" to "telemetry-missing",
+            "telemetryBytes" to null,
+            "telemetrySha256" to null,
+            "main" to "no-inspection-activity-observed",
+            "unitTest" to "no-inspection-activity-observed",
+            "e2eTest" to "no-inspection-activity-observed"
+        )
+    }
+    return qodanaObservedScope(Files.readAllBytes(telemetryFile.toPath()), canonicalProjectDir)
+}
+
 fun parseXml(file: java.io.File): org.w3c.dom.Document {
     val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
     factory.isNamespaceAware = false
@@ -234,24 +951,78 @@ version = providers.gradleProperty("talosVersion").orNull
 
 fun validateReleaseLedgerText(changelogText: String, expectedVersion: String) {
     val normalized = changelogText.replace("\r\n", "\n").replace("\r", "\n")
-    if (normalized.contains("pending release notes")) {
+    if (normalized.contains("pending release notes", ignoreCase = true)) {
         throw GradleException("CHANGELOG.md contains placeholder text: pending release notes")
     }
 
-    val headings = Regex("(?m)^## \\[([^\\]]+)](?: - (\\d{4}-\\d{2}-\\d{2}))?\\s*$")
+    val bracketedHeadings = Regex("(?m)^[ ]{0,3}##[ \\t]+\\[[^\\r\\n]*$")
         .findAll(normalized)
         .toList()
-    if (headings.isEmpty() || headings.first().groupValues[1] != "Unreleased") {
+    val headings = Regex(
+        "(?m)^## \\[([^\\]\\r\\n]+)\\](?: - (\\d{4}-\\d{2}-\\d{2}))?[ \\t]*$"
+    )
+        .findAll(normalized)
+        .toList()
+    if (headings.size != bracketedHeadings.size) {
+        throw GradleException("CHANGELOG.md contains a malformed bracketed top-level release heading")
+    }
+
+    var unreleasedCount = 0
+    var unreleasedStart = -1
+    val releasedVersions = mutableSetOf<String>()
+    headings.forEach { heading ->
+        val name = heading.groupValues[1]
+        val date = heading.groupValues[2]
+        if (name == "Unreleased") {
+            if (date.isNotEmpty()) {
+                throw GradleException("CHANGELOG.md must not attach a release date to ## [Unreleased]")
+            }
+            unreleasedCount++
+            if (unreleasedStart < 0) unreleasedStart = heading.range.first
+        } else {
+            if (!Regex("^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$")
+                    .matches(name)) {
+                throw GradleException(
+                    "CHANGELOG.md released-version headings must use numeric MAJOR.MINOR.PATCH identities; found '$name'"
+                )
+            }
+            if (date.isEmpty()) {
+                throw GradleException("Released CHANGELOG.md version $name must include an ISO release date")
+            }
+            val parsedDate = try {
+                LocalDate.parse(date)
+            } catch (_: DateTimeParseException) {
+                throw GradleException(
+                    "Released CHANGELOG.md version $name must include a valid ISO release date; found '$date'"
+                )
+            }
+            if (parsedDate.year !in 1..9999) {
+                throw GradleException(
+                    "Released CHANGELOG.md version $name must include a valid ISO release date; found '$date'"
+                )
+            }
+            if (!releasedVersions.add(name)) {
+                throw GradleException("CHANGELOG.md contains a duplicate released-version heading: '$name'")
+            }
+        }
+    }
+
+    if (unreleasedCount == 0) {
         throw GradleException("CHANGELOG.md must contain a top-level ## [Unreleased] section before released versions")
+    }
+    if (unreleasedCount != 1) {
+        throw GradleException(
+            "CHANGELOG.md must contain exactly one top-level ## [Unreleased] section; found $unreleasedCount"
+        )
+    }
+    val beforeUnreleased = normalized.substring(0, unreleasedStart)
+    if (!Regex("(?s)\\A# Changelog[ \\t]*\\n[\\s]*\\z").matches(beforeUnreleased)) {
+        throw GradleException("CHANGELOG.md must keep ## [Unreleased] as the first section after # Changelog")
     }
 
     val topReleased = headings.firstOrNull { it.groupValues[1] != "Unreleased" }
         ?: throw GradleException("CHANGELOG.md must contain at least one released version section")
     val topReleasedVersion = topReleased.groupValues[1]
-    val topReleasedDate = topReleased.groupValues[2]
-    if (topReleasedDate.isBlank()) {
-        throw GradleException("Top released CHANGELOG.md version $topReleasedVersion must include an ISO release date")
-    }
     if (topReleasedVersion != expectedVersion) {
         throw GradleException("Top released CHANGELOG.md version $topReleasedVersion does not match talosVersion $expectedVersion")
     }
@@ -707,6 +1478,425 @@ val e2eTest by tasks.registering(Test::class) {
     shouldRunAfter(tasks.test)
 }
 
+tasks.register<JavaExec>("modelQualificationBankHash") {
+    description = "Prints the frozen Talos model-qualification scenario and fixture bank SHA-256."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    args("bank-hash")
+}
+
+tasks.register<JavaExec>("printModelQualificationLaunchEnvironmentIdentity") {
+    description = "Prints the provider environment and endpoint-observer identities for protocol v6."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    args("launch-environment-hash")
+}
+
+tasks.register<JavaExec>("validateModelQualificationEvidence") {
+    description = "Validates a local model-qualification packet before scoring."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("validate", "--root", root)
+    })
+}
+
+tasks.register<JavaExec>("validateModelQualificationCalibration") {
+    description = "Validates frozen model calibration metadata before the first trial and requires zero run results."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("preflight", "--root", root)
+    })
+}
+
+tasks.register<JavaExec>("assertWritableModelQualificationCampaign") {
+    description = "Rejects any noncanonical or non-v6 qualification campaign before packet mutation."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("assert-writable-campaign", "--root", root)
+    })
+}
+
+tasks.register<JavaExec>("finalizeModelQualificationRequirements") {
+    description = "Writes immutable mechanical requirement results using the canonical qualification evaluator."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        listOf(
+            "requirements",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+    })
+}
+
+tasks.register<JavaExec>("finalizeModelQualificationApprovals") {
+    description = "Writes immutable ordered approval evidence from the qualification PTY capture."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        listOf(
+            "approvals",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+    })
+}
+
+tasks.register<JavaExec>("finalizeModelQualificationProviderEvidence") {
+    description = "Writes immutable provider prompt and model runtime evidence for one qualification trial."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val serverPort = providers.gradleProperty("qualificationServerPort").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        if (serverPort.toIntOrNull() !in 1..65535) {
+            throw GradleException("-PqualificationServerPort=<1..65535> is required")
+        }
+        listOf(
+            "provider-evidence",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+            "--server-port", serverPort,
+        )
+    })
+}
+
+tasks.register<JavaExec>("finalizeModelQualificationTraceEvidence") {
+    description = "Publishes the committed run's exact /last trace artifact as immutable qualification evidence."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        listOf(
+            "trace-evidence",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+    })
+}
+
+tasks.register<JavaExec>("completeModelQualificationCampaign") {
+    description = "Commits immutable protocol-v6 campaign completion authority."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val bank = providers.gradleProperty("qualificationBank").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (bank.lowercase() !in setOf("admission", "full")) {
+            throw GradleException("-PqualificationBank=admission|full is required")
+        }
+        listOf("complete-campaign", "--root", root, "--bank", bank)
+    })
+}
+
+tasks.register<JavaExec>("reconcileModelQualificationRunPublication") {
+    description = "Verifies or recovers the mechanically selected protocol-v6 run transaction."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val serverPort = providers.gradleProperty("qualificationServerPort").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        val base = listOf(
+            "reconcile-run-publication",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+        if (serverPort.isBlank()) {
+            base
+        } else {
+            if (serverPort.toIntOrNull() !in 1..65535) {
+                throw GradleException("-PqualificationServerPort must be 1..65535 when supplied")
+            }
+            base + listOf("--server-port", serverPort)
+        }
+    })
+}
+
+tasks.register<JavaExec>("scoreModelQualificationEvidence") {
+    description = "Validates and mechanically scores a local admission or full qualification packet."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val bank = providers.gradleProperty("qualificationBank").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (bank.lowercase() !in setOf("admission", "full")) {
+            throw GradleException("-PqualificationBank=admission|full is required")
+        }
+        listOf("score", "--root", root, "--bank", bank)
+    })
+}
+
+tasks.register<JavaExec>("captureModelQualificationPtyTrial") {
+    description = "Captures one frozen Windows true-PTY model-qualification trial."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationPtyCaptureMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val repetition = providers.gradleProperty("qualificationRepetition").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (repetition.toIntOrNull() == null || repetition.toInt() < 1) {
+            throw GradleException("-PqualificationRepetition=<positive integer> is required")
+        }
+        listOf(root, scenario, repetition)
+    })
+}
+
+tasks.register<JavaExec>("checkModelQualificationCampaignContinuation") {
+    description = "Stops a model-qualification batch after invalid evidence or a hard trust failure."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationCampaignContinuationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val repetition = providers.gradleProperty("qualificationRepetition").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (repetition.toIntOrNull() == null || repetition.toInt() < 1) {
+            throw GradleException("-PqualificationRepetition=<positive integer> is required")
+        }
+        listOf(root, scenario, repetition)
+    })
+}
+
+val finalizeModelQualificationResult by tasks.registering(JavaExec::class) {
+    description = "Publishes Java-derived protocol-v6 causal, canary, and result artifacts."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationCausalFinalizerMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val run = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (run.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        listOf(root, run, scenario)
+    })
+}
+
+tasks.register<JavaExec>("printModelQualificationFinalizerIdentity") {
+    description = "Prints the exact compiled protocol-v6 Java finalizer SHA-256."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+}
+
+tasks.register<JavaExec>("printModelQualificationExecutionInputIdentity") {
+    description = "Prints path-free finalizer and classpath values for the frozen protocol-v6 harness input specification."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionInputIdentityMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+}
+
+tasks.register<JavaExec>("writeModelQualificationExecutionIdentity") {
+    description = "Creates exact protocol-v6 harness and runtime identity manifests for a pre-trial packet."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityWriterMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        fun requiredProperty(name: String): String {
+            val value = providers.gradleProperty(name).orElse("").get()
+            if (value.isBlank()) throw GradleException("-P$name=<absolute path> is required")
+            val requested = File(value)
+            if (!requested.isAbsolute) {
+                throw GradleException("-P$name must be an explicit absolute path")
+            }
+            return requested.absolutePath
+        }
+        val currentCommit = packagedGitHead.get()
+        if (!currentCommit.matches(Regex("[0-9a-f]{40}"))) {
+            throw GradleException("current Git commit is unavailable; execution identity was not written")
+        }
+        if (packagedGitDirty.get()) {
+            throw GradleException("tracked worktree is dirty; execution identity was not written")
+        }
+        listOf(
+            "--root", requiredProperty("qualificationRoot"),
+            "--repository-root", rootProject.projectDir.absolutePath,
+            "--built-talos", requiredProperty("qualificationBuiltTalosArtifact"),
+            "--installed-talos", requiredProperty("qualificationInstalledTalosArtifact"),
+            "--model-artifact", requiredProperty("qualificationModelArtifact"),
+            "--engine-executable", requiredProperty("qualificationEngineExecutable"),
+            "--harness-inputs", requiredProperty("qualificationHarnessInputSpecification"),
+            "--current-commit", currentCommit,
+            "--current-version", project.version.toString(),
+        )
+    })
+}
+
+tasks.register<JavaExec>("verifyModelQualificationExecutionIdentity") {
+    description = "Read-only verification of an existing protocol-v6 execution identity chain and its live frozen inputs."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityVerifierMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        fun requiredProperty(name: String): String {
+            val value = providers.gradleProperty(name).orElse("").get()
+            if (value.isBlank()) throw GradleException("-P$name=<absolute path> is required")
+            val requested = File(value)
+            if (!requested.isAbsolute) {
+                throw GradleException("-P$name must be an explicit absolute path")
+            }
+            return requested.absolutePath
+        }
+        val currentCommit = packagedGitHead.get()
+        if (!currentCommit.matches(Regex("[0-9a-f]{40}"))) {
+            throw GradleException("current Git commit is unavailable; execution identity was not verified")
+        }
+        if (packagedGitDirty.get()) {
+            throw GradleException("tracked worktree is dirty; execution identity was not verified")
+        }
+        listOf(
+            "--root", requiredProperty("qualificationRoot"),
+            "--repository-root", rootProject.projectDir.absolutePath,
+            "--built-talos", requiredProperty("qualificationBuiltTalosArtifact"),
+            "--installed-talos", requiredProperty("qualificationInstalledTalosArtifact"),
+            "--model-artifact", requiredProperty("qualificationModelArtifact"),
+            "--engine-executable", requiredProperty("qualificationEngineExecutable"),
+            "--current-commit", currentCommit,
+            "--current-version", project.version.toString(),
+        )
+    })
+}
+
+tasks.register("finalizeModelQualificationCausality") {
+    description = "Deprecated safe alias for finalizeModelQualificationResult."
+    group = "verification"
+    dependsOn(finalizeModelQualificationResult)
+}
+
 val candidateTest by tasks.registering(Test::class) {
     description = "Runs the candidate unit-test lane and preserves results even when tests fail."
     group = "verification"
@@ -725,6 +1915,16 @@ val candidateTest by tasks.registering(Test::class) {
 tasks.test {
     filter {
         excludeTestsMatching("dev.talos.architecture.intelligence.*")
+    }
+}
+
+listOf(tasks.test, candidateTest).forEach { lane ->
+    lane.configure {
+        dependsOn(tasks.jar)
+        inputs.file(tasks.jar.flatMap { it.archiveFile }).withPropertyName("packagedTalosJar")
+        doFirst {
+            systemProperty("talos.test.packagedJar", tasks.jar.get().archiveFile.get().asFile.absolutePath)
+        }
     }
 }
 
@@ -824,6 +2024,39 @@ val generateBuildVersionResource by tasks.registering {
     }
 }
 
+val packagedGitHead = providers.provider {
+    gitOutput("rev-parse", "HEAD")
+        ?.lowercase()
+        ?.takeIf { it.matches(Regex("[0-9a-f]{40}")) }
+        ?: "unknown"
+}
+val packagedGitBranch = providers.provider {
+    gitOutput("rev-parse", "--abbrev-ref", "HEAD") ?: "unknown"
+}
+val packagedGitDirty = providers.provider {
+    gitOutput("status", "--porcelain", "--untracked-files=no") != null
+}
+val generatePackagedBuildIdentityResource by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/resources/packagedBuildIdentity")
+    outputs.dir(outputDir)
+    inputs.property("gitHead", packagedGitHead)
+    inputs.property("gitBranch", packagedGitBranch)
+    inputs.property("gitDirty", packagedGitDirty)
+
+    doLast {
+        val dirty = packagedGitDirty.get()
+        val commit = if (dirty) "unknown" else packagedGitHead.get()
+        val metaInfDir = outputDir.get().file("META-INF").asFile
+        metaInfDir.mkdirs()
+        metaInfDir.resolve("talos-build.properties").writeText(
+            "git.commit=$commit\n" +
+                    "git.branch=${packagedGitBranch.get()}\n" +
+                    "git.dirty=$dirty\n",
+            Charsets.UTF_8
+        )
+    }
+}
+
 tasks.processResources {
     from(generateBuildVersionResource)
 }
@@ -831,6 +2064,7 @@ tasks.processResources {
 /* ---------- Jar naming ---------- */
 
 tasks.jar {
+    from(generatePackagedBuildIdentityResource)
     archiveBaseName.set("talos")
     archiveVersion.set("") // stable name: talos.jar (referenced by installDist + jpackage)
 }
@@ -1626,18 +2860,97 @@ tasks.register<Exec>("qodanaNativeLocal") {
 tasks.register<Exec>("qodanaNativeFreshLocal") {
     description = "Deletes previous local Qodana outputs, then runs native Qodana into the summary-compatible report path."
     group = "verification"
-    val qodanaRoot = projectDir.resolve(".qodana")
+    val qodanaProjectDir = projectDir.canonicalFile
+    val qodanaProjectPath = qodanaProjectDir.toPath().toAbsolutePath().normalize()
+    val qodanaRoot = qodanaProjectDir.resolve(".qodana")
     val qodanaReportDir = qodanaRoot.resolve("report")
-    val qodanaResultsDir = qodanaReportDir.resolve("results")
+    val qodanaReportResultsDir = qodanaReportDir.resolve("results")
+    val qodanaRawResultsDir = qodanaRoot.resolve("results")
+    val qodanaRunBindingFile = qodanaReportResultsDir.resolve("talos-run-binding.json")
+    val qodanaBaselineFile = qodanaProjectDir.resolve("qodana-baseline.sarif.json")
+    val qodanaProjectKey = UUID.nameUUIDFromBytes(
+        qodanaProjectDir.path.toByteArray(StandardCharsets.UTF_8)
+    )
+    val canonicalGradleHome = gradle.gradleUserHomeDir.canonicalFile
+    val canonicalGradleHomePath = canonicalGradleHome.toPath().toAbsolutePath().normalize()
+    val qodanaStateRoot = canonicalGradleHome.resolve(
+        "caches/talos-qodana/qodana-jvm-community-2026.1-v1"
+    )
+    val qodanaProjectStateDir = qodanaStateRoot.resolve(qodanaProjectKey.toString())
+    val qodanaWorkDir = qodanaProjectStateDir.resolve("work")
+    val qodanaCacheDir = qodanaProjectStateDir.resolve("cache")
+    val qodanaCleanupTargets = listOf(
+        qodanaReportDir,
+        qodanaRawResultsDir,
+        qodanaRoot.resolve("qodana.sarif.json"),
+        qodanaRoot.resolve("qodana-short.sarif.json"),
+        qodanaRoot.resolve("log")
+    )
+    var sourceSnapshotBefore: QodanaSourceSnapshot? = null
     doFirst {
-        delete(
-            qodanaReportDir,
-            qodanaRoot.resolve("qodana.sarif.json"),
-            qodanaRoot.resolve("qodana-short.sarif.json"),
-            qodanaRoot.resolve("log")
+        requireNoFollowOrdinaryComponents(qodanaProjectPath, qodanaRoot.toPath(), "Qodana output root")
+        requireNoFollowOrdinaryTree(qodanaRoot.toPath(), "Qodana output root")
+        qodanaCleanupTargets.forEach { target ->
+            requireNoFollowOrdinaryComponents(qodanaProjectPath, target.toPath(), "Qodana cleanup target")
+            requireNoFollowOrdinaryTree(target.toPath(), "Qodana cleanup target")
+        }
+        requireNoTrackedGitPathsIntersect(qodanaCleanupTargets)
+        requireNoFollowOrdinaryComponents(
+            qodanaProjectPath,
+            qodanaBaselineFile.toPath(),
+            "Qodana baseline"
         )
-        qodanaResultsDir.mkdirs()
+        if (qodanaStateRoot.toPath().toAbsolutePath().normalize().startsWith(qodanaProjectPath)) {
+            throw GradleException("Native Qodana state must remain outside the project")
+        }
+        listOf(qodanaStateRoot, qodanaProjectStateDir, qodanaWorkDir, qodanaCacheDir).forEach { target ->
+            requireNoFollowOrdinaryComponents(
+                canonicalGradleHomePath,
+                target.toPath(),
+                "Qodana reusable state"
+            )
+        }
+        requireNoFollowOrdinaryTree(qodanaWorkDir.toPath(), "Qodana work state")
+        requireNoFollowOrdinaryTree(qodanaCacheDir.toPath(), "Qodana cache state")
+
+        sourceSnapshotBefore = qodanaSourceSnapshot()
+
+        requireNoTrackedGitPathsIntersect(qodanaCleanupTargets)
+        qodanaCleanupTargets.forEach { target ->
+            deleteNoFollowOrdinaryTree(
+                qodanaProjectPath,
+                target.toPath(),
+                "Qodana cleanup target"
+            )
+        }
+        requireNoFollowOrdinaryComponents(
+            qodanaProjectPath,
+            qodanaRawResultsDir.toPath(),
+            "Qodana results directory"
+        )
+        Files.createDirectories(qodanaRawResultsDir.toPath())
+        requireNoFollowOrdinaryComponents(
+            canonicalGradleHomePath,
+            qodanaWorkDir.toPath(),
+            "Qodana work directory"
+        )
+        requireNoFollowOrdinaryTree(qodanaWorkDir.toPath(), "Qodana work directory")
+        Files.createDirectories(qodanaWorkDir.toPath())
+        requireNoFollowOrdinaryComponents(
+            canonicalGradleHomePath,
+            qodanaCacheDir.toPath(),
+            "Qodana cache directory"
+        )
+        requireNoFollowOrdinaryTree(qodanaCacheDir.toPath(), "Qodana cache directory")
+        Files.createDirectories(qodanaCacheDir.toPath())
+        requireNoFollowOrdinaryComponents(qodanaProjectPath, qodanaRawResultsDir.toPath(), "Qodana results directory")
+        requireNoFollowOrdinaryComponents(canonicalGradleHomePath, qodanaWorkDir.toPath(), "Qodana work directory")
+        requireNoFollowOrdinaryComponents(canonicalGradleHomePath, qodanaCacheDir.toPath(), "Qodana cache directory")
+        requireNoFollowOrdinaryTree(qodanaRawResultsDir.toPath(), "Qodana results directory")
+        requireNoFollowOrdinaryTree(qodanaWorkDir.toPath(), "Qodana work directory")
+        requireNoFollowOrdinaryTree(qodanaCacheDir.toPath(), "Qodana cache directory")
     }
+    workingDir(qodanaWorkDir)
     commandLine(
         "qodana",
         "scan",
@@ -1645,13 +2958,54 @@ tasks.register<Exec>("qodanaNativeFreshLocal") {
         "qodana-jvm-community",
         "--within-docker",
         "false",
+        "--cache-dir",
+        qodanaCacheDir.absolutePath,
+        "--project-dir",
+        qodanaProjectDir.absolutePath,
+        "--repository-root",
+        qodanaProjectDir.absolutePath,
         "--baseline",
-        projectDir.resolve("qodana-baseline.sarif.json").absolutePath,
+        qodanaBaselineFile.absolutePath,
         "--results-dir",
-        qodanaResultsDir.absolutePath,
+        qodanaRawResultsDir.absolutePath,
         "--report-dir",
         qodanaReportDir.absolutePath
     )
+    doLast {
+        val before = sourceSnapshotBefore
+            ?: throw GradleException("Qodana source snapshot was not captured before the scan")
+        val after = qodanaSourceSnapshot()
+        if (before != after) {
+            throw GradleException("Qodana source snapshot changed while the scan was running")
+        }
+        requireNoFollowOrdinaryComponents(
+            qodanaProjectPath,
+            qodanaReportResultsDir.toPath(),
+            "Qodana report results"
+        )
+        requireNoFollowOrdinaryTree(qodanaReportDir.toPath(), "Qodana report output")
+        requireNoFollowOrdinaryTree(qodanaRawResultsDir.toPath(), "Qodana raw output")
+        if (readNoFollowAttributesOrNull(qodanaRunBindingFile.toPath(), "Qodana run binding") != null) {
+            throw GradleException("Qodana scan unexpectedly created the Talos run-binding path")
+        }
+        val boundArtifacts = readQodanaBoundArtifacts(qodanaRoot, qodanaProjectDir)
+        val scopeArtifact = boundArtifacts.single {
+            it.spec.relativePath == "results/log/qodana_directories_inspection_groups.csv"
+        }
+        val observedScope = qodanaObservedScope(scopeArtifact.bytes, qodanaProjectDir)
+        writeJson(
+            qodanaRunBindingFile,
+            linkedMapOf(
+                "schemaVersion" to 1,
+                "sourceSnapshotStatus" to "stable",
+                "sourceSnapshotBefore" to before.asMap(),
+                "sourceSnapshotAfter" to after.asMap(),
+                "artifactManifest" to boundArtifacts.map { it.asMap() },
+                "observedScope" to observedScope
+            )
+        )
+        requireNoFollowOrdinaryTree(qodanaRunBindingFile.toPath(), "Qodana run binding")
+    }
 }
 
 tasks.register<Exec>("gitleaksLocal") {
@@ -1864,16 +3218,19 @@ val writeQodanaSummary by tasks.registering {
     val qodanaMetaFile = qodanaResultsDir.resolve("metaInformation.json")
     val qodanaProblemsFile = qodanaResultsDir.resolve("result-allProblems.json")
     val qodanaSarifFile = qodanaResultsDir.resolve("qodana.sarif.json")
-    inputs.files(providers.provider {
-        if (qodanaRootDir.exists()) {
-            fileTree(qodanaRootDir)
-        } else {
-            files()
-        }
-    })
+    val qodanaRunBindingFile = qodanaResultsDir.resolve("talos-run-binding.json")
+    val qodanaScopeTelemetryFile = file(".qodana/results/log/qodana_directories_inspection_groups.csv")
+    inputs.files(
+        qodanaMetaFile,
+        qodanaProblemsFile,
+        qodanaSarifFile,
+        qodanaRunBindingFile,
+        qodanaScopeTelemetryFile
+    )
     inputs.property("projectVersion", project.version.toString())
     inputs.property("gitHead", providers.provider { gitOutput("rev-parse", "HEAD") ?: "unknown" })
     inputs.property("gitBranch", providers.provider { gitOutput("rev-parse", "--abbrev-ref", "HEAD") ?: "unknown" })
+    outputs.upToDateWhen { false }
 
     doLast {
         val qodanaRoot = qodanaRootDir
@@ -1881,103 +3238,414 @@ val writeQodanaSummary by tasks.registering {
         val metaFile = qodanaMetaFile
         val problemsFile = qodanaProblemsFile
         val sarifFile = qodanaSarifFile
+        val runBindingFile = qodanaRunBindingFile
+        val scopeTelemetryFile = qodanaScopeTelemetryFile
+        val canonicalProjectPath = projectDir.canonicalFile.toPath().toAbsolutePath().normalize()
+        listOf(
+            qodanaRoot,
+            resultsDir,
+            metaFile,
+            problemsFile,
+            sarifFile,
+            runBindingFile,
+            scopeTelemetryFile
+        ).forEach { source ->
+            requireNoFollowOrdinaryComponents(
+                canonicalProjectPath,
+                source.toPath(),
+                "Qodana summary input"
+            )
+        }
+        requireNoFollowOrdinaryTree(qodanaRoot.toPath(), "Qodana summary input tree")
         writeSummarySoft(outputFile.get().asFile, "qodana-summary", project.version.toString()) {
             val currentGitRevision = gitOutput("rev-parse", "HEAD")
             val currentGitBranch = gitOutput("rev-parse", "--abbrev-ref", "HEAD")
-
-            val slurper = groovy.json.JsonSlurper()
-            val meta = if (metaFile.exists()) slurper.parse(metaFile) as Map<*, *> else emptyMap<String, Any>()
-            val problems = if (problemsFile.exists()) {
-                ((slurper.parse(problemsFile) as Map<*, *>)["listProblem"] as? List<*>) ?: emptyList<Any>()
-            } else emptyList<Any>()
-            val sarifRuns = if (sarifFile.exists()) {
-                ((slurper.parse(sarifFile) as Map<*, *>)["runs"] as? List<*>) ?: emptyList<Any>()
-            } else emptyList<Any>()
             val qodanaAvailable = qodanaRoot.exists()
-            val metaPresent = metaFile.exists()
-            val problemsPresent = problemsFile.exists()
-            val sarifPresent = sarifFile.exists()
-            val firstSarifRun = sarifRuns.firstOrNull { it is Map<*, *> } as? Map<*, *>
-            val sarifDriver = ((firstSarifRun?.get("tool") as? Map<*, *>)?.get("driver") as? Map<*, *>)
-            val sarifVcs = ((firstSarifRun?.get("versionControlProvenance") as? List<*>)?.firstOrNull() as? Map<*, *>)
-            val qodanaAttributes = meta["attributes"] as? Map<*, *>
-            val qodanaVcs = qodanaAttributes?.get("vcs") as? Map<*, *>
-            val qodanaSarifIdea = qodanaVcs?.get("sarifIdea") as? Map<*, *>
-            val qodanaRevision = qodanaSarifIdea?.get("revisionId")?.toString()?.ifBlank { null }
-                ?: sarifVcs?.get("revisionId")?.toString()?.ifBlank { null }
-            val qodanaBranch = qodanaSarifIdea?.get("branch")?.toString()?.ifBlank { null }
-                ?: sarifVcs?.get("branch")?.toString()?.ifBlank { null }
+            val metaPresent = metaFile.isFile
+            val problemsPresent = problemsFile.isFile
+            val sarifPresent = sarifFile.isFile
+            val scopeTelemetryPresent = scopeTelemetryFile.isFile
 
-            val severityCounts = linkedMapOf<String, Int>()
-            problems.forEach { raw ->
-                if (raw is Map<*, *>) {
-                    val severity = (raw["severity"]?.toString()?.trim()?.uppercase()).orEmpty().ifBlank { "UNKNOWN" }
-                    severityCounts[severity] = (severityCounts[severity] ?: 0) + 1
+            var runBindingParseFailure: String? = null
+            val runBinding = if (!runBindingFile.isFile) {
+                null
+            } else {
+                try {
+                    parseStrictJson(
+                        Files.readAllBytes(runBindingFile.toPath()),
+                        "Qodana run binding",
+                        1_048_576
+                    ) as? Map<*, *>
+                        ?: run {
+                            runBindingParseFailure = "run-binding-root-not-object"
+                            null
+                        }
+                } catch (_: Throwable) {
+                    runBindingParseFailure = "run-binding-json-invalid"
+                    null
                 }
             }
 
+            fun parseArtifactManifest(raw: Any?): List<Map<String, Any>>? {
+                val entries = raw as? List<*> ?: return null
+                if (entries.size != qodanaBoundArtifactSpecs.size) return null
+                return entries.mapIndexed { index, rawEntry ->
+                    val entry = rawEntry as? Map<*, *> ?: return null
+                    val path = entry["path"] as? String ?: return null
+                    val bytes = exactJsonNonNegativeLong(entry["bytes"]) ?: return null
+                    val sha256 = entry["sha256"] as? String ?: return null
+                    if (entry.keys != setOf("path", "bytes", "sha256") ||
+                        path != qodanaBoundArtifactSpecs[index].relativePath ||
+                        !sha256.matches(Regex("[0-9a-f]{64}"))) {
+                        return null
+                    }
+                    linkedMapOf("path" to path, "bytes" to bytes, "sha256" to sha256)
+                }
+            }
+
+            fun parseObservedScope(raw: Any?): Map<String, Any?>? {
+                val candidate = raw as? Map<*, *> ?: return null
+                val telemetryBytes = exactJsonNonNegativeLong(candidate["telemetryBytes"]) ?: return null
+                val telemetrySha256 = candidate["telemetrySha256"] as? String ?: return null
+                val observed = "inspection-activity-observed"
+                val notObserved = "no-inspection-activity-observed"
+                if (candidate.keys != setOf(
+                        "telemetryStatus", "telemetryBytes", "telemetrySha256",
+                        "main", "unitTest", "e2eTest"
+                    ) ||
+                    candidate["telemetryStatus"] != "telemetry-present" ||
+                    telemetryBytes <= 0L ||
+                    !telemetrySha256.matches(Regex("[0-9a-f]{64}")) ||
+                    candidate["main"] !in setOf(observed, notObserved) ||
+                    candidate["unitTest"] !in setOf(observed, notObserved) ||
+                    candidate["e2eTest"] !in setOf(observed, notObserved)) {
+                    return null
+                }
+                return linkedMapOf(
+                    "telemetryStatus" to "telemetry-present",
+                    "telemetryBytes" to telemetryBytes,
+                    "telemetrySha256" to telemetrySha256,
+                    "main" to candidate["main"],
+                    "unitTest" to candidate["unitTest"],
+                    "e2eTest" to candidate["e2eTest"]
+                )
+            }
+
+            val bindingBefore = qodanaSourceSnapshotFromMap(runBinding?.get("sourceSnapshotBefore"))
+            val bindingAfter = qodanaSourceSnapshotFromMap(runBinding?.get("sourceSnapshotAfter"))
+            val bindingManifest = parseArtifactManifest(runBinding?.get("artifactManifest"))
+            val bindingObservedScope = parseObservedScope(runBinding?.get("observedScope"))
+            var artifactReadFailure: String? = null
+            val currentArtifacts = if (metaPresent && problemsPresent && sarifPresent && scopeTelemetryPresent) {
+                try {
+                    readQodanaBoundArtifacts(qodanaRoot, projectDir.canonicalFile)
+                } catch (failure: Throwable) {
+                    artifactReadFailure = failure.message ?: "qodana-artifact-read-failed"
+                    null
+                }
+            } else null
+            val currentManifest = currentArtifacts?.map { it.asMap() }
+            val runBindingStructureValid = runBinding != null &&
+                runBinding.keys == setOf(
+                    "schemaVersion", "sourceSnapshotStatus", "sourceSnapshotBefore",
+                    "sourceSnapshotAfter", "artifactManifest", "observedScope"
+                ) &&
+                exactJsonNonNegativeInt(runBinding["schemaVersion"]) == 1 &&
+                runBinding["sourceSnapshotStatus"] == "stable" &&
+                bindingBefore != null && bindingAfter != null && bindingBefore == bindingAfter &&
+                bindingManifest != null && bindingObservedScope != null
+            val artifactBindingStatus = when {
+                !runBindingFile.isFile -> "qodana-run-binding-missing"
+                runBindingParseFailure != null || !runBindingStructureValid -> "qodana-run-binding-invalid"
+                currentArtifacts == null -> "bound-artifacts-unavailable"
+                bindingManifest != currentManifest -> "bound-artifact-mismatch"
+                else -> "matches-run-binding"
+            }
+
+            var scopeParseFailure: String? = null
+            val currentObservedScope = if (artifactBindingStatus == "matches-run-binding") {
+                try {
+                    val telemetry = currentArtifacts!!.single {
+                        it.spec.relativePath == "results/log/qodana_directories_inspection_groups.csv"
+                    }
+                    qodanaObservedScope(telemetry.bytes, projectDir.canonicalFile)
+                } catch (failure: Throwable) {
+                    scopeParseFailure = failure.message ?: "scope-telemetry-invalid"
+                    emptyMap()
+                }
+            } else emptyMap()
+            var currentSnapshotFailure: String? = null
+            val currentSnapshot = if (runBindingStructureValid) {
+                try {
+                    qodanaSourceSnapshot()
+                } catch (_: Throwable) {
+                    currentSnapshotFailure = "current-source-snapshot-unavailable"
+                    null
+                }
+            } else {
+                null
+            }
+            val sourceSnapshotStatus = when {
+                !runBindingFile.isFile -> "qodana-run-binding-missing"
+                runBindingParseFailure != null || !runBindingStructureValid -> "qodana-run-binding-invalid"
+                currentSnapshot == null -> "current-source-snapshot-unavailable"
+                bindingAfter != currentSnapshot -> "source-snapshot-mismatch"
+                else -> "matches-current-source-snapshot"
+            }
+            val observedStatus = "inspection-activity-observed"
+            val noActivityStatus = "no-inspection-activity-observed"
+            val scopeTelemetryValid = bindingObservedScope != null &&
+                artifactBindingStatus == "matches-run-binding" &&
+                scopeParseFailure == null &&
+                bindingObservedScope == currentObservedScope
+            val scanScopeStatus = when {
+                !runBindingFile.isFile -> "qodana-run-binding-missing"
+                !scopeTelemetryValid -> "scope-telemetry-incomplete"
+                currentObservedScope["main"] != observedStatus -> "required-source-roots-not-observed"
+                currentObservedScope["e2eTest"] != observedStatus -> "required-source-roots-not-observed"
+                currentObservedScope["unitTest"] !in setOf(observedStatus, noActivityStatus) ->
+                    "scope-telemetry-incomplete"
+                else -> "required-source-roots-observed"
+            }
+
+            var meta = emptyMap<Any?, Any?>()
+            var problems = emptyList<Any?>()
+            var sarifRuns = emptyList<Any?>()
+            var resultSchemaFailure: String? = null
+            var metaTotal: Int? = null
+            val severityCounts = linkedMapOf<String, Int>()
             var sarifError = 0
             var sarifWarning = 0
             var sarifNote = 0
             var sarifIssueCount = 0
             var newIssues: Int? = 0
-            sarifRuns.forEach { run ->
-                if (run is Map<*, *>) {
-                    val results = run["results"] as? List<*> ?: emptyList<Any>()
-                    results.forEach { raw ->
-                        if (raw is Map<*, *>) {
-                            sarifIssueCount++
-                            when (raw["level"]?.toString()?.lowercase()) {
+            val sarifSeverityCounts = linkedMapOf<String, Int>()
+            var authenticatedLinter: String? = null
+            var authenticatedLinterVersion: String? = null
+            val explicitQodanaRevisions = mutableListOf<String>()
+            val explicitQodanaBranches = mutableListOf<String>()
+            if (artifactBindingStatus == "matches-run-binding") {
+                try {
+                    fun requireResult(condition: Boolean, message: String) {
+                        if (!condition) throw GradleException(message)
+                    }
+                    fun explicitNativeString(container: Map<*, *>, key: String, label: String): String? {
+                        if (!container.containsKey(key)) return null
+                        val value = container[key]
+                        requireResult(value is String && value.isNotBlank(), "$label must be a non-empty string")
+                        return value as String
+                    }
+                    val artifactsByPath = currentArtifacts!!.associateBy { it.spec.relativePath }
+                    val parsedMeta = parseStrictJson(
+                        artifactsByPath.getValue("report/results/metaInformation.json").bytes,
+                        "Qodana metaInformation.json",
+                        16 * 1024 * 1024
+                    )
+                    val parsedProblems = parseStrictJson(
+                        artifactsByPath.getValue("report/results/result-allProblems.json").bytes,
+                        "Qodana result-allProblems.json",
+                        128 * 1024 * 1024
+                    )
+                    val parsedSarif = parseStrictJson(
+                        artifactsByPath.getValue("report/results/qodana.sarif.json").bytes,
+                        "Qodana qodana.sarif.json",
+                        256 * 1024 * 1024
+                    )
+                    requireResult(parsedMeta is Map<*, *>, "Qodana metadata root must be an object")
+                    requireResult(parsedProblems is Map<*, *>, "Qodana problems root must be an object")
+                    requireResult(parsedSarif is Map<*, *>, "Qodana SARIF root must be an object")
+                    meta = parsedMeta as Map<Any?, Any?>
+                    val metaLinter = meta["linter"] as? String
+                    val metaLinterVersion = meta["linterVersion"] as? String
+                    requireResult(metaLinter == qodanaExpectedLinter, "Qodana metadata linter identity is not the configured engine")
+                    requireResult(
+                        metaLinterVersion != null && qodanaExpectedLinterVersion.matches(metaLinterVersion),
+                        "Qodana metadata linter version is not in the configured 2026.1 engine family"
+                    )
+                    authenticatedLinter = metaLinter
+                    authenticatedLinterVersion = metaLinterVersion
+                    val rawAttributes = meta["attributes"]
+                    if (rawAttributes != null) {
+                        requireResult(rawAttributes is Map<*, *>, "Qodana metadata attributes must be an object")
+                        val rawVcs = (rawAttributes as Map<*, *>)["vcs"]
+                        if (rawVcs != null) {
+                            requireResult(rawVcs is Map<*, *>, "Qodana metadata VCS must be an object")
+                            val rawSarifIdea = (rawVcs as Map<*, *>)["sarifIdea"]
+                            if (rawSarifIdea != null) {
+                                requireResult(rawSarifIdea is Map<*, *>, "Qodana metadata sarifIdea must be an object")
+                                val sarifIdea = rawSarifIdea as Map<*, *>
+                                val revision = explicitNativeString(
+                                    sarifIdea,
+                                    "revisionId",
+                                    "Qodana metadata revisionId"
+                                )
+                                val branch = explicitNativeString(
+                                    sarifIdea,
+                                    "branch",
+                                    "Qodana metadata branch"
+                                )
+                                if (revision != null) {
+                                    requireResult(
+                                        revision.matches(Regex("[0-9a-fA-F]{40}")),
+                                        "Qodana metadata revisionId must be a 40-digit Git object ID"
+                                    )
+                                    explicitQodanaRevisions += revision.lowercase()
+                                }
+                                if (branch != null) explicitQodanaBranches += branch
+                            }
+                        }
+                    }
+                    val rawProblems = (parsedProblems as Map<*, *>)["listProblem"]
+                    val rawRuns = (parsedSarif as Map<*, *>)["runs"]
+                    requireResult(rawProblems is List<*>, "Qodana problems must contain a listProblem list")
+                    requireResult(rawRuns is List<*> && rawRuns.isNotEmpty(), "Qodana SARIF must contain a non-empty runs list")
+                    problems = rawProblems as List<Any?>
+                    sarifRuns = rawRuns as List<Any?>
+                    metaTotal = exactJsonNonNegativeInt(meta["total"])
+                    requireResult(metaTotal != null, "Qodana metadata total must be an exact nonnegative integer")
+                    val knownSeverities = setOf("CRITICAL", "HIGH", "MODERATE", "LOW", "INFO")
+                    problems.forEach { raw ->
+                        requireResult(raw is Map<*, *>, "Every Qodana problem must be an object")
+                        val severity = (raw as Map<*, *>)["severity"] as? String
+                        val normalized = severity?.trim()?.uppercase()
+                        requireResult(normalized in knownSeverities, "Qodana problem contains an unknown severity")
+                        severityCounts[normalized!!] = (severityCounts[normalized] ?: 0) + 1
+                    }
+                    sarifRuns.forEach { rawRun ->
+                        requireResult(rawRun is Map<*, *>, "Every Qodana SARIF run must be an object")
+                        val run = rawRun as Map<*, *>
+                        val driver = ((run["tool"] as? Map<*, *>)?.get("driver") as? Map<*, *>)
+                            ?: throw GradleException("Every Qodana SARIF run must identify its analysis driver")
+                        requireResult(
+                            driver["name"] == qodanaExpectedLinter,
+                            "Qodana SARIF driver identity is not the configured engine"
+                        )
+                        requireResult(
+                            driver["version"] == metaLinterVersion,
+                            "Qodana SARIF driver version disagrees with authenticated metadata"
+                        )
+                        val rawProvenance = run["versionControlProvenance"]
+                        if (rawProvenance != null) {
+                            requireResult(
+                                rawProvenance is List<*>,
+                                "Qodana SARIF versionControlProvenance must be a list"
+                            )
+                            (rawProvenance as List<*>).forEach { rawEntry ->
+                                requireResult(
+                                    rawEntry is Map<*, *>,
+                                    "Every Qodana SARIF version-control provenance entry must be an object"
+                                )
+                                val entry = rawEntry as Map<*, *>
+                                val revision = explicitNativeString(
+                                    entry,
+                                    "revisionId",
+                                    "Qodana SARIF revisionId"
+                                )
+                                val branch = explicitNativeString(entry, "branch", "Qodana SARIF branch")
+                                if (revision != null) {
+                                    requireResult(
+                                        revision.matches(Regex("[0-9a-fA-F]{40}")),
+                                        "Qodana SARIF revisionId must be a 40-digit Git object ID"
+                                    )
+                                    explicitQodanaRevisions += revision.lowercase()
+                                }
+                                if (branch != null) explicitQodanaBranches += branch
+                            }
+                        }
+                        val results = run["results"]
+                        requireResult(results is List<*>, "Every Qodana SARIF run must contain a results list")
+                        (results as List<*>).forEach { rawResult ->
+                            requireResult(rawResult is Map<*, *>, "Every Qodana SARIF result must be an object")
+                            val result = rawResult as Map<*, *>
+                            val level = result["level"] as? String
+                            requireResult(level in setOf("error", "warning", "note", "none"), "Qodana SARIF result contains an unknown level")
+                            when (level) {
                                 "error" -> sarifError++
                                 "warning" -> sarifWarning++
                                 "note" -> sarifNote++
                             }
-                            if (!problemsPresent) {
-                                val properties = raw["properties"] as? Map<*, *>
-                                val severity = properties?.get("qodanaSeverity")?.toString()?.trim()?.uppercase()
-                                    ?.ifBlank { null } ?: "UNKNOWN"
-                                severityCounts[severity] = (severityCounts[severity] ?: 0) + 1
-                            }
-                            val baselineState = raw["baselineState"]?.toString()
+                            val properties = result["properties"] as? Map<*, *>
+                            val severity = properties?.get("qodanaSeverity") as? String
+                            val normalized = severity?.trim()?.uppercase()
+                            requireResult(normalized in knownSeverities, "Qodana SARIF result contains an unknown Qodana severity")
+                            sarifSeverityCounts[normalized!!] = (sarifSeverityCounts[normalized] ?: 0) + 1
+                            sarifIssueCount++
+                            val rawBaselineState = result["baselineState"]
+                            requireResult(
+                                rawBaselineState == null ||
+                                    rawBaselineState is String &&
+                                    rawBaselineState in setOf("new", "unchanged", "updated", "absent"),
+                                "Qodana SARIF result contains an unknown baseline state"
+                            )
+                            val baselineState = rawBaselineState as? String
                             if (baselineState == null) {
                                 newIssues = null
-                            } else if (baselineState.equals("new", ignoreCase = true)) {
-                                newIssues = (newIssues ?: 0) + 1
+                            } else if (baselineState == "new") {
+                                newIssues = newIssues?.plus(1)
                             }
                         }
                     }
+                    requireResult(metaTotal == problems.size, "Qodana metadata and problem counts disagree")
+                    requireResult(metaTotal == sarifIssueCount, "Qodana metadata and SARIF counts disagree")
+                    requireResult(severityCounts == sarifSeverityCounts, "Qodana problem and SARIF severity counts disagree")
+                } catch (failure: Throwable) {
+                    resultSchemaFailure = failure.message ?: "qodana-result-schema-invalid"
+                    meta = emptyMap()
+                    problems = emptyList()
+                    sarifRuns = emptyList()
+                    metaTotal = null
+                    severityCounts.clear()
+                    sarifSeverityCounts.clear()
+                    authenticatedLinter = null
+                    authenticatedLinterVersion = null
+                    explicitQodanaRevisions.clear()
+                    explicitQodanaBranches.clear()
+                    sarifError = 0
+                    sarifWarning = 0
+                    sarifNote = 0
+                    sarifIssueCount = 0
+                    newIssues = null
                 }
             }
+            val resultSchemaStatus = if (
+                artifactBindingStatus == "matches-run-binding" && resultSchemaFailure == null
+            ) "validated-consistent-results" else "invalid-or-unauthenticated-results"
+
+            val qodanaRevisions = explicitQodanaRevisions.distinct()
+            val qodanaBranches = explicitQodanaBranches.distinct()
+            val qodanaRevision = qodanaRevisions.singleOrNull()
+            val qodanaBranch = qodanaBranches.singleOrNull()
 
             val missingRequiredArtifacts = if (!qodanaAvailable) {
-                listOf("metaInformation.json", "result-allProblems.json", "qodana.sarif.json")
-            } else {
-                listOfNotNull(if (sarifPresent) null else "qodana.sarif.json")
-            }
-            val missingAuxiliaryArtifacts = if (!qodanaAvailable) {
-                emptyList()
+                listOf(
+                    "metaInformation.json", "result-allProblems.json", "qodana.sarif.json",
+                    "qodana_directories_inspection_groups.csv"
+                )
             } else {
                 listOfNotNull(
                     if (metaPresent) null else "metaInformation.json",
-                    if (problemsPresent) null else "result-allProblems.json"
+                    if (problemsPresent) null else "result-allProblems.json",
+                    if (sarifPresent) null else "qodana.sarif.json",
+                    if (scopeTelemetryPresent) null else "qodana_directories_inspection_groups.csv"
                 )
             }
             val requiredArtifactStatus = when {
                 !qodanaAvailable -> "qodana-results-missing"
-                missingRequiredArtifacts.isEmpty() && missingAuxiliaryArtifacts.isEmpty() -> "all-required-artifacts-present"
-                missingRequiredArtifacts.isEmpty() -> "sarif-only-results-present"
+                missingRequiredArtifacts.isEmpty() -> "all-required-artifacts-present"
                 else -> "required-artifacts-missing"
             }
             val revisionStatus = when {
                 !qodanaAvailable -> "qodana-results-missing"
-                qodanaRevision == null -> "qodana-revision-unavailable"
+                qodanaRevisions.isEmpty() -> "qodana-revision-unavailable"
+                qodanaRevisions.size != 1 -> "qodana-revision-conflict"
                 currentGitRevision == null -> "current-git-revision-unavailable"
                 qodanaRevision == currentGitRevision -> "matches-current-revision"
                 else -> "revision-mismatch"
             }
             val branchStatus = when {
                 !qodanaAvailable -> "qodana-results-missing"
-                qodanaBranch == null -> "qodana-branch-unavailable"
+                qodanaBranches.isEmpty() -> "qodana-branch-unavailable"
+                qodanaBranches.size != 1 -> "qodana-branch-conflict"
                 currentGitBranch == null -> "current-git-branch-unavailable"
                 qodanaBranch == currentGitBranch -> "matches-current-branch"
                 else -> "branch-mismatch"
@@ -1985,8 +3653,15 @@ val writeQodanaSummary by tasks.registering {
             val summaryStatus = when {
                 !qodanaAvailable -> "qodana-results-missing"
                 missingRequiredArtifacts.isNotEmpty() -> "qodana-results-incomplete"
-                revisionStatus == "revision-mismatch" || branchStatus == "branch-mismatch" -> "stale-qodana-provenance"
-                revisionStatus != "matches-current-revision" || branchStatus != "matches-current-branch" -> "qodana-provenance-incomplete"
+                sourceSnapshotStatus == "qodana-run-binding-missing" -> "qodana-run-binding-missing"
+                sourceSnapshotStatus == "qodana-run-binding-invalid" -> "qodana-run-binding-invalid"
+                artifactBindingStatus != "matches-run-binding" -> "stale-qodana-artifacts"
+                resultSchemaStatus != "validated-consistent-results" -> "qodana-results-invalid"
+                sourceSnapshotStatus != "matches-current-source-snapshot" -> "stale-qodana-source-snapshot"
+                scanScopeStatus != "required-source-roots-observed" -> "qodana-scope-incomplete"
+                revisionStatus !in setOf("matches-current-revision", "qodana-revision-unavailable") ||
+                    branchStatus !in setOf("matches-current-branch", "qodana-branch-unavailable") ->
+                    "stale-qodana-provenance"
                 else -> "qodana-results-match-current-candidate"
             }
 
@@ -1999,45 +3674,86 @@ val writeQodanaSummary by tasks.registering {
                     "resultsDir" to resultsDir.absolutePath,
                     "metaFile" to metaFile.absolutePath,
                     "problemsFile" to problemsFile.absolutePath,
-                    "sarifFile" to sarifFile.absolutePath
+                    "sarifFile" to sarifFile.absolutePath,
+                    "runBindingFile" to runBindingFile.absolutePath,
+                    "scopeTelemetryFile" to scopeTelemetryFile.absolutePath
                 ),
                 "requiredArtifacts" to mapOf(
                     "status" to requiredArtifactStatus,
                     "missing" to missingRequiredArtifacts,
-                    "auxiliaryMissing" to missingAuxiliaryArtifacts,
+                    "auxiliaryMissing" to emptyList<String>(),
                     "files" to mapOf(
                         "metaInformation" to metaPresent,
                         "allProblems" to problemsPresent,
-                        "sarif" to sarifPresent
+                        "sarif" to sarifPresent,
+                        "scopeTelemetry" to scopeTelemetryPresent
                     )
+                ),
+                "artifactBinding" to mapOf(
+                    "status" to artifactBindingStatus,
+                    "binding" to bindingManifest,
+                    "current" to currentManifest,
+                    "diagnostic" to artifactReadFailure
+                ),
+                "resultSchema" to mapOf(
+                    "status" to resultSchemaStatus,
+                    "diagnostic" to resultSchemaFailure
                 ),
                 "provenance" to mapOf(
                     "qodanaSourceBranch" to qodanaBranch,
                     "qodanaSourceRevision" to qodanaRevision,
+                    "qodanaSourceBranches" to qodanaBranches,
+                    "qodanaSourceRevisions" to qodanaRevisions,
                     "currentGitBranch" to currentGitBranch,
                     "currentGitRevision" to currentGitRevision,
                     "revisionStatus" to revisionStatus,
                     "branchStatus" to branchStatus
                 ),
-                "linter" to (meta["linter"] ?: sarifDriver?.get("name")),
-                "linterVersion" to (meta["linterVersion"] ?: sarifDriver?.get("version")),
-                "totalIssues" to ((meta["total"] as? Number)?.toInt() ?: if (problemsPresent) problems.size else sarifIssueCount),
+                "sourceSnapshot" to mapOf(
+                    "status" to sourceSnapshotStatus,
+                    "bindingBefore" to bindingBefore?.asMap(),
+                    "bindingAfter" to bindingAfter?.asMap(),
+                    "current" to currentSnapshot?.asMap(),
+                    "diagnostic" to (runBindingParseFailure ?: currentSnapshotFailure)
+                ),
+                "scanScope" to mapOf(
+                    "status" to scanScopeStatus,
+                    "telemetryStatus" to currentObservedScope["telemetryStatus"],
+                    "telemetryBytes" to currentObservedScope["telemetryBytes"],
+                    "telemetrySha256" to currentObservedScope["telemetrySha256"],
+                    "main" to currentObservedScope["main"],
+                    "unitTest" to currentObservedScope["unitTest"],
+                    "e2eTest" to currentObservedScope["e2eTest"],
+                    "diagnostic" to scopeParseFailure,
+                    "unitTestCorrectnessOwner" to "test-and-candidateTest",
+                    "unitTestCoverageClaim" to "inspection-activity-only"
+                ),
+                "linter" to authenticatedLinter,
+                "linterVersion" to authenticatedLinterVersion,
+                "totalIssues" to metaTotal,
                 "severityCounts" to severityCounts,
                 "sarifLevelCounts" to mapOf(
                     "error" to sarifError,
                     "warning" to sarifWarning,
                     "note" to sarifNote
                 ),
-                "criticalIssues" to if (!qodanaRoot.exists()) null else (severityCounts["CRITICAL"] ?: 0),
+                "criticalIssues" to if (resultSchemaStatus == "validated-consistent-results") {
+                    severityCounts["CRITICAL"] ?: 0
+                } else null,
                 "criticalIssuesStatus" to when {
                     !qodanaRoot.exists() -> "qodana-results-missing"
-                    severityCounts.isNotEmpty() -> "derived-from-problem-severities"
-                    else -> "unknown-problem-severities-missing"
+                    resultSchemaStatus == "validated-consistent-results" ->
+                        "derived-from-validated-consistent-results"
+                    else -> "unknown-invalid-or-unauthenticated-results"
                 },
-                "highIssues" to (severityCounts["HIGH"] ?: 0),
+                "highIssues" to if (resultSchemaStatus == "validated-consistent-results") {
+                    severityCounts["HIGH"] ?: 0
+                } else null,
                 "newIssues" to newIssues,
                 "newIssuesStatus" to when {
                     !qodanaRoot.exists() -> "qodana-results-missing"
+                    resultSchemaStatus != "validated-consistent-results" ->
+                        "unknown-invalid-or-unauthenticated-results"
                     newIssues == null -> "unknown-no-baseline-state"
                     else -> "derived-from-sarif-baseline-state"
                 }
@@ -2541,7 +4257,13 @@ ${indentedV1ScenarioLines}
         val severityCounts = mdMap(qodana["severityCounts"])
         val sarifLevelCounts = mdMap(qodana["sarifLevelCounts"])
         val provenance = mdMap(qodana["provenance"])
+        val sourceSnapshot = mdMap(qodana["sourceSnapshot"])
+        val scanScope = mdMap(qodana["scanScope"])
         val requiredArtifacts = mdMap(qodana["requiredArtifacts"])
+        val artifactBinding = mdMap(qodana["artifactBinding"])
+        val resultSchema = mdMap(qodana["resultSchema"])
+        val criticalIssuesStatus = mdSafe(qodana["criticalIssuesStatus"])
+        val validatedResults = criticalIssuesStatus == "derived-from-validated-consistent-results"
         val highIssues = mdInt(severityCounts["HIGH"])
         val moderateIssues = mdInt(severityCounts["MODERATE"])
         val criticalIssues = mdInt(severityCounts["CRITICAL"])
@@ -2551,11 +4273,25 @@ ${indentedV1ScenarioLines}
         val currentBranch = mdSafe(provenance["currentGitBranch"])
         val qodanaRevision = mdSafe(provenance["qodanaSourceRevision"]).take(7)
         val currentRevision = mdSafe(provenance["currentGitRevision"]).take(7)
+        val sourceSnapshotStatus = mdSafe(sourceSnapshot["status"])
+        val sourceSnapshotMatches = sourceSnapshotStatus == "matches-current-source-snapshot"
+        val currentSourceSnapshot = mdMap(sourceSnapshot["current"])
+        val currentSnapshotHash = mdSafe(currentSourceSnapshot["snapshotSha256"])
+        val currentTrackedFiles = mdInt(currentSourceSnapshot["trackedFiles"])
+        val currentTrackedBytes = mdSafe(currentSourceSnapshot["trackedBytes"])
+        val currentChangedFiles = mdInt(currentSourceSnapshot["changedTrackedFiles"])
+        val scanScopeStatus = mdSafe(scanScope["status"])
+        val mainScopeStatus = mdSafe(scanScope["main"])
+        val unitScopeStatus = mdSafe(scanScope["unitTest"])
+        val e2eScopeStatus = mdSafe(scanScope["e2eTest"])
+        val acceptableCurrentEvidence = mdSafe(qodana["summaryStatus"]) == "qodana-results-match-current-candidate" &&
+            sourceSnapshotMatches && scanScopeStatus == "required-source-roots-observed" &&
+            validatedResults && artifactBinding["status"] == "matches-run-binding"
 
         writeReport("qodana", talosVersion, """
             # Qodana Report - $reportDate - Talos $talosVersion
 
-            This report is useful because it answers the two questions that caused previous ambiguity: whether the scan is current, and how much static-analysis triage remains. Its main limitation is that it summarizes severity, not root causes. For actual remediation, open the Qodana HTML or SARIF report and group issues by inspection type.
+            This report describes whether the scan is bound to the exact Git HEAD, ordered tracked paths, and every tracked file's current raw bytes; Git diff facts are diagnostics only. It reports only scan activity actually observed in Qodana telemetry. It summarizes severity rather than root causes; use the HTML or SARIF report for remediation details. Unit-test correctness is owned by the `test` and `candidateTest` lanes because this Qodana run may report no inspection activity under `src/test`.
 
             ```text
             +--------------------------------------------------------------+
@@ -2569,9 +4305,9 @@ ${indentedV1ScenarioLines}
 
             | Question | Answer | Confidence |
             | --- | --- | --- |
-            | Does this scan match the current workspace? | ${if (provenance["branchStatus"] == "matches-current-branch" && provenance["revisionStatus"] == "matches-current-revision") "Yes, branch and revision match" else "No or incomplete provenance"} | High |
-            | Are there critical issues? | ${if (criticalIssues == 0) "No, `0` critical" else "Yes, `$criticalIssues` critical"} | High |
-            | Are there high-priority issues to triage? | ${if (highIssues > 0) "Yes, `$highIssues` high" else "No high issues"} | High |
+            | Does this scan match the current source snapshot? | ${if (sourceSnapshotMatches) "Yes, exact HEAD + tracked paths + raw file bytes match" else "No, `$sourceSnapshotStatus`"} | High |
+            | Are there critical issues? | ${if (!validatedResults) "Unknown, `$criticalIssuesStatus`" else if (criticalIssues == 0) "No, `0` critical" else "Yes, `$criticalIssues` critical"} | High |
+            | Are there high-priority issues to triage? | ${if (!validatedResults) "Unknown until result schemas authenticate" else if (highIssues > 0) "Yes, `$highIssues` high" else "No high issues"} | High |
             | Is this report useful for release review? | Yes for triage pressure and provenance, not enough for root-cause details | High |
 
             ## Release Triage Funnel
@@ -2581,9 +4317,9 @@ ${indentedV1ScenarioLines}
             ```text
             $totalIssues Qodana findings
               |
-              +-- $criticalIssues CRITICAL -> ${if (criticalIssues == 0) "no immediate static-analysis blocker" else "block release until reviewed"}
+              +-- $criticalIssues CRITICAL -> ${if (!validatedResults) "UNKNOWN: results are not authenticated" else if (criticalIssues == 0) "no immediate static-analysis blocker" else "block release until reviewed"}
               |
-              +-- $highIssues HIGH ----> ${if (highIssues == 0) "no high-severity triage needed" else "triage required"}
+              +-- $highIssues HIGH ----> ${if (!validatedResults) "UNKNOWN" else if (highIssues == 0) "no high-severity triage needed" else "triage required"}
               |       |
               |       +-- fix true positives
               |       +-- suppress accepted false positives with justification
@@ -2592,20 +4328,39 @@ ${indentedV1ScenarioLines}
               +-- $moderateIssues MODERATE -> review after high-severity pass
             ```
 
-            ## Provenance Gate
+            ## Current-Source Binding
 
-            Decision question: can reviewers trust that this report belongs to this candidate?
+            Decision question: can reviewers trust that this report belongs to these exact source bytes?
 
             ```text
-            Qodana scan                         Current workspace
-            +----------------------+           +----------------------+
-            | branch: ${qodanaBranch.take(14).padEnd(14)} |  ${mdSafe(provenance["branchStatus"]).replace("matches-current-branch", "MATCH").take(5).padEnd(5)}    | branch: ${currentBranch.take(14).padEnd(14)} |
-            | rev:    ${qodanaRevision.padEnd(7)}      |  ----->   | rev:    ${currentRevision.padEnd(7)}      |
-            +----------------------+           +----------------------+
+            domain: talos-qodana-current-source-v2
+            HEAD + paths + raw bytes -> ${currentSnapshotHash.take(32)}...
+            selected tracked files   -> $currentTrackedFiles ($currentTrackedBytes bytes)
+            changed-file diagnostic  -> $currentChangedFiles
+            comparison               -> $sourceSnapshotStatus
 
             Decision:
-              ${if (provenance["branchStatus"] == "matches-current-branch" && provenance["revisionStatus"] == "matches-current-revision") "Trust the report as current. Do not treat it as stale evidence." else "Do not use this report as current release evidence until provenance is fixed."}
+              ${if (acceptableCurrentEvidence) "Trust the report as bound to the current source snapshot." else "Do not use this report as current release evidence."}
             ```
+
+            Native Qodana VCS metadata is an independent cross-check. Missing native branch/revision fields are informational when the exact source snapshot matches; an explicit mismatch is still rejected.
+
+            | Native field | Qodana | Current | Status |
+            | --- | --- | --- | --- |
+            | Branch | `$qodanaBranch` | `$currentBranch` | `${mdSafe(provenance["branchStatus"])}` |
+            | Revision | `$qodanaRevision` | `$currentRevision` | `${mdSafe(provenance["revisionStatus"])}` |
+
+            ## Observed Scan Scope
+
+            These values mean inspection activity was or was not observed in the authenticated Qodana telemetry. They do not claim that every file was visited, and “no activity observed” is not proof that a directory was excluded.
+
+            | Source root | Observed status | Correctness owner |
+            | --- | --- | --- |
+            | `src/main` | `$mainScopeStatus` | Qodana + tests |
+            | `src/test` | `$unitScopeStatus` | `test` and `candidateTest` |
+            | `src/e2eTest` | `$e2eScopeStatus` | Qodana + `candidateE2eTest` |
+
+            Scope gate: `$scanScopeStatus`.
 
             ## Severity Pressure
 
@@ -2616,10 +4371,10 @@ ${indentedV1ScenarioLines}
 
             HIGH      ${highIssues.toString().padStart(3)}  ${mdBar(highIssues, maxSeverity, 40)}  ${if (highIssues > 0) "demands triage" else "clean"}
             MODERATE  ${moderateIssues.toString().padStart(3)}  ${mdBar(moderateIssues, maxSeverity, 40)}  review next
-            CRITICAL  ${criticalIssues.toString().padStart(3)}  ${mdBar(criticalIssues, maxSeverity, 40)}  ${if (criticalIssues == 0) "no critical blocker" else "blocker"}
+            CRITICAL  ${criticalIssues.toString().padStart(3)}  ${mdBar(criticalIssues, maxSeverity, 40)}  ${if (!validatedResults) "unknown" else if (criticalIssues == 0) "no critical blocker" else "blocker"}
 
             Reviewer signal:
-              the lane is current, but not clean.
+              ${if (acceptableCurrentEvidence) "the lane is current, its exact result bytes are authenticated, and its observed scope is explicit; severity triage remains." else "the lane is not acceptable as current release evidence."}
             ```
 
             ## Status Details
@@ -2628,6 +4383,10 @@ ${indentedV1ScenarioLines}
             | --- | --- |
             | Summary status | `${mdSafe(qodana["summaryStatus"])}` |
             | Required artifact status | `${mdSafe(requiredArtifacts["status"])}` |
+            | Exact artifact-byte binding | `${mdSafe(artifactBinding["status"])}` |
+            | Result schema and count consistency | `${mdSafe(resultSchema["status"])}` |
+            | Source snapshot status | `$sourceSnapshotStatus` |
+            | Observed scan-scope status | `$scanScopeStatus` |
             | Linter | `${mdSafe(qodana["linter"])}` |
             | Linter version | `${mdSafe(qodana["linterVersion"])}` |
             | Branch status | `${mdSafe(provenance["branchStatus"])}` |
@@ -2641,6 +4400,8 @@ ${indentedV1ScenarioLines}
             | Artifact | Path |
             | --- | --- |
             | Talos JSON summary | `build/reports/talos/qodana-summary.json` |
+            | Talos run binding | `.qodana/report/results/talos-run-binding.json` |
+            | Scope telemetry | `.qodana/results/log/qodana_directories_inspection_groups.csv` |
             | SARIF | `.qodana/report/results/qodana.sarif.json` |
             | HTML report | `.qodana/report/index.html` |
         """)
@@ -2794,22 +4555,68 @@ tasks.register("qualityReportGate") {
 
         val qodana = readQualitySummary(qodanaSummary.get().asFile, "qodana-summary")
         val qodanaStatus = mdSafe(qodana["summaryStatus"])
+        val qodanaLinter = qodana["linter"] as? String
+        val qodanaLinterVersion = qodana["linterVersion"] as? String
         val qodanaCriticalStatus = mdSafe(qodana["criticalIssuesStatus"])
         val qodanaCriticalIssues = mdInt(qodana["criticalIssues"])
-        val rejectedQodanaStatuses = setOf(
-            "summary-generation-failed",
-            "qodana-results-missing",
-            "qodana-results-incomplete",
-            "stale-qodana-provenance"
-        )
+        val qodanaSourceSnapshot = mdMap(qodana["sourceSnapshot"])
+        val qodanaScanScope = mdMap(qodana["scanScope"])
+        val qodanaArtifactBinding = mdMap(qodana["artifactBinding"])
+        val qodanaResultSchema = mdMap(qodana["resultSchema"])
+        val qodanaSummaryCurrentSnapshot = qodanaSourceSnapshotFromMap(qodanaSourceSnapshot["current"])
+        val qodanaGateCurrentSnapshot = try {
+            qodanaSourceSnapshot()
+        } catch (_: Throwable) {
+            null
+        }
 
         requireQuality(
-            qodanaStatus !in rejectedQodanaStatuses,
-            "qodana-summary status must be usable for release review, was `$qodanaStatus`"
+            qodanaStatus == "qodana-results-match-current-candidate",
+            "qodana-summary status must be exactly `qodana-results-match-current-candidate`, was `$qodanaStatus`"
         )
         requireQuality(
-            qodanaCriticalStatus != "unknown-problem-severities-missing",
-            "qodana-summary must expose critical-issue status"
+            qodanaSourceSnapshot["status"] == "matches-current-source-snapshot",
+            "qodana-summary must match the current source snapshot"
+        )
+        requireQuality(
+            qodanaSummaryCurrentSnapshot != null &&
+                qodanaGateCurrentSnapshot != null &&
+                qodanaSummaryCurrentSnapshot == qodanaGateCurrentSnapshot,
+            "qodana-summary current source snapshot must still match exact tracked bytes at gate time"
+        )
+        requireQuality(
+            qodanaArtifactBinding["status"] == "matches-run-binding",
+            "qodana-summary must authenticate the exact bound Qodana artifact bytes"
+        )
+        requireQuality(
+            qodanaResultSchema["status"] == "validated-consistent-results",
+            "qodana-summary must validate consistent Qodana result schemas and counts"
+        )
+        requireQuality(
+            qodanaLinter == qodanaExpectedLinter &&
+                qodanaLinterVersion != null &&
+                qodanaExpectedLinterVersion.matches(qodanaLinterVersion),
+            "qodana-summary must authenticate the configured QDJVM 2026.1 analysis engine"
+        )
+        requireQuality(
+            qodanaScanScope["status"] == "required-source-roots-observed",
+            "qodana-summary must have authenticated required-source-root telemetry"
+        )
+        requireQuality(
+            qodanaScanScope["main"] == "inspection-activity-observed" &&
+                qodanaScanScope["e2eTest"] == "inspection-activity-observed",
+            "qodana-summary must observe inspection activity for src/main and src/e2eTest"
+        )
+        requireQuality(
+            qodanaScanScope["unitTest"] in setOf(
+                "inspection-activity-observed",
+                "no-inspection-activity-observed"
+            ),
+            "qodana-summary must explicitly report src/test inspection activity"
+        )
+        requireQuality(
+            qodanaCriticalStatus == "derived-from-validated-consistent-results",
+            "qodana-summary critical-issue status must be in the explicit derived-status allowlist"
         )
         requireQuality(qodanaCriticalIssues == 0, "qodana-summary must have zero critical issues")
 
@@ -2832,9 +4639,6 @@ tasks.register("qualityReportGate") {
         }
 
         logger.lifecycle("Talos quality report gate passed: coverage, e2e, qodana, and version summaries are release-acceptable.")
-        if (qodanaStatus == "qodana-provenance-incomplete") {
-            logger.warn("Qodana provenance is incomplete; keep the Markdown report attached to reviewer evidence.")
-        }
     }
 }
 

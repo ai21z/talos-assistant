@@ -8,6 +8,7 @@ import dev.talos.core.context.TokenBudget;
 import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
@@ -110,6 +111,34 @@ class SessionLifecycleTest {
         TurnResult result = tp.process(session, "test", ctx);
         assertNotNull(result);
         assertEquals(1, received.size());
+    }
+    @Test
+    void turnProcessorPreservesFatalListenerBehaviorOnSuccessfulTurn() {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true));
+        var tp = new TurnProcessor(modes);
+        AssertionError fatal = new AssertionError("fatal listener");
+        AtomicInteger later = new AtomicInteger();
+        tp.addListener(new SessionListener() {
+            @Override public void onTurnComplete(TurnResult r, String u) { throw fatal; }
+        });
+        tp.addListener(new SessionListener() {
+            @Override public void onTurnComplete(TurnResult r, String u) { later.incrementAndGet(); }
+        });
+
+        AssertionError observed = assertThrows(AssertionError.class, () ->
+                tp.process(
+                        new Session(WS, new Config()),
+                        "test",
+                        Context.builder(new Config()).build()));
+
+        assertSame(fatal, observed);
+        assertEquals(0, later.get());
+        TurnPublicationHealth health = tp.consumePublicationHealth();
+        assertNotNull(health);
+        assertEquals(List.of(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION),
+                health.reasons());
+        assertEquals(List.of(AssertionError.class.getName()), health.exceptionClasses());
     }
     @Test
     void turnProcessorDoesNotFireOnNoResult() throws Exception {

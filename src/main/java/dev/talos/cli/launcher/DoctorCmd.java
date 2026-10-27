@@ -5,6 +5,7 @@ import dev.talos.cli.doctor.DoctorEngine;
 import dev.talos.cli.doctor.DoctorReportRenderer;
 import dev.talos.cli.doctor.ProbeResult;
 import dev.talos.core.Config;
+import dev.talos.engine.llamacpp.LlamaCppVerificationLaunch;
 import picocli.CommandLine;
 
 import java.io.PrintStream;
@@ -50,6 +51,13 @@ public class DoctorCmd implements Callable<Integer> {
 
     /** Testable seam: everything after CLI parsing. Exit 0 = no FAIL, 1 = FAIL. */
     static int run(Config cfg, Path workspace, Path talosHome, boolean start, PrintStream out) {
+        if (start) {
+            // --start is the verification launch: the managed server runs
+            // with debug log verbosity so offload/rate evidence lands in the
+            // server log. Scoped to this run's in-memory config; ordinary
+            // sessions never log prompts at debug verbosity.
+            LlamaCppVerificationLaunch.mark(cfg);
+        }
         DoctorContext ctx = new DoctorContext(cfg, workspace, talosHome);
         List<ProbeResult> results = DoctorEngine.run(ctx, DoctorEngine.probes(start));
         out.print(DoctorReportRenderer.render(results));

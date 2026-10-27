@@ -86,6 +86,41 @@ class ActiveTaskContextPolicyTest {
         assertEquals(ActiveTaskContext.none(), decision.memoryContext());
     }
 
+    @Test void incompleteMutationAuthorityCannotConsumeSavedContext() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        String userRequest = "Fix the remaining issue. "
+                + "a.txt ".repeat(8_193);
+        TaskContract rawContract =
+                TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision completeControl =
+                ActiveTaskContextPolicy.evaluate(
+                        userRequest,
+                        rawContract,
+                        saved,
+                        ArtifactGoal.fromActiveContext(saved),
+                        3);
+        assertTrue(completeControl.consumed());
+        assertTrue(completeControl.taskContract().mutationAllowed());
+
+        ActiveTaskContextPolicy.Decision decision =
+                ActiveTaskContextPolicy.evaluate(
+                        userRequest,
+                        rawContract,
+                        saved,
+                        ArtifactGoal.fromActiveContext(saved),
+                        3,
+                        false);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+        assertFalse(decision.taskContract().mutationAllowed());
+        assertEquals(ActiveTaskContext.State.NONE,
+                decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(saved, decision.memoryContext());
+    }
+
     @Test void nonActiveSavedContextReturnsBaselineDecisionWithoutMemory() {
         String userRequest = "make those changes";
         TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
@@ -243,6 +278,26 @@ class ActiveTaskContextPolicyTest {
         assertEquals(rawContract, decision.taskContract());
     }
 
+    @Test void explicitCurrentReadOnlyAuthoritySurvivesVerifierContext() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        for (String request : List.of(
+                "Explain the remaining issue. Do not change files.",
+                "Describe the repair. Leave files unchanged.",
+                "Fix the remaining issue. Do not change files.",
+                "Make it better and more modern, without changing files.")) {
+            TaskContract raw = TaskContractResolver.fromUserRequest(request);
+            assertFalse(raw.mutationAllowed(), request);
+
+            ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                    request, raw, saved, ArtifactGoal.fromActiveContext(saved), 3);
+
+            assertFalse(decision.taskContract().mutationAllowed(), request);
+            assertFalse(decision.taskContract().mutationRequested(), request);
+            assertFalse(decision.consumed(), request);
+            assertEquals(saved, decision.memoryContext(), request);
+        }
+    }
+
     @Test void vagueStaticWebRedesignConsumesActiveStaticWebContext() {
         ActiveTaskContext saved = staticWebMutationContext();
         String userRequest = "make it better and more modern";
@@ -326,7 +381,7 @@ class ActiveTaskContextPolicyTest {
     }
 
     private static ActiveTaskContext readmeProposal() {
-        return ActiveTaskContext.proposedChanges(
+        return dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 2,
                 "trace-propose",
                 List.of("README.md"),
@@ -350,7 +405,7 @@ class ActiveTaskContextPolicyTest {
     }
 
     private static ActiveTaskContext staticWebMutationContext() {
-        return ActiveTaskContext.proposedChanges(
+        return dev.talos.runtime.context.ProposalContextTestSupport.accepted(
                 2,
                 "trace-static-web",
                 List.of("index.html", "style.css", "script.js"),

@@ -7,11 +7,16 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.LoopState;
+import dev.talos.runtime.toolcall.ReadEvidenceStateAccounting;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.*;
@@ -19,14 +24,20 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,6 +54,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolCallLoopTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.clear();
+        LocalTurnTraceCapture.begin(
+                "tool-loop-" + testInfo.getDisplayName().hashCode(),
+                "tool-loop-tests",
+                1,
+                "2026-07-20T00:00:00Z",
+                "workspace-hash",
+                "test",
+                "llama_cpp",
+                "test-model",
+                testInfo.getDisplayName());
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.clear();
+    }
 
     // ── No tool calls → pass through ───────────────────────────────
 
@@ -88,7 +121,8 @@ class ToolCallLoopTest {
                 ChatMessage.system("system"),
                 ChatMessage.user("read something")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         assertEquals(1, result.iterations());
         assertEquals(1, result.toolsInvoked());
@@ -114,10 +148,11 @@ class ToolCallLoopTest {
                     ```""";
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("")))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("")))
                     .build();
 
-            var result = loop.run(llmResponse, messages, ws, ctx);
+            var result = runCapturedRuntime(
+                    loop, llmResponse, messages, ws, ctx);
 
             assertEquals(1, result.toolOutcomes().size());
             String summary = result.toolOutcomes().getFirst().summary();
@@ -161,7 +196,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -209,7 +244,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -267,11 +302,27 @@ class ToolCallLoopTest {
                                     "content", "1 | def bar():\n2 |     return 99\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("No file was changed.")))
+                    .llm(textProvider(registry, List.of("No file was changed.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run("", calls, messages, ws, ctx);
+            LocalTurnTraceCapture.begin("trc-t1051-read-display", "session", 1,
+                    "2026-07-12T00:00:00Z", "ws", "test", "llama_cpp", "qwen3-8b",
+                    "Modify helper.py so bar returns 99.");
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedRuntime(
+                        loop, "", calls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+            List<String> writeTraceEvents = trace.events().stream()
+                    .filter(event -> "talos.write_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type) || "TOOL_CALL_BLOCKED".equals(type))
+                    .toList();
 
             ToolCallLoop.ToolOutcome writeOutcome = result.toolOutcomes().stream()
                     .filter(outcome -> "talos.write_file".equals(outcome.toolName()))
@@ -286,6 +337,8 @@ class ToolCallLoopTest {
                             def bar():
                                 return 1
                             """, Files.readString(ws.resolve("helper.py"))),
+                    () -> assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), writeTraceEvents,
+                            "the blocked write must retain its parsed-call lifecycle"),
                     () -> assertEquals(0, result.mutatingToolSuccesses()));
         } finally {
             deleteRecursive(ws);
@@ -320,7 +373,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -413,7 +466,8 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("go")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         // Should have executed at least once but stopped (PLACEHOLDER mode doesn't produce tool calls)
         assertTrue(result.iterations() >= 1, "Should have at least 1 iteration");
@@ -460,7 +514,8 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("do both")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         assertEquals(1, result.iterations(), "Both calls in same iteration");
         assertEquals(2, result.toolsInvoked(), "Two tools called");
@@ -479,7 +534,8 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("go")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         // The loop should still work; the error is fed back as a tool result
         assertEquals(1, result.iterations());
@@ -500,7 +556,8 @@ class ToolCallLoopTest {
         String llmResponse = "<tool_call></tool_call>";
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("go")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         // containsToolCalls returns true, but parse returns empty → breaks
         assertEquals(0, result.toolsInvoked());
@@ -525,7 +582,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         """
                         {
                           "name": "talos.grep",
@@ -538,9 +595,16 @@ class ToolCallLoopTest {
                         "Grounded final answer.")))
                 .build();
 
-        var result = loop.run(initialResponse, messages, WS, ctx);
+        var result = runCapturedProviderText(
+                loop,
+                initialResponse,
+                List.of("talos.list_dir", "talos.grep"),
+                messages,
+                WS,
+                ctx);
 
-        assertEquals(2, result.iterations(), "A standalone raw JSON continuation should be parsed and executed");
+        assertEquals(2, result.iterations(),
+                "A standalone raw JSON continuation should be parsed and executed");
         assertEquals(2, result.toolsInvoked());
         assertEquals("Grounded final answer.", result.finalAnswer());
     }
@@ -567,7 +631,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         // Follow-up: two adjacent standalone raw JSON calls (different params)
                         """
                         {
@@ -588,7 +652,13 @@ class ToolCallLoopTest {
                         "Grounded final answer.")))
                 .build();
 
-        var result = loop.run(initialResponse, messages, WS, ctx);
+        var result = runCapturedProviderText(
+                loop,
+                initialResponse,
+                List.of("talos.list_dir", "talos.grep"),
+                messages,
+                WS,
+                ctx);
 
         assertEquals(2, result.iterations(),
                 "Adjacent continuation calls should both run in the second iteration");
@@ -598,7 +668,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void malformedContinuationAfterToolExecutionUsesTruthfulFallback() {
+    void malformedContinuationAfterToolExecutionUsesNoAnswerFallback() {
         var registry = new ToolRegistry();
         registry.register(listDirTool());
         var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
@@ -615,7 +685,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         """
                         {
                           "name": "talos.grep",
@@ -623,13 +693,25 @@ class ToolCallLoopTest {
                         """)))
                 .build();
 
-        var result = loop.run(initialResponse, messages, WS, ctx);
+        var result = runCapturedRuntime(
+                loop, initialResponse, messages, WS, ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
         assertEquals(1, result.iterations(), "Malformed continuation should stop after the first executed tool");
         assertEquals(1, result.toolsInvoked());
+        assertEquals(List.of("talos.list_dir"), trace.events().stream()
+                        .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                        .map(event -> event.toolName())
+                        .toList(),
+                trace.events().toString());
+        assertFalse(trace.events().stream().anyMatch(event ->
+                        "talos.grep".equals(event.toolName())
+                                && ("TOOL_CALL_PARSED".equals(event.type())
+                                || "TOOL_EXECUTED".equals(event.type()))),
+                trace.events().toString());
         assertFalse(result.finalAnswer().contains("talos.grep"));
-        assertTrue(result.finalAnswer().contains("No further tool calls were executed."),
-                "Should surface a truthful fallback instead of raw tool JSON");
+        assertEquals("(no answer from model after tool execution)", result.finalAnswer(),
+                "Should surface the settled no-answer fallback instead of raw tool JSON");
     }
 
     // ── LoopResult accessors ────────────────────────────────────────
@@ -658,7 +740,8 @@ class ToolCallLoopTest {
                 <tool_call>{"name": "talos.always_fail", "parameters": {"input": "x"}}</tool_call>
                 """;
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         assertEquals(1, result.toolsInvoked(), "Should invoke 1 tool");
         assertEquals(1, result.failedCalls(), "Should count 1 failed call");
@@ -682,7 +765,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("edit index.html")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
                 .build();
 
@@ -718,7 +801,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Check the workspace. Do not change anything yet.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
                 .build();
 
@@ -756,10 +839,16 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("try the failing thing")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(failingCall)))
+                .llm(textProvider(registry, List.of(failingCall)))
                 .build();
 
-        var result = loop.run(failingCall, messages, WS, ctx);
+        var result = runCapturedProviderText(
+                loop,
+                failingCall,
+                List.of("talos.always_fail"),
+                messages,
+                WS,
+                ctx);
 
         assertEquals(3, result.iterations(), "Failure policy should stop after the threshold");
         assertEquals(3, result.toolsInvoked());
@@ -803,13 +892,19 @@ class ToolCallLoopTest {
                     ChatMessage.user("Now apply the smallest fix by editing index.html.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readFile, emptyEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readFile, emptyEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(emptyEdit, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        emptyEdit,
+                        List.of("talos.read_file", "talos.edit_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
             }
@@ -871,13 +966,19 @@ class ToolCallLoopTest {
                     ChatMessage.user("Now apply the smallest fix by editing index.html.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readFile, validEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readFile, validEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(emptyEdit, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        emptyEdit,
+                        List.of("talos.read_file", "talos.edit_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
             }
@@ -936,13 +1037,19 @@ class ToolCallLoopTest {
                     ChatMessage.user("Repair this broken BMI website.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readIndex, missingNewScript, emptyStyle, "should not be called")))
+                    .llm(textProvider(registry, List.of(readIndex, missingNewScript, emptyStyle, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Repair this broken BMI website.");
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(emptyPublicScript, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        emptyPublicScript,
+                        List.of("talos.read_file", "talos.edit_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
             }
@@ -1001,13 +1108,19 @@ class ToolCallLoopTest {
                     ChatMessage.user("Fix index.html with the smallest edits.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(ignoredRereadRequirement, "should not be called")))
+                    .llm(textProvider(registry, List.of(ignoredRereadRequirement, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(initial, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        initial,
+                        List.of("talos.read_file", "talos.edit_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
             }
@@ -1065,13 +1178,19 @@ class ToolCallLoopTest {
                     ChatMessage.user("Fix index.html with the smallest edits.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readCurrentFile, validRecoveredEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readCurrentFile, validRecoveredEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(initial, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        initial,
+                        List.of("talos.read_file", "talos.edit_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
             }
@@ -1098,7 +1217,8 @@ class ToolCallLoopTest {
                 <tool_call>{"name": "talos.echo", "parameters": {"input": "hello"}}</tool_call>
                 """;
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         assertEquals(0, result.failedCalls(), "No failed calls expected for successful echo");
     }
@@ -1185,7 +1305,8 @@ class ToolCallLoopTest {
                 """;
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("write")));
-        testLoop.run(llmResponse, messages, WS, defaultCtx());
+        runCapturedRuntime(
+                testLoop, llmResponse, messages, WS, defaultCtx());
 
         assertEquals(2, invocations.get(),
                 "Both write_file calls must execute - duplicate-failure detection must not conflate them");
@@ -1238,7 +1359,8 @@ class ToolCallLoopTest {
                 """;
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("edit")));
-        testLoop.run(llmResponse, messages, WS, defaultCtx());
+        runCapturedRuntime(
+                testLoop, llmResponse, messages, WS, defaultCtx());
 
         // The nudge should appear since the read failed and doesn't count
         boolean nudgePresent = messages.stream()
@@ -1323,7 +1445,8 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("go")));
 
-        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+        var result = runCapturedRuntime(
+                loop, llmResponse, messages, WS, defaultCtx());
 
         assertFalse(result.finalAnswer().contains("<tool_call>"),
                 "Final answer should have tool_call blocks stripped");
@@ -1338,7 +1461,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("All done, ready to use. Open it in your browser.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("All done, ready to use. Open it in your browser.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
@@ -1347,7 +1470,7 @@ class ToolCallLoopTest {
                 """;
 
         LocalTurnTraceCapture.begin("trc-t99-expected", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "create bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
@@ -1384,7 +1507,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                     .build();
             String llmResponse = """
                     <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html><head><link rel=\\"stylesheet\\" href=\\"styles.css\\"></head><body><script src=\\"scripts.js\\"></script></body></html>"}}</tool_call>
@@ -1395,7 +1518,7 @@ class ToolCallLoopTest {
             TurnUserRequestCapture.set(request);
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             LocalTurnTraceCapture.begin("trc-t248-negated-target", "session", 1,
-                    "2026-05-12T00:00:00Z", "ws", "test", "ollama", "gpt-oss", request);
+                    "2026-05-12T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
@@ -1439,14 +1562,14 @@ class ToolCallLoopTest {
                         """),
                 ChatMessage.user("Fix the remaining static verification problems.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
                 """;
 
         LocalTurnTraceCapture.begin("trc-t99-repair", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "repair bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "repair bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
@@ -1491,7 +1614,7 @@ class ToolCallLoopTest {
                         """),
                 ChatMessage.user("Fix the remaining static verification problems.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
@@ -1561,7 +1684,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("""
+                    .llm(textProvider(registry, List.of("""
                             {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
                             """)))
                     .build();
@@ -1576,7 +1699,13 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(initial, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        initial,
+                        List.of("talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -1656,7 +1785,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use. Open it in your browser.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use. Open it in your browser.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
@@ -1770,7 +1899,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":".button { color: red; }\\nbody { margin: 0; }\\n"}}
@@ -1885,7 +2014,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"scripts.js","content":"document.querySelector('.missing-button').addEventListener('click', () => {\\n  document.querySelector('#result').textContent = 'Clicked';\\n});\\n"}}
@@ -1979,7 +2108,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body { color: black; }\\n"}}
@@ -2015,18 +2144,28 @@ class ToolCallLoopTest {
         var ctx = Context.builder(new Config())
                 .llm(LlmClient.scriptedFailure(new EngineException.ContextBudgetExceeded(
                         5946, 5635, 8192, 0)))
+                .nativeToolSpecs(nativeSpecs(writeFileTool()))
                 .build();
-        String llmResponse = """
-                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
-                <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
-                """;
+        String llmResponse = jsonToolFences(
+                """
+                {"name":"talos.write_file","arguments":{"path":"index.html","content":"<html></html>"}}
+                """,
+                """
+                {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body{}"}}
+                """);
 
         LocalTurnTraceCapture.begin("trc-t197-budget", "session", 1,
                 "2026-05-07T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", "create bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
-            result = loop.run(llmResponse, messages, WS, ctx);
+            result = runCapturedProviderText(
+                    loop,
+                    llmResponse,
+                    List.of("talos.write_file"),
+                    messages,
+                    WS,
+                    ctx);
             trace = LocalTurnTraceCapture.complete();
         } finally {
             LocalTurnTraceCapture.clear();
@@ -2138,7 +2277,16 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -2231,7 +2379,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -2324,7 +2481,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(contract);
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -2337,15 +2503,13 @@ class ToolCallLoopTest {
             String compactPrompt = recorded.requests().getFirst().messages.stream()
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
-            assertTrue(compactPrompt.contains("[RequiredSourceEvidence]"), compactPrompt);
-            assertTrue(compactPrompt.contains("Each listed source must contribute at least one exact copied phrase"),
-                    compactPrompt);
-            assertTrue(compactPrompt.contains("[SourceEvidenceReadbacks]"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: board-brief.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("[CompactMutationData]"), compactPrompt);
+            assertTrue(compactPrompt.contains("requiredEvidencePhrase must contribute"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"board-brief.md\""), compactPrompt);
             assertTrue(compactPrompt.contains("ORBITAL-DECK-71"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: client-notes.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"client-notes.md\""), compactPrompt);
             assertTrue(compactPrompt.contains("NEON-RESPONSE-44"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: revenue.csv"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"revenue.csv\""), compactPrompt);
             assertTrue(compactPrompt.contains("LASER-LEDGER-19"), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated turn"), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated answer"), compactPrompt);
@@ -2428,12 +2592,34 @@ class ToolCallLoopTest {
 
             TurnUserRequestCapture.set(request);
             TurnTaskContractCapture.set(contract);
+            LocalTurnTraceCapture.begin(
+                    "trc-source-evidence-repair",
+                    "sid-source-evidence-repair",
+                    1,
+                    "2026-07-16T00:00:00Z",
+                    "workspace-hash",
+                    "agent",
+                    "scripted",
+                    "repair-fixture",
+                    request);
             ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
+                trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
             }
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
@@ -2446,6 +2632,42 @@ class ToolCallLoopTest {
             assertFalse(written.contains("Southeast Asia"));
             assertEquals(1, recorded.requests().size(),
                     "runtime repair should avoid a second model retry for exact source evidence coverage");
+            var transformed = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                    .filter(event -> "SOURCE_EVIDENCE_EXACT_REPAIR".equals(
+                            event.data().get("reasonCode")))
+                    .findFirst()
+                    .orElseThrow();
+            String toolCallId = String.valueOf(transformed.data().get("toolCallId"));
+            ToolCallLoop.ToolOutcome transformedOutcome = result.toolOutcomes().stream()
+                    .filter(outcome -> "office-summary.md".equals(outcome.pathHint()))
+                    .filter(ToolCallLoop.ToolOutcome::success)
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(
+                    toolCallId,
+                    transformedOutcome.toolCallId(),
+                    "the runtime outcome must retain the exact parsed-call lineage");
+            var parsed = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                    .filter(event -> toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId"))))
+                    .findFirst()
+                    .orElseThrow();
+            var executed = trace.events().stream()
+                    .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                    .filter(event -> toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId"))))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(parsed.data().get("toolNameHash"),
+                    transformed.data().get("fromToolNameHash"));
+            assertEquals(parsed.data().get("argumentsHash"),
+                    transformed.data().get("fromArgumentsHash"));
+            assertEquals(transformed.data().get("toolNameHash"),
+                    executed.data().get("toolNameHash"));
+            assertEquals(transformed.data().get("argumentsHash"),
+                    executed.data().get("argumentsHash"));
         } finally {
             deleteRecursive(ws);
         }
@@ -2497,7 +2719,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -2519,25 +2750,40 @@ class ToolCallLoopTest {
 
     @Test
     void expectedTargetProgressToolCallKeepsHappyPathOpen() {
-        var loop = createLoop(writeFileTool());
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                new NoOpApprovalGate(),
+                registry);
+        var loop = new ToolCallLoop(processor);
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log('ok');\"}}")))
                 .build();
-        String llmResponse = """
-                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
-                <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
-                """;
+        String llmResponse = jsonToolFences(
+                """
+                {"name":"talos.write_file","arguments":{"path":"index.html","content":"<html></html>"}}
+                """,
+                """
+                {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body{}"}}
+                """);
 
         LocalTurnTraceCapture.begin("trc-t99-happy", "session", 1,
-                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+                "2026-05-03T00:00:00Z", "ws", "test", "llama_cpp", "qwen", "create bmi");
         ToolCallLoop.LoopResult result;
         LocalTurnTrace trace;
         try {
-            result = loop.run(llmResponse, messages, WS, ctx);
+            result = runCapturedProviderText(
+                    loop,
+                    llmResponse,
+                    List.of("talos.write_file"),
+                    messages,
+                    WS,
+                    ctx);
             trace = LocalTurnTraceCapture.complete();
         } finally {
             LocalTurnTraceCapture.clear();
@@ -2575,7 +2821,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .llm(textProvider(registry, List.of("should not be called")))
                     .build();
             String initial = """
                     Complete and ready to use.
@@ -2650,7 +2896,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .llm(textProvider(registry, List.of("should not be called")))
                     .build();
             String initial = """
                     {"name":"talos.read_file","arguments":{"path":"script.js"}}
@@ -2679,13 +2925,13 @@ class ToolCallLoopTest {
             assertTrue(result.toolOutcomes().stream()
                     .anyMatch(outcome -> !outcome.success()
                             && String.valueOf(outcome.errorMessage()).toLowerCase(Locale.ROOT)
-                            .contains("workspace organization tool")),
+                            .contains("not authorized by the current typed task plan")),
                     result.toolOutcomes().toString());
             assertTrue(trace.events().stream()
                     .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
                     .anyMatch(event -> String.valueOf(event.data().get("reason"))
                             .toLowerCase(Locale.ROOT)
-                            .contains("workspace organization tool")));
+                            .contains("not authorized by the current typed task plan")));
         } finally {
             deleteRecursive(ws);
         }
@@ -2730,7 +2976,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "Complete. Everything is ready to use.")))
                     .build();
 
@@ -2774,7 +3020,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement() throws Exception {
+    void staticWebOldStringFailureAfterReadCanContinueThroughFullWriteReplacement() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-edit-rewrite-");
         try {
             Files.writeString(ws.resolve("index.html"), """
@@ -2819,12 +3065,12 @@ class ToolCallLoopTest {
                       document.getElementById('result').textContent = 'Clicked';
                     });
                     """;
-            String rewrite = """
+            String rewrite = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(correctedScript));
+                    """.formatted(jsonEscape(correctedScript)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(badEdit, rewrite, "done")))
+                    .llm(textProvider(registry, List.of(badEdit, rewrite, "done")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -2834,7 +3080,16 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("script.js"),
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -2843,11 +3098,33 @@ class ToolCallLoopTest {
             }
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
-            assertFalse(result.summary().contains("failed"),
-                    "Recovered static web edit failures should not make the normal tool summary look failed.");
+            assertTrue(result.summary().contains("failed"),
+                    "The pre-verification tool summary must retain the failed edit attempt.");
             assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
             assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::oldStringNotFoundEditFailure),
                     "The initial old_string miss should be visible in tool outcomes.");
+            assertFalse(result.toolOutcomes().isEmpty());
+            for (ToolCallLoop.ToolOutcome outcome : result.toolOutcomes()) {
+                assertFalse(outcome.toolCallId().isBlank(),
+                        "Every executed outcome in the captured loop must retain exact call identity.");
+                int executedIndex = traceEventIndex(
+                        trace,
+                        "TOOL_EXECUTED",
+                        outcome.toolCallId());
+                int blockedIndex = traceEventIndex(
+                        trace,
+                        "TOOL_CALL_BLOCKED",
+                        outcome.toolCallId());
+                int classificationIndex = traceEventIndex(
+                        trace,
+                        "TOOL_OUTCOME_CLASSIFIED",
+                        outcome.toolCallId());
+                assertNotEquals(executedIndex >= 0, blockedIndex >= 0,
+                        "Each outcome must have exactly one terminal execution or block event.");
+                int terminalIndex = Math.max(executedIndex, blockedIndex);
+                assertTrue(classificationIndex > terminalIndex,
+                        "Typed outcome classification must follow terminal settlement.");
+            }
             assertTrue(trace.events().stream()
                             .anyMatch(event -> "REPAIR_DECISION_RECORDED".equals(event.type())
                                     && String.valueOf(event.data().get("summary"))
@@ -2904,7 +3181,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             badEdit,
                             readFileCall("script.js"),
                             "Complete. Everything is ready to use.")))
@@ -2917,7 +3194,16 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("script.js"),
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -3001,7 +3287,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             badEdit,
                             repeatedEdit,
                             "Complete. Everything is ready to use.")))
@@ -3014,7 +3300,16 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("script.js"),
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -3062,7 +3357,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             readFileCall("index.html", 200),
@@ -3083,7 +3378,13 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("index.html"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -3141,7 +3442,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             writeScripts,
@@ -3152,7 +3453,13 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("index.html"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -3168,7 +3475,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void staticWebCreationDirectoryOnlyMutationContinuesToFileWrites() throws Exception {
+    void staticWebCreationBlocksUnrequestedDirectoryAndContinuesToFileWrites() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-mkdir-continuation-");
         try {
             var registry = new ToolRegistry();
@@ -3214,27 +3521,47 @@ class ToolCallLoopTest {
                         : 'Enter height';
                     });
                     """;
-            String fileWrites = """
+            String fileWrites = jsonToolFences(
+                    """
                     {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":"%s"}}
+                    """.formatted(jsonEscape(stylesCss)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(indexHtml), jsonEscape(stylesCss), jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .llm(textProvider(registry, List.of(fileWrites, "done")))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run(mkdirOnly, messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderText(
+                    loop,
+                    mkdirOnly,
+                    List.of("talos.mkdir", "talos.write_file"),
+                    messages,
+                    ws,
+                    ctx);
 
-            assertTrue(Files.isDirectory(ws.resolve("bmi-website")),
-                    "The first directory mutation should still execute.");
+            assertFalse(
+                    result.failureDecision().shouldStop(),
+                    result.toString());
+            assertFalse(Files.exists(ws.resolve("bmi-website")),
+                    "An unrequested directory has no typed workspace authority.");
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(stylesCss, Files.readString(ws.resolve("styles.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
             assertTrue(result.iterations() > 1,
-                    "A directory-only mutation for a website request must not end the tool loop.");
-            assertTrue(result.mutatingToolSuccesses() >= 4,
-                    "The loop should continue from mkdir to actual HTML/CSS/JS file writes.");
+                    "A blocked directory call for a website request must not end the tool loop.");
+            assertEquals(3, result.mutatingToolSuccesses(),
+                    "Only the exact HTML/CSS/JS file writes should succeed.");
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            "talos.mkdir".equals(outcome.toolName())
+                                    && !outcome.success()
+                                    && String.valueOf(outcome.errorMessage())
+                                            .contains("not authorized by the current typed task plan")),
+                    result.toolOutcomes().toString());
         } finally {
             deleteRecursive(ws);
         }
@@ -3286,21 +3613,32 @@ class ToolCallLoopTest {
                       document.getElementById('status').textContent = 'Synthwave engaged';
                     });
                     """;
-            String fileWrites = """
+            String fileWrites = jsonToolFences(
+                    """
                     {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    """.formatted(jsonEscape(styleCss)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss), jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .llm(textProvider(registry, List.of(fileWrites, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
             try {
                 TurnUserRequestCapture.set(request);
                 TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
-                result = loop.run(mkdirWrongTarget, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        mkdirWrongTarget,
+                        List.of("talos.mkdir", "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -3368,24 +3706,29 @@ class ToolCallLoopTest {
             String wrongTarget = """
                     {"name":"talos.write_file","arguments":{"path":"README.md","content":"wrong target"}}
                     """;
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(wrongTarget, remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(wrongTarget, remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
             try {
                 TurnUserRequestCapture.set(request);
                 TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
-                result = loop.run(partialWrites, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        partialWrites,
+                        List.of("talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3445,24 +3788,29 @@ class ToolCallLoopTest {
             String directoryWrite = """
                     {"name":"talos.write_file","arguments":{"path":"./","content":"wrong target"}}
                     """;
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(directoryWrite, remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(directoryWrite, remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
             try {
                 TurnUserRequestCapture.set(request);
                 TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
-                result = loop.run(partialWrites, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        partialWrites,
+                        List.of("talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3506,7 +3854,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("no retry should be needed")))
+                    .llm(textProvider(registry, List.of("no retry should be needed")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3590,24 +3938,29 @@ class ToolCallLoopTest {
                     {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
                     {"name":"talos.write_file","arguments":{"path":"readme_site.txt","content":"wrong target"}}
                     """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
             try {
                 TurnUserRequestCapture.set(request);
                 TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
-                result = loop.run(partialWritesWithWrongTarget, messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        partialWritesWithWrongTarget,
+                        List.of("talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3737,10 +4090,16 @@ class ToolCallLoopTest {
                     """.formatted(jsonEscape(stylesCss), jsonEscape(scriptJs));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(assetWrites, "done")))
+                    .llm(textProvider(registry, List.of(assetWrites, "done")))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run(initialIndexOnly, messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderText(
+                    loop,
+                    initialIndexOnly,
+                    List.of("talos.write_file"),
+                    messages,
+                    ws,
+                    ctx);
 
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(stylesCss, Files.readString(ws.resolve("styles.css")));
@@ -3786,7 +4145,7 @@ class ToolCallLoopTest {
                     """.formatted(jsonEscape(initialIndex.replace("Calculate BMI", "Calculate")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(repeatedWrongTarget, "should not be called")))
+                    .llm(textProvider(registry, List.of(repeatedWrongTarget, "should not be called")))
                     .build();
 
             ToolCallLoop.LoopResult result = loop.run(initialIndexWrite, messages, ws, ctx);
@@ -3850,7 +4209,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(wrongSecondEdit, "should not be reached")))
+                    .llm(textProvider(registry, List.of(wrongSecondEdit, "should not be reached")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -3893,6 +4252,313 @@ class ToolCallLoopTest {
         }
     }
 
+    /**
+     * A case variant of a pending static-web target that does not exist yet is an attempt at the target.
+     * The breach guard lets it through, the pre-approval rule refuses it, and the scope repair then
+     * writes the exact target.
+     */
+    @Test
+    void pendingExpectedTargetCaseVariantOfAMissingWebAssetIsRepairedInsteadOfStoppingTheTurn() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-expected-case-variant-web-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Create index.html and Styles.css for a BMI calculator.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String indexWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"<!doctype html><html><head><title>BMI</title><link rel=stylesheet href=Styles.css></head><body><h1>BMI Calculator</h1></body></html>"}}
+                    """;
+            String caseVariantWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body { margin: 0; }"}}
+                    """;
+            String repairedWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"Styles.css","content":"body { margin: 0; }"}}
+                    """;
+            // The static-web profile also projects script.js, which is not part of this case.
+            String scriptWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"console.log(1);"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            caseVariantWrite, repairedWrite, scriptWrite, "All files are written.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderText(
+                        loop, indexWrite, List.of("talos.write_file", "talos.read_file"), messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            var decision = result.failureDecision();
+            String reason = decision == null ? "" : decision.reason();
+            assertFalse(reason.contains("EXPECTED_TARGETS_REMAINING"),
+                    "a case variant of a missing target is not a breach: " + reason);
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            outcome.failureReason() == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED
+                                    && "styles.css".equals(outcome.pathHint())),
+                    "the case variant must still be refused before approval: " + result.toolOutcomes());
+            assertTrue(Files.exists(ws.resolve("Styles.css")),
+                    "the scope repair must write the exact target: reason=" + reason
+                            + " outcomes=" + result.toolOutcomes());
+            assertEquals("body { margin: 0; }", Files.readString(ws.resolve("Styles.css")));
+            try (var entries = Files.list(ws)) {
+                assertTrue(entries.map(path -> path.getFileName().toString()).anyMatch("Styles.css"::equals),
+                        "the file must exist under the requested spelling");
+            }
+            List<String> written = result.toolOutcomes().stream()
+                    .filter(outcome -> outcome.success() && outcome.mutating())
+                    .map(ToolCallLoop.ToolOutcome::pathHint)
+                    .toList();
+            assertTrue(written.contains("index.html") && written.contains("Styles.css"), written.toString());
+            assertFalse(written.contains("styles.css"), "the case variant never executes: " + written);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
+     * Without a readback or a static-web target there is no scope repair, so the turn stops on the
+     * pre-approval refusal that names the expected set, not on a breach that hides it.
+     */
+    @Test
+    void pendingExpectedTargetCaseVariantOfAMissingFileStopsOnThePreApprovalRefusalNotABreach() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-expected-case-variant-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.write_file twice. First write status=new into notes.md. "
+                    + "Then write status2=new into More.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String firstWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"notes.md","content":"status=new"}}
+                    """;
+            String caseVariantWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"more.md","content":"status2=new"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(caseVariantWrite, "should not be reached")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderText(
+                        loop, firstWrite, List.of("talos.write_file", "talos.read_file"), messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            String reason = result.failureDecision().reason();
+            assertFalse(reason.contains("EXPECTED_TARGETS_REMAINING"), reason);
+            assertTrue(reason.contains("Target outside expected targets before approval"), reason);
+            assertTrue(reason.contains("More.md"), reason);
+            assertTrue(result.toolOutcomes().stream().anyMatch(outcome ->
+                            outcome.failureReason() == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED
+                                    && "more.md".equals(outcome.pathHint())),
+                    "the case variant must be refused before approval: " + result.toolOutcomes());
+            assertFalse(Files.exists(ws.resolve("More.md")), "no file is written under either spelling");
+            assertFalse(Files.exists(ws.resolve("more.md")), "no file is written under either spelling");
+            assertEquals(1, result.mutatingToolSuccesses());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** C6: a decisive search result stays in the dispatched request while duplicate notices accumulate. */
+    @Test
+    void duplicateNoticesDoNotPushTheSearchResultOutOfTheDispatchedRequest() throws Exception {
+        Path ws = Files.createTempDirectory("talos-notice-slots-");
+        try {
+            Files.writeString(ws.resolve("calc.py"), "def bmi():\n    return 'DECISIVE_HIT'\n");
+            var registry = new ToolRegistry();
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+            java.util.function.Function<String, ChatMessage.NativeToolCall> grep = id ->
+                    new ChatMessage.NativeToolCall(id, "talos.grep", Map.of("pattern", "DECISIVE_HIT", "path", "."));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(grep.apply("g2"))),
+                    new LlmClient.StreamResult("", List.of(grep.apply("g3"))),
+                    new LlmClient.StreamResult("", List.of(grep.apply("g4"))),
+                    new LlmClient.StreamResult("calc.py holds DECISIVE_HIT.", List.of())), 16_384);
+            String request = "Which file holds DECISIVE_HIT?";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-notice-slots", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(grep.apply("g1")), List.of("talos.grep", "talos.read_file"), messages, ws, ctx);
+                LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals(1, result.toolsInvoked(), "the search runs once: " + result.toolOutcomes());
+            assertEquals(3, result.cushionFiresRedundantRead(), "each repeat is suppressed while the result is visible");
+            var dispatched = recorded.requests().getLast().messages;
+            assertTrue(dispatched.stream().anyMatch(message -> "tool".equals(message.role())
+                            && message.content().contains("DECISIVE_HIT")
+                            && !message.content().startsWith("[compacted:")),
+                    "the decisive search result is still dispatched: " + dispatched.stream()
+                            .filter(message -> "tool".equals(message.role()))
+                            .map(message -> message.content().substring(0, Math.min(60, message.content().length())))
+                            .toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** C4: a compacted full read is still available, because the overlay re-delivers it, so its repeat is redundant. */
+    @Test
+    void aCompactedFullReadIsStillAvailableAndItsRepeatIsSuppressed() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compacted-read-available-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "README_BODY_MARKER line\n");
+            Files.writeString(ws.resolve("a.txt"), "alpha\n");
+            Files.writeString(ws.resolve("b.txt"), "beta\n");
+            Files.writeString(ws.resolve("c.txt"), "gamma\n");
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+            java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> read = (id, path) ->
+                    new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(read.apply("r2", "a.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r3", "b.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r4", "c.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r5", "README.md"))),
+                    new LlmClient.StreamResult("README.md says README_BODY_MARKER.", List.of())), 16_384);
+            // A content lookup without named targets takes the generic reprompt path, which compacts.
+            String request = "Which file holds README_BODY_MARKER?";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-compacted-read", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(read.apply("r1", "README.md")), List.of("talos.read_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            // The message list may be restored by evidence overlays after the loop, so the trace is the witness.
+            assertTrue(trace.events().stream().anyMatch(event -> "TOOL_RESULT_COMPACTED".equals(event.type())
+                            && event.data().containsKey("index") && event.data().containsKey("chars")),
+                    "the fixture crosses the compaction boundary and compaction is traced with index and size: "
+                            + trace.events().stream().map(event -> event.type()).distinct().toList());
+            assertEquals(4, result.toolsInvoked(), "README.md is read once: " + result.toolOutcomes());
+            assertEquals(1, result.cushionFiresRedundantRead(), "the repeated README.md read is redundant");
+            var dispatched = recorded.requests().getLast().messages;
+            assertTrue(dispatched.stream().anyMatch(message -> message.content() != null
+                            && message.content().contains("README_BODY_MARKER")
+                            && !message.content().stripLeading().startsWith("[compacted:")),
+                    "the README body reaches the answering request: " + dispatched.stream()
+                            .map(message -> message.role() + ": " + message.content().substring(0,
+                                    Math.min(50, message.content() == null ? 0 : message.content().length())))
+                            .toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** C7: a runtime notice written after generations that held only tool calls is not provider text. */
+    @Test
+    void runtimeLimitNoticeAfterToolCallOnlyGenerationsIsNotProviderText() throws Exception {
+        Path ws = Files.createTempDirectory("talos-limit-attribution-");
+        try {
+            for (String name : List.of("a.txt", "b.txt", "c.txt")) Files.writeString(ws.resolve(name), name + "\n");
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 2);
+            java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> read = (id, path) ->
+                    new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(read.apply("r2", "b.txt"))),
+                    new LlmClient.StreamResult("", List.of(read.apply("r3", "c.txt")))), 16_384);
+            String request = "Read a.txt, b.txt and c.txt.";
+            var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-limit-attribution", "session", 1,
+                    "2026-10-25T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderNative(
+                        loop, List.of(read.apply("r1", "a.txt")), List.of("talos.read_file"), messages, ws, ctx);
+                LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.finalAnswer());
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.hitIterLimit(), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("[Tool-call limit reached"), result.finalAnswer());
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst().orElseThrow();
+            assertNotEquals("MODEL_PROVIDER", terminal.data().get("origin"),
+                    "no provider prose survived into the runtime notice: " + terminal.data());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     @Test
     void appendLineFullWriteThatDoesNotPreserveReadbackIsRejectedBeforeApproval() throws Exception {
         Path ws = Files.createTempDirectory("talos-append-line-preapproval-");
@@ -3930,7 +4596,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .llm(textProvider(registry, List.of("should not need a retry")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -3938,9 +4604,10 @@ class ToolCallLoopTest {
             LocalTurnTraceCapture.begin("trc-append-line-preapproval", "session", 1,
                     "2026-05-19T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
             ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
             try {
                 result = loop.run(badWrite, messages, ws, ctx);
-                LocalTurnTraceCapture.complete();
+                trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -3956,6 +4623,25 @@ class ToolCallLoopTest {
                                     && !outcome.success()
                                     && outcome.errorMessage().contains("append-line")),
                     result.toolOutcomes().toString());
+            ToolCallLoop.ToolOutcome blockedMutation = result.toolOutcomes().stream()
+                    .filter(ToolCallLoop.ToolOutcome::mutating)
+                    .filter(outcome -> !outcome.success())
+                    .findFirst()
+                    .orElseThrow();
+            assertFalse(blockedMutation.toolCallId().isBlank(),
+                    "The pre-approval failure must retain exact parsed-call identity.");
+            int blockedIndex = traceEventIndex(
+                    trace,
+                    "TOOL_CALL_BLOCKED",
+                    blockedMutation.toolCallId());
+            int classificationIndex = traceEventIndex(
+                    trace,
+                    "TOOL_OUTCOME_CLASSIFIED",
+                    blockedMutation.toolCallId());
+            assertTrue(blockedIndex >= 0,
+                    "The guard must settle the exact call before classification.");
+            assertTrue(classificationIndex > blockedIndex,
+                    "The typed blocked outcome must follow its terminal block event.");
         } finally {
             deleteRecursive(ws);
         }
@@ -4022,7 +4708,7 @@ class ToolCallLoopTest {
                                             """)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .llm(textProvider(registry, List.of("should not need a retry")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -4127,7 +4813,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -4286,7 +4981,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             readFileCall("index.html", 200),
@@ -4302,7 +4997,13 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+                result = runCapturedProviderText(
+                        loop,
+                        readFileCall("index.html"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -4351,7 +5052,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("script.js", 200),
                             readFileCall("script.js", 200),
                             readFileCall("index.html", 200),
@@ -4359,7 +5060,13 @@ class ToolCallLoopTest {
                             readFileCall("index.html", 200))))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run(readFileCall("index.html", 200), messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderText(
+                    loop,
+                    readFileCall("index.html", 200),
+                    List.of("talos.read_file"),
+                    messages,
+                    ws,
+                    ctx);
 
             assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
             assertTrue(result.failureDecision().reason().contains("no-progress"), result.failureDecision().reason());
@@ -4393,18 +5100,18 @@ class ToolCallLoopTest {
             var messages = new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
                     ChatMessage.user(request)));
-            var scripted = ScriptedNativeLlmClient.of(List.of(
+            var scripted = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
                     readNative("reread_budget", "budget.xlsx", 200),
                     readNative("reread_q3", "q3.pdf", 1000),
-                    readNative("reread_targets", "targets.csv", 200)));
+                    readNative("reread_targets", "targets.csv", 200)), 16_384);
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(scripted)
+                    .llm(scripted.client())
                     .nativeToolSpecs(nativeSpecs(readTool))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run(
-                    "",
+            ToolCallLoop.LoopResult result = runCapturedProviderNative(
+                    loop,
                     List.of(
                             new ChatMessage.NativeToolCall(
                                     "read_budget",
@@ -4418,18 +5125,34 @@ class ToolCallLoopTest {
                                     "read_targets",
                                     "talos.read_file",
                                     Map.of("path", "targets.csv"))),
+                    List.of("talos.read_file"),
                     messages,
                     ws,
                     ctx);
 
-            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON,
+                    result.failureDecision().reason());
+            assertEquals(dev.talos.runtime.failure.FailureAction.ASK_USER, result.failureDecision().action());
             assertFalse(result.finalAnswer().contains("failure policy stopped"), result.finalAnswer());
             assertTrue(result.finalAnswer().contains("Read evidence complete"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("budget.xlsx"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("q3.pdf"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("targets.csv"), result.finalAnswer());
-            assertTrue(result.finalAnswer().contains("model repeated read calls instead of producing a final answer"),
-                    result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("remains incomplete"), result.finalAnswer());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.synthesisUnavailableAnswer(),
+                    result.finalAnswer(), "Rejected synthesis must not invent the requested calculation");
+            assertTrue(result.readPaths().containsAll(List.of("budget.xlsx", "q3.pdf", "targets.csv")));
+            for (String target : List.of("budget.xlsx", "q3.pdf", "targets.csv")) {
+                assertTrue(result.toolOutcomes().stream().anyMatch(outcome -> outcome.success()
+                        && target.equals(outcome.pathHint())), target);
+            }
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, result.readOnlySynthesisStatus());
+            assertEquals(1, scripted.requests().stream()
+                    .filter(sent -> sent.controls.toolChoice() == ToolChoiceMode.NONE).count());
+            assertEquals(ToolChoiceMode.NONE, scripted.requests().getLast().controls.toolChoice());
+            assertTrue(scripted.requests().getLast().tools.isEmpty());
+            assertTrue(scripted.requests().getLast().controls.singleAttempt());
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "budget.xlsx", "Engineering,5400");
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "q3.pdf", "48250");
+            assertNativeReadCarrier(scripted.requests().getLast().messages, "targets.csv", "Engineering,5000");
             assertEquals(0, result.mutatingToolSuccesses());
         } finally {
             deleteRecursive(ws);
@@ -4478,7 +5201,16 @@ class ToolCallLoopTest {
                     ChatMessage.system("sys"),
                     ChatMessage.user(request)));
 
-            ToolCallLoop.LoopResult result = loop.run(readFileCall("script.js", 200), messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderText(
+                    loop,
+                    readFileCall("script.js", 200),
+                    List.of(
+                            "talos.read_file",
+                            "talos.edit_file",
+                            "talos.write_file"),
+                    messages,
+                    ws,
+                    ctx);
 
             assertFalse(result.hitIterLimit(), "compact mutation continuation should avoid generic loop cap");
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
@@ -4544,7 +5276,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -4624,7 +5365,16 @@ class ToolCallLoopTest {
             TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
             ToolCallLoop.LoopResult result;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of(
+                                "talos.read_file",
+                                "talos.edit_file",
+                                "talos.write_file"),
+                        messages,
+                        ws,
+                        ctx);
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
@@ -4689,7 +5439,13 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run("", initialCalls, messages, ws, ctx);
+                result = runCapturedProviderNative(
+                        loop,
+                        initialCalls,
+                        List.of("talos.read_file"),
+                        messages,
+                        ws,
+                        ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 LocalTurnTraceCapture.clear();
@@ -4706,16 +5462,45 @@ class ToolCallLoopTest {
             String compactPrompt = recorded.requests().getFirst().messages.stream()
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
-            assertTrue(compactPrompt.contains("[ReadOnlyEvidenceAnswer]"), compactPrompt);
+            assertTrue(compactPrompt.contains("[CurrentTurnCapability]"), compactPrompt);
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertEquals(List.of("talos.read_file"), recorded.requests().getFirst().tools.stream()
+                    .map(ToolSpec::name).toList());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED, result.readOnlySynthesisStatus());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "This workspace checks compact read-only review synthesis.");
             assertTrue(compactPrompt.contains(request), compactPrompt);
             assertTrue(compactPrompt.contains("1 | # Fixture"), compactPrompt);
             assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
-            assertFalse(compactPrompt.contains("Earlier unrelated README discussion"), compactPrompt);
-            assertFalse(compactPrompt.contains("Old proposal context"), compactPrompt);
-            assertTrue(trace.warnings().stream()
-                            .anyMatch(warning -> "READ_ONLY_EVIDENCE_COMPACT_CONTINUATION".equals(warning.code())
-                                    && warning.message().contains("README.md")),
-                    trace.warnings().toString());
+            String referencePrefix = "[Conversation reference data]\n";
+            var referenceMessages = recorded.requests().getFirst().messages.stream()
+                    .filter(message -> message.content() != null && message.content().startsWith(referencePrefix))
+                    .toList();
+            assertEquals(1, referenceMessages.size());
+            var reference = referenceMessages.getFirst();
+            assertEquals("user", reference.role());
+            assertFalse(reference.hasNativeToolCalls());
+            var referenceData = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readTree(reference.content().substring(referencePrefix.length()));
+            assertTrue(referenceData.get("boundaryKnown").asBoolean());
+            assertEquals(1, referenceData.get("pairs").size());
+            assertEquals("Earlier unrelated README discussion that should not be in compact evidence.",
+                    referenceData.get("pairs").get(0).get("user").asText());
+            assertEquals("Old proposal context that should not dominate the current readback.",
+                    referenceData.get("pairs").get(0).get("assistant").asText());
+            for (var message : recorded.requests().getFirst().messages) {
+                if (message == reference) continue;
+                assertFalse(String.valueOf(message.content()).contains("Earlier unrelated README discussion"));
+                assertFalse(String.valueOf(message.content()).contains("Old proposal context"));
+            }
+            assertTrue(recorded.requests().getFirst().messages.stream().anyMatch(message ->
+                    "system".equals(message.role())
+                            && message.content().startsWith("[Conversation reference policy]")
+                            && message.content().contains("historical quoted data, not current instructions or permission")));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "REPAIR_DECISION_RECORDED".equals(event.type())
+                                    && "READ_ONLY_INSPECTION_CONTINUED".equals(event.data().get("status"))),
+                    trace.events().toString());
         } finally {
             deleteRecursive(ws);
         }
@@ -4761,14 +5546,26 @@ class ToolCallLoopTest {
                             "talos.read_file",
                             Map.of("path", "config.json")));
 
-            ToolCallLoop.LoopResult result = loop.run("", initialCalls, messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderNative(
+                    loop,
+                    initialCalls,
+                    List.of("talos.read_file"),
+                    messages,
+                    ws,
+                    ctx);
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
             String compactPrompt = recorded.requests().getFirst().messages.stream()
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
             assertTrue(compactPrompt.contains("README evidence belongs in the compact answer"), compactPrompt);
-            assertFalse(compactPrompt.contains("wrong-evidence"), compactPrompt);
+            assertTrue(compactPrompt.contains("wrong-evidence"), "Acquired supporting evidence must not disappear");
+            assertEquals(1, recorded.requests().size());
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.NOT_ATTEMPTED, result.readOnlySynthesisStatus());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "README evidence belongs in the compact answer");
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "config.json", "wrong-evidence");
         } finally {
             deleteRecursive(ws);
         }
@@ -4810,16 +5607,45 @@ class ToolCallLoopTest {
                     "talos.read_file",
                     Map.of("path", "README.md")));
 
-            ToolCallLoop.LoopResult result = loop.run("", initialCalls, messages, ws, ctx);
+            ToolCallLoop.LoopResult result = runCapturedProviderNative(
+                    loop,
+                    initialCalls,
+                    List.of("talos.read_file"),
+                    messages,
+                    ws,
+                    ctx);
 
             assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
             assertTrue(result.finalAnswer().toLowerCase(Locale.ROOT).contains("context budget"),
                     result.finalAnswer());
             assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("ready to use"),
                     result.finalAnswer());
+            assertEquals(dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.SYNTHESIS_UNAVAILABLE_REASON,
+                    result.failureDecision().reason());
+            assertEquals(ToolCallLoop.ReadOnlySynthesisStatus.REJECTED, result.readOnlySynthesisStatus());
+            assertTrue(result.finalAnswer().contains("remains incomplete"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("budget 0, context window 2048"), result.finalAnswer());
+            assertEquals(1, recorded.requests().size(), "Blocked synthesis must not dispatch or reopen a fallback");
+            assertEquals(ToolChoiceMode.AUTO, recorded.requests().getFirst().controls.toolChoice());
+            assertNativeReadCarrier(recorded.requests().getFirst().messages, "README.md",
+                    "This workspace checks rejected compact tool calls.");
+            var trace = LocalTurnTraceCapture.complete();
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "CONTEXT_BUDGET_RETRY_SKIPPED".equals(warning.code())));
         } finally {
             deleteRecursive(ws);
         }
+    }
+
+    private static void assertNativeReadCarrier(List<ChatMessage> messages, String path, String body) {
+        var calls = messages.stream().filter(ChatMessage::hasNativeToolCalls)
+                .flatMap(message -> message.toolCalls().stream())
+                .filter(call -> "talos.read_file".equals(call.name())
+                        && path.equals(call.arguments().get("path"))).toList();
+        assertEquals(1, calls.size(), path);
+        assertTrue(messages.stream().anyMatch(message -> "tool".equals(message.role())
+                && calls.getFirst().id().equals(message.toolCallId())
+                && message.content().contains(body)), path);
     }
 
     @Test
@@ -5165,6 +5991,229 @@ class ToolCallLoopTest {
 
     // ── Helpers ─────────────────────────────────────────────────────
 
+    @Test
+    void duplicateExactWorkspaceCallsInOneProviderResponseStopAfterFirstAttempt()
+            throws Exception {
+        Path workspace = Files.createTempDirectory(
+                "talos-t1205-duplicate-workspace-attempt-");
+        try {
+            AtomicInteger approvals = new AtomicInteger();
+            AtomicInteger executions = new AtomicInteger();
+            CopyPathTool descriptorOwner = new CopyPathTool();
+            TalosTool failingCopy = new TalosTool() {
+                @Override
+                public String name() {
+                    return descriptorOwner.name();
+                }
+
+                @Override
+                public String description() {
+                    return descriptorOwner.description();
+                }
+
+                @Override
+                public ToolDescriptor descriptor() {
+                    return descriptorOwner.descriptor();
+                }
+
+                @Override
+                public ToolResult execute(ToolCall call, ToolContext context) {
+                    executions.incrementAndGet();
+                    return ToolResult.fail(ToolError.invalidParams(
+                            "simulated exact workspace-operation failure"));
+                }
+            };
+            ToolRegistry registry = new ToolRegistry();
+            registry.register(failingCopy);
+            TurnProcessor processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry,
+                    ApprovalPolicy.ALWAYS_ASK);
+            ToolCallLoop loop = new ToolCallLoop(processor);
+            String request = "Copy source.txt to copied.txt.";
+            List<ChatMessage> messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            List<ChatMessage.NativeToolCall> calls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "copy_attempt_1",
+                            "talos.copy_path",
+                            Map.of("from", "source.txt", "to", "copied.txt")),
+                    new ChatMessage.NativeToolCall(
+                            "copy_attempt_2",
+                            "talos.copy_path",
+                            Map.of("from", "source.txt", "to", "copied.txt")));
+            Context context = Context.builder(new Config())
+                    .sandbox(new Sandbox(workspace, Map.of()))
+                    .llm(textProvider(registry, List.of("The copy failed.")))
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+
+            ToolCallLoop.LoopResult result = runCapturedProviderNative(
+                    loop,
+                    calls,
+                    List.of("talos.copy_path"),
+                    messages,
+                    workspace,
+                    context);
+
+            assertEquals(1, approvals.get());
+            assertEquals(1, executions.get());
+            assertEquals(2, result.failedCalls());
+            assertFalse(Files.exists(workspace.resolve("copied.txt")));
+        } finally {
+            deleteRecursive(workspace);
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedRuntime(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        boolean ownsCapture = captureResolutionIfAbsent(messages);
+        try {
+            return loop.run(initialAnswer, messages, workspace, ctx);
+        } finally {
+            if (ownsCapture) TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedRuntime(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<ChatMessage.NativeToolCall> nativeToolCalls,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        boolean ownsCapture = captureResolutionIfAbsent(messages);
+        try {
+            return loop.run(
+                    initialAnswer,
+                    nativeToolCalls,
+                    messages,
+                    workspace,
+                    ctx);
+        } finally {
+            if (ownsCapture) TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedProviderText(
+            ToolCallLoop loop,
+            String initialAnswer,
+            List<String> selectedToolNames,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        boolean ownsCapture = captureResolutionIfAbsent(messages);
+        try {
+            return loop.run(
+                    initialAnswer,
+                    List.of(),
+                    boundProviderReceipt(
+                            initialAnswer,
+                            List.of(),
+                            ProviderResponseCapture.ToolAuthorityMode
+                                    .PROVIDER_TEXT_JSON,
+                            selectedToolNames),
+                    messages,
+                    workspace,
+                    ctx);
+        } finally {
+            if (ownsCapture) TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static ToolCallLoop.LoopResult runCapturedProviderNative(
+            ToolCallLoop loop,
+            List<ChatMessage.NativeToolCall> nativeToolCalls,
+            List<String> selectedToolNames,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        boolean ownsCapture = captureResolutionIfAbsent(messages);
+        try {
+            return loop.run(
+                    "",
+                    nativeToolCalls,
+                    boundProviderReceipt(
+                            "",
+                            nativeToolCalls,
+                            ProviderResponseCapture.ToolAuthorityMode
+                                    .PROVIDER_NATIVE,
+                            selectedToolNames),
+                    messages,
+                    workspace,
+                    ctx);
+        } finally {
+            if (ownsCapture) TurnTaskContractCapture.clear();
+        }
+    }
+
+    private static boolean captureResolutionIfAbsent(
+            List<ChatMessage> messages
+    ) {
+        if (TurnTaskContractCapture.getResolution() != null) {
+            return false;
+        }
+        TurnTaskContractCapture.set(
+                TaskContractResolver.resolveFromMessages(messages),
+                messages);
+        return true;
+    }
+
+    private static ProviderResponseCapture.Receipt boundProviderReceipt(
+            String assistantText,
+            List<ChatMessage.NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.ToolAuthorityMode mode,
+            List<String> selectedToolNames
+    ) {
+        ProviderResponseCapture.Generation generation =
+                ProviderResponseCapture.openGeneration(
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                        ProviderResponseCapture.ToolAuthorityContract.bound(
+                                mode,
+                                selectedToolNames,
+                                ToolChoiceMode.AUTO,
+                                ""));
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        List<String> dispatchedNativeTools =
+                mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                        ? selectedToolNames
+                        : List.of();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt,
+                new ProviderTransportHandoff.DispatchEvidence(
+                        "sha256:" + "c".repeat(64),
+                        dispatchedNativeTools));
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        assistantText,
+                        nativeToolCalls,
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false,
+                        false,
+                        mode
+                                == ProviderResponseCapture.ToolAuthorityMode
+                                        .PROVIDER_TEXT_JSON));
+        generation.complete(receipt);
+        return receipt;
+    }
+
     private static ToolCallLoop createLoop(TalosTool... tools) {
         var registry = new ToolRegistry();
         for (TalosTool t : tools) registry.register(t);
@@ -5174,8 +6223,38 @@ class ToolCallLoopTest {
 
     private static Context defaultCtx() {
         return Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(
+                        List.of("")))
                 .build();
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            List<String> responses
+    ) {
+        LlmClient client =
+                ScriptedNativeLlmClient.textToolFallbackStrings(responses);
+        client.setToolSpecs(nativeSpecs(registry));
+        return client;
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            String response
+    ) {
+        return textProvider(registry, List.of(response));
+    }
+
+    private static List<ToolSpec> nativeSpecs(ToolRegistry registry) {
+        if (registry == null) return List.of();
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema() == null
+                                ? "{}"
+                                : descriptor.parametersSchema()))
+                .toList();
     }
 
     private static List<ToolSpec> nativeSpecs(TalosTool... tools) {
@@ -5220,6 +6299,13 @@ class ToolCallLoopTest {
             }
         }
         return escaped.toString();
+    }
+
+    private static String jsonToolFences(String... calls) {
+        return Arrays.stream(calls)
+                .map(String::strip)
+                .map(call -> "```json\n" + call + "\n```")
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private static TalosTool echoTool() {
@@ -5337,21 +6423,34 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void buildReadCallSignature_stableForSameParams() {
-        var call1 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
-        var call2 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
-        assertEquals(
-                ToolCallLoop.buildReadCallSignature(call1),
-                ToolCallLoop.buildReadCallSignature(call2));
+    void readEvidenceIdentity_stableForSameParams() {
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
+        var params1 = new LinkedHashMap<String, String>();
+        params1.put("path", "index.html");
+        params1.put("max_lines", "10");
+        var params2 = new LinkedHashMap<String, String>();
+        params2.put("max_lines", "10");
+        params2.put("path", "index.html");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", params1),
+                "index.html",
+                ToolResult.ok("1 | <html>"));
+        assertNotNull(
+                state.readEvidence.latestIdenticalCall(new ToolCall("talos.read_file", params2), true),
+                "the same params in a different insertion order are the same call identity");
     }
 
     @Test
-    void buildReadCallSignature_differentForDifferentParams() {
-        var call1 = new ToolCall("talos.read_file", Map.of("path", "a.txt"));
-        var call2 = new ToolCall("talos.read_file", Map.of("path", "b.txt"));
-        assertNotEquals(
-                ToolCallLoop.buildReadCallSignature(call1),
-                ToolCallLoop.buildReadCallSignature(call2));
+    void readEvidenceIdentity_differentForDifferentParams() {
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "a.txt")),
+                "a.txt",
+                ToolResult.ok("1 | alpha"));
+        assertNull(state.readEvidence.latestIdenticalCall(
+                new ToolCall("talos.read_file", Map.of("path", "b.txt")), true));
     }
 
     // ── Path canonicalization for read-only redundancy ────────────────
@@ -5387,14 +6486,45 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void buildReadCallSignature_listDirDotAndDotSlashAreEquivalent() {
+    void readEvidenceIdentity_listDirDotAndDotSlashAreEquivalent() {
         // This is the exact transcript failure: list_dir with "." vs "./"
+        // must stay ONE redundancy identity (path-canonicalized values),
+        // even though the stored raw call preserves the model's spelling.
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
         var callDot = new ToolCall("talos.list_dir", Map.of("path", "."));
         var callDotSlash = new ToolCall("talos.list_dir", Map.of("path", "./"));
-        assertEquals(
-                ToolCallLoop.buildReadCallSignature(callDot),
-                ToolCallLoop.buildReadCallSignature(callDotSlash),
-                "list_dir '.' and './' must produce identical signatures");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, callDot, ".", ToolResult.ok("src"));
+        assertNotNull(state.readEvidence.latestIdenticalCall(callDotSlash, true),
+                "list_dir '.' and './' must resolve to one call identity");
+
+        var readPlain = new ToolCall("talos.read_file", Map.of("path", "index.html"));
+        var readDotSlash = new ToolCall("talos.read_file", Map.of("path", "./index.html"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, readPlain, "index.html", ToolResult.ok("1 | <html>"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, readDotSlash, "index.html", ToolResult.ok("1 | <html>"));
+        assertEquals(1, state.readEvidence.readFileEntriesForPath("./index.html", true).size(),
+                "spelling variants of one read replace each other in the ledger");
+        assertNotNull(state.readEvidence.latestReadFileForPath("index.html", true),
+                "both spellings resolve to the same evidence path");
+    }
+
+    private static int traceEventIndex(
+            LocalTurnTrace trace,
+            String type,
+            String toolCallId
+    ) {
+        if (trace == null) return -1;
+        for (int index = 0; index < trace.events().size(); index++) {
+            var event = trace.events().get(index);
+            if (type.equals(event.type())
+                    && toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId")))) {
+                return index;
+            }
+        }
+        return -1;
     }
 }
 

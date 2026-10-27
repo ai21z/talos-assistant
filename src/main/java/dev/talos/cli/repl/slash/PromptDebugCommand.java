@@ -64,6 +64,8 @@ public final class PromptDebugCommand implements Command {
         artifact.providerBodyPath().ifPresent(json ->
             result.append("Saved provider body JSON to: ")
                     .append(json.toAbsolutePath().normalize()).append('\n'));
+        result.append("Saved prompt debug export index to: ")
+                .append(artifact.indexPath().toAbsolutePath().normalize()).append('\n');
         return new Result.TrustedInfo(result.toString());
     }
 
@@ -119,10 +121,12 @@ public final class PromptDebugCommand implements Command {
 
                 /prompt-debug save [directory]
                   Save the same render outside the active workspace by default, plus provider-body JSON when available.
+                  Each save creates a new export group and lists its completed members in an index.
                   Destination precedence: explicit directory, talos.promptDebugDir, TALOS_PROMPT_DEBUG_DIR, then ~/.talos/prompt-debug.
 
                 /prompt-debug save-all [directory]
                   Save every non-background provider request captured since the latest turn started.
+                  Earlier export groups are preserved. A failed save may leave a partial new group.
                 """;
     }
 }

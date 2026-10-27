@@ -59,7 +59,7 @@ public final class PrivacyCommand implements Command {
         boolean privateDocRag = PrivateDocumentPolicy.privateDocumentRagIndexingOptIn(cfg);
 
         return "Privacy status\n"
-                + "  workspace: " + workspace.toAbsolutePath().normalize().getFileName() + "\n"
+                + "  workspace: " + dev.talos.cli.CliUtil.folderName(workspace.toAbsolutePath().normalize()) + "\n"
                 + "  mode: " + (privateMode ? "private" : "developer") + "\n"
                 + "  protected read default scope: " + ProtectedReadScopePolicy.defaultScope(cfg) + "\n"
                 + "  approved protected reads can enter model context: " + (sendToModel ? "yes" : "no") + "\n"

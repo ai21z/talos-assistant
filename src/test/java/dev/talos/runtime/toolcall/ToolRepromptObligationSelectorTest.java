@@ -5,19 +5,30 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRepromptObligationSelectorTest {
+
+    @AfterEach
+    void clearProviderResponseCapture() {
+        ProviderResponseCapture.clear();
+    }
 
     @Test
     void selectorOwnsTargetAccountingPendingObligationAndToolSurfaceSelection() throws Exception {
@@ -126,12 +137,65 @@ class ToolRepromptObligationSelectorTest {
         return new LoopState(
                 "",
                 List.of(),
+                boundForegroundProviderReceipt(tools),
                 new ArrayList<>(messages),
                 Path.of("."),
                 ctx,
                 null,
                 10,
                 0);
+    }
+
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> tools
+    ) {
+        List<String> selectedToolNames =
+                tools.stream().map(ToolSpec::name).toList();
+        if (selectedToolNames.isEmpty()) {
+            return ProviderResponseCapture.Receipt.none();
+        }
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "tool-reprompt-obligation-selector");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "b".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    List.of(new ChatMessage.NativeToolCall(
+                                            "fixture-prior-call",
+                                            selectedToolNames.getFirst(),
+                                            Map.of())),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
     }
 
     private static ToolCallExecutionStage.IterationOutcome outcome(int mutations, int failures) {

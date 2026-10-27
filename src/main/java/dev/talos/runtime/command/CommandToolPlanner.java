@@ -193,9 +193,9 @@ public final class CommandToolPlanner {
         sb.append("    checkpoint: ")
                 .append(plan.requiresCheckpoint() ? "required" : "not required")
                 .append('\n');
-        sb.append("    network: ")
-                .append(plan.networkAccess() ? "allowed" : "disabled")
-                .append(", interactive: ")
+        sb.append("    network requirement: ")
+                .append(plan.networkAccess() ? "declared" : "not declared")
+                .append(" (host network is not isolated), interactive: ")
                 .append(plan.interactive() ? "allowed" : "disabled");
         return sb.toString();
     }

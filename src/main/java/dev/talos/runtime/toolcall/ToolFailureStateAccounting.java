@@ -58,8 +58,12 @@ final class ToolFailureStateAccounting {
         if (classification.expectedTargetScopeBlock()) {
             return false;
         }
+        // An old-string miss or an invalid-arguments rejection is blocked
+        // before approval and never touches disk, so the same-turn read
+        // evidence stays valid. The T1003 recovery depends on the complete
+        // read surviving exactly these failures.
         if (isEditFile
-                && classification.oldStringNotFound()
+                && (classification.oldStringNotFound() || classification.emptyEditArguments())
                 && wasPathReadThisTurn(state, pathHint)
                 && !wasMutatedSinceRead(state, pathHint)) {
             return false;

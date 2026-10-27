@@ -9,7 +9,13 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -132,6 +138,8 @@ class ToolRepromptContextBudgetHandlerTest {
 
     private LoopState mutationState(String request, LlmClient llm) {
         LoopState state = state(request, llm);
+        state.currentResponseReceipt =
+                boundForegroundProviderReceipt(baseTools());
         state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
                 "talos.read_file",
                 "README.md",
@@ -140,10 +148,61 @@ class ToolRepromptContextBudgetHandlerTest {
                 false,
                 "Read README.md",
                 ""));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=README.md;",
-                "1 | # Old\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Old\n"));
         return state;
+    }
+
+    private static ProviderResponseCapture.Receipt boundForegroundProviderReceipt(
+            List<ToolSpec> tools
+    ) {
+        List<String> selectedToolNames =
+                tools.stream().map(ToolSpec::name).toList();
+        ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {},
+                "tool-reprompt-context-budget-handler");
+        try {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                            ProviderResponseCapture.ToolAuthorityContract.bound(
+                                    ProviderResponseCapture.ToolAuthorityMode
+                                            .PROVIDER_NATIVE,
+                                    selectedToolNames,
+                                    ToolChoiceMode.AUTO,
+                                    ""));
+            ProviderResponseCapture.Attempt attempt =
+                    generation.startAttempt(
+                            ProviderResponseCapture.AttemptKind.PRIMARY,
+                            ProviderResponseCapture.RetryReason.NONE);
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt,
+                    new ProviderTransportHandoff.DispatchEvidence(
+                            "sha256:" + "f".repeat(64),
+                            selectedToolNames));
+            ProviderResponseCapture.Receipt receipt =
+                    attempt.respond(
+                            new ProviderResponseCapture.Response(
+                                    "",
+                                    List.of(new ChatMessage.NativeToolCall(
+                                            "fixture-prior-call",
+                                            selectedToolNames.getFirst(),
+                                            Map.of())),
+                                    ProviderResponseCapture.Source
+                                            .FOREGROUND_PROVIDER,
+                                    ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                    false,
+                                    false,
+                                    false));
+            generation.complete(receipt);
+            return receipt;
+        } finally {
+            ProviderResponseCapture.clear();
+        }
     }
 
     private LoopState state(String request, LlmClient llm) {

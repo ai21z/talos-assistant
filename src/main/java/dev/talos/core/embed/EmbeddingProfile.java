@@ -13,7 +13,7 @@ import java.util.Objects;
  * Use {@link #fingerprint()} for index compatibility checks and
  * {@link #cacheNamespace()} for embedding cache key isolation.
  *
- * @param provider             backend id: "compat", "llama_cpp", "ollama", etc.
+ * @param provider             backend id: "llama_cpp" or "compat"
  * @param model                model identifier as the backend knows it
  * @param dimensions           expected vector dimensionality (0 = auto-detect at runtime)
  * @param instructionAware     whether query/document embedding requires instruction prefixes
@@ -41,11 +41,11 @@ public record EmbeddingProfile(
 
     /**
      * bge-m3: lightweight 1024-dim model, no instruction prefixes, runs on CPU.
-     * This remains a supported legacy Ollama embedding profile. The default
-     * beta configuration is BM25-only until the user configures embeddings.
+     * The default beta configuration is BM25-only until the user configures
+     * embeddings.
      */
     public static final EmbeddingProfile BGE_M3 = new EmbeddingProfile(
-            "ollama", "bge-m3", 1024,
+            "llama_cpp", "bge-m3", 1024,
             false, null, null,
             8192, true
     );
@@ -54,15 +54,14 @@ public record EmbeddingProfile(
      * Qwen/Qwen3-Embedding-8B: instruction-aware, 4096 native dims
      * (recommended at 1024 via Matryoshka for index compat with bge-m3).
      * <p>
-     * Default built-in provider is {@code "ollama"} for explicit legacy
-     * Ollama embedding configs. OpenAI-compatible local embedding endpoints are
-     * available through {@code embed.provider: "compat"}.
+     * The built-in provider is {@code "llama_cpp"}. The provider of a resolved
+     * profile always comes from {@code embed.provider}.
      * <p>
      * The query instruction uses a neutral retrieval prompt. Override via
      * {@code embed.query_instruction} in config for domain-specific tuning.
      */
     public static final EmbeddingProfile QWEN3_EMBED_8B = new EmbeddingProfile(
-            "ollama", "Qwen/Qwen3-Embedding-8B", 1024,
+            "llama_cpp", "Qwen/Qwen3-Embedding-8B", 1024,
             true,
             "Instruct: Given a query, retrieve relevant passages that answer the query\nQuery: ",
             null,
@@ -101,10 +100,10 @@ public record EmbeddingProfile(
      * vector reuse across incompatible profiles.
      * <p>
      * <strong>Note:</strong> This intentionally breaks backward compatibility
-     * with the legacy {@code "ollama/bge-m3"} cache keys. Existing cached
-     * embeddings will become cache misses on first run after upgrade - they
-     * will be recomputed and cached under the new key. This is the correct
-     * trade-off: cache safety &gt; one-time cold start.
+     * with older provider/model cache keys. Existing cached embeddings will
+     * become cache misses on first run after upgrade - they will be recomputed
+     * and cached under the new key. This is the correct trade-off: cache
+     * safety &gt; one-time cold start.
      */
     public String cacheNamespace() {
         return fingerprint();

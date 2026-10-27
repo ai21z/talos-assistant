@@ -14,6 +14,7 @@ import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.spi.types.ToolChoiceMode;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,6 +31,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PromptDebugCommandTest {
 
     private final Context ctx = Context.builder(new Config()).build();
+
+    @TempDir Path exportDirectory;
+
+    @BeforeEach
+    void isolateExports() {
+        System.setProperty("talos.promptDebugDir", exportDirectory.toString());
+    }
 
     @AfterEach
     void clearCapture() {
@@ -118,7 +126,7 @@ class PromptDebugCommandTest {
     void lastRendersPromptDiagnosticsAndExpectedTargetCoverage() throws Exception {
         PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
                 new ChatRequest(
-                        "ollama",
+                        "llama_cpp",
                         "qwen2.5-coder:14b",
                         "",
                         "",
@@ -134,7 +142,7 @@ class PromptDebugCommandTest {
                                 "",
                                 ResponseFormatMode.JSON_OBJECT,
                                 "",
-                                List.of("expected-target-repair"))),
+                                List.of("expected-target-repair")).withMaxOutputTokens(512)),
                 false,
                 "{\"model\":\"qwen2.5-coder:14b\",\"system\":\"main system\\n\\n[CurrentTurnCapability]\",\"messages\":[{\"role\":\"user\",\"content\":\"Create index.html, styles.css, and scripts.js\"}]}"));
         PromptDebugCommand command = new PromptDebugCommand();
@@ -143,10 +151,10 @@ class PromptDebugCommandTest {
 
         Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
         assertTrue(info.text.contains("# Talos Prompt Debug"), info.text);
-        assertTrue(info.text.contains("Stage: OLLAMA_HTTP_BODY"), info.text);
-        assertTrue(info.text.contains("Ollama merges system messages"), info.text);
+        assertTrue(info.text.contains("Stage: COMPAT_CHAT_HTTP_BODY"), info.text);
         assertTrue(info.text.contains("Tool choice: REQUIRED"), info.text);
         assertTrue(info.text.contains("Response format: JSON_OBJECT"), info.text);
+        assertTrue(info.text.contains("Max output tokens: 512"), info.text);
         assertTrue(info.text.contains("Debug tags: expected-target-repair"), info.text);
         assertTrue(info.text.contains("Expected-target coverage: MISSING"), info.text);
         assertTrue(info.text.contains("Expected targets:"), info.text);
@@ -347,6 +355,28 @@ class PromptDebugCommandTest {
         }
         assertTrue(savedPath(info.text, "Saved prompt debug history index to: ")
                 .startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+    }
+
+    @Test
+    void saveReportsCompleteGroupMembershipIndex(@TempDir Path tempDir) throws Exception {
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+
+        Result result = new PromptDebugCommand().execute("save " + tempDir, ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        Path body = savedPath(info.text, "Saved provider body JSON to: ");
+        Path index = savedPath(info.text, "Saved prompt debug export index to: ");
+        assertTrue(Files.isRegularFile(render), info.text);
+        assertTrue(Files.isRegularFile(body), info.text);
+        assertTrue(Files.isRegularFile(index), info.text);
+        assertTrue(index.getParent().equals(render.getParent()), info.text);
+        assertTrue(index.getParent().equals(body.getParent()), info.text);
+        String membership = Files.readString(index);
+        assertTrue(membership.contains(render.getFileName().toString()), membership);
+        assertTrue(membership.contains(body.getFileName().toString()), membership);
+        assertFalse(membership.contains("SECRET=manual-test"), membership);
+        assertFalse(membership.contains("MODE=dev"), membership);
     }
 
     @Test
@@ -597,8 +627,8 @@ class PromptDebugCommandTest {
                 ]}
                 """;
         return new PromptDebugSnapshot(
-                "OLLAMA_HTTP_BODY",
-                "ollama",
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
                 "qwen2.5-coder:14b",
                 false,
                 null,

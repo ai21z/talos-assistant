@@ -21,6 +21,7 @@ import dev.talos.core.privacy.PrivateDocumentIndexingPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.spi.Embeddings;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;
 import org.slf4j.Logger;
@@ -38,19 +39,26 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int INDEX_METADATA_SCHEMA_VERSION = 3;
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 5;
+    private static final String FILE_GLOB_SEMANTICS_VERSION =
+            "native-leading-recursive-zero-directory-v1";
 
     private final Config cfg;
+    private final Supplier<Embeddings> documentEmbeddingsFactory;
+    private final Supplier<CacheDb> cacheFactory;
+    private final java.util.function.Function<Path, GitExclusions.Scope> gitScope;
     private volatile IndexingStats lastRunStats;
 
     private static final class PrivacyIndexingSkip extends IOException {
@@ -60,7 +68,43 @@ public class Indexer {
     }
 
     public Indexer(Config cfg) {
-        this.cfg = cfg;
+        this(cfg, () -> EmbeddingsFactory.forDocument(cfg), CacheDb::new);
+    }
+
+    Indexer(
+            Config cfg,
+            Supplier<Embeddings> documentEmbeddingsFactory,
+            Supplier<CacheDb> cacheFactory
+    ) {
+        this(cfg, documentEmbeddingsFactory, cacheFactory, GitExclusions::resolve);
+    }
+
+    Indexer(
+            Config cfg,
+            Supplier<Embeddings> documentEmbeddingsFactory,
+            Supplier<CacheDb> cacheFactory,
+            java.util.function.Function<Path, GitExclusions.Scope> gitScope
+    ) {
+        this.cfg = Objects.requireNonNull(cfg, "cfg");
+        this.documentEmbeddingsFactory = Objects.requireNonNull(
+                documentEmbeddingsFactory, "documentEmbeddingsFactory");
+        this.cacheFactory = Objects.requireNonNull(cacheFactory, "cacheFactory");
+        this.gitScope = Objects.requireNonNull(gitScope, "gitScope");
+    }
+
+    /** In a Git repository only the files Git keeps stay in the corpus. Without an answer from Git the walk stands. */
+    private List<Path> applyGitExclusions(Path rootPath, Map<String, Object> rag, List<Path> walked) {
+        if (!CfgUtil.boolAt(rag, "git_exclusions", true)) return walked;
+        GitExclusions.Scope scope = gitScope.apply(rootPath);
+        if (!scope.applies()) {
+            LOG.info("Git exclusions not applied under {}: {}", SafeLogFormatter.value(rootPath), scope.note());
+            return walked;
+        }
+        List<Path> kept = walked.stream()
+                .filter(file -> scope.keeps(rootPath.relativize(file).toString()))
+                .toList();
+        LOG.info("Git exclusions kept {} of {} walked files.", kept.size(), walked.size());
+        return kept;
     }
 
     public Path indexDirFor(Path root) {
@@ -83,6 +127,8 @@ public class Indexer {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = JSON.readValue(metadata.toFile(), Map.class);
             return INDEX_METADATA_SCHEMA_VERSION == intValue(data.get("schemaVersion"))
+                    && FILE_GLOB_SEMANTICS_VERSION.equals(
+                            String.valueOf(data.get("fileGlobSemanticsVersion")))
                     && ProtectedWorkspacePaths.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
                     && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
                     && DocumentExtractionService.EXTRACTION_POLICY_VERSION.equals(String.valueOf(data.get("documentExtractionPolicyVersion")))
@@ -122,6 +168,8 @@ public class Indexer {
     public void index(Path root, boolean forceFullReindex, IndexProgressListener listener) {
         final IndexingStats stats = new IndexingStats();
         final long startTime = System.currentTimeMillis();
+        // A run that ends early still leaves its own statistics, not the previous run's.
+        this.lastRunStats = stats;
 
         final Path rootPath = root.toAbsolutePath().normalize();
         LOG.info("Indexing root: {} (force_full={})", SafeLogFormatter.value(rootPath), forceFullReindex);
@@ -130,10 +178,11 @@ public class Indexer {
 
         // Check force_full_reindex config
         boolean configForceReindex = CfgUtil.intAt(rag, "force_full_reindex", 0) == 1;
-        if (forceFullReindex || configForceReindex) {
+        boolean metadataRequiresFullReindex = !isPolicyMetadataCurrent(rootPath);
+        if (forceFullReindex || configForceReindex || metadataRequiresFullReindex) {
             invalidateIndex(rootPath);
         }
-        final boolean skipHashing = forceFullReindex || configForceReindex;
+        final boolean forceReprocess = forceFullReindex || configForceReindex;
 
         // Accept either includes/excludes OR include/exclude
         var includeGlobs = firstNonEmptyStrList(
@@ -149,15 +198,16 @@ public class Indexer {
         final Predicate<Path> pred = createFileFilter(rootPath, includeGlobs, excludeGlobs);
 
         // Walk files with timing
-        final List<Path> files;
+        final List<Path> walked;
         long walkStart = System.currentTimeMillis();
         try {
-            files = FileWalker.listFiles(rootPath, pred);
+            walked = FileWalker.listFiles(rootPath, pred);
         } catch (IOException ioe) {
             LOG.warn("Failed to walk files under {}: {}",
                     SafeLogFormatter.value(rootPath), SafeLogFormatter.throwableMessage(ioe));
             return;
         }
+        final List<Path> files = applyGitExclusions(rootPath, rag, walked);
         stats.addWalkTime(System.currentTimeMillis() - walkStart);
 
         if (files.isEmpty()) {
@@ -191,11 +241,22 @@ public class Indexer {
             if (en instanceof Boolean b) vecEnabled = b;
         }
 
-        // Resolve embedding profile and build a document embedder (cached)
+        // Resolve embedding profile and build a document embedder (cached) only when
+        // vectors are on. A provider this build cannot construct, such as one left in
+        // an old config, falls back to BM25-only so keyword retrieval keeps working.
+        // A supported provider that fails to build still fails the index as before.
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        Embeddings rawEmb = EmbeddingsFactory.forDocument(cfg);
+        Embeddings rawEmb = EmbeddingsFactory.disabled(profile);
+        if (vecEnabled && !EmbeddingsFactory.isSupportedProvider(profile.provider())) {
+            LOG.warn("Embedding provider {} is not supported; falling back to BM25-only.",
+                    SafeLogFormatter.value(profile.provider()));
+            vecEnabled = false;
+        }
+        if (vecEnabled) {
+            rawEmb = documentEmbeddingsFactory.get();
+        }
 
-        try (CacheDb cache = new CacheDb();
+        try (CacheDb cache = cacheFactory.get();
              CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, profile.cacheNamespace())) {
 
             int dim = 0;
@@ -204,6 +265,7 @@ public class Indexer {
                 try {
                     dim = cachedEmb.dimension();
                 } catch (Exception e) {
+                    propagateControlFlow(e);
                     LOG.warn("Embeddings dimension probe failed; falling back to BM25-only: {}",
                             SafeLogFormatter.throwableMessage(e));
                     useVectors = false;
@@ -233,26 +295,25 @@ public class Indexer {
                         String rel = rootPath.relativize(p).toString().replace('\\','/');
 
                         try {
+                            byte[] sourceSnapshot = Files.readAllBytes(p);
+                            String sourceHash = Hash.sha256Hex(sourceSnapshot);
                             // Check if file is unchanged (unless forcing full reindex)
-                            if (!skipHashing) {
-                                String currentHash = Hash.sha256Hex(Files.readAllBytes(p));
-                                if (store.isUpToDate(rel, currentHash)) {
+                            if (!forceReprocess) {
+                                if (store.isUpToDate(rel, sourceHash)) {
                                     if (refreshSymbolsForUnchangedFiles) {
-                                        String text = parseIndexableTextWithTiming(rootPath, p, stats);
+                                        String text = parseIndexableTextWithTiming(rootPath, p, sourceSnapshot, stats);
+                                        requireUnchangedSource(p, sourceHash);
                                         refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
                                     }
                                     LOG.debug("Skipping unchanged file: {}", SafeLogFormatter.value(rel));
                                     stats.incrementFilesSkipped();
                                     return null; // Skip processing
                                 }
-                                // File has changed - remove old chunks and reprocess
-                                store.removeFileChunks(rel);
                             }
 
                             // Parse with timing
-                            String text = parseIndexableTextWithTiming(rootPath, p, stats);
-                            stats.incrementFilesEmbedded();
-                            refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
+                            String text = parseIndexableTextWithTiming(rootPath, p, sourceSnapshot, stats);
+                            requireUnchangedSource(p, sourceHash);
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
@@ -268,6 +329,7 @@ public class Indexer {
                                 try {
                                     vectors = embForTasks.embedBatch(chunkTexts);
                                 } catch (Exception ex) {
+                                    propagateControlFlow(ex);
                                     LOG.debug("Batch embedding failed for {}: {} (falling back to individual)",
                                             SafeLogFormatter.value(rel), SafeLogFormatter.throwableMessage(ex));
                                     // Fallback to individual processing
@@ -277,6 +339,7 @@ public class Indexer {
                                             float[] vec = embForTasks.embed(chunkText);
                                             vectors.add(vec);
                                         } catch (Exception e) {
+                                            propagateControlFlow(e);
                                             LOG.debug("Individual embedding failed: {}", SafeLogFormatter.throwableMessage(e));
                                             vectors.add(null);
                                         }
@@ -284,6 +347,8 @@ public class Indexer {
                                 }
                                 stats.addEmbedTime(System.currentTimeMillis() - embedStart);
 
+                                requireUnchangedSource(p, sourceHash);
+                                store.removeFileChunks(rel);
                                 // Store chunks with their corresponding embeddings
                                 for (int i = 0; i < chunks.size(); i++) {
                                     ParsedChunk c = chunks.get(i);
@@ -296,26 +361,30 @@ public class Indexer {
                                     }
 
                                     long luceneStart = System.currentTimeMillis();
-                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                    store.add(c.id(), c.text(), vec, currentHash, c.chunkId(), c.metadata());
+                                    store.add(c.id(), c.text(), vec, sourceHash, c.chunkId(), c.metadata());
                                     stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             } else {
+                                requireUnchangedSource(p, sourceHash);
+                                store.removeFileChunks(rel);
                                 // BM25-only processing when vectors are disabled or unavailable.
                                 for (ParsedChunk c : chunks) {
                                     long luceneStart = System.currentTimeMillis();
-                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                    store.add(c.id(), c.text(), null, currentHash, c.chunkId(), c.metadata());
+                                    store.add(c.id(), c.text(), null, sourceHash, c.chunkId(), c.metadata());
                                     stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             }
+                            stats.incrementFilesEmbedded();
+                            refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
                         } catch (PrivacyIndexingSkip ex) {
                             stats.incrementFilesSkipped();
                             stats.incrementFilesSkippedByPrivacy();
                             LOG.info("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } catch (Exception ex) {
+                            propagateControlFlow(ex);
+                            stats.incrementFilesSkipped();
                             LOG.warn("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } finally {
                             listener.onFileComplete(filesCompleted.incrementAndGet(), totalFiles, rel);
@@ -348,13 +417,29 @@ public class Indexer {
                     for (Future<Void> f : futures) {
                         try { f.get(); }
                         catch (ExecutionException ee) {
+                            propagateControlFlow(ee.getCause());
                             LOG.warn("task failed: {}", SafeLogFormatter.throwableMessage(ee.getCause()));
                         }
                     }
                 } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    LOG.warn("Indexing interrupted");
+                    throw ControlFlowFailure.propagate(ie);
                 }
+
+                // Chunks of files that left the corpus, by deletion or by Git exclusion, leave with this run.
+                // The terms dictionary is read without scoring or stored fields. The chunk marker is the last '#',
+                // so a file name that contains '#' keeps its own chunks.
+                java.util.Set<String> indexedPaths = new java.util.HashSet<>();
+                for (String chunk : store.indexedChunkPaths()) {
+                    int marker = chunk.lastIndexOf('#');
+                    indexedPaths.add(marker < 0 ? chunk : chunk.substring(0, marker));
+                }
+                int removed = 0;
+                for (String stale : indexedPaths) {
+                    if (currentRelPaths.contains(stale)) continue;
+                    store.removeFileChunks(stale);
+                    removed++;
+                }
+                if (removed > 0) LOG.info("Removed chunks of {} files that are no longer in the corpus.", removed);
 
                 long commitStart = System.currentTimeMillis();
                 store.commit();
@@ -375,11 +460,19 @@ public class Indexer {
                 LOG.info("Performance - {}", stats.getDetailedTimings());
 
             } catch (Exception e) {
+                propagateControlFlow(e);
                 throw new RuntimeException(e);
             }
         } catch (Exception e) {
+            propagateControlFlow(e);
             throw new RuntimeException("Caching embeddings setup failed", e);
         }
+    }
+
+    private static void propagateControlFlow(Throwable failure) {
+        if (!ControlFlowFailure.isCancellation(failure)
+                && !ControlFlowFailure.isInterruption(failure)) return;
+        throw ControlFlowFailure.propagate(failure);
     }
 
     private static List<String> firstNonEmptyStrList(List<String> a, List<String> b) {
@@ -443,6 +536,7 @@ public class Indexer {
         Files.createDirectories(metadata.getParent());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("schemaVersion", INDEX_METADATA_SCHEMA_VERSION);
+        data.put("fileGlobSemanticsVersion", FILE_GLOB_SEMANTICS_VERSION);
         data.put("privacyPolicyVersion", ProtectedWorkspacePaths.POLICY_VERSION);
         data.put("fileCapabilityPolicyVersion", FileCapabilityPolicy.POLICY_VERSION);
         data.put("documentExtractionPolicyVersion", DocumentExtractionService.EXTRACTION_POLICY_VERSION);
@@ -504,10 +598,8 @@ public class Indexer {
      */
     private Predicate<Path> createCaseSensitiveFilter(Path rootPath, List<String> includeGlobs, List<String> excludeGlobs) {
         final FileSystem fs = rootPath.getFileSystem();
-        final List<PathMatcher> includeMatchers = new ArrayList<>();
-        for (String g : includeGlobs) includeMatchers.add(fs.getPathMatcher("glob:" + g));
-        final List<PathMatcher> excludeMatchers = new ArrayList<>();
-        for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
+        final List<PathMatcher> includeMatchers = createCaseSensitiveMatchers(fs, includeGlobs);
+        final List<PathMatcher> excludeMatchers = createCaseSensitiveMatchers(fs, excludeGlobs);
 
         return p -> {
             if (ProtectedWorkspacePaths.isProtectedPath(rootPath, p)
@@ -519,6 +611,20 @@ public class Indexer {
             boolean exc = excludeMatchers.stream().anyMatch(m -> m.matches(rel));
             return inc && !exc;
         };
+    }
+
+    private static List<PathMatcher> createCaseSensitiveMatchers(FileSystem fs, List<String> globs) {
+        List<PathMatcher> matchers = new ArrayList<>();
+        for (String glob : globs) {
+            matchers.add(fs.getPathMatcher("glob:" + glob));
+            if (glob != null && glob.length() > 3 && glob.startsWith("**/")) {
+                // A case-sensitive native matcher can require a separator for leading **/.
+                // Compile the zero-directory form with the same native matcher so
+                // brace, character-class, escaping, and separator rules stay native.
+                matchers.add(fs.getPathMatcher("glob:" + glob.substring(3)));
+            }
+        }
+        return matchers;
     }
 
     /**
@@ -570,7 +676,7 @@ public class Indexer {
         return Pattern.compile("^" + regex + "$", Pattern.CASE_INSENSITIVE);
     }
 
-    private String parseIndexableText(Path rootPath, Path path) throws IOException {
+    private String parseIndexableText(Path rootPath, Path path, byte[] sourceSnapshot) throws IOException {
         FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
                 .describe(path, cfg)
                 .orElse(null);
@@ -587,14 +693,20 @@ public class Indexer {
             }
             throw new IOException("Document extraction unavailable for index status=" + result.status());
         }
-        return ParserUtil.smartParse(path);
+        return ParserUtil.smartParse(path, sourceSnapshot);
     }
 
-    private String parseIndexableTextWithTiming(Path rootPath, Path path, IndexingStats stats) throws IOException {
+    private String parseIndexableTextWithTiming(Path rootPath, Path path, byte[] sourceSnapshot, IndexingStats stats) throws IOException {
         long parseStart = System.currentTimeMillis();
-        String text = parseIndexableText(rootPath, path);
+        String text = parseIndexableText(rootPath, path, sourceSnapshot);
         stats.addParseTime(System.currentTimeMillis() - parseStart);
         return text;
+    }
+
+    private static void requireUnchangedSource(Path path, String sourceHash) throws IOException {
+        if (!sourceHash.equals(Hash.sha256Hex(Files.readAllBytes(path)))) {
+            throw new IOException("Source changed during indexing; discarded changed source snapshot");
+        }
     }
 
     private boolean unsupportedAndNotExtractionEnabled(Path path) {

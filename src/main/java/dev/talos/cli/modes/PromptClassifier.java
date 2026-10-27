@@ -52,6 +52,14 @@ public final class PromptClassifier {
         ")"
     );
 
+    private static final String MUTATION_VERB_PATTERN =
+            "create|write|generate|save|make|put|delete|remove|rename|move|edit|update|fix|change|improve|modify|rewrite|overwrite";
+
+    private static final Pattern STRUCTURAL_COMMAND_THEN_MUTATION = Pattern.compile(
+        "(?i)^\\s*(?:open|view|show)\\s+\\S+.{0,180}\\b(?:and|then|,|;)\\s+"
+            + "(?:" + MUTATION_VERB_PATTERN + ")\\b"
+    );
+
     /** "show me [the] &lt;file&gt;" - compound command prefix (supports quoted paths). */
     private static final Pattern SHOW_ME_PREFIX = Pattern.compile(
         "(?i)^\\s*show\\s+me\\s+(?:the\\s+)?"
@@ -213,6 +221,10 @@ public final class PromptClassifier {
         String lower = trimmed.toLowerCase(Locale.ROOT);
 
         // Layer 1: structural dev commands
+        if (STRUCTURAL_COMMAND_THEN_MUTATION.matcher(trimmed).find()) {
+            steps.add("structural command prefix contains mutation intent");
+            return new RouteResult(Route.ASSIST, "action intent (tool-calling)", steps);
+        }
         if (DEV_COMMAND.matcher(trimmed).find()) {
             steps.add("matched dev command pattern");
             return new RouteResult(Route.COMMAND, "dev command", steps);

@@ -8,14 +8,22 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
+import dev.talos.runtime.verification.ReadOnlyWebDiagnosticAnswer;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -30,6 +38,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("AssistantTurnExecutor tool-loop outcome characterization")
 class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        ProviderAuthorityTestTrace.begin("executor-outcome", testInfo);
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        ProviderAuthorityTestTrace.clear();
+    }
 
     @Test
     void postToolLoopSynthesisRetryRunsBeforeOutcomeShaping(@TempDir Path workspace) throws Exception {
@@ -115,19 +132,41 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 16_384);
         Context ctx = context(workspace, registry, recorded, 5);
 
+        String request = "Review this static web page and explain whether the button script is wired.";
+        var contract = TaskContractResolver.fromUserRequest(request);
+        assertEquals(TaskType.DIAGNOSE_ONLY, contract.type());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+
         AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                messages("Review this static web page and explain whether the button script is wired."),
+                messages(request),
                 workspace,
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        assertTrue(out.text().contains("Ready"), out.text());
+        assertTrue(out.text().contains(ReadOnlyWebDiagnosticAnswer.LIMITED_PREFIX), out.text());
+        assertFalse(out.text().contains("Ready"), out.text());
         assertEquals(1, countOccurrences(out.text(), "[Used "),
                 "merged inspect-completeness retry evidence should surface one visible summary block");
         assertTrue(recorded.requests().stream()
                         .map(AssistantTurnExecutorToolLoopOutcomeCharacterizationTest::joinRequestMessages)
                         .anyMatch(prompt -> prompt.contains("Read these files now before answering: script.js")),
                 "inspect-completeness retry must ask for the linked script that was missed initially");
+
+        var trace = LocalTurnTraceCapture.complete();
+        var readEvents = trace.events().stream()
+                .filter(event -> event.type().equals("TOOL_EXECUTED")
+                        && event.toolName().equals("talos.read_file")
+                        && Boolean.TRUE.equals(event.data().get("success")))
+                .toList();
+        assertEquals(List.of("index.html", "script.js"),
+                readEvents.stream().map(event -> event.data().get("pathHint")).toList(),
+                "both initial and retry reads must remain recorded despite the unbound final answer");
+        var assessments = trace.events().stream()
+                .filter(event -> event.type().equals("READ_ONLY_WEB_ANSWER_ASSESSED")).toList();
+        assertEquals(1, assessments.size());
+        assertEquals("LIMITED", assessments.getFirst().data().get("disposition"));
+        assertEquals("SOURCE_EVIDENCE_UNAVAILABLE", assessments.getFirst().data().get("reasonCode"));
     }
 
     @Test
@@ -179,6 +218,32 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 .toolCallLoop(new ToolCallLoop(new TurnProcessor(null, new NoOpApprovalGate(), registry), maxIterations))
                 .nativeToolSpecs(specsFrom(registry))
                 .build();
+    }
+
+    @Test
+    void lengthLimitedToolProposalIsRejectedWithoutFollowUp(
+            @TempDir Path workspace
+    ) throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "PROJECT_MARKER = T989-NOTICE\n");
+        ToolRegistry registry = registryWith(new ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(readCall("call_read_notes", "notes.md")), "length"),
+                        new LlmClient.StreamResult("The notes.md marker is T989-NOTICE.", List.of(), "stop")),
+                16_384);
+        Context ctx = context(workspace, registry, recorded, 4);
+
+        AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                messages("Read notes.md and answer with the project marker from the file."),
+                workspace,
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(out.text().contains("[Evidence incomplete:"), out.text());
+        assertTrue(out.text().contains("notes.md"), out.text());
+        assertFalse(out.text().contains("T989-NOTICE"), out.text());
+        assertEquals(1, recorded.requests().size(),
+                "a truncated proposal must not execute or dispatch a follow-up");
     }
 
     private static ToolRegistry registryWith(dev.talos.tools.TalosTool... tools) {

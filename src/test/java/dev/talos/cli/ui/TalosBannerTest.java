@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 class TalosBannerTest {
     private final Config cfg = new Config();
@@ -16,9 +17,12 @@ class TalosBannerTest {
         return baos.toString(StandardCharsets.UTF_8);
     }
     private String captureCompact(Path workspace, String mode) {
+        return captureCompact(workspace, cfg, mode);
+    }
+    private String captureCompact(Path workspace, Config config, String mode) {
         var baos = new ByteArrayOutputStream();
         var ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
-        TalosBanner.printCompact(workspace, cfg, mode, ps);
+        TalosBanner.printCompact(workspace, config, mode, ps);
         return baos.toString(StandardCharsets.UTF_8);
     }
     @Test
@@ -77,6 +81,24 @@ class TalosBannerTest {
         String output = captureCompact(Path.of("."), "auto");
         assertTrue(output.contains("auto"), "Compact banner should show the mode");
     }
+
+    @Test
+    void printCompact_reports_setup_incomplete_when_managed_engine_files_are_missing() {
+        Config missingFiles = new Config();
+        missingFiles.data.put("llm", Map.of("default_backend", "llama_cpp"));
+        missingFiles.data.put("engines", Map.of("llama_cpp", Map.of(
+                "model", "qwen2.5-coder-14b",
+                "server_path", "Z:/definitely-missing/llama-server.exe",
+                "model_path", "Z:/definitely-missing/qwen2.5-coder-14b.gguf")));
+
+        String output = captureCompact(Path.of("."), missingFiles, "auto");
+
+        assertTrue(output.contains("setup incomplete"), output);
+        assertTrue(output.contains("talos setup models"), output);
+        assertFalse(output.contains("ready · type"), output);
+        assertFalse(output.contains("ready - type"), output);
+        assertFalse(output.contains("[ok] setup incomplete"), output);
+    }
     @Test
     void printCompact_omits_unicode_icon() {
         String compact = captureCompact(Path.of("."), "rag");
@@ -102,7 +124,6 @@ class TalosBannerTest {
         Config empty = new Config();
         empty.data.remove("llm");
         empty.data.remove("engines");
-        empty.data.remove("ollama");
         String model = TalosBanner.resolveModel(empty);
         String envModel = System.getenv("TALOS_MODEL");
         if (envModel != null && !envModel.isBlank()) {
@@ -111,5 +132,35 @@ class TalosBannerTest {
         } else {
             assertEquals("unknown", model);
         }
+    }
+
+    @Test
+    void resolveModelDoesNotPresentAConfiguredAliasAsResolvedIdentity() {
+        Config mismatched = new Config();
+        mismatched.data.put("llm", Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b"));
+        mismatched.data.put("engines", Map.of("llama_cpp", Map.of(
+                "mode", "managed",
+                "model", "qwen2.5-coder-14b",
+                "model_path", "C:/models/qwen2.5-coder-7b.gguf",
+                "server_path", "C:/engines/llama-server.exe")));
+
+        String model = TalosBanner.resolveModel(mismatched);
+
+        assertTrue(model.startsWith("qwen2.5-coder-14b"), model);
+        assertTrue(model.contains("refused") || model.contains("unverified"), model);
+        assertNotEquals("qwen2.5-coder-14b", model);
+    }
+
+    @Test
+    void startupHintNamesAnUnsupportedBackendInsteadOfReady() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new java.util.LinkedHashMap<>(Map.of(
+                "default_backend", "ollama", "model", "qwen2.5-coder:14b")));
+
+        String hint = TalosBanner.startupHint(cfg);
+
+        assertEquals("backend ollama is not supported · run talos setup models", hint);
     }
 }

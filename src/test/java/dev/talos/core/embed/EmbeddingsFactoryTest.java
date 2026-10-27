@@ -14,21 +14,15 @@ class EmbeddingsFactoryTest {
         assertEquals("none", profile.model());
     }
     @Test
-    void legacyOllamaEmbedKeyResolvesBgeM3() {
+    void llamaCppBgeM3ResolvesTheBuiltInProfile() {
         Config cfg = new Config(null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
-        ollama.put("embed", "bge-m3");
-        cfg.data.put("embed", new LinkedHashMap<>(Map.of("provider", "ollama")));
+        cfg.data.put("embed", new LinkedHashMap<>(Map.of("provider", "llama_cpp", "model", "bge-m3")));
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertSame(EmbeddingProfile.BGE_M3, profile);
     }
     @Test
-    void embedModelKeyTakesPrecedenceOverOllamaEmbed() {
+    void embedModelKeyResolvesTheModel() {
         Config cfg = new Config(null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
-        ollama.put("embed", "bge-m3");
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "custom-embed");
         cfg.data.put("embed", embedSection);
@@ -41,12 +35,12 @@ class EmbeddingsFactoryTest {
         Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
-        embedSection.put("provider", "ollama");
+        embedSection.put("provider", "llama_cpp");
         cfg.data.put("embed", embedSection);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
                 "Qwen model with no overrides should return the built-in singleton");
-        assertEquals("ollama", profile.provider());
+        assertEquals("llama_cpp", profile.provider());
     }
 
     @Test
@@ -151,7 +145,8 @@ class EmbeddingsFactoryTest {
     void forQueryDoesNotWrapForBgeM3() {
         Config cfg = localOnlyConfig();
         cfg.data.put("embed", new LinkedHashMap<>(Map.of(
-                "provider", "ollama",
+                "provider", "compat",
+                "host", "http://127.0.0.1:8080",
                 "model", "bge-m3")));
         Embeddings emb = EmbeddingsFactory.forQuery(cfg);
         assertFalse(emb instanceof InstructionEmbeddings,
@@ -161,7 +156,8 @@ class EmbeddingsFactoryTest {
     void forDocumentDoesNotWrapForBgeM3() {
         Config cfg = localOnlyConfig();
         cfg.data.put("embed", new LinkedHashMap<>(Map.of(
-                "provider", "ollama",
+                "provider", "compat",
+                "host", "http://127.0.0.1:8080",
                 "model", "bge-m3")));
         Embeddings emb = EmbeddingsFactory.forDocument(cfg);
         assertFalse(emb instanceof InstructionEmbeddings,
@@ -172,7 +168,8 @@ class EmbeddingsFactoryTest {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "custom-instr-model");
-        embedSection.put("provider", "ollama");
+        embedSection.put("provider", "compat");
+        embedSection.put("host", "http://127.0.0.1:8080");
         embedSection.put("query_instruction", "search: ");
         cfg.data.put("embed", embedSection);
         Embeddings emb = EmbeddingsFactory.forQuery(cfg);
@@ -184,7 +181,8 @@ class EmbeddingsFactoryTest {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "custom-instr-model");
-        embedSection.put("provider", "ollama");
+        embedSection.put("provider", "compat");
+        embedSection.put("host", "http://127.0.0.1:8080");
         embedSection.put("query_instruction", "search: ");
         // No document_instruction
         cfg.data.put("embed", embedSection);
@@ -250,10 +248,6 @@ class EmbeddingsFactoryTest {
                 "profileFrom should resolve without touching transport");
     }
     private static Config localOnlyConfig() {
-        Config cfg = new Config(null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
-        ollama.put("host", "http://127.0.0.1:11434");
-        return cfg;
+        return new Config(null);
     }
 }

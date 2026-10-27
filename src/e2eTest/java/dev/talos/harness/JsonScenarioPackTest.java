@@ -7,15 +7,24 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("JSON deterministic scenario pack")
 class JsonScenarioPackTest {
+    private static final String BMI_SCRIPT_SHA256 =
+            "519151e2ea63cbdfc28f213528b9e1bd6e89e749a52d00f825cc7df56be79d2e";
+    private static final String RETRY_BMI_SCRIPT_SHA256 =
+            "f74cd167d482cfcebcba74282b736f20259048ced3350c7b7e5ef53812521484";
 
     @Test
     @DisplayName("[json-scenario:scenarios/01-read-only-repo-question.json] 01: read-only repo question stays read-only and answers from fixture facts")
@@ -195,18 +204,71 @@ class JsonScenarioPackTest {
 
     @Test
     @DisplayName("[json-scenario:scenarios/19-static-verifier-partial-mutation-not-verified-complete.json] 19: partial mutation is not blessed as statically verified complete")
-    void staticVerifierDoesNotBlessPartialMutationAsComplete() {
+    void staticVerifierDoesNotBlessPartialMutationAsComplete() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/19-static-verifier-partial-mutation-not-verified-complete.json");
+        var initialFiles = loaded.definition().initialFiles();
+        assertTrue(initialFiles.containsKey("index.html"), initialFiles.keySet().toString());
+        assertTrue(initialFiles.containsKey("style.css"), initialFiles.keySet().toString());
+
+        String originalIndex = initialFiles.get("index.html");
+        byte[] originalStyleBytes = initialFiles.get("style.css")
+                .getBytes(StandardCharsets.UTF_8);
+        String eol = originalIndex.contains("\r\n") ? "\r\n" : "\n";
+        String paragraph = "        <p>Dive into a world of innovation and cutting-edge design.</p>";
+        String closingDiv = "      </div>";
+        String originalBlock = paragraph + eol + closingDiv;
+        String replacementBlock = paragraph + eol
+                + "        <a class=\"cta-button\" href=\"#tickets\">Listen now</a>"
+                + eol + closingDiv;
+        int replacementStart = originalIndex.indexOf(originalBlock);
+        assertTrue(replacementStart >= 0, "fixture is missing the exact scenario 19 edit block");
+        assertEquals(
+                replacementStart,
+                originalIndex.lastIndexOf(originalBlock),
+                "fixture must contain exactly one scenario 19 edit block");
+        byte[] expectedIndexBytes = (originalIndex.substring(0, replacementStart)
+                + replacementBlock
+                + originalIndex.substring(replacementStart + originalBlock.length()))
+                .getBytes(StandardCharsets.UTF_8);
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertAnswerContains("Succeeded:")
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertLocalTraceRecorded()
+                    .assertAnswerContains("Succeeded:")
                     .assertAnswerContains("Failed:")
                     .assertAnswerContains("style.css")
+                    .assertAnswerContains("old_string not found")
+                    .assertAnswerNotContains("not one of the expected task targets")
+                    .assertAnswerNotContains("outside the current expected target set")
                     .assertAnswerNotContains("Static verification: passed")
-                    .assertFileContains("index.html", "class=\"cta-button\"");
+                    .assertFileContains("index.html", "class=\"cta-button\"")
+                    .assertFileNotContains("style.css", ".does-not-exist");
+            assertTraceExpectedTargets(result, "index.html", "style.css");
+            assertRolefulTarget(result, "index.html", "MUST_MUTATE");
+            assertRolefulTargetExactUserSpan(
+                    result,
+                    loaded.definition().userPrompt(),
+                    "style.css",
+                    "MUST_MUTATE",
+                    "update style.css too.");
+            assertSettledFailureReason(
+                    result,
+                    "talos.edit_file",
+                    "style.css",
+                    "EDIT_OLD_STRING_NOT_FOUND");
+            assertEquals("PARTIAL", result.localTrace().outcome().mutationStatus());
+            assertTraceOutcome(result, "BLOCKED", "BLOCKED_BY_POLICY");
+            assertArrayEquals(
+                    expectedIndexBytes,
+                    Files.readAllBytes(result.workspace().resolve("index.html")),
+                    "index.html must contain only the exact requested CTA insertion");
+            assertArrayEquals(
+                    originalStyleBytes,
+                    Files.readAllBytes(result.workspace().resolve("style.css")),
+                    "failed style.css edit must preserve every original byte");
         }
     }
 
@@ -250,36 +312,39 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: selector mismatch analysis is grounded in actual files")
-    void selectorMismatchAnalysisIsGrounded() {
+    @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: unbound selector analysis is explicitly limited")
+    void selectorMismatchAnalysisIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/10-selector-mismatch-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Mismatches found:")
-                    .assertAnswerContains("`.cta-button`")
-                    .assertAnswerNotContains("There are no mismatches")
-                    .assertAnswerNotContains("present in both HTML and JavaScript");
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "style.css", "script.js"));
+            result.assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("present in both HTML and JavaScript")
+                    .assertAnswerNotContains("`.cta-button`");
         }
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/20-selector-mismatch-grep-only-grounded.json] 20: grep-only selector underinspection is grounded")
-    void selectorMismatchGrepOnlyUnderinspectionIsGrounded() {
+    @DisplayName("[json-scenario:scenarios/20-selector-mismatch-grep-only-grounded.json] 20: grep-only selector underinspection is explicitly limited")
+    void selectorMismatchGrepOnlyUnderinspectionIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/20-selector-mismatch-grep-only-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Mismatches found:")
-                    .assertAnswerContains("`.cta-button`")
-                    .assertAnswerNotContains("There are no mismatches")
-                    .assertAnswerNotContains("No further action is needed");
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.grep", "talos.grep", "talos.grep"), List.of());
+            result.assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("there are no mismatches")
+                    .assertAnswerNotContains("No further action is needed")
+                    .assertAnswerNotContains("Mismatches found:")
+                    .assertAnswerNotContains("`.cta-button`");
         }
     }
 
@@ -288,6 +353,11 @@ class JsonScenarioPackTest {
     void mutationPromptEmptyEditArgsStopsCleanly() {
         var loaded = JsonScenarioLoader.load("scenarios/21-mutation-prompt-empty-edit-args-stops-cleanly.json");
 
+        // T1003: after the two empty-old_string strikes on a read small text
+        // file, Talos now grants one bounded full-rewrite recovery generation.
+        // The scripted model wastes it with prose, so the turn must still end
+        // with the canonical truthful invalid-mutation stop: no approval, no
+        // mutation, and the breached recovery obligation named as the reason.
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
@@ -296,8 +366,9 @@ class JsonScenarioPackTest {
                     .assertAnswerContains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION)
                     .assertAnswerContains("No file changes were applied")
                     .assertAnswerContains("Repeated empty or missing talos.edit_file arguments")
+                    .assertAnswerContains("Pending action obligation")
                     .assertAnswerNotContains("[iteration limit reached]")
-                    .assertAnswerNotContains("This response should not be reached")
+                    .assertAnswerNotContains("I cannot produce the complete corrected file content")
                     .assertFileContains("index.html", "<title>Horror Synthwave Band</title>")
                     .assertFileNotContains("index.html", "class=\"cta-button\"");
         }
@@ -343,19 +414,34 @@ class JsonScenarioPackTest {
 
         try (var result = ScenarioRunner.run(loaded.definition())) {
             // T755: the raw emission carries trailing markdown commentary.
-            // The approval window must describe the sanitized payload
-            // (40 bytes / 2 lines - the raw payload is 89 bytes / 6 lines),
-            // and the written file must equal those approved bytes exactly.
+            // The approval window must describe the sanitized payload (the
+            // raw payload is 89 bytes / 6 lines), and the written file must
+            // equal those approved bytes exactly. The byte count is derived
+            // from the written file rather than pinned literally because
+            // format preservation (T1012) re-joins the sanitized payload to
+            // the existing fixture's checkout-dependent line-ending style.
             // The trace-level hash equality (TOOL_CONTENT_SANITIZED.afterHash
             // == APPROVAL_REQUIRED.contentHash) is pinned in TurnProcessorTest.
             result.assertUsedTool("talos.write_file")
                     .assertNoFailedCalls()
                     .assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnyApprovalDetailContains("(40 bytes, 2 lines)")
                     .assertAnyApprovalDetailContains("diff (+")
                     .assertFileContains("style.css", "background: #222")
                     .assertFileNotContains("style.css", "## Summary")
                     .assertFileNotContains("style.css", "```");
+            long writtenBytes;
+            try {
+                writtenBytes = java.nio.file.Files.size(result.workspace().resolve("style.css"));
+            } catch (java.io.IOException e) {
+                throw new AssertionError("Scenario 'trailing markdown commentary stripped before approval': "
+                        + "could not size the written file", e);
+            }
+            if (writtenBytes >= 89) {
+                throw new AssertionError("Scenario 'trailing markdown commentary stripped before approval': "
+                        + "expected the sanitized payload to be smaller than the raw 89-byte emission, "
+                        + "but style.css is " + writtenBytes + " bytes");
+            }
+            result.assertAnyApprovalDetailContains("(" + writtenBytes + " bytes, 2 lines)");
         }
     }
 
@@ -415,20 +501,23 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/35-no-tool-mutation-retry-create-file-alias.json] 35: no-tool mutation retry executes create_file alias")
-    void noToolMutationRetryExecutesCreateFileAlias() {
+    @DisplayName("[json-scenario:scenarios/35-no-tool-mutation-retry-create-file-alias.json] 35: no-tool mutation retry rejects create_file alias outside selected surface")
+    void noToolMutationRetryRejectsCreateFileAliasOutsideSelectedSurface() {
         var loaded = JsonScenarioLoader.load("scenarios/35-no-tool-mutation-retry-create-file-alias.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("File write/readback passed")
-                    .assertAnswerContains("task completion was not verified")
-                    .assertAnswerNotContains("Static verification: passed")
-                    .assertAnswerContains("script.js")
-                    .assertFileContains("script.js", "retry-create-file-alias");
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("mutating tool call failed")
+                    .assertAnswerContains("No successful file change was applied")
+                    .assertAnswerNotContains("File write/readback passed")
+                    .assertFileAbsent("script.js");
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())
+                            && event.data().toString().contains("PROVIDER_TOOL_SURFACE_MISMATCH")),
+                    result.localTrace().events().toString());
         }
     }
 
@@ -447,6 +536,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("index.html", "class=\"cta-button\"")
                     .assertFileContains("index.html", "Listen now");
+            assertResolvedTypedRepairSequence(result, "EDIT_EMPTY_ARGUMENTS");
         }
     }
 
@@ -547,40 +637,39 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/31-read-only-web-diagnostics-grounded.json] 31: read-only web diagnostics are grounded")
-    void readOnlyWebDiagnosticsAreGrounded() {
+    @DisplayName("[json-scenario:scenarios/31-read-only-web-diagnostics-grounded.json] 31: unbound web diagnostics do not acquire disk facts")
+    void readOnlyWebDiagnosticsAreGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/31-read-only-web-diagnostics-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerContains("`calculator-container` should probably be `.calculator-container`")
-                    .assertAnswerContains("No files were changed.")
-                    .assertAnswerNotContains("script.js` file is missing a closing script tag")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerNotContains("script.js` file is missing a closing script tag")
+                    .assertAnswerNotContains("malformed closing tag")
+                    .assertAnswerNotContains("`calculator-container` should probably be `.calculator-container`")
                     .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
                     .assertFileContains("index.html", "<script src=\"script.js\"></script");
         }
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/36-natural-site-diagnostic-grounded.json] 36: natural site diagnostic prompt is grounded")
-    void naturalSiteDiagnosticPromptIsGrounded() {
+    @DisplayName("[json-scenario:scenarios/36-natural-site-diagnostic-grounded.json] 36: natural site diagnosis reports unavailable source binding")
+    void naturalSiteDiagnosticPromptIsGrounded() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/36-natural-site-diagnostic-grounded.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerNotContains("newer browser")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerNotContains("newer browser")
+                    .assertAnswerNotContains("malformed closing tag")
                     .assertAnswerNotContains("There are no static HTML, CSS, or JavaScript problems");
         }
     }
@@ -867,6 +956,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertFileContains("scripts.js", "Your BMI is");
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
         }
     }
 
@@ -880,12 +970,16 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("invalid tool-call payload")
-                    .assertAnswerContains("No file changes were applied")
+                    .assertLocalTraceRecorded()
+                    .assertAnswerContains("[Action obligation failed: no file was changed in this turn.]")
                     .assertAnswerNotContains("talos.edit_file")
                     .assertAnswerNotContains("old_string")
                     .assertFileContains("script.js", "document.getElementById('bmi-form')")
                     .assertFileNotContains("script.js", "document.querySelector(\"button\")");
+            assertFalse(result.localTrace().events().stream().anyMatch(event ->
+                            "TOOL_CALL_PARSED".equals(event.type())
+                                    || "TOOL_EXECUTED".equals(event.type())),
+                    result.localTrace().events().toString());
         }
     }
 
@@ -935,6 +1029,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertFileContains("scripts.js", "Your BMI is");
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -964,8 +1059,12 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
+            assertResolvedTypedRepairSequence(
+                    result,
+                    "EDIT_FULL_REWRITE_REQUIRED");
         }
     }
 
@@ -992,6 +1091,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -1013,6 +1113,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("COMPLETE", result.localTrace().outcome().status());
             assertEquals("COMPLETED_VERIFIED", result.localTrace().outcome().classification());
         }
@@ -1356,7 +1457,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("I apologize")
                     .assertLocalTraceRecorded();
             assertEquals("DIRECTORY_LISTING", result.localTrace().taskContract().type());
-            assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().nativeTools());
+            assertEquals(List.of(), result.localTrace().toolSurface().nativeTools());
             assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().promptTools());
             assertTrue(result.localTrace().events().stream()
                     .anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
@@ -1385,6 +1486,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("index.html", "bmiForm")
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')");
+            assertUtf8Sha256(result, "scripts.js", RETRY_BMI_SCRIPT_SHA256);
             assertTrue(result.localTrace().events().stream()
                     .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
                             && "UNSATISFIED".equals(event.data().get("status"))));
@@ -1679,23 +1781,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: read-only web diagnostics stop before iteration cap")
-    void readOnlyWebDiagnosticsShortCircuit() {
+    @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: unbound read-only diagnosis stops after one post-read draft")
+    void readOnlyWebDiagnosticsShortCircuit() throws Exception {
         var loaded = JsonScenarioLoader.load("scenarios/33-read-only-web-diagnostics-short-circuit.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("Static web diagnostics found:")
-                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
-                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
-                    .assertAnswerContains("1 iteration(s)")
+            assertSourceUnavailableReadOnlyScenario(result,
+                    List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                    List.of("index.html", "styles.css", "script.js"));
+            result.assertAnswerContains("1 iteration(s)")
                     .assertAnswerNotContains("iteration limit reached")
                     .assertAnswerNotContains("10 iteration(s)")
                     .assertAnswerNotContains("failure policy stopped")
+                    .assertAnswerNotContains("malformed closing tag")
+                    .assertAnswerNotContains("A problem in the BMI calculation is suspected")
                     .assertAnswerNotContains("This response should not be reached");
+            assertTwoForegroundResponsesEndWith(result,
+                    "The page files were reviewed. A problem in the BMI calculation is suspected.");
         }
     }
 
@@ -1735,7 +1840,35 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("old_string not found")
                     .assertAnswerContains("style.css")
                     .assertAnswerNotContains("The title was changed to Melodic Horror Synthwave");
+            assertEquals("PARTIAL", result.localTrace().outcome().status());
+            assertFalse(result.localTrace().events().stream().anyMatch(event ->
+                    "MUTATION_FAILURE_RECOVERY_EVALUATED".equals(event.type())
+                            && "RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN".equals(
+                                    event.data().get("decision"))),
+                    result.localTrace().events().toString());
         }
+    }
+
+    private static void assertResolvedTypedRepairSequence(
+            ExecutorScenarioResult result,
+            String expectedFailureReason
+    ) {
+        List<dev.talos.runtime.trace.TurnTraceEvent> matches =
+                result.localTrace().events().stream()
+                        .filter(event ->
+                                "MUTATION_FAILURE_RECOVERY_EVALUATED".equals(
+                                        event.type()))
+                        .filter(event ->
+                                "RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN".equals(
+                                        event.data().get("decision")))
+                        .toList();
+        assertEquals(1, matches.size(), result.localTrace().events().toString());
+        var data = matches.getFirst().data();
+        assertEquals(expectedFailureReason, data.get("failureReason"));
+        assertEquals(true, data.get("resolved"));
+        assertEquals(false, data.get("recovered"));
+        assertEquals("", data.get("verifiedRequestObligationSha256"));
+        assertEquals(List.of(), data.get("coveredSuccessfulMutationToolCallIds"));
     }
 
     @Test
@@ -1779,6 +1912,111 @@ class JsonScenarioPackTest {
         }
     }
 
+    private static void assertSourceUnavailableReadOnlyScenario(
+            ExecutorScenarioResult result,
+            List<String> expectedTools,
+            List<String> expectedReadPaths
+    ) throws Exception {
+        result.assertApprovalCounts(0, 0, 0, 0)
+                .assertLocalTraceRecorded()
+                .assertAnswerContains("[Answer incomplete: static diagnostics only;")
+                .assertAnswerContains("The source observations could not be bound to this answer with complete eligible coverage.")
+                .assertAnswerContains("No files were changed.")
+                .assertAnswerNotContains("Static web diagnostics found:");
+
+        var trace = result.localTrace();
+        String traceDetail = trace.events().toString();
+        assertEquals("ADVISORY_ONLY", trace.outcome().status(), traceDetail);
+        assertEquals("NOT_RUN", trace.outcome().verificationStatus(), traceDetail);
+        assertEquals("NOT_REQUESTED", trace.outcome().mutationStatus(), traceDetail);
+        assertFalse(trace.taskContract().mutationAllowed(), trace.taskContract().toString());
+        assertFalse(trace.taskContract().mutationRequested(), trace.taskContract().toString());
+        assertTraceExpectedTargets(result);
+
+        var assessments = trace.events().stream()
+                .filter(event -> "READ_ONLY_WEB_ANSWER_ASSESSED".equals(event.type()))
+                .toList();
+        assertEquals(1, assessments.size(), traceDetail);
+        var assessment = assessments.getFirst().data();
+        assertEquals("LIMITED", assessment.get("disposition"), assessment.toString());
+        assertEquals("SOURCE_EVIDENCE_UNAVAILABLE", assessment.get("reasonCode"), assessment.toString());
+        assertEquals(0, assessment.get("typedDiagnosticCount"), assessment.toString());
+        assertEquals(List.of(), assessment.get("typedDiagnosticKinds"), assessment.toString());
+        for (String key : List.of("selectionId", "generationId", "inputHash", "outputHash",
+                "observationIds", "analysisVersion", "scope")) {
+            assertFalse(assessment.containsKey(key),
+                    "Unavailable observations must not acquire " + key + ": " + assessment);
+        }
+
+        var executed = trace.events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .toList();
+        assertEquals(expectedTools, executed.stream().map(event -> event.toolName()).toList(), traceDetail);
+        assertEquals(expectedTools, trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .map(event -> event.toolName()).toList(), traceDetail);
+        assertTrue(executed.stream().allMatch(event -> Boolean.TRUE.equals(event.data().get("success"))),
+                traceDetail);
+        assertTrue(executed.stream().noneMatch(event -> event.data().containsKey("mutationEffects")),
+                traceDetail);
+        assertEquals(expectedReadPaths, executed.stream()
+                .filter(event -> "talos.read_file".equals(event.toolName()))
+                .map(event -> String.valueOf(event.data().get("pathHint")))
+                .toList(), traceDetail);
+        assertFalse(trace.events().stream().anyMatch(event ->
+                        "TOOL_CALL_BLOCKED".equals(event.type())
+                                || "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())),
+                traceDetail);
+        var outcomes = trace.events().stream()
+                .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                .toList();
+        assertEquals(expectedTools.size(), outcomes.size(), traceDetail);
+        for (var outcome : outcomes) {
+            assertEquals(true, outcome.data().get("success"), outcome.toString());
+            assertEquals(false, outcome.data().get("denied"), outcome.toString());
+            assertEquals(false, outcome.data().get("mutating"), outcome.toString());
+            assertEquals("NONE", outcome.data().get("mutationEvidenceKind"), outcome.toString());
+        }
+
+        for (var entry : result.definition().initialFiles().entrySet()) {
+            assertArrayEquals(entry.getValue().getBytes(StandardCharsets.UTF_8),
+                    Files.readAllBytes(result.workspace().resolve(entry.getKey())),
+                    "Read-only diagnosis changed " + entry.getKey());
+        }
+    }
+
+    private static void assertTwoForegroundResponsesEndWith(
+            ExecutorScenarioResult result,
+            String expectedSecondDraft
+    ) throws Exception {
+        var foregroundEvents = result.localTrace().events().stream()
+                .filter(event -> "FOREGROUND_PROVIDER".equals(event.data().get("source"))
+                        && "TURN_RESPONSE".equals(event.data().get("purpose")))
+                .toList();
+        var startedIds = foregroundEvents.stream()
+                .filter(event -> "GENERATION_STARTED".equals(event.type()))
+                .map(event -> event.data().get("generationId"))
+                .toList();
+        assertEquals(2, startedIds.size(), foregroundEvents.toString());
+        assertEquals(2, startedIds.stream().distinct().count(), foregroundEvents.toString());
+        for (String type : List.of("GENERATION_REQUEST_DISPATCHED", "GENERATION_COMPLETED")) {
+            assertEquals(startedIds, foregroundEvents.stream()
+                    .filter(event -> type.equals(event.type()))
+                    .map(event -> event.data().get("generationId"))
+                    .toList(), type + ": " + foregroundEvents);
+        }
+        var completed = foregroundEvents.stream()
+                .filter(event -> "GENERATION_COMPLETED".equals(event.type()))
+                .toList();
+        String expectedHash = "sha256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(expectedSecondDraft.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(expectedHash, completed.getLast().data().get("assistantHash"), completed.toString());
+        assertTrue(completed.stream().allMatch(event ->
+                        "PROVIDER_EOS".equals(event.data().get("completion"))
+                                && Boolean.TRUE.equals(event.data().get("providerTerminalEligible"))),
+                completed.toString());
+    }
+
     private static void assertTraceExpectedTargets(ExecutorScenarioResult result, String... expectedTargets) {
         assertEquals(List.of(expectedTargets), result.localTrace().taskContract().expectedTargets(),
                 "trace expected targets");
@@ -1796,11 +2034,108 @@ class JsonScenarioPackTest {
                         + ", actual: " + result.localTrace().taskContract().rolefulTargets());
     }
 
+    private static void assertRolefulTargetExactUserSpan(
+            ExecutorScenarioResult result,
+            String canonicalRequest,
+            String path,
+            String role,
+            String expectedSourceText
+    ) {
+        var target = result.localTrace().taskContract().rolefulTargets().stream()
+                .filter(candidate -> path.equals(candidate.path())
+                        && role.equals(candidate.role()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "missing exact roleful target " + path + " = " + role
+                                + ": "
+                                + result.localTrace().taskContract().rolefulTargets()));
+        assertEquals("USER_REQUEST", target.source(), target.toString());
+        int expectedStart = canonicalRequest.indexOf(expectedSourceText);
+        int expectedAuthorityEnd = canonicalRequest.indexOf(path, expectedStart)
+                + path.length();
+        int expectedEnd = expectedStart + expectedSourceText.length();
+        assertTrue(expectedStart >= 0, canonicalRequest);
+        assertEquals(expectedSourceText, target.sourceText(), target.toString());
+        assertEquals(expectedStart, target.startOffset(), target.toString());
+        assertEquals(
+                expectedAuthorityEnd,
+                target.authorityEndOffset(),
+                target.toString());
+        assertEquals(expectedEnd, target.endOffset(), target.toString());
+        assertEquals(
+                expectedSourceText,
+                canonicalRequest.substring(
+                        target.startOffset(),
+                        target.endOffset()),
+                target.toString());
+    }
+
+    private static void assertSettledFailureReason(
+            ExecutorScenarioResult result,
+            String tool,
+            String path,
+            String failureReason
+    ) {
+        var events = result.localTrace().events();
+        var settledCall = events.stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type())
+                        || "TOOL_CALL_BLOCKED".equals(event.type()))
+                .filter(event -> tool.equals(event.toolName()))
+                .filter(event -> path.equals(event.data().get("pathHint"))
+                        || event.data().get("pathHints") instanceof List<?> paths
+                        && paths.contains(path))
+                .toList();
+        assertEquals(1, settledCall.size(), events.toString());
+        String toolCallId = String.valueOf(
+                settledCall.getFirst().data().getOrDefault("toolCallId", ""));
+        assertFalse(toolCallId.isBlank(), settledCall.getFirst().toString());
+        var classified = events.stream()
+                .filter(event -> "TOOL_OUTCOME_CLASSIFIED".equals(event.type()))
+                .filter(event -> toolCallId.equals(
+                        String.valueOf(event.data().get("toolCallId"))))
+                .toList();
+        assertEquals(1, classified.size(), events.toString());
+        assertEquals(false, classified.getFirst().data().get("success"));
+        assertEquals(false, classified.getFirst().data().get("denied"));
+        assertEquals("INVALID_PARAMS", classified.getFirst().data().get("errorCode"));
+        assertEquals(
+                failureReason,
+                classified.getFirst().data().get("failureReason"));
+        String settlementReason = String.valueOf(
+                settledCall.getFirst().data().getOrDefault("reason", ""));
+        assertFalse(
+                settlementReason.contains("not one of the expected task targets")
+                        || settlementReason.contains(
+                                "outside the current expected target set"),
+                settledCall.getFirst().toString());
+        assertFalse(events.stream().anyMatch(event ->
+                        "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())
+                                && toolCallId.equals(String.valueOf(
+                                        event.data().get("toolCallId")))),
+                events.toString());
+    }
+
     private static void assertNoRolefulTarget(ExecutorScenarioResult result, String path, String role) {
         assertFalse(result.localTrace().taskContract().rolefulTargets().stream()
                         .anyMatch(target -> path.equals(target.path()) && role.equals(target.role())),
                 "unexpected trace roleful target " + path + " = " + role
                         + ", actual: " + result.localTrace().taskContract().rolefulTargets());
+    }
+
+    private static void assertUtf8Sha256(
+            ExecutorScenarioResult result,
+            String relativePath,
+            String expectedSha256) {
+        try {
+            byte[] bytes = result.workspace().read(relativePath)
+                    .getBytes(StandardCharsets.UTF_8);
+            String observed = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(bytes));
+            assertEquals(expectedSha256, observed,
+                    relativePath + " UTF-8 SHA-256");
+        } catch (Exception e) {
+            throw new AssertionError("Unable to hash scenario file " + relativePath, e);
+        }
     }
 
     private static void assertTraceOutcome(

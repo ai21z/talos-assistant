@@ -1,6 +1,8 @@
 package dev.talos.core.context;
 
 import dev.talos.spi.types.ChunkMetadata;
+import dev.talos.core.privacy.DocumentContentDecision;
+import dev.talos.safety.ContentRestrictions;
 
 import java.util.*;
 
@@ -15,7 +17,7 @@ public final class ContextResult {
      * A single packed snippet - path, sanitized text, and optional structured metadata.
      * Metadata enables richer citation rendering (line ranges, heading context, language).
      */
-    public record Snippet(String path, String text, ChunkMetadata metadata) {
+    public record Snippet(String path, String text, ChunkMetadata metadata, DocumentContentDecision contentDecision) {
         public Snippet {
             path = Objects.requireNonNullElse(path, "");
             text = Objects.requireNonNullElse(text, "");
@@ -24,6 +26,14 @@ public final class ContextResult {
         /** Backwards-compatible constructor without metadata. */
         public Snippet(String path, String text) {
             this(path, text, ChunkMetadata.empty());
+        }
+        public Snippet(String path, String text, ChunkMetadata metadata) {
+            this(path, text, metadata, null);
+        }
+        public ContentRestrictions contentRestrictions() {
+            return contentDecision == null ? ContentRestrictions.UNRESTRICTED : new ContentRestrictions(
+                    contentDecision.modelHandoffAllowed(), contentDecision.rawArtifactPersistenceAllowed(),
+                    !contentDecision.privateDocumentContent(), contentDecision.ragIndexAllowed());
         }
     }
 
@@ -77,6 +87,12 @@ public final class ContextResult {
 
     /** True if no snippets survived packing. */
     public boolean isEmpty() { return snippets.isEmpty(); }
+
+    public ContentRestrictions contentRestrictions() {
+        ContentRestrictions restrictions = ContentRestrictions.UNRESTRICTED;
+        for (Snippet snippet : snippets) restrictions = restrictions.intersect(snippet.contentRestrictions());
+        return restrictions;
+    }
 
     /** Convert snippets to the Map<String,String> format expected by LlmClient. */
     public List<Map<String, String>> toSnippetMaps() {

@@ -2,9 +2,14 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.tools.WorkspacePathIdentity;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -28,11 +33,19 @@ final class CompactReadOnlyEvidenceContinuation {
         if (evidence.isEmpty()) return false;
         ReadOnlyEvidenceAnswer answer = evidence.get();
         List<ChatMessage> messages = answerMessages(answer);
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
         try {
             LlmClient.StreamResult result = state.ctx.llm().chatFull(
                     messages,
                     List.of(),
                     ChatRequestControls.defaults());
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            if (result.aborted() || dev.talos.runtime.IncompleteGenerationPresentation.required(result)) {
+                state.applyProviderResult(result);
+                return true;
+            }
             String text = result.text() == null ? "" : result.text().strip();
             if (result.hasToolCalls() || ToolCallParser.containsToolCalls(text)) {
                 LocalTurnTraceCapture.warning(
@@ -47,8 +60,7 @@ final class CompactReadOnlyEvidenceContinuation {
                         "compact read-only evidence continuation returned empty text after " + retryName);
                 return false;
             }
-            state.currentText = stripped;
-            state.currentNativeCalls = List.of();
+            state.finishWithProviderAnswer(stripped, result.provenance());
             state.failureDecision = FailureDecision.continueLoop();
             state.clearPendingActionObligation();
             LocalTurnTraceCapture.warning(
@@ -56,16 +68,26 @@ final class CompactReadOnlyEvidenceContinuation {
                     "used compact evidence-only answer for " + answer.target() + " after " + retryName);
             return true;
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_CONTEXT_BUDGET_EXCEEDED",
                     ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget));
             return false;
         } catch (EngineException ee) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_FAILED",
                     ee.getMessage() == null ? ee.getClass().getSimpleName() : ee.getMessage());
             return false;
         } catch (Exception e) {
+            if (e instanceof RuntimeException runtime
+                    && (dev.talos.runtime.IncompleteGenerationPresentation.isAbortedFailure(runtime)
+                        || runtime instanceof dev.talos.runtime.GenerationWatchdogException)) throw runtime;
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_FAILED",
                     e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
@@ -79,11 +101,14 @@ final class CompactReadOnlyEvidenceContinuation {
         if (state == null || state.ctx == null || state.ctx.llm() == null) return Optional.empty();
         if (state.hasPendingActionObligation()) return Optional.empty();
         if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return Optional.empty();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) {
             return Optional.empty();
         }
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (!looksLikeReadOnlyReviewProposal(userTask)) return Optional.empty();
         String target = contract.expectedTargets().iterator().next();
         String normalizedTarget = ToolCallSupport.normalizePath(target);
@@ -118,7 +143,8 @@ final class CompactReadOnlyEvidenceContinuation {
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
+            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))
+                    || WorkspacePathIdentity.matches(state.workspace, normalizedPath, outcome.pathHint())) {
                 return true;
             }
         }
@@ -126,31 +152,10 @@ final class CompactReadOnlyEvidenceContinuation {
     }
 
     private static String latestSuccessfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) {
-            return null;
-        }
-        String target = ToolCallSupport.canonicalizeReadPath(normalizedPath)
-                .toLowerCase(Locale.ROOT);
-        String fullBody = latestSuccessfulReadbackForPath(state.successfulReadCallBodies, target);
-        if (fullBody != null) return fullBody;
-        return latestSuccessfulReadbackForPath(state.successfulReadCalls, target);
-    }
-
-    private static String latestSuccessfulReadbackForPath(Map<String, String> readbacksBySignature, String target) {
-        if (readbacksBySignature == null || readbacksBySignature.isEmpty()
-                || target == null || target.isBlank()) {
-            return null;
-        }
-        for (var entry : readbacksBySignature.entrySet()) {
-            String signature = entry.getKey() == null
-                    ? ""
-                    : entry.getKey().replace('\\', '/').toLowerCase(Locale.ROOT);
-            if (signature.startsWith("talos.read_file:")
-                    && signature.contains("path=" + target + ";")) {
-                return entry.getValue();
-            }
-        }
-        return null;
+        if (state == null) return null;
+        // T1013: deterministic latest read_file body for the effective path.
+        ReadEvidence read = state.readEvidence.latestReadFileForPath(normalizedPath, true);
+        return read == null ? null : read.body();
     }
 
     private static String normalizeExpectedTargetKey(String path) {
@@ -180,7 +185,7 @@ final class CompactReadOnlyEvidenceContinuation {
                         + "\nOlder conversation history is intentionally omitted from this compact frame."),
                 ChatMessage.user(
                         "Current user request:\n"
-                                + answer.userTask()
+                                + RuntimeModelIdentityAnswerPolicy.capturedProviderTask(answer.userTask())
                                 + "\n\nCurrent read_file evidence for " + answer.target() + ":\n"
                                 + answer.readback()
                                 + "\n\nAnswer now without tools."));

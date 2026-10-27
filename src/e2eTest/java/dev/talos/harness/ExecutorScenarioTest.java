@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end executor-path scenarios - the N4 seam in action.
@@ -57,10 +58,13 @@ class ExecutorScenarioTest {
                 </html>
                 """;
 
+        // The foreground-provider fixture must return the exact tool name from
+        // the selected provider surface. Alias substitution is intentionally
+        // rejected by the runtime authority gate.
         String readFileCall = """
                 I'll first inspect index.html to see the current CTA text.
                 ```json
-                {"name": "read_file", "parameters": {"path": "index.html"}}
+                {"name": "talos.read_file", "parameters": {"path": "index.html"}}
                 ```
                 """;
 
@@ -78,6 +82,18 @@ class ExecutorScenarioTest {
                 scenario,
                 "Change the CTA button text to 'Let's Get Healthy' in index.html",
                 List.of(readFileCall, falseMutationClaim))) {
+
+            assertTrue(result.localTrace() != null, "expected executor trace");
+            assertTrue(
+                    result.localTrace().events().stream().anyMatch(event ->
+                            "TOOL_EXECUTED".equals(event.type())
+                                    && "talos.read_file".equals(event.toolName())
+                                    && Boolean.TRUE.equals(event.data().get("success"))),
+                    result.traceSummary());
+            assertFalse(
+                    result.localTrace().events().stream().anyMatch(event ->
+                            "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())),
+                    result.traceSummary());
 
             // ── T48 obligation failure must replace the false claim ─────────
             //

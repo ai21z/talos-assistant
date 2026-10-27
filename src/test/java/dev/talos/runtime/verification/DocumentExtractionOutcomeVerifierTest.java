@@ -7,6 +7,9 @@ import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -136,5 +139,41 @@ class DocumentExtractionOutcomeVerifierTest {
                 0,
                 0,
                 List.of(outcome));
+    }
+
+    private static final String EXTRACT_REPORT = "Extract the exact text from report.pdf.";
+
+    @Test
+    void documentReadUnderItsAbsoluteSpellingIsTheTargetRead(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.writeString(root.resolve("report.pdf"), "placeholder");
+
+        TaskVerificationEvidence evidence = DocumentExtractionOutcomeVerifier.verifyWithEvidence(
+                TaskContractResolver.fromUserRequest(EXTRACT_REPORT),
+                loopResult(readSuccess(root.resolve("report.pdf").toString(), "SUCCESS")),
+                root);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertEquals(TaskVerificationEvidenceSource.DOCUMENT_EXTRACTION_TOOL_RESULT, evidence.source());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.PARSER_EXTRACTION.name()),
+                evidence.report().toString());
+    }
+
+    @Test
+    void documentReadOfSameNameElsewhereOrSiblingIsNotTheTargetRead(@TempDir Path temporary) throws Exception {
+        Path root = temporary.toRealPath();
+        Files.createDirectories(root.resolve("archive"));
+        Files.writeString(root.resolve("report.pdf"), "placeholder");
+        Files.writeString(root.resolve("archive").resolve("report.pdf"), "placeholder");
+        Files.writeString(root.resolve("report-old.pdf"), "placeholder");
+        for (Path read : List.of(root.resolve("archive").resolve("report.pdf"), root.resolve("report-old.pdf"))) {
+            TaskVerificationEvidence evidence = DocumentExtractionOutcomeVerifier.verifyWithEvidence(
+                    TaskContractResolver.fromUserRequest(EXTRACT_REPORT),
+                    loopResult(readSuccess(read.toString(), "SUCCESS")),
+                    root);
+
+            assertEquals(TaskVerificationStatus.NOT_RUN, evidence.compatibilityResult().status(), read.toString());
+        }
     }
 }

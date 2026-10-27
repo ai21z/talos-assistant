@@ -29,7 +29,11 @@ final class LlamaCppCatalog implements ModelCatalog {
     public List<ModelRef> installed() {
         List<ModelRef> serverModels = serverModels();
         if (!serverModels.isEmpty()) return serverModels;
-        return List.of(ModelRef.of(LlamaCppEngine.BACKEND, config.catalogFallbackModel()));
+        return List.of(new ModelRef(
+                LlamaCppEngine.BACKEND,
+                config.catalogFallbackModel(),
+                null,
+                config.modelSourceNote()));
     }
 
     @Override

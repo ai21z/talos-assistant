@@ -1,5 +1,6 @@
 package dev.talos.build;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
 import org.junit.jupiter.api.DisplayName;
@@ -7,11 +8,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualityMarkdownReportsTaskTest {
 
     private static final Path ROOT = Path.of("").toAbsolutePath().normalize();
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final long COMMAND_TIMEOUT_SECONDS = 30;
+    private static final long TERMINATION_TIMEOUT_SECONDS = 5;
 
     @TempDir
     Path tempDir;
@@ -80,7 +96,9 @@ class QualityMarkdownReportsTaskTest {
                 {
                   "version": "0.9.0",
                   "summaryStatus": "qodana-results-match-current-candidate",
-                  "requiredArtifacts": { "status": "sarif-only-results-present" },
+                  "requiredArtifacts": { "status": "all-required-artifacts-present" },
+                  "artifactBinding": { "status": "matches-run-binding" },
+                  "resultSchema": { "status": "validated-consistent-results" },
                   "provenance": {
                     "qodanaSourceBranch": "main",
                     "currentGitBranch": "main",
@@ -89,11 +107,32 @@ class QualityMarkdownReportsTaskTest {
                     "branchStatus": "matches-current-branch",
                     "revisionStatus": "matches-current-revision"
                   },
+                  "sourceSnapshot": {
+                    "status": "matches-current-source-snapshot",
+                    "current": {
+                      "algorithm": "talos-qodana-current-source-v2",
+                      "gitHead": "abcdef123456abcdef123456abcdef123456abcd",
+                      "trackedFiles": 200,
+                      "trackedBytes": 120000,
+                      "changedTrackedFiles": 4,
+                      "diffBytes": 120,
+                      "diffSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "snapshotSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    }
+                  },
+                  "scanScope": {
+                    "status": "required-source-roots-observed",
+                    "main": "inspection-activity-observed",
+                    "unitTest": "no-inspection-activity-observed",
+                    "e2eTest": "inspection-activity-observed"
+                  },
                   "linter": "QDJVM",
-                  "linterVersion": "253.31821",
+                  "linterVersion": "261.25881",
                   "totalIssues": 3,
                   "severityCounts": { "HIGH": 2, "MODERATE": 1 },
-                  "sarifLevelCounts": { "warning": 2, "note": 1 }
+                  "sarifLevelCounts": { "warning": 2, "note": 1 },
+                  "criticalIssues": 0,
+                  "criticalIssuesStatus": "derived-from-validated-consistent-results"
                 }
                 """);
         writeUtf8(summariesDir.resolve("version-summary.json"), """
@@ -152,6 +191,12 @@ class QualityMarkdownReportsTaskTest {
         assertTrue(e2e.contains("inspect-first-analysis-is-grounded"));
         assertTrue(qodana.contains("3 Qodana findings"));
         assertTrue(qodana.contains("Yes, `2` high"));
+        assertTrue(qodana.contains("## Observed Scan Scope"));
+        assertTrue(qodana.contains("`src/test` | `no-inspection-activity-observed`"));
+        assertTrue(qodana.contains("Unit-test correctness is owned by the `test` and `candidateTest` lanes"));
+        assertTrue(qodana.contains("exact HEAD + tracked paths + raw file bytes match"));
+        assertTrue(qodana.contains("the lane is current, its exact result bytes are authenticated"));
+        assertTrue(qodana.contains("Trust the report as bound to the current source snapshot."));
         assertTrue(version.contains("artifact is fresh for this packet"));
     }
 
@@ -190,6 +235,70 @@ class QualityMarkdownReportsTaskTest {
     }
 
     @Test
+    @DisplayName("qualityReportGate rejects every Qodana status outside the exact success allowlist")
+    void qualityReportGateRejectsNonExactQodanaStatus() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "passed", 0, 0, "passed", "qodana-run-binding-missing");
+
+        BuildResult result = runQualityReportGate(projectDir, true);
+
+        assertTrue(result.getOutput().contains(
+                "qodana-summary status must be exactly `qodana-results-match-current-candidate`"));
+    }
+
+    @Test
+    @DisplayName("matching artifacts cannot make conflicting native provenance look acceptable in Markdown")
+    void markdownAndGateRejectConflictingNativeProvenanceDespiteExactArtifacts() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "passed", 0, 0, "passed", "stale-qodana-provenance");
+        Path qodanaSummary = projectDir.resolve("build/reports/talos/qodana-summary.json");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = JSON.readValue(qodanaSummary.toFile(), Map.class);
+        summary.put("provenance", Map.of(
+                "branchStatus", "mismatches-current-branch",
+                "revisionStatus", "matches-current-revision",
+                "qodanaSourceBranch", "different-branch",
+                "currentGitBranch", "main"));
+        JSON.writerWithDefaultPrettyPrinter().writeValue(qodanaSummary.toFile(), summary);
+
+        runWriteQualityMarkdownReports(projectDir);
+        String qodana;
+        try (var reports = Files.list(projectDir.resolve("reports"))) {
+            Path report = reports.filter(path -> path.getFileName().toString().startsWith("qodana-"))
+                    .findFirst().orElseThrow();
+            qodana = Files.readString(report, StandardCharsets.UTF_8);
+        }
+        assertTrue(qodana.contains("exact HEAD + tracked paths + raw file bytes match"));
+        assertTrue(qodana.contains("stale-qodana-provenance"));
+        assertTrue(qodana.contains("the lane is not acceptable as current release evidence."));
+        assertTrue(qodana.contains("Do not use this report as current release evidence."));
+        assertFalse(qodana.contains("the lane is current, its exact result bytes are authenticated"));
+        assertFalse(qodana.contains("Trust the report as bound to the current source snapshot."));
+
+        BuildResult gate = runQualityReportGate(projectDir, true);
+        assertTrue(gate.getOutput().contains(
+                "qodana-summary status must be exactly `qodana-results-match-current-candidate`"));
+    }
+
+    @Test
+    @DisplayName("qualityReportGate rejects a stale Qodana analysis-engine identity")
+    void qualityReportGateRejectsStaleQodanaEngine() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "passed", 0, 0, "passed",
+                "qodana-results-match-current-candidate");
+        Path qodanaSummary = projectDir.resolve("build/reports/talos/qodana-summary.json");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = JSON.readValue(qodanaSummary.toFile(), Map.class);
+        summary.put("linterVersion", "253.31821");
+        JSON.writerWithDefaultPrettyPrinter().writeValue(qodanaSummary.toFile(), summary);
+
+        BuildResult result = runQualityReportGate(projectDir, true);
+
+        assertTrue(result.getOutput().contains(
+                "qodana-summary must authenticate the configured QDJVM 2026.1 analysis engine"));
+    }
+
+    @Test
     @DisplayName("qualityReportGate fails when candidate tests failed")
     void qualityReportGateFailsWhenCandidateTestsFailed() throws Exception {
         Path projectDir = createBuildFixture();
@@ -198,6 +307,25 @@ class QualityMarkdownReportsTaskTest {
         BuildResult result = runQualityReportGate(projectDir, true);
 
         assertTrue(result.getOutput().contains("coverage-summary tests must have zero failures and errors"));
+    }
+
+    @Test
+    @DisplayName("qualityReportGate rejects tracked-byte drift after the Qodana summary was written")
+    void qualityReportGateRepinsCurrentSourceAtGateTime() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "passed", 0, 0, "passed",
+                "qodana-results-match-current-candidate");
+        Files.writeString(
+                projectDir.resolve("gradle.properties"),
+                "\nchangedAfterSummary=true\n",
+                StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.APPEND
+        );
+
+        BuildResult result = runQualityReportGate(projectDir, true);
+
+        assertTrue(result.getOutput().contains(
+                "qodana-summary current source snapshot must still match exact tracked bytes at gate time"));
     }
 
     @Test
@@ -217,12 +345,14 @@ class QualityMarkdownReportsTaskTest {
                 "qualityReportGate must validate summaries after fresh local quality evidence is written");
     }
 
-    private Path createBuildFixture() throws IOException {
+    private Path createBuildFixture() throws Exception {
         Path projectDir = tempDir.resolve("fixture");
         Files.createDirectories(projectDir);
         copyProjectFile("build.gradle.kts", projectDir.resolve("build.gradle.kts"));
         copyProjectFile("settings.gradle", projectDir.resolve("settings.gradle"));
         copyProjectFile("gradle.properties", projectDir.resolve("gradle.properties"));
+        copyProjectFile(".gitignore", projectDir.resolve(".gitignore"));
+        initGitFixture(projectDir);
         return projectDir;
     }
 
@@ -254,8 +384,9 @@ class QualityMarkdownReportsTaskTest {
             int coverageFailures,
             int coverageErrors,
             String e2eStatus,
-            String qodanaStatus) throws IOException {
+            String qodanaStatus) throws Exception {
         Path summariesDir = Files.createDirectories(projectDir.resolve("build/reports/talos"));
+        String currentSourceSnapshot = JSON.writeValueAsString(sourceSnapshot(projectDir));
         int coveragePassed = 10 - coverageFailures - coverageErrors;
         writeUtf8(summariesDir.resolve("coverage-summary.json"), """
                 {
@@ -296,17 +427,31 @@ class QualityMarkdownReportsTaskTest {
                 {
                   "version": "0.10.8",
                   "summaryStatus": "%s",
+                  "linter": "QDJVM",
+                  "linterVersion": "261.25881",
                   "requiredArtifacts": { "status": "all-required-artifacts-present" },
+                  "artifactBinding": { "status": "matches-run-binding" },
+                  "resultSchema": { "status": "validated-consistent-results" },
                   "provenance": {
                     "revisionStatus": "matches-current-revision",
                     "branchStatus": "matches-current-branch"
                   },
+                  "sourceSnapshot": {
+                    "status": "matches-current-source-snapshot",
+                    "current": %s
+                  },
+                  "scanScope": {
+                    "status": "required-source-roots-observed",
+                    "main": "inspection-activity-observed",
+                    "unitTest": "no-inspection-activity-observed",
+                    "e2eTest": "inspection-activity-observed"
+                  },
                   "criticalIssues": 0,
-                  "criticalIssuesStatus": "derived-from-problem-severities",
+                  "criticalIssuesStatus": "derived-from-validated-consistent-results",
                   "highIssues": 0,
                   "newIssues": 0
                 }
-                """.formatted(qodanaStatus));
+                """.formatted(qodanaStatus, currentSourceSnapshot));
         writeUtf8(summariesDir.resolve("version-summary.json"), """
                 {
                   "version": "0.10.8",
@@ -322,6 +467,344 @@ class QualityMarkdownReportsTaskTest {
                   ]
                 }
                 """);
+    }
+
+    private void initGitFixture(Path projectDir) throws Exception {
+        runCommand(projectDir, "git", "init", "-q");
+        runCommand(projectDir, "git", "config", "user.email", "t@t");
+        runCommand(projectDir, "git", "config", "user.name", "t");
+        runCommand(projectDir, "git", "config", "commit.gpgsign", "false");
+        runCommand(projectDir, "git", "add", "-A");
+        runCommand(projectDir, "git", "commit", "-q", "-m", "fixture");
+    }
+
+    private String runCommand(Path projectDir, String... command) throws Exception {
+        return new String(runCommandBytes(projectDir, command), StandardCharsets.UTF_8).trim();
+    }
+
+    private byte[] runCommandBytes(Path projectDir, String... command) throws Exception {
+        Path stdoutFile = Files.createTempFile(tempDir, "quality-command-out-", ".bin");
+        Path stderrFile = Files.createTempFile(tempDir, "quality-command-err-", ".bin");
+        Throwable commandFailure = null;
+        try {
+            Process process = new ProcessBuilder(command)
+                    .directory(projectDir.toFile())
+                    .redirectOutput(stdoutFile.toFile())
+                    .redirectError(stderrFile.toFile())
+                    .start();
+            int exit = awaitCommandExit(process, String.join(" ", command));
+            byte[] stdout = Files.readAllBytes(stdoutFile);
+            byte[] stderr = Files.readAllBytes(stderrFile);
+            if (exit != 0) {
+                throw new IOException("command failed (" + exit + "): "
+                        + new String(stderr, StandardCharsets.UTF_8));
+            }
+            return stdout;
+        } catch (Exception | Error failure) {
+            commandFailure = failure;
+            throw failure;
+        } finally {
+            try {
+                deleteCommandOutputs(stdoutFile, stderrFile);
+            } catch (IOException cleanupFailure) {
+                if (commandFailure != null) {
+                    commandFailure.addSuppressed(cleanupFailure);
+                } else {
+                    throw cleanupFailure;
+                }
+            }
+        }
+    }
+
+    private int awaitCommandExit(Process process, String description) throws InterruptedException, IOException {
+        ProcessHandle root = process.toHandle();
+        Set<ProcessHandle> observedDescendants = new LinkedHashSet<>();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COMMAND_TIMEOUT_SECONDS);
+        try {
+            while (process.isAlive() && System.nanoTime() < deadline) {
+                retainDescendants(root, observedDescendants);
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                if (Thread.interrupted()) throw new InterruptedException();
+            }
+            retainDescendants(root, observedDescendants);
+            if (!process.isAlive()) {
+                long drainDeadline = System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(TERMINATION_TIMEOUT_SECONDS);
+                while (System.nanoTime() < drainDeadline) {
+                    retainDescendants(root, observedDescendants);
+                    if (observedDescendants.stream().noneMatch(ProcessHandle::isAlive)) break;
+                    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                    if (Thread.interrupted()) throw new InterruptedException();
+                }
+                retainDescendants(root, observedDescendants);
+            }
+        } catch (InterruptedException interrupted) {
+            terminateAfterCommandFailure(process, root, observedDescendants, interrupted);
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        } catch (RuntimeException | Error failure) {
+            terminateAfterCommandFailure(process, root, observedDescendants, failure);
+            throw failure;
+        }
+        if (!process.isAlive()) {
+            List<Long> survivors = observedDescendants.stream()
+                    .filter(ProcessHandle::isAlive)
+                    .map(ProcessHandle::pid)
+                    .toList();
+            if (survivors.isEmpty()) return process.exitValue();
+            IOException failure = new IOException(
+                    description + " left live descendant processes: " + survivors);
+            terminateAfterCommandFailure(process, root, observedDescendants, failure);
+            throw failure;
+        }
+        IOException failure = new IOException(
+                description + " timed out after " + COMMAND_TIMEOUT_SECONDS + " seconds");
+        terminateAfterCommandFailure(process, root, observedDescendants, failure);
+        throw failure;
+    }
+
+    private void retainDescendants(ProcessHandle root, Set<ProcessHandle> observedDescendants) {
+        FixtureProcessOwnership.retainDescendants(root, observedDescendants);
+    }
+
+    private void terminateAfterCommandFailure(
+            Process process,
+            ProcessHandle root,
+            Set<ProcessHandle> observedDescendants,
+            Throwable originalFailure) {
+        try {
+            terminateProcessTree(process, root, observedDescendants);
+        } catch (RuntimeException | Error cleanupFailure) {
+            originalFailure.addSuppressed(cleanupFailure);
+        }
+    }
+
+    private void terminateProcessTree(
+            Process process,
+            ProcessHandle root,
+            Set<ProcessHandle> observedDescendants) {
+        boolean restoreInterrupt = Thread.interrupted();
+        RuntimeException inspectionFailure = null;
+        try {
+            long gracefulDeadline = System.nanoTime()
+                    + TimeUnit.SECONDS.toNanos(TERMINATION_TIMEOUT_SECONDS);
+            while (System.nanoTime() < gracefulDeadline) {
+                try {
+                    retainDescendants(root, observedDescendants);
+                } catch (RuntimeException failure) {
+                    if (inspectionFailure == null) inspectionFailure = failure;
+                }
+                inspectionFailure = destroyObservedTree(
+                        process, root, observedDescendants, false, inspectionFailure);
+                if (!process.isAlive()
+                        && observedDescendants.stream().noneMatch(ProcessHandle::isAlive)) {
+                    if (inspectionFailure != null) {
+                        throw new AssertionError(
+                                "process-tree inspection was incomplete during termination",
+                                inspectionFailure);
+                    }
+                    return;
+                }
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                if (Thread.interrupted()) restoreInterrupt = true;
+            }
+
+            long forcedDeadline = System.nanoTime()
+                    + TimeUnit.SECONDS.toNanos(TERMINATION_TIMEOUT_SECONDS);
+            while (System.nanoTime() < forcedDeadline) {
+                try {
+                    retainDescendants(root, observedDescendants);
+                } catch (RuntimeException failure) {
+                    if (inspectionFailure == null) inspectionFailure = failure;
+                }
+                inspectionFailure = destroyObservedTree(
+                        process, root, observedDescendants, true, inspectionFailure);
+                if (!process.isAlive()
+                        && observedDescendants.stream().noneMatch(ProcessHandle::isAlive)) {
+                    if (inspectionFailure != null) {
+                        throw new AssertionError(
+                                "process-tree inspection was incomplete during forced termination",
+                                inspectionFailure);
+                    }
+                    return;
+                }
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                if (Thread.interrupted()) restoreInterrupt = true;
+            }
+
+            List<Long> survivors = new ArrayList<>();
+            if (process.isAlive()) survivors.add(process.pid());
+            observedDescendants.stream()
+                    .filter(ProcessHandle::isAlive)
+                    .map(ProcessHandle::pid)
+                    .forEach(survivors::add);
+            AssertionError failure = new AssertionError(
+                    "process tree did not terminate after forced destruction; survivors=" + survivors);
+            if (inspectionFailure != null) failure.addSuppressed(inspectionFailure);
+            throw failure;
+        } finally {
+            if (restoreInterrupt || Thread.interrupted()) Thread.currentThread().interrupt();
+        }
+    }
+
+    private RuntimeException destroyObservedTree(
+            Process process,
+            ProcessHandle root,
+            Set<ProcessHandle> observedDescendants,
+            boolean forcibly,
+            RuntimeException firstFailure) {
+        List<ProcessHandle> descendants;
+        try {
+            descendants = observedDescendants.stream()
+                    .filter(ProcessHandle::isAlive)
+                    .sorted(Comparator.comparingInt(
+                            (ProcessHandle handle) -> processDepth(handle, root)).reversed())
+                    .toList();
+        } catch (RuntimeException failure) {
+            if (firstFailure == null) firstFailure = failure;
+            descendants = List.copyOf(observedDescendants);
+        }
+        for (ProcessHandle handle : descendants) {
+            try {
+                if (!handle.isAlive()) continue;
+                if (forcibly) handle.destroyForcibly(); else handle.destroy();
+            } catch (RuntimeException failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        if (process.isAlive()) {
+            try {
+                if (forcibly) process.destroyForcibly(); else process.destroy();
+            } catch (RuntimeException failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        return firstFailure;
+    }
+
+    private int processDepth(ProcessHandle handle, ProcessHandle root) {
+        int depth = 1;
+        ProcessHandle current = handle;
+        while (depth < 128) {
+            var parent = current.parent();
+            if (parent.isEmpty() || parent.get().pid() == root.pid()) return depth;
+            current = parent.get();
+            depth++;
+        }
+        return depth;
+    }
+
+    private void deleteCommandOutputs(Path... paths) throws IOException {
+        IOException aggregate = null;
+        for (Path path : paths) {
+            try {
+                deleteEventually(path);
+            } catch (IOException failure) {
+                if (aggregate == null) aggregate = failure; else aggregate.addSuppressed(failure);
+            }
+        }
+        if (aggregate != null) throw aggregate;
+    }
+
+    private void deleteEventually(Path path) throws IOException {
+        IOException lastFailure = null;
+        boolean restoreInterrupt = Thread.interrupted();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TERMINATION_TIMEOUT_SECONDS);
+        try {
+            do {
+                try {
+                    Files.deleteIfExists(path);
+                    return;
+                } catch (IOException failure) {
+                    lastFailure = failure;
+                }
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                if (Thread.interrupted()) restoreInterrupt = true;
+            } while (System.nanoTime() < deadline);
+        } finally {
+            if (restoreInterrupt || Thread.interrupted()) Thread.currentThread().interrupt();
+        }
+        throw lastFailure;
+    }
+
+    private Map<String, Object> sourceSnapshot(Path projectDir) throws Exception {
+        String head = new String(
+                runCommandBytes(projectDir, "git", "rev-parse", "--verify", "HEAD"),
+                StandardCharsets.US_ASCII
+        ).trim().toLowerCase(Locale.ROOT);
+        byte[] staged = runCommandBytes(projectDir, "git", "diff", "--cached", "--binary", "--full-index",
+                "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--");
+        byte[] untracked = runCommandBytes(projectDir, "git", "ls-files", "--others", "--exclude-standard", "-z");
+        if (staged.length != 0 || untracked.length != 0) {
+            throw new IOException("quality gate fixture source must not contain staged or untracked files");
+        }
+        byte[] diff = runCommandBytes(projectDir, "git", "diff", "--binary", "--full-index",
+                "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--");
+        byte[] changedNames = runCommandBytes(projectDir, "git", "diff", "--name-only", "-z",
+                "--no-ext-diff", "--no-renames", "HEAD", "--");
+        List<byte[]> trackedPaths = splitNulPaths(
+                runCommandBytes(projectDir, "git", "ls-files", "-z", "--")
+        );
+        trackedPaths.sort(this::compareUnsignedBytes);
+        MessageDigest snapshotDigest = MessageDigest.getInstance("SHA-256");
+        updateDigestField(snapshotDigest, "talos-qodana-current-source-v2".getBytes(StandardCharsets.US_ASCII));
+        updateDigestField(snapshotDigest, head.getBytes(StandardCharsets.US_ASCII));
+        snapshotDigest.update(ByteBuffer.allocate(8).putLong(trackedPaths.size()).array());
+        long trackedBytes = 0L;
+        for (byte[] rawPath : trackedPaths) {
+            byte[] contents = Files.readAllBytes(projectDir.resolve(new String(rawPath, StandardCharsets.UTF_8)));
+            updateDigestField(snapshotDigest, rawPath);
+            updateDigestField(snapshotDigest, contents);
+            trackedBytes = Math.addExact(trackedBytes, contents.length);
+        }
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("algorithm", "talos-qodana-current-source-v2");
+        snapshot.put("gitHead", head);
+        snapshot.put("trackedFiles", trackedPaths.size());
+        snapshot.put("trackedBytes", trackedBytes);
+        snapshot.put("changedTrackedFiles", splitNulPaths(changedNames).size());
+        snapshot.put("diffBytes", diff.length);
+        snapshot.put("diffSha256", sha256(diff));
+        snapshot.put("snapshotSha256", hex(snapshotDigest.digest()));
+        return snapshot;
+    }
+
+    private List<byte[]> splitNulPaths(byte[] raw) throws IOException {
+        List<byte[]> paths = new ArrayList<>();
+        if (raw.length == 0) return paths;
+        if (raw[raw.length - 1] != 0) throw new IOException("Git path list is not NUL-terminated");
+        int start = 0;
+        for (int index = 0; index < raw.length; index++) {
+            if (raw[index] == 0) {
+                paths.add(java.util.Arrays.copyOfRange(raw, start, index));
+                start = index + 1;
+            }
+        }
+        return paths;
+    }
+
+    private int compareUnsignedBytes(byte[] left, byte[] right) {
+        int common = Math.min(left.length, right.length);
+        for (int index = 0; index < common; index++) {
+            int comparison = Integer.compare(left[index] & 0xff, right[index] & 0xff);
+            if (comparison != 0) return comparison;
+        }
+        return Integer.compare(left.length, right.length);
+    }
+
+    private void updateDigestField(MessageDigest digest, byte[] value) {
+        digest.update(ByteBuffer.allocate(8).putLong(value.length).array());
+        digest.update(value);
+    }
+
+    private String sha256(byte[] bytes) throws Exception {
+        return hex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private String hex(byte[] bytes) {
+        StringBuilder result = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) result.append("%02x".formatted(value & 0xff));
+        return result.toString();
     }
 
     private String blockBetween(String content, String start, String end) {

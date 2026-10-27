@@ -17,7 +17,9 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
     public CachingEmbeddings(Embeddings delegate, CacheDb db, String modelName) {
         this.delegate = delegate;
         this.db = db;
-        this.modelName = modelName;
+        // Earlier batch adapters could persist misordered or partial responses. Do not
+        // reuse that unauthenticated generation; leave historical rows untouched.
+        this.modelName = "validated-batch-v2\n" + modelName;
     }
 
     @Override
@@ -29,12 +31,12 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
     public float[] embed(String text) throws Exception {
         String key = Hash.sha1Hex(modelName + "\n" + text);
         float[] cached = db.getEmbedding(key);
-        if (cached != null && cached.length > 0) {
+        if (EmbeddingVectors.isValidVector(cached)) {
             hits.incrementAndGet();
             return cached;
         }
         float[] vec = delegate.embed(text);
-        if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
+        if (vec != null && vec.length > 0 && EmbeddingVectors.isValidVector(vec)) {
             db.putEmbedding(key, vec.length, vec);
             misses.incrementAndGet();
         }
@@ -55,7 +57,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
             String key = Hash.sha1Hex(modelName + "\n" + text);
             float[] cached = db.getEmbedding(key);
 
-            if (cached != null && cached.length > 0) {
+            if (EmbeddingVectors.isValidVector(cached)) {
                 results.add(cached);
                 hits.incrementAndGet();
             } else {
@@ -63,6 +65,15 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
                 cacheMisses.add(text);
                 missIndices.add(i);
             }
+        }
+
+        int cachedDimension = 0;
+        for (float[] vector : results) {
+            if (vector == null) continue;
+            if (cachedDimension != 0 && vector.length != cachedDimension) {
+                throw new IllegalStateException("Inconsistent cached embedding dimensions");
+            }
+            cachedDimension = vector.length;
         }
 
         // If all were cache hits, return immediately
@@ -83,6 +94,20 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
             }
         }
 
+        // Authenticate the entire response before publishing even one cache entry. A
+        // partial/oversized response must not poison the cache or misbind later texts.
+        if (batchResults == null || batchResults.size() != cacheMisses.size()) {
+            throw new IllegalStateException("Embedding batch cardinality mismatch");
+        }
+        int expectedDimension = results.stream().filter(java.util.Objects::nonNull)
+                .findFirst().map(vector -> vector.length).orElseGet(() ->
+                        batchResults.get(0) == null ? 0 : batchResults.get(0).length);
+        for (float[] vector : batchResults) {
+            if (!EmbeddingVectors.isValidVector(vector) || vector.length != expectedDimension) {
+                throw new IllegalStateException("Invalid embedding batch vector or dimension");
+            }
+        }
+
         // Third pass: fill in results and cache new embeddings
         for (int i = 0; i < batchResults.size(); i++) {
             float[] vec = batchResults.get(i);
@@ -91,7 +116,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
 
             results.set(originalIndex, vec);
 
-            if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
+            if (vec != null && vec.length > 0 && EmbeddingVectors.isValidVector(vec)) {
                 // Cache the new embedding
                 String key = Hash.sha1Hex(modelName + "\n" + text);
                 db.putEmbedding(key, vec.length, vec);

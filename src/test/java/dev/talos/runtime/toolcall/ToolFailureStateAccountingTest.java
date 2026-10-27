@@ -17,14 +17,15 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolFailureStateAccountingTest {
     @Test
     void failedMutatingResultRecordsCountsClearsReadCachesAndReportsFailure() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
-        state.successfulReadCallBodies.put("talos.read_file:path=README.md;", "1 | old");
+        addReadEvidence(state, "README.md", "1 | old");
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "docs\\notes.md", "content", "new"));
         ToolResult result = ToolResult.fail(ToolError.invalidParams("Path not allowed before approval: docs/notes.md"));
         ToolExecutionFailureClassifier.Classification classification =
@@ -37,15 +38,13 @@ class ToolFailureStateAccountingTest {
         assertEquals(1, state.failedCalls);
         assertEquals(1, state.failureCountsByTool.get("talos.write_file"));
         assertEquals(1, state.failureCountsByPath.get("docs/notes.md"));
-        assertTrue(state.successfulReadCalls.isEmpty());
-        assertTrue(state.successfulReadCallBodies.isEmpty());
+        assertNull(state.readEvidence.latestReadFileForPath("README.md", true));
     }
 
     @Test
     void expectedTargetScopeFailureRecordsCountsButPreservesReadCaches() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("talos.read_file:path=index.html;", "1 | <main></main>");
-        state.successfulReadCallBodies.put("talos.read_file:path=index.html;", "1 | <main></main>");
+        addReadEvidence(state, "index.html", "1 | <main></main>");
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "docs\\other.md", "content", "new"));
         ToolResult result = ToolResult.fail(ToolError.invalidParams(
                 ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
@@ -60,16 +59,13 @@ class ToolFailureStateAccountingTest {
         assertEquals(1, state.failedCalls);
         assertEquals(1, state.failureCountsByTool.get("talos.write_file"));
         assertEquals(1, state.failureCountsByPath.get("docs/other.md"));
-        assertFalse(state.successfulReadCalls.isEmpty());
-        assertFalse(state.successfulReadCallBodies.isEmpty());
+        assertNotNull(state.readEvidence.latestReadFileForPath("index.html", true));
     }
 
     @Test
     void oldStringMissAfterSameTurnReadWithoutMutationPreservesReadCaches() {
         LoopState state = loopState();
-        state.pathsReadThisTurn.add("docs/notes.md");
-        state.successfulReadCalls.put("talos.read_file:path=docs/notes.md;", "1 | old");
-        state.successfulReadCallBodies.put("talos.read_file:path=docs/notes.md;", "1 | old");
+        addReadEvidence(state, "docs/notes.md", "1 | old");
         ToolCall edit = new ToolCall("talos.edit_file", Map.of(
                 "path", "docs\\notes.md",
                 "old_string", "missing",
@@ -86,15 +82,13 @@ class ToolFailureStateAccountingTest {
         assertEquals(1, state.failedCalls);
         assertEquals(1, state.failureCountsByTool.get("talos.edit_file"));
         assertEquals(1, state.failureCountsByPath.get("docs/notes.md"));
-        assertFalse(state.successfulReadCalls.isEmpty());
-        assertFalse(state.successfulReadCallBodies.isEmpty());
+        assertNotNull(state.readEvidence.latestReadFileForPath("docs/notes.md", true));
     }
 
     @Test
     void failedReadOnlyResultRecordsCountsAndPreservesReadCaches() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
-        state.successfulReadCallBodies.put("talos.read_file:path=README.md;", "1 | old");
+        addReadEvidence(state, "README.md", "1 | old");
         ToolCall grep = new ToolCall("talos.grep", Map.of("pattern", "TODO", "path", "src"));
         ToolResult result = ToolResult.fail(ToolError.invalidParams("missing pattern"));
         ToolExecutionFailureClassifier.Classification classification =
@@ -107,15 +101,13 @@ class ToolFailureStateAccountingTest {
         assertEquals(1, state.failedCalls);
         assertEquals(1, state.failureCountsByTool.get("talos.grep"));
         assertEquals(1, state.failureCountsByPath.get("src"));
-        assertFalse(state.successfulReadCalls.isEmpty());
-        assertFalse(state.successfulReadCallBodies.isEmpty());
+        assertNotNull(state.readEvidence.latestReadFileForPath("README.md", true));
     }
 
     @Test
     void syntheticPreResultFailureRecordsCountsWithoutCachePolicy() {
         LoopState state = loopState();
-        state.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
-        state.successfulReadCallBodies.put("talos.read_file:path=README.md;", "1 | old");
+        addReadEvidence(state, "README.md", "1 | old");
         ToolCall edit = new ToolCall("talos.edit_file", Map.of(
                 "path", "README.md",
                 "old_string", "old",
@@ -128,8 +120,7 @@ class ToolFailureStateAccountingTest {
         assertEquals(1, state.failedCalls);
         assertEquals(1, state.failureCountsByTool.get("talos.edit_file"));
         assertEquals(1, state.failureCountsByPath.get("README.md"));
-        assertFalse(state.successfulReadCalls.isEmpty());
-        assertFalse(state.successfulReadCallBodies.isEmpty());
+        assertNotNull(state.readEvidence.latestReadFileForPath("README.md", true));
     }
 
     @Test
@@ -194,6 +185,14 @@ class ToolFailureStateAccountingTest {
 
     private static LoopState loopState() {
         return new LoopState("", java.util.List.of(), java.util.List.of(), null, null, null, 5, 0);
+    }
+
+    private static void addReadEvidence(LoopState state, String path, String body) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(body));
     }
 
     private static ToolCallExecutionStage.IterationOutcome failedIteration() {

@@ -343,6 +343,9 @@ public final class SystemPromptBuilder {
             }
         }
 
+        if (!nativeTools) {
+            sb.append("\n\n").append(TextToolCallInstructions.formatContract());
+        }
         sb.append("\n\n");
 
         // Tool descriptions
@@ -379,7 +382,7 @@ public final class SystemPromptBuilder {
                 sb.append("- You CAN create files. You have talos.write_file. USE IT when a file creation or full overwrite is required.\n");
             }
             if (hasTool(descriptors, "talos.edit_file")) {
-                sb.append("- When the user asks you to EDIT an existing file, call talos.edit_file with old_string and new_string.\n");
+                sb.append("- When the user asks you to EDIT an existing file, read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.\n");
             }
             sb.append("- NEVER claim you changed a file unless a listed mutation tool actually succeeded.\n");
             sb.append("- After writing or editing, briefly confirm what you did.\n");
@@ -596,15 +599,13 @@ public final class SystemPromptBuilder {
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
             - When the user asks you to CREATE, WRITE, SAVE, PUT, or GENERATE a file → call talos.write_file with the full content.
-            - When the user asks you to EDIT an existing file → call talos.edit_file with old_string and new_string.
+            - When the user asks you to EDIT an existing file → read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.
             - NEVER say "I cannot create files." NEVER just print code in a code block. ALWAYS call the tool.
             - After writing or editing, briefly confirm what you did.
             
             Rules:
             - CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.
             - Only call a tool when you need to PERFORM an action (read a file, run a search, etc.) that the current context cannot satisfy.
-            - Emit each tool call as a JSON code block (```json). The JSON must have "name" and "parameters" keys exactly as shown.
-            - You may emit multiple tool call blocks in one response.
             - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
             - Do NOT fabricate tool results. Wait for the actual result.
             - Only call tools that are listed below. Do not invent tool names.
@@ -641,7 +642,7 @@ public final class SystemPromptBuilder {
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
             - When the user asks you to CREATE, WRITE, SAVE, PUT, or GENERATE a file → call talos.write_file with the full content.
-            - When the user asks you to EDIT an existing file → call talos.edit_file with old_string and new_string.
+            - When the user asks you to EDIT an existing file → read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.
             - NEVER say "I cannot create files." NEVER just print code in a code block. ALWAYS call the tool.
             - After writing or editing, briefly confirm what you did.
             

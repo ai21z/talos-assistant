@@ -64,14 +64,28 @@ public final class MemoryUpdateListener implements SessionListener {
     }
 
     @Override
+    public TurnPublicationReceipt onTurnSettled(TurnSettlement settlement, String userInput) {
+        if (settlement != null && !settlement.ordinaryCompletion() && memory != null)
+            memory.recordTypedResults(settlement.result());
+        return SessionListener.super.onTurnSettled(settlement, userInput);
+    }
+
+    @Override
     public void onTurnComplete(TurnResult result, String userInput) {
         if (result == null || userInput == null || userInput.isBlank()) return;
         if (memory != null) {
+            memory.recordTypedResults(result);
             memory.recordToolEvidence(result.turnNumber(), result.audit().toolCalls());
+            memory.recordWorkStatus(result);
         }
 
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {
+            // Aborted generations are not conversational history. Checked on
+            // the raw text BEFORE chrome stripping: the stripper removes the
+            // marker line, which would leave the unfinished partial output
+            // to persist as a clean, authoritative-looking answer.
+            if (UiChrome.containsTurnAbortMarker(answer)) return;
             // BUG #1 fix - strip Talos's UI status chrome before persisting
             // to history. Otherwise the model sees its own previous turn
             // decorated with "[Used N tool(s)…]" and "✓ Edited X…" status
@@ -80,13 +94,17 @@ public final class MemoryUpdateListener implements SessionListener {
             // a confidence-trick failure mode (4 fabricated turns observed
             // in a real qwen2.5-coder transcript). Render-side chrome must
             // never be part of the model's training surface.
-            String forHistory = assistantTextForPersistence(answer, userInput);
+            String forHistory = result.audit().contentRestrictions().forHistory(
+                    assistantTextForPersistence(answer, userInput));
             if (!isMemorizableAssistantReply(result.result(), forHistory)) return;
             if (forHistory.isBlank()) return;
             conversationManager.addTurn(userInput, forHistory);
 
             // Trigger compaction check (non-blocking - if LLM is null, this is a no-op)
-            if (llm != null) {
+            boolean retainedStatus = result.audit().workStatusReceipt().active()
+                    || dev.talos.runtime.policy.WorkStatusAnswerPolicy.requestFor(
+                            dev.talos.runtime.task.TaskContractResolver.fromUserRequest(userInput)).isPresent();
+            if (llm != null && !retainedStatus) {
                 try {
                     boolean compacted = assistMode
                             ? conversationManager.maybeCompactForAssist(llm)
@@ -129,7 +147,9 @@ public final class MemoryUpdateListener implements SessionListener {
         for (String line : text.split("\\R", -1)) {
             String t = line.trim();
             if (t.startsWith(UiChrome.TOOL_SUMMARY_OPEN) && t.contains(UiChrome.TOOL_SUMMARY_MARKER)) continue;
+            if (t.startsWith(UiChrome.GROUNDING_NOTE_PREFIX)) continue;
             if (t.startsWith(UiChrome.TOOL_CALL_LIMIT_PREFIX)) continue;
+            if (t.startsWith(UiChrome.OUTPUT_LIMIT_PREFIX)) continue;
             if (t.startsWith(UiChrome.TURN_ABORTED_PREFIX)) continue;
             if (t.startsWith(UiChrome.ITERATION_LIMIT_PREFIX)) continue;
             if (t.startsWith(UiChrome.ENGINE_ERROR_PREFIX)) continue;

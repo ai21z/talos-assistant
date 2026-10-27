@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -248,6 +249,47 @@ class TurnProcessorPlaceholderGuardTest {
         String err = r.errorMessage() == null ? "" : r.errorMessage();
         assertTrue(err.contains("synthetic tool crash"),
                 "error message should include the original exception message: " + err);
+    }
+
+    @Test
+    void toolThrowingDirectCancellationPropagatesUnchanged() {
+        CancellationException cancellation = new CancellationException("stop tool execution");
+        ToolRegistry reg = new ToolRegistry();
+        reg.register(new ThrowingTool(cancellation));
+        TurnProcessor tp = new TurnProcessor(
+                ModeController.defaultController(), unreachableGate(), reg);
+        Session session = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> tp.executeTool(
+                        session,
+                        new ToolCall("test.thrower", Map.of()),
+                        ctx));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void toolThrowingGenericWrappedCancellationPropagatesUnchanged() {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop tool execution"));
+        ToolRegistry reg = new ToolRegistry();
+        reg.register(new ThrowingTool(wrapped));
+        TurnProcessor tp = new TurnProcessor(
+                ModeController.defaultController(), unreachableGate(), reg);
+        Session session = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> tp.executeTool(
+                        session,
+                        new ToolCall("test.thrower", Map.of()),
+                        ctx));
+
+        assertSame(wrapped, thrown);
     }
 
     // ---- helper tools ----

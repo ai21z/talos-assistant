@@ -2,6 +2,7 @@ package dev.talos.runtime.turn;
 
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.VerifierProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
@@ -121,6 +122,24 @@ class CurrentTurnPlanTest {
     }
 
     @Test
+    void visibleToolsUnionsTypedSurfacesAndRemovesBlockedNames() {
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(
+                        "Read README.md and summarize it."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file", "talos.grep"),
+                List.of("talos.read_file", "talos.retrieve"),
+                List.of("talos.grep"));
+
+        assertEquals(
+                List.of("talos.read_file", "talos.retrieve"),
+                plan.visibleTools());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> plan.visibleTools().add("talos.write_file"));
+    }
+
+    @Test
     void readTargetPlanCapturesReadEvidenceObligation() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read README.md and summarize it.");
 
@@ -219,12 +238,8 @@ class CurrentTurnPlanTest {
     void directConstructorDefensivelyCopiesTaskExpectations() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");
-        List<TaskExpectation> expectations = new ArrayList<>();
-        expectations.add(new LiteralContentExpectation(
-                "index.html",
-                "AFTER",
-                LiteralContentExpectation.MatchMode.EXACT,
-                "test"));
+        List<TaskExpectation> expectations = new ArrayList<>(
+                TaskExpectationResolver.resolve(contract));
 
         CurrentTurnPlan plan = new CurrentTurnPlan(
                 contract,

@@ -1,10 +1,12 @@
 package dev.talos.runtime.task;
 
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -16,6 +18,133 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractResolverTest {
+
+    private static final String REFERENCED_RENEWAL = "Those edits were not approved before. "
+            + "Please implement those same two changes now, then read both files back to check what was actually saved. "
+            + "Preserve everything else.";
+
+    @Test
+    void explicitCurrentReferenceBindsOnlyThePreviousUserScopeWithFreshRequestIdentity() {
+        for (String outcome : List.of("Approval was denied.", "Executable tool authority was invalid.",
+                "The edit was completed.", "A different file should be modified.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css. Do not touch secret.txt."),
+                    ChatMessage.assistant(outcome), ChatMessage.user(REFERENCED_RENEWAL)));
+            assertTrue(resolution.contract().mutationRequested());
+            assertTrue(resolution.contract().mutationAllowed(), resolution.contract() + " reference="
+                    + dev.talos.runtime.MutationIntent.currentMutationReference(REFERENCED_RENEWAL)
+                    + " prior=" + TaskContractResolver.resolveFromUserRequest(
+                            "Change index.html and style.css. Do not touch secret.txt."));
+            assertEquals(Set.of("index.html", "style.css"), resolution.contract().expectedTargets());
+            assertEquals(Set.of("secret.txt"), resolution.contract().forbiddenTargets());
+            assertEquals(REFERENCED_RENEWAL, resolution.contract().originalUserRequest());
+            assertEquals(REFERENCED_RENEWAL, resolution.intent().originalUserRequest());
+            assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+            assertTrue(resolution.intent().targets().targets().stream().allMatch(target ->
+                    target.derivation().source() == dev.talos.runtime.intent.TargetSource.MESSAGE_HISTORY));
+        }
+    }
+
+    @Test
+    void currentReferenceCannotInheritMixedContentAndAuthorizedWorkspaceOperationScope() {
+        String previous = "Edit index.html and app.js, then copy a.md to b.md.";
+        String current = "Please implement those changes now.";
+        var prior = TaskContractResolver.resolveFromUserRequest(previous);
+        assertTrue(prior.contract().mutationRequested());
+        assertTrue(prior.contract().mutationAllowed());
+        assertTrue(prior.hasIndependentAuthorizedContentMutation());
+        assertFalse(prior.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertFalse(prior.contract().expectedTargets().isEmpty());
+        assertTrue(prior.contract().expectedTargets().size() <= 8);
+
+        var reference = dev.talos.runtime.MutationIntent.currentMutationReference(current).orElseThrow();
+        assertFalse(reference.ambiguous());
+        assertEquals(0, reference.statedCount(), "No stated count may independently reject the prior scope.");
+        var currentOnly = TaskContractResolver.resolveFromUserRequest(current);
+        assertTrue(currentOnly.contract().mutationRequested());
+        assertTrue(currentOnly.contract().mutationAllowed());
+        assertTrue(currentOnly.contract().expectedTargets().isEmpty());
+        assertTrue(currentOnly.workspaceOperationPlan().authorizedOperations().isEmpty());
+
+        var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                ChatMessage.user(previous), ChatMessage.user(current)));
+        assertFalse(resolution.contract().mutationAllowed());
+        assertTrue(resolution.contract().expectedTargets().isEmpty());
+        assertTrue(resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+        assertEquals("unresolved-user-mutation-reference", resolution.contract().classificationReason());
+        assertEquals(current, resolution.contract().originalUserRequest());
+        assertEquals(current, resolution.intent().originalUserRequest());
+    }
+
+    @Test
+    void unresolvedReferenceCannotUseAssistantPlansOrSkipAnUnrelatedUserRequest() {
+        for (List<ChatMessage> messages : List.of(
+                List.of(ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Explain index.html and style.css."),
+                        ChatMessage.assistant("Change index.html and style.css."), ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.assistant("Approval was denied."), ChatMessage.user("What is Java?"),
+                        ChatMessage.assistant("Java is a language."), ChatMessage.user(REFERENCED_RENEWAL)),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("Please implement those changes. Please apply these edits.")),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("Please implement those changes only if I approve later.")),
+                List.of(ChatMessage.user("Change a.txt, b.txt and c.txt."),
+                        ChatMessage.user("Please implement those same two changes.")),
+                List.of(ChatMessage.user("Change index.html and style.css."),
+                        ChatMessage.user("The guide says. Please apply those same two changes.")))) {
+            var resolution = TaskContractResolver.resolveFromMessages(messages);
+            assertFalse(resolution.contract().mutationAllowed(), resolution.contract().toString());
+            assertTrue(resolution.contract().expectedTargets().isEmpty());
+            assertEquals("unresolved-user-mutation-reference", resolution.contract().classificationReason());
+        }
+    }
+
+    @Test
+    void unknownReportingFramesCannotCreateCurrentMutationAuthority() {
+        for (String current : List.of(
+                "Here is the previous request. Please implement those same two changes.",
+                "The old instruction follows. Please implement those same two changes.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css."), ChatMessage.user(current)));
+            assertFalse(resolution.contract().mutationRequested(), resolution.contract().toString());
+            assertFalse(resolution.contract().mutationAllowed());
+            assertTrue(resolution.contract().expectedTargets().isEmpty());
+            assertEquals("non-mutating", resolution.contract().classificationReason());
+        }
+    }
+
+    @Test
+    void restrictedPreviousUserScopeCannotBeCopiedIntoCurrentPromptsOrTaskMetadata() {
+        for (var restrictions : List.of(
+                new dev.talos.safety.ContentRestrictions(false, true, true, true),
+                new dev.talos.safety.ContentRestrictions(true, false, true, true),
+                new dev.talos.safety.ContentRestrictions(true, true, false, true),
+                new dev.talos.safety.ContentRestrictions(true, true, true, false))) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change private-canary.txt and hidden-canary.txt.")
+                            .withContentRestrictions(restrictions), ChatMessage.user(REFERENCED_RENEWAL)));
+            assertFalse(resolution.contract().mutationAllowed());
+            assertTrue(resolution.intent().targets().targets().isEmpty());
+            assertFalse(resolution.toString().contains("private-canary"));
+            assertFalse(resolution.toString().contains("hidden-canary"));
+        }
+    }
+
+    @Test
+    void currentProhibitionsCannotBeOverriddenByReferencedMutation() {
+        for (String current : List.of(REFERENCED_RENEWAL + " Do not change anything.",
+                REFERENCED_RENEWAL + " Do not edit index.html.",
+                "Why were those changes denied?", "Those changes were not approved before.")) {
+            var resolution = TaskContractResolver.resolveFromMessages(List.of(
+                    ChatMessage.user("Change index.html and style.css."), ChatMessage.user(current)));
+            assertFalse(resolution.contract().mutationAllowed(), resolution.contract().toString());
+        }
+    }
+
+    private static final String F10_SCOPED_WEB_PROMPT =
+            "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                    + "Do not touch CSS or JavaScript.";
 
     private static final String RETROCATS_AUDIT_PROMPT =
             "Create a complete modern dark synthwave static website for a band called Retrocats. "
@@ -60,6 +189,100 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void scopedWebResourceConstraintKeepsOnlyNamedMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(F10_SCOPED_WEB_PROMPT);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+        assertTrue(contract.forbiddenTargets().isEmpty(),
+                "generic resource classes must not be converted into guessed filenames");
+    }
+
+    @Test
+    void explicitScopedWebPathsRemainForbiddenTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Update index.html. Do not touch styles.css or script.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css", "script.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void scopedSymbolRenameKeepsOnlyTheEditedFileMutable() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rename reset to resetAll in script.js only. "
+                        + "scripts.js is a different file and must remain unchanged.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("script.js"), contract.expectedTargets());
+        assertEquals(Set.of("scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void naturalMustRemainOrStayUnchangedFormsProjectForbiddenTargets() {
+        for (String input : List.of(
+                "Edit script.js. scripts.js must remain unchanged.",
+                "Edit script.js. Keep the helper separate, scripts.js must stay unchanged.",
+                "Edit script.js. SCRIPTS.JS MUST REMAIN UNCHANGED!")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(Set.of("script.js"), contract.expectedTargets(), input);
+            assertEquals(1, contract.forbiddenTargets().size(), input);
+            assertTrue(contract.forbiddenTargets().stream()
+                    .anyMatch(target -> "scripts.js".equalsIgnoreCase(target)), input);
+        }
+    }
+
+    @Test
+    void ambiguousMutationRequestKeepsReadOnlyContractUntilClarified() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rename reset to resetAll in app.js, but do not change any files yet.");
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertEquals("global-read-only-negation", contract.classificationReason());
+    }
+
+    @Test
+    void leadingGlobalNegationThenMutationClauseIsClarificationOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+        assertTrue(contract.forbiddenTargets().isEmpty());
+        assertEquals("global-read-only-negation", contract.classificationReason());
+    }
+
+    @Test
+    void explicitTextFormatRequestBecomesNamedFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Normalize notes.txt line endings to LF.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("notes.txt"), contract.expectedTargets());
+        assertEquals("explicit-text-format-request", contract.classificationReason());
     }
 
     @Test
@@ -164,63 +387,78 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void deleteRequestBecomesMutationAllowedContractWithExpectedTarget() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void deleteRequestUsesTypedAuthorityInsteadOfGenericExpectedTarget() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Delete docs/synthwave-webpage-plan.md please.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("docs/synthwave-webpage-plan.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertWorkspaceOperation(
+                resolution,
+                WorkspaceOperationObligation.Kind.DELETE_PATH,
+                "",
+                "",
+                "docs/synthwave-webpage-plan.md");
     }
 
     @Test
-    void explicitDeleteToolRequestWithTmpTargetBecomesMutationAllowedContract() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void explicitDeleteToolNameProseDoesNotCreateTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("delete-me.tmp"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceCopyScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceCopyToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("source.md", "source-copy.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceMoveScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceMoveToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("move-me.md", "moved.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void workspaceRenameScenarioPromptPinsExactPathTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void workspaceRenameToolNameProseDoesNotProjectGenericPathAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("rename-me.md", "renamed.md"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
@@ -247,12 +485,14 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void naturalBatchCopyDestinationStopWordIsNotAnExpectedTarget() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchWithInvalidCopyDestinationHasNoGenericOrTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one, then copy styles.css to by.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
-        assertEquals(Set.of("batch-one"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
@@ -571,7 +811,7 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void confirmationAfterConcreteAssistantMutationPlanInheritsMutationContract() {
+    void confirmationAfterAssistantMutationPlanDoesNotCreateAuthorityFromProse() {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("The site is too plain. Make it look like a synthwave band page."),
@@ -587,13 +827,9 @@ class TaskContractResolverTest {
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
-        assertEquals(TaskType.FILE_EDIT, contract.type());
-        assertTrue(contract.mutationRequested());
-        assertTrue(contract.mutationAllowed());
-        assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
-        assertEquals("confirmation-follow-up-inherits-assistant-mutation-plan",
-                contract.classificationReason());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.expectedTargets().isEmpty());
     }
 
     @Test
@@ -757,14 +993,22 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void naturalSingleDirectoryCreationBecomesMutationAllowedContract() {
-        TaskContract contract = TaskContractResolver.fromUserRequest("make me a folder called ideas");
+    void naturalSingleDirectoryCreationUsesTypedAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
+                "make me a folder called ideas");
+        TaskContract contract = resolution.contract();
 
         assertEquals(TaskType.FILE_CREATE, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("ideas"), contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertWorkspaceOperation(
+                resolution,
+                WorkspaceOperationObligation.Kind.MKDIR,
+                "",
+                "",
+                "ideas");
     }
 
     @Test
@@ -796,50 +1040,62 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void batchWorkspaceNaturalPromptTargetsCreatedDirsAndCopyDestinationNotSource() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void batchWorkspaceNaturalPromptFailsClosedAsMultipleOperations() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.apply_workspace_batch to create directories batch-one and batch-two "
                         + "and copy styles.css to batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertEquals("explicit-batch-workspace-apply-request", contract.classificationReason());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void naturalBatchPromptExtractsDirectoryAndCopyTargets() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchPromptFailsClosedAsMultipleOperations() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void naturalBatchPromptWithArrowCopyTreatsCopySourceAsInputOnly() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void naturalBatchPromptWithArrowCopyHasNoPartialAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "batch this: create batch-one and batch-two, then copy styles.css -> batch-one/styles-copy.css.");
+        TaskContract contract = resolution.contract();
 
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
-                contract.expectedTargets());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertBlockedWorkspaceOperation(resolution);
     }
 
     @Test
-    void explicitBatchWorkspaceApplyPromptExposesBatchToolInApplySurface() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
+    void explicitBatchWorkspaceApplyPromptDoesNotCreateTypedToolAuthority() {
+        TaskResolution resolution = TaskContractResolver.resolveFromUserRequest(
                 "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "
                         + "[{\"op\":\"mkdir\",\"path\":\"docs\"}].");
         ToolRegistry registry = new ToolRegistry();
         registry.register(new BatchWorkspaceApplyTool());
 
-        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.APPLY, registry);
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                resolution,
+                ExecutionPhase.APPLY,
+                registry,
+                dev.talos.runtime.toolcall.ToolCapabilityAvailability
+                        .allEnabled());
 
-        assertTrue(plan.nativeToolNames().contains("talos.apply_workspace_batch"));
+        assertEquals(
+                WorkspaceOperationAuthorityPlan.State.NONE,
+                resolution.workspaceOperationPlan().state());
+        assertTrue(resolution.contract().expectedTargets().isEmpty());
+        assertFalse(plan.nativeToolNames().contains("talos.apply_workspace_batch"));
     }
 
     @Test
@@ -1358,6 +1614,26 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void systemStaticWebVocabularyCannotUpgradeReadOnlyDirectoryListing() {
+        String request =
+                "List the top-level files and folders in this workspace. Do not modify anything.";
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(
+                "Static web guidance may mention index.html, styles.css, and script.js."));
+        messages.add(ChatMessage.user(request));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract userOnly = TaskContractResolver.fromUserRequest(request);
+
+        assertEquals(TaskType.DIRECTORY_LISTING, contract.type());
+        assertEquals(TaskType.DIRECTORY_LISTING, userOnly.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertFalse("contextual-static-web-follow-up".equals(contract.classificationReason()));
+    }
+
+    @Test
     void listOnlyWithNegativeContentTargetsBecomesDirectoryListingContract() {
         for (String input : List.of(
                 "List files only; do not show content from README.md or notes.md.",
@@ -1583,6 +1859,15 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void underscoredProjectIdentifierDoesNotCreateWorkspaceExplainContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Retrieve context for PROJECT_PUBLIC_FACT using talos.retrieve.");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void metaQuestionAboutEditToolStaysReadOnly() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Why didn't you call the edit tool?");
@@ -1612,6 +1897,89 @@ class TaskContractResolverTest {
         assertEquals(Set.of("report.pdf"), pdf.expectedTargets());
         assertFalse(pdf.mutationRequested());
         assertFalse(pdf.mutationAllowed());
+    }
+
+    @Test
+    void exampleArtifactFilenamesDoNotBecomeRequiredReadTargets() {
+        for (String input : List.of(
+                "Show me an example package.json for a demo app.",
+                "Give me a sample package.json for a small Node project.",
+                "What would a template package.json look like?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.expectedTargets().isEmpty(), input + " -> " + contract.expectedTargets());
+        }
+    }
+
+    @Test
+    void explicitMutationVerbsOverrideExampleSuppression() {
+        for (String input : List.of(
+                "Rewrite the sample package.json in this repo.",
+                "Modify the sample package.json to add a build script.",
+                "Overwrite the sample package.json with the new fields.",
+                "Replace the sample package.json in the workspace.",
+                "Generate a sample package.json in this workspace.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(Set.of("package.json"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
+    void dotsInsideTokensDoNotSeverTheGoverningVerb() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Update the v1.2 draft of the sample package.json.");
+
+        assertEquals(Set.of("package.json"), contract.expectedTargets(),
+                "a version-number dot must not read as a sentence boundary");
+    }
+
+    @Test
+    void governingVerbUpToOneHundredSixtyCharsBeforeTargetStillBinds() {
+        String filler = "as agreed in the long planning discussion about restructuring every "
+                + "module of this workspace and the whole build pipeline, ";
+        String input = "Update, " + filler + "the sample package.json.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+        assertEquals(Set.of("package.json"), contract.expectedTargets(),
+                "the governing verb sits beyond 80 chars but within the widened window: " + input);
+    }
+
+    @Test
+    void exampleSuppressionSurvivesLocaleLengthChangingCharacters() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "İstanbul notes review: show me an example package.json for the demo app.");
+
+        assertTrue(contract.expectedTargets().isEmpty(),
+                "locale-length-changing characters must not misalign the suppression windows: "
+                        + contract.expectedTargets());
+    }
+
+    @Test
+    void explicitPackageJsonReadAndMutationTargetsStillBind() {
+        for (String input : List.of(
+                "Read package.json and summarize it.",
+                "Open package.json and tell me the scripts.",
+                "Inspect package.json for broken scripts.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(Set.of("package.json"), contract.expectedTargets(), input);
+        }
+
+        TaskContract create = TaskContractResolver.fromUserRequest("Create package.json for this Node project.");
+
+        assertTrue(create.mutationAllowed());
+        assertEquals(Set.of("package.json"), create.expectedTargets());
+
+        TaskContract createSample = TaskContractResolver.fromUserRequest(
+                "Create a sample package.json for this Node project.");
+
+        assertTrue(createSample.mutationAllowed());
+        assertEquals(Set.of("package.json"), createSample.expectedTargets());
     }
 
     @Test
@@ -1761,7 +2129,7 @@ class TaskContractResolverTest {
         messages.add(ChatMessage.user("Great! now can you create that site?"));
         messages.add(ChatMessage.assistant("Created index.html."));
         messages.add(ChatMessage.user(
-                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files."));
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
@@ -1770,6 +2138,21 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void conditionalFixAfterSiteCreationDoesNotBecomeRequiredMutation() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Great! now can you create that site?"));
+        messages.add(ChatMessage.assistant("Created index.html."));
+        messages.add(ChatMessage.user(
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
     }
 
     @Test
@@ -2127,5 +2510,39 @@ class TaskContractResolverTest {
             assertEquals(TaskType.UNKNOWN, contract.type());
             assertFalse(contract.mutationAllowed());
         }
+    }
+
+    private static void assertWorkspaceOperation(
+            TaskResolution resolution,
+            WorkspaceOperationObligation.Kind kind,
+            String sourcePath,
+            String destinationPath,
+            String targetPath) {
+        WorkspaceOperationAuthorityPlan plan = resolution.workspaceOperationPlan();
+
+        assertEquals(WorkspaceOperationAuthorityPlan.State.AUTHORIZED_SINGLE, plan.state());
+        assertEquals(1, plan.authorizedOperations().size());
+        WorkspaceOperationObligation operation = plan.authorizedOperations().getFirst();
+        assertEquals(kind, operation.kind());
+        switch (kind) {
+            case COPY_PATH, MOVE_PATH, RENAME_PATH -> {
+                assertEquals(sourcePath, operation.sourcePath());
+                assertEquals(destinationPath, operation.destinationPath());
+                assertEquals("", operation.targetPath());
+            }
+            case MKDIR, DELETE_PATH -> {
+                assertEquals("", operation.sourcePath());
+                assertEquals("", operation.destinationPath());
+                assertEquals(targetPath, operation.targetPath());
+            }
+        }
+    }
+
+    private static void assertBlockedWorkspaceOperation(TaskResolution resolution) {
+        WorkspaceOperationAuthorityPlan plan = resolution.workspaceOperationPlan();
+
+        assertEquals(WorkspaceOperationAuthorityPlan.State.BLOCKED, plan.state());
+        assertTrue(plan.authorizedOperations().isEmpty());
+        assertTrue(plan.toolNames().isEmpty());
     }
 }

@@ -71,7 +71,7 @@ public final class TalosKnowledgeEngine {
      * Force a full reindex of the given workspace directory.
      */
     public void reindex(Path workspace) throws Exception {
-        ragService.reindex(workspace);
+        ragService.reindex(workspace, true, dev.talos.core.index.IndexProgressListener.NOOP);
     }
 
     /** Access the underlying RagService (escape hatch for advanced/internal use). */

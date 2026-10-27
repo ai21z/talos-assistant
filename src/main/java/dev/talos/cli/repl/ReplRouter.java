@@ -5,6 +5,7 @@ import dev.talos.runtime.Result;
 import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.PromptClassifier;
+import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.core.Config;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;
@@ -122,8 +123,17 @@ public final class ReplRouter {
         );
 
         if (quit.get()) return true;
-        render.render(r);
+        render.renderCommand(name, r);
         return true;
+    }
+
+    /** Local aliases are read without starting or validating a model. */
+    public java.util.List<String> modelCompletionAliases() {
+        if (ctx.llm() == null || !ctx.llm().supportsManagedModelSelection()
+                || !ctx.llm().getModel().startsWith("llama_cpp/")) return java.util.List.of();
+        return ctx.llm().managedModelLibrary().entries().stream()
+                .filter(entry -> !"unavailable locally".equals(entry.availability()))
+                .map(dev.talos.engine.llamacpp.ManagedModelLibrary.Entry::alias).toList();
     }
 
     /** Try to handle a non-command prompt. Returns true if handled. */
@@ -147,6 +157,7 @@ public final class ReplRouter {
      * template expansions (which bypass classification by design).
      */
     private void processPrompt(String rawLine) {
+        LastPromptCapture.clear();
         // Show routing indicator in auto mode (dimmed, one line)
         if ("auto".equals(modes.getActiveName())) {
             PromptClassifier.Route preview = PromptClassifier.route(rawLine, modes.lastRoute(),
@@ -156,18 +167,9 @@ public final class ReplRouter {
             render.printRouteHint(label);
         }
 
-        // T802: resolve @-file pins before the spinner so skip/refusal
-        // notices print as plain lines above the turn. Pins ride a
-        // turn-scoped Context copy; the long-lived ctx never carries them.
-        AtFilePins.Resolution pinResolution =
-                AtFilePins.resolve(rawLine, workspace, ctx.sandbox());
-        AtFilePins.recordLast(pinResolution); // /context pinned-bytes row (T803)
-        for (String notice : pinResolution.notices()) {
-            render.render(new Result.TrustedInfo(notice));
-        }
-        final Context turnCtx = pinResolution.pins().isEmpty()
-                ? ctx
-                : ctx.withPinnedFiles(pinResolution.pins());
+        // Pin resolution is owned by the turn boundary. Its notices are rendered after processing.
+        AtFilePins.recordLast(AtFilePins.Resolution.empty());
+        final Context turnCtx = ctx;
 
         render.startSpinner();
 
@@ -180,7 +182,35 @@ public final class ReplRouter {
                 ctx, "(prompt)"
         );
 
-        render.render(r);
+        var publicationHealth = turnProcessor.consumePublicationHealth();
+
+        for (String notice : AtFilePins.lastResolution().notices()) {
+            render.render(new Result.TrustedInfo(notice));
+        }
+
+        try {
+            render.render(r);
+        } finally {
+            var delivery = render.lastAnswerDelivery();
+            if (delivery != null && lastTurnResult != null && delivery.turn() == lastTurnResult.turnNumber()) {
+                try {
+                    ctx.audit().log("answer_delivery", java.util.Map.of(
+                            "presentationId", delivery.presentationId().toString(),
+                            "turn", delivery.turn(), "state", delivery.state().name(),
+                            "humanObservation", "UNKNOWN"));
+                } catch (RuntimeException ignored) { }
+            }
+        }
+        if (publicationHealth != null && !publicationHealth.healthy()) {
+            String reasons = publicationHealth.reasons().stream()
+                    .map(Enum::name)
+                    .distinct()
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(", "));
+            render.render(new Result.TrustedInfo(
+                    "Local turn evidence is degraded"
+                            + (reasons.isBlank() ? "." : " (" + reasons + ").")));
+        }
 
         // Show turn stats (timing) after the answer
         if (lastTurnResult != null) {
@@ -191,8 +221,7 @@ public final class ReplRouter {
                     : (r instanceof Result.Streamed st) ? st.fullText.length()
                     : 0;
             render.printTurnStats(
-                    lastTurnResult.turnNumber(),
-                    lastTurnResult.elapsed().toMillis(),
+                    lastTurnResult,
                     responseLen
             );
             lastTurnResult = null;
@@ -253,6 +282,13 @@ public final class ReplRouter {
                 .append('\n');
         sb.append("  nativeTools: ").append(listOrNone(trace.nativeTools())).append('\n');
         sb.append("  promptTools: ").append(listOrNone(trace.promptTools())).append('\n');
+        if (!trace.rolefulTargets().isEmpty()) {
+            sb.append("  targetRoles: ").append(trace.rolefulTargets().stream()
+                    .map(target -> target.path() + "=" + target.role())
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(", ")))
+                    .append('\n');
+        }
         sb.append("  blocked: ").append(listOrNone(trace.blocks())).append('\n');
         return sb.toString();
     }

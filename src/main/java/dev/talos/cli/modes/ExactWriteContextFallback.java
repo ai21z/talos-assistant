@@ -102,6 +102,12 @@ final class ExactWriteContextFallback {
     }
 
     private static CurrentTurnPlan compactPlan(CurrentTurnPlan plan) {
+        List<String> nativeTools = plan.nativeTools().contains("talos.write_file")
+                ? List.of("talos.write_file")
+                : List.of();
+        List<String> promptTools = plan.promptTools().contains("talos.write_file")
+                ? List.of("talos.write_file")
+                : List.of();
         return new CurrentTurnPlan(
                 plan.taskContract(),
                 plan.originalUserRequest(),
@@ -109,21 +115,27 @@ final class ExactWriteContextFallback {
                 plan.phaseFinal(),
                 plan.actionObligation(),
                 plan.taskExpectations(),
-                List.of("talos.write_file"),
-                List.of("talos.write_file"),
+                nativeTools,
+                promptTools,
                 plan.blockedTools(),
                 plan.evidenceObligation(),
                 plan.outputObligation(),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
                 plan.artifactGoal(),
-                plan.verifierProfile());
+                plan.verifierProfile(),
+                plan.requestObligation(),
+                plan.workspaceOperationPlan(),
+                plan.contentMutationPredecessorPaths(),
+                plan.requestedResults(),
+                plan.contentSaveRequest());
     }
 
     private static List<ChatMessage> compactMessages(CurrentTurnPlan plan) {
         List<ChatMessage> out = new ArrayList<>();
         out.add(ChatMessage.system(COMPACT_EXACT_WRITE_CONTEXT_FALLBACK_SYSTEM_PROMPT));
         out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
-        out.add(ChatMessage.user(Objects.toString(plan.originalUserRequest(), "")));
+        out.add(ChatMessage.user(dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy
+                .capturedProviderTask(Objects.toString(plan.originalUserRequest(), ""))));
         return out;
     }
 
@@ -163,6 +175,10 @@ final class ExactWriteContextFallback {
                 safe.namedTool(),
                 safe.responseFormat(),
                 safe.jsonSchema(),
-                tags);
+                tags,
+                safe.sampling(),
+                0,
+                safe.toolAuthorityMode(),
+                safe.singleAttempt());
     }
 }

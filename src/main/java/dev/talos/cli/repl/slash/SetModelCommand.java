@@ -4,7 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.GgufCacheScanner;
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.List;
@@ -16,7 +16,7 @@ public final class SetModelCommand implements Command {
             "Usage: /set model <name>\nRun /models to see configured/selectable model names.";
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("set", List.of(), "/set model <name>", "Switch active model.",
+        return new CommandSpec("set", List.of(), "/set model <name>", "Compatibility model selection. Managed models use /models use <alias>.",
                 CommandGroup.MODELS);
     }
 
@@ -31,12 +31,41 @@ public final class SetModelCommand implements Command {
         String name = parts.length > 1 ? parts[1].trim() : "";
         if (name.isEmpty()) return new Result.Error(USAGE, 200);
 
-        String sanitized = name.replaceAll("[^A-Za-z0-9._:/-]", "");
-        if (sanitized.isEmpty()) return new Result.Error("Invalid model name.", 400);
+        String sanitized = name;
+        if (!sanitized.matches("[A-Za-z0-9._:/-]{1,160}")) return new Result.Error("Invalid model name.", 400);
+
+        if (ctx.llm().supportsManagedModelSelection()
+                && (sanitized.startsWith("llama_cpp/") || (!sanitized.contains("/")
+                && ctx.llm().getModel().startsWith("llama_cpp/")))) {
+            try {
+                ctx.llm().setModel(sanitized.startsWith("llama_cpp/") ? sanitized : "llama_cpp/" + sanitized);
+                var identity = ctx.llm().modelIdentity();
+                return new Result.Info("Model loaded: " + ctx.llm().getModel()
+                        + "\nResolution: " + identity.resolution().toLowerCase(Locale.ROOT)
+                        + ", tools: " + (ctx.llm().nativeToolsCurrentlyEnabled() ? "native" : "textual")
+                        + "\nThe selection applies to this session. Saved defaults and conversation history are unchanged.");
+            } catch (RuntimeException failure) {
+                if (dev.talos.spi.types.ControlFlowFailure.classify(failure)
+                        != dev.talos.spi.types.ControlFlowFailure.Kind.NONE) {
+                    throw dev.talos.spi.types.ControlFlowFailure.propagate(failure);
+                }
+                String detail = java.util.Objects.toString(failure.getMessage(), "Model selection failed.")
+                        .replace('\r', ' ').replace('\n', ' ');
+                if (detail.length() > 600) detail = detail.substring(0, 600);
+                return new Result.Error(detail + (ctx.llm().modelSelectionUnavailable()
+                        ? "\nNo model is available for requests in this session."
+                        : "\nThe previous selection was preserved.")
+                        + "\nAfter the cause is resolved, use " + managedRecoveryCommand(ctx.llm().getModel()) + "."
+                        + "\nUse /models to inspect local candidates or /help models for help.", 409);
+            }
+        }
 
         try (var reg = new EngineRegistry(ctx.cfg())) {
             var cat = reg.compositeCatalog();
-            var mref = cat.find(sanitized);
+            String selected = ctx.llm().getModel();
+            String lookup = !sanitized.contains("/") && selected.contains("/")
+                    ? selected.substring(0, selected.indexOf('/') + 1) + sanitized : sanitized;
+            var mref = cat.find(lookup);
             if (mref.isEmpty()) {
                 // T899/T902: a downloaded-but-unconfigured GGUF gets actionable switch
                 // guidance (concrete hf_repo/hf_file config edit) instead of a bare 404.
@@ -47,6 +76,11 @@ public final class SetModelCommand implements Command {
             ctx.llm().setModel(chosen.backend() + "/" + chosen.name());
             return new Result.Info("Model: " + ctx.llm().getModel());
         }
+    }
+
+    public static String managedRecoveryCommand(String currentModel) {
+        return currentModel != null && currentModel.startsWith("llama_cpp/")
+                ? "/models use <alias>" : "/set model llama_cpp/<alias>";
     }
 
     static String modelNotFoundMessage(String sanitized) {
@@ -69,9 +103,9 @@ public final class SetModelCommand implements Command {
      */
     static String modelNotFoundMessage(String sanitized, List<ModelRef> downloaded) {
         String matched = matchDownloaded(sanitized, downloaded);
-        LlamaCppModelProfiles.CannedProfile profile = matched == null
+        LlamaCppModelCatalog.Profile profile = matched == null
                 ? null
-                : LlamaCppModelProfiles.profileForGgufFile(matched).orElse(null);
+                : LlamaCppModelCatalog.profileForGgufFile(matched).orElse(null);
         return modelNotFoundMessage(sanitized, downloaded, profile);
     }
 
@@ -83,13 +117,23 @@ public final class SetModelCommand implements Command {
      * profile. Honest about the no-hot-swap reality: this still requires a restart.
      */
     static String modelNotFoundMessage(
-            String sanitized, List<ModelRef> downloaded, LlamaCppModelProfiles.CannedProfile profile) {
+            String sanitized, List<ModelRef> downloaded, LlamaCppModelCatalog.Profile profile) {
         String matched = matchDownloaded(sanitized, downloaded);
         if (matched == null) {
             return modelNotFoundMessage(sanitized);
         }
         StringBuilder sb = new StringBuilder();
         sb.append("\"").append(matched).append("\" is downloaded but not configured, so it is not selectable here yet.");
+        if (profile != null && profile.requiresLocalModelPath()) {
+            sb.append("\nThe ").append(profile.alias())
+                    .append(" evidence applies only to the exact local GGUF path for ")
+                    .append(profile.artifactFile()).append(".");
+            sb.append("\nRun: talos setup models --profile ").append(profile.alias())
+                    .append(" --server-path <your llama-server path> --model-path <path-to-")
+                    .append(profile.artifactFile()).append("> --write --force");
+            sb.append("\nThen restart Talos and confirm with /models and /status --verbose.");
+            return sb.toString();
+        }
         sb.append("\nManaged llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml with this redaction-safe patch:");
         if (profile != null) {
             sb.append(cannedProfileConfigPatch(profile));
@@ -104,15 +148,15 @@ public final class SetModelCommand implements Command {
         return sb.toString();
     }
 
-    private static String cannedProfileConfigPatch(LlamaCppModelProfiles.CannedProfile profile) {
+    private static String cannedProfileConfigPatch(LlamaCppModelCatalog.Profile profile) {
         String alias = yamlScalar(profile.alias());
         return "\n  llm:"
                 + "\n    model: \"" + alias + "\""
                 + "\n  engines:"
                 + "\n    llama_cpp:"
                 + "\n      model: \"" + alias + "\""
-                + "\n      hf_repo: \"" + yamlScalar(profile.hfRepo()) + "\""
-                + "\n      hf_file: \"" + yamlScalar(profile.hfFile()) + "\"";
+                + "\n      hf_repo: \"" + yamlScalar(profile.repository()) + "\""
+                + "\n      hf_file: \"" + yamlScalar(profile.artifactFile()) + "\"";
     }
 
     private static String yamlScalar(String value) {

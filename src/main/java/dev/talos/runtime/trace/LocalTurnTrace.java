@@ -1,7 +1,12 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetRef;
+import dev.talos.runtime.intent.TaskIntentEvidence;
+import dev.talos.runtime.intent.MutationPlanSelection;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnSettlement;
 import dev.talos.core.context.ContextLedgerSummary;
 
 import java.util.ArrayList;
@@ -10,7 +15,9 @@ import java.util.List;
 /**
  * First-class local trace artifact for one Talos turn.
  *
- * <p>Version 2 is intentionally Java-record/JSON friendly and conservative:
+ * <p>Version 5 adds closed, typed managed-provider process identity evidence.
+ * Version 4 added executable tool-authority evidence. The trace remains
+ * intentionally Java-record/JSON friendly and conservative:
  * raw prompts, assistant answers, file contents, and write/edit payloads are
  * summarized by hashes and counts in the default redaction mode.
  */
@@ -37,7 +44,7 @@ public record LocalTurnTrace(
         RedactionSummary redaction
 ) {
     public LocalTurnTrace {
-        schemaVersion = schemaVersion <= 0 ? 2 : schemaVersion;
+        schemaVersion = schemaVersion <= 0 ? 5 : schemaVersion;
         traceId = safe(traceId);
         sessionId = safe(sessionId);
         timestamp = safe(timestamp);
@@ -60,6 +67,148 @@ public record LocalTurnTrace(
 
     public static Builder builder(String traceId, String sessionId, int turnNumber, String timestamp) {
         return new Builder(traceId, sessionId, turnNumber, timestamp);
+    }
+
+    /** Derived prose and path-bearing rows are withheld without changing the terminal outcome. */
+    public LocalTurnTrace contentWithheldProjection() {
+        boolean safeTerminalEvents = TurnEvidenceProjectionTraceEvent.decode(this).valid();
+        Builder projected = builder(terminalToken(traceId, 128, ""), terminalToken(sessionId, 200, ""),
+                turnNumber, terminalToken(timestamp, 64, ""))
+                .workspaceHash(terminalToken(workspaceHash, 128, ""))
+                .mode(terminalToken(mode, 64, "unknown"))
+                .outcome(terminalToken(outcome.status(), 64, "UNKNOWN"),
+                        terminalToken(outcome.verificationStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.approvalStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.mutationStatus(), 64, "UNKNOWN"),
+                        terminalToken(outcome.classification(), 128, "UNKNOWN"));
+        if (safeTerminalEvents) events.forEach(projected::event);
+        else {
+            projected.event(TurnTraceEvent.simple("DOCUMENT_CONTENT_WITHHELD", terminalToken(timestamp, 64, ""),
+                    java.util.Map.of("projection", "DOCUMENT_DERIVED_CONTENT_WITHHELD")));
+            SafeTerminalTraceProjector.project(events, traceId).events().forEach(projected::event);
+        }
+        return projected.build();
+    }
+
+    /**
+     * Produce the bounded trace persisted for a non-conversational settlement.
+     *
+     * <p>Failure and no-result records retain only stable identity, typed
+     * provider lifecycle events, terminal state, internal contract flags, and
+     * redaction hashes. Ordinary policy clauses, paths, prompt audit fields,
+     * tool summaries, verifier prose, and warnings are deliberately omitted.
+     */
+    public LocalTurnTrace safeTerminalProjection(
+            TurnSettlement.Kind kind,
+            boolean retrievalSummaryPresent
+    ) {
+        if (kind == null || kind == TurnSettlement.Kind.COMPLETED) return this;
+        SafeTerminalTraceProjector.Projection projected =
+                SafeTerminalTraceProjector.project(events, traceId);
+        String safeTimestamp = terminalToken(timestamp, 64, "");
+        TurnTraceEvent projectionMarker = TurnEvidenceProjectionTraceEvent.create(
+                safeTimestamp,
+                projected.terminalizationRecovery(),
+                projected.providerLifecycleObserved(),
+                projected.providerLifecyclePreserved(),
+                retrievalSummaryPresent);
+        List<TurnTraceEvent> safeEvents = new ArrayList<>();
+        boolean markerAdded = false;
+        for (TurnTraceEvent event : projected.events()) {
+            if (!markerAdded && "TURN_SETTLED".equals(event.type())) {
+                safeEvents.add(projectionMarker);
+                markerAdded = true;
+            }
+            safeEvents.add(event);
+        }
+        if (!markerAdded) {
+            int completed = safeEvents.size();
+            if (completed > 0
+                    && "TRACE_COMPLETED".equals(safeEvents.getLast().type())) {
+                completed--;
+            }
+            safeEvents.add(completed, projectionMarker);
+        }
+        String terminalStatus = switch (kind) {
+            case CANCELLED -> "ABORTED";
+            case FAILED -> "ERROR";
+            case NO_RESULT -> "NO_RESULT";
+            case COMPLETED -> outcome.status();
+        };
+        String terminalClassification = switch (kind) {
+            case CANCELLED -> "TURN_CANCELLED";
+            case FAILED -> "TURN_FAILED";
+            case NO_RESULT -> "NO_MODE_RESULT";
+            case COMPLETED -> outcome.classification();
+        };
+        TaskContractSummary safeContract = new TaskContractSummary(
+                taskContract.type(),
+                taskContract.mutationAllowed(),
+                taskContract.verificationRequired(),
+                taskContract.mutationRequested(),
+                List.of(),
+                List.of(),
+                "",
+                List.of());
+        RedactionSummary safeRedaction = new RedactionSummary(
+                redaction.mode(),
+                false,
+                false,
+                false,
+                terminalHash(redaction.promptHash()),
+                terminalHash(redaction.assistantHash()),
+                terminalTextSummary(redaction.prompt()),
+                terminalTextSummary(redaction.assistant()));
+        return new LocalTurnTrace(
+                schemaVersion,
+                terminalToken(traceId, 128, ""),
+                terminalToken(sessionId, 200, ""),
+                turnNumber,
+                safeTimestamp,
+                terminalToken(workspaceHash, 128, ""),
+                terminalToken(mode, 64, "unknown"),
+                new ModelSummary("", ""),
+                safeContract,
+                List.of(),
+                ToolSurface.empty(),
+                PromptAuditSnapshot.empty(),
+                safeEvents,
+                VerificationSummary.empty(),
+                RepairSummary.empty(),
+                CheckpointSummary.empty(),
+                new OutcomeSummary(
+                        terminalStatus,
+                        "NOT_RUN",
+                        "UNKNOWN",
+                        "UNKNOWN",
+                        terminalClassification),
+                List.of(),
+                ContextLedgerSummary.empty(),
+                safeRedaction);
+    }
+
+    private static String terminalToken(String value, int maxChars, String fallback) {
+        return value != null
+                && value.length() <= maxChars
+                && value.matches("[A-Za-z0-9._:$+\\-]*")
+                ? value
+                : fallback;
+    }
+
+    private static String terminalHash(String value) {
+        return value != null
+                && value.matches("sha256:(?:[0-9a-f]{64}|unavailable)")
+                ? value
+                : "";
+    }
+
+    private static TextSummary terminalTextSummary(TextSummary summary) {
+        if (summary == null) return TextSummary.empty();
+        return new TextSummary(
+                terminalHash(summary.hash()),
+                Math.max(0, summary.chars()),
+                Math.max(0, summary.bytes()),
+                Math.max(0, summary.lines()));
     }
 
     public record ModelSummary(String backend, String model) {
@@ -123,11 +272,13 @@ public record LocalTurnTrace(
             expectedTargets = expectedTargets == null ? List.of() : List.copyOf(expectedTargets);
             forbiddenTargets = forbiddenTargets == null ? List.of() : List.copyOf(forbiddenTargets);
             classificationReason = safe(classificationReason);
-            rolefulTargets = rolefulTargets == null ? List.of() : List.copyOf(rolefulTargets);
+            rolefulTargets = validatedRolefulTargets(rolefulTargets);
         }
 
         static TaskContractSummary empty() {
-            return new TaskContractSummary("", false, false, false, List.of(), List.of(), "", List.of());
+            return new TaskContractSummary(
+                    "", false, false, false, List.of(), List.of(), "",
+                    List.of());
         }
 
         static TaskContractSummary from(TaskContract contract) {
@@ -144,14 +295,19 @@ public record LocalTurnTrace(
         }
 
         static RolefulTargetSummary rolefulTargetFrom(TurnPolicyTrace.RolefulTarget target) {
-            if (target == null) return new RolefulTargetSummary("", "", "", "", "", 0.0);
+            if (target == null) {
+                throw new IllegalArgumentException("Roleful target must not be null");
+            }
             return new RolefulTargetSummary(
                     target.path(),
                     target.role(),
                     target.source(),
                     target.reason(),
                     target.sourceText(),
-                    target.confidence());
+                    target.confidence(),
+                    target.startOffset(),
+                    target.authorityEndOffset(),
+                    target.endOffset());
         }
     }
 
@@ -161,18 +317,110 @@ public record LocalTurnTrace(
             String source,
             String reason,
             String sourceText,
-            double confidence
+            double confidence,
+            int startOffset,
+            int authorityEndOffset,
+            int endOffset
     ) {
+        public RolefulTargetSummary(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                    confidence,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET);
+        }
+
+        public RolefulTargetSummary(
+                String path,
+                String role,
+                String source,
+                String reason,
+                String sourceText,
+                double confidence,
+                int startOffset,
+                int endOffset
+        ) {
+            this(
+                    path,
+                    role,
+                    source,
+                    reason,
+                    sourceText,
+                    confidence,
+                    startOffset,
+                    dev.talos.runtime.intent.IntentDerivation.UNKNOWN_OFFSET,
+                    endOffset);
+        }
+
         public RolefulTargetSummary {
-            path = safe(path);
-            role = safe(role);
-            source = safe(source);
+            path = TargetRef.normalizePath(path);
+            if (role == null || role.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Roleful target summary role must be a named TargetRole");
+            }
+            try {
+                TargetRole.valueOf(role);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Unknown roleful target summary role: " + role,
+                        e);
+            }
+            TaskIntentEvidence.requireDurableShape(
+                    path,
+                    source,
+                    startOffset,
+                    authorityEndOffset,
+                    endOffset,
+                    sourceText,
+                    confidence);
             reason = safe(reason);
             sourceText = sourceText == null ? "" : sourceText;
-            if (Double.isNaN(confidence) || confidence < 0.0 || confidence > 1.0) {
-                confidence = 0.0;
-            }
         }
+    }
+
+    private static List<RolefulTargetSummary> validatedRolefulTargets(
+            List<RolefulTargetSummary> targets
+    ) {
+        if (targets == null || targets.isEmpty()) return List.of();
+        if (targets.size()
+                > MutationPlanSelection.MAX_DURABLE_ROLEFUL_TARGETS) {
+            throw new IllegalArgumentException(
+                    "too many roleful target summaries");
+        }
+        java.util.LinkedHashMap<String, RolefulTargetSummary> byPath =
+                new java.util.LinkedHashMap<>();
+        long retainedSourceCharacters = 0L;
+        for (RolefulTargetSummary target : targets) {
+            if (target == null) {
+                throw new IllegalArgumentException("Roleful target summary must not be null");
+            }
+            RolefulTargetSummary prior = byPath.putIfAbsent(target.path(), target);
+            if (prior != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate or conflicting roleful target summary path: " + target.path());
+            }
+            int length = target.sourceText().length();
+            if (length > MutationPlanSelection
+                    .MAX_PROJECTED_ROLEFUL_SOURCE_CHARACTERS
+                            - retainedSourceCharacters) {
+                throw new IllegalArgumentException(
+                        "roleful target summary evidence exceeds its durable bound");
+            }
+            retainedSourceCharacters += length;
+        }
+        return List.copyOf(byPath.values());
     }
 
     public record PhaseTransition(String from, String to, String reason) {
@@ -472,7 +720,7 @@ public record LocalTurnTrace(
 
         public LocalTurnTrace build() {
             return new LocalTurnTrace(
-                    2,
+                    5,
                     traceId,
                     sessionId,
                     turnNumber,

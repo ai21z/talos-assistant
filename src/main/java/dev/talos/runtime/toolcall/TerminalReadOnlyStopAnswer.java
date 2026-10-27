@@ -1,10 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.verification.StaticTaskVerifier;
-import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -13,10 +11,63 @@ import java.util.Locale;
 
 /** Selects deterministic terminal answers after read-only tool evidence is already gathered. */
 public final class TerminalReadOnlyStopAnswer {
+    public static final String SYNTHESIS_UNAVAILABLE_REASON = "READ_ONLY_SYNTHESIS_UNAVAILABLE";
+    public static final String RETENTION_LIMIT_REASON = "READ_ONLY_EVIDENCE_RETENTION_LIMIT";
+    public static final String INSPECTION_UNAVAILABLE_REASON = "READ_ONLY_INSPECTION_UNAVAILABLE";
+    public static final String INSPECTION_REQUEST_LIMIT_REASON = "READ_ONLY_INSPECTION_REQUEST_LIMIT";
+    public static final String ACQUISITION_LIMIT_REASON = "READ_ONLY_ACQUISITION_LIMIT";
+    public static final String DELIVERY_UNAVAILABLE_REASON = "READ_EVIDENCE_DELIVERY_UNAVAILABLE";
     private TerminalReadOnlyStopAnswer() {
     }
 
-    record Answer(String text, String logMessage) {}
+    record Answer(String text, String logMessage, boolean synthesisIncomplete) {
+        Answer(String text, String logMessage) {
+            this(text, logMessage, false);
+        }
+    }
+
+    public static boolean synthesisUnavailable(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return result != null && result.failureDecision().action() == dev.talos.runtime.failure.FailureAction.ASK_USER
+                && SYNTHESIS_UNAVAILABLE_REASON.equals(result.failureDecision().reason());
+    }
+
+    public static boolean retentionLimited(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return result != null && result.failureDecision().action() == dev.talos.runtime.failure.FailureAction.ASK_USER
+                && RETENTION_LIMIT_REASON.equals(result.failureDecision().reason());
+    }
+
+    /** Only runtime-owned read-only stops establish this limitation, never answer wording. */
+    public static String limitationReason(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        if (result == null || result.failureDecision().action() != dev.talos.runtime.failure.FailureAction.ASK_USER)
+            return "";
+        return switch (result.failureDecision().reason()) {
+            case SYNTHESIS_UNAVAILABLE_REASON, RETENTION_LIMIT_REASON, INSPECTION_UNAVAILABLE_REASON,
+                    INSPECTION_REQUEST_LIMIT_REASON, ACQUISITION_LIMIT_REASON,
+                    DELIVERY_UNAVAILABLE_REASON -> result.failureDecision().reason();
+            default -> "";
+        };
+    }
+
+    static String retentionLimitAnswer() {
+        return "The acquired source observations exceed the bounded answer context. "
+                + "A complete diagnosis cannot be established without discarding evidence. "
+                + "No further tools were executed and no files were changed. The diagnosis remains incomplete.";
+    }
+
+    /** A rejected answer generation is distinguished from failed read evidence. */
+    public static boolean rejectedProposalSynthesis(dev.talos.runtime.ToolCallLoop.LoopResult result) {
+        return synthesisUnavailable(result)
+                && result.readOnlySynthesisStatus() == dev.talos.runtime.ToolCallLoop.ReadOnlySynthesisStatus.REJECTED
+                && result.readOnlyFinalizationEvidence().proposalSelected()
+                && result.failedCalls() == 0 && result.mutatingToolSuccesses() == 0
+                && !result.toolOutcomes().isEmpty()
+                && result.toolOutcomes().stream().noneMatch(outcome -> outcome.denied() || !outcome.success()
+                    || outcome.mutating() || outcome.mutationEffects().hasEffects());
+    }
+
+    public static String synthesisUnavailableAnswer() {
+        return ReadOnlyEvidenceSynthesizer.UNAVAILABLE;
+    }
 
     public static String tryAnswer(
             LoopState state,
@@ -30,12 +81,9 @@ public final class TerminalReadOnlyStopAnswer {
             LoopState state,
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
-        String webDiagnostics = readOnlyWebDiagnosticStopAnswer(state, outcome);
-        if (webDiagnostics != null) {
-            return new Answer(
-                    webDiagnostics,
-                    "Stopping read-only web diagnostic loop with deterministic static diagnostics.");
-        }
+        // Reading a web surface proves evidence availability, not completion of
+        // the requested explanation. Let the provider synthesize; finalization
+        // still contains unsupported claims using static diagnostics.
 
         String unsupportedDocument = unsupportedDocumentStopAnswer(state, outcome);
         if (unsupportedDocument != null) {
@@ -62,7 +110,7 @@ public final class TerminalReadOnlyStopAnswer {
         if (multiTargetEvidenceComplete != null) {
             return new Answer(
                     multiTargetEvidenceComplete,
-                    "Stopping read-only multi-target loop after all requested files were read.");
+                    "Stopping read-only multi-target loop without a final synthesis.", true);
         }
 
         return null;
@@ -73,21 +121,35 @@ public final class TerminalReadOnlyStopAnswer {
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
         if (state == null || outcome == null) return null;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return null;
         String target = contract.expectedTargets().iterator().next();
         String normalizedTarget = ToolCallSupport.normalizePath(target);
-        boolean targetRead = state.toolOutcomes.stream()
-                .anyMatch(toolOutcome -> "talos.read_file".equals(canonicalToolName(toolOutcome.toolName()))
-                        && toolOutcome.success()
-                        && normalizedTarget.equals(ToolCallSupport.normalizePath(toolOutcome.pathHint())));
+        boolean targetRead = TargetReadEvidence.successfullyRead(
+                target, null, state.toolOutcomes, state.workspace);
         if (!targetRead) {
             return missingReadTargetAnswer(state, target, normalizedTarget);
         }
         if (outcome.successesThisIteration() > 0 && outcome.failuresThisIteration() == 0) return null;
+        if (!latestSuccessfulReadNames(target, state.toolOutcomes, state.workspace)) return null;
         String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.read_file");
         if (body == null || body.isBlank()) return null;
         return "Read " + target + ":\n" + body;
+    }
+
+    /** The latest read body is only the target's body when the latest successful read named the target. */
+    static boolean latestSuccessfulReadNames(
+            String target,
+            List<dev.talos.runtime.ToolCallLoop.ToolOutcome> outcomes,
+            java.nio.file.Path workspace
+    ) {
+        for (int i = outcomes.size() - 1; i >= 0; i--) {
+            dev.talos.runtime.ToolCallLoop.ToolOutcome outcome = outcomes.get(i);
+            if (outcome == null || !outcome.success() || outcome.denied() || !TargetReadEvidence.isRead(outcome)) continue;
+            return TargetReadEvidence.names(target, outcome.pathHint(), workspace);
+        }
+        return false;
     }
 
     private static String missingReadTargetAnswer(
@@ -95,12 +157,13 @@ public final class TerminalReadOnlyStopAnswer {
             String target,
             String normalizedTarget
     ) {
+        if (state == null) return null;
         if (state == null || normalizedTarget == null || normalizedTarget.isBlank()) return null;
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             var outcome = state.toolOutcomes.get(i);
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (outcome.success()) continue;
-            if (!normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) continue;
+            if (!TargetReadEvidence.names(target, outcome.pathHint(), state.workspace)) continue;
             String message = outcome.errorMessage() == null ? "" : outcome.errorMessage().strip();
             if (message.isBlank()) {
                 message = "read_file failed for " + target + ".";
@@ -141,7 +204,8 @@ public final class TerminalReadOnlyStopAnswer {
                 || outcome.mutationsThisIteration() > 0) {
             return null;
         }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() < 2) {
             return null;
         }
@@ -151,7 +215,8 @@ public final class TerminalReadOnlyStopAnswer {
                 .sorted()
                 .toList();
         if (targets.size() < 2) return null;
-        if (!state.pathsReadThisTurn.containsAll(targets)) {
+        if (!targets.stream().allMatch(target -> TargetReadEvidence.successfullyRead(
+                target, state.pathsReadThisTurn, state.toolOutcomes, state.workspace))) {
             return null;
         }
 
@@ -171,7 +236,8 @@ public final class TerminalReadOnlyStopAnswer {
             ToolCallExecutionStage.IterationOutcome outcome
     ) {
         if (state == null || outcome == null || outcome.successesThisIteration() <= 0) return null;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         if (contract.type() != TaskType.DIRECTORY_LISTING) return null;
         String body = DirectoryListingEvidence.selectedBody(
                 state.messages,
@@ -246,7 +312,9 @@ public final class TerminalReadOnlyStopAnswer {
 
     private static boolean userNamedConvertedFallback(LoopState state, List<String> unsupportedPaths) {
         if (state == null || unsupportedPaths == null || unsupportedPaths.isEmpty()) return false;
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        String userTask =
+                TurnTaskContractCapture.originalUserRequestOrResolve(
+                        state.messages);
         if (userTask == null || userTask.isBlank()) return false;
         String lower = userTask.toLowerCase(Locale.ROOT);
         for (String path : unsupportedPaths) {
@@ -268,50 +336,4 @@ public final class TerminalReadOnlyStopAnswer {
         return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
     }
 
-    private static String readOnlyWebDiagnosticStopAnswer(
-            LoopState state,
-            ToolCallExecutionStage.IterationOutcome outcome
-    ) {
-        if (state == null || outcome == null) return null;
-        if (state.workspace == null) return null;
-        if (state.totalToolsInvoked <= 0) return null;
-        if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
-
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        String retryTaskType = ToolCallSupport.embeddedRetryTaskType(userTask);
-        if ("WORKSPACE_EXPLAIN".equals(retryTaskType)) return null;
-        if (declaresTaskType(state.messages, "WORKSPACE_EXPLAIN")) return null;
-        String intentUserTask = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(userTask);
-        if (!WebDiagnosticIntent.matchesReadOnlyRequest(intentUserTask)) return null;
-        if (!readStaticWebDiagnosticSurface(state)) return null;
-
-        String diagnostics = StaticTaskVerifier.renderWebDiagnostics(state.workspace);
-        return diagnostics == null || diagnostics.isBlank() ? null : diagnostics;
-    }
-
-    private static boolean readStaticWebDiagnosticSurface(LoopState state) {
-        if (state == null || state.pathsReadThisTurn.isEmpty()) return false;
-        boolean readHtml = false;
-        boolean readScript = false;
-        for (String path : state.pathsReadThisTurn) {
-            String lower = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
-            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-                readHtml = true;
-            }
-            if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-                readScript = true;
-            }
-        }
-        return readHtml && readScript;
-    }
-
-    private static boolean declaresTaskType(List<ChatMessage> messages, String taskType) {
-        if (messages == null || taskType == null || taskType.isBlank()) return false;
-        String marker = "Task type: " + taskType;
-        for (ChatMessage message : messages) {
-            if (message == null || message.content() == null) continue;
-            if (message.content().contains(marker)) return true;
-        }
-        return false;
-    }
 }

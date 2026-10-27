@@ -1,7 +1,9 @@
 package dev.talos.cli.modes;
 
+import dev.talos.runtime.policy.RuntimeModelIdentityAnswerPolicy;
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -50,6 +52,8 @@ final class PostToolSynthesisRetry {
         LlmClient.StreamResult chat(List<ChatMessage> messages) throws Exception;
     }
 
+    record Result(String answer, AnswerOutputLimit outputLimit) {}
+
     /**
      * If tools were used and the answer is a deflection, re-prompts the model
      * once with an instruction to synthesize from already gathered evidence.
@@ -60,12 +64,19 @@ final class PostToolSynthesisRetry {
             List<ChatMessage> messages,
             ChatFunction chatFull
     ) {
-        if (toolsInvoked <= 0) return answer;
-        if (!isDeflection(answer)) return answer;
+        return selectSynthesisIfNeeded(answer, toolsInvoked, messages, chatFull).answer();
+    }
+
+    static Result selectSynthesisIfNeeded(
+            String answer, int toolsInvoked, List<ChatMessage> messages, ChatFunction chatFull) {
+        if (toolsInvoked <= 0) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+        if (!isDeflection(answer)) return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
 
         LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
 
-        String originalRequest = latestUserRequest(messages);
+        String originalRequest =
+                RuntimeModelIdentityAnswerPolicy.capturedProviderTask(
+                        TurnTaskContractCapture.originalUserRequestOrResolve(messages));
         String retryPrompt;
         if (originalRequest != null && !originalRequest.isBlank()) {
             String pinned = originalRequest.length() <= 2000
@@ -84,21 +95,52 @@ final class PostToolSynthesisRetry {
                     + "Do not ask what I want - answer the question.";
         }
 
-        messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(retryPrompt));
+        List<ChatMessage> retryMessages =
+                new java.util.ArrayList<>(messages);
+        retryMessages.add(ChatMessage.assistant(answer));
+        retryMessages.add(ChatMessage.user(retryPrompt));
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
 
         try {
-            LlmClient.StreamResult retry = chatFull.chat(messages);
+            LlmClient.StreamResult retry = chatFull.chat(
+                    List.copyOf(retryMessages));
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
                 LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
-                return retryText;
+                return new Result(retryText, AnswerOutputLimit.selected(retry.outputLimitReached()));
             }
-            LOG.warn("Synthesis retry still deflected. Returning original answer.");
+            boolean empty = retryText == null || retryText.isBlank();
+            LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                    checkpoint,
+                    answer,
+                    empty
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                                    .SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                                    .SPECULATIVE_RETRY_REJECTED);
+            LOG.warn(empty
+                    ? "Synthesis retry was empty. Returning original answer."
+                    : "Synthesis retry still deflected. Returning original answer.");
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                    checkpoint,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                            .SPECULATIVE_RETRY_FAILED);
             LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
-        return answer;
+        return new Result(answer, AnswerOutputLimit.KEEP_ORIGINAL);
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     /**
@@ -135,16 +177,4 @@ final class PostToolSynthesisRetry {
         return false;
     }
 
-    private static String latestUserRequest(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return null;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if ("user".equals(message.role())) {
-                String content = message.content();
-                if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
-                return content == null || content.isBlank() ? null : content;
-            }
-        }
-        return null;
-    }
 }

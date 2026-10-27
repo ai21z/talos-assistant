@@ -100,7 +100,7 @@ public class AnswerSanitizationTest {
 
     @Test
     public void testStripMultipleLeakedToolCallBlocks() {
-        String input = "Text.\n<tool_call>\n{\"name\": \"a\"}\n</tool_call>\nMiddle.\n<tool_call>\n{\"name\": \"b\"}\n</tool_call>\nEnd.";
+        String input = "Text.\n<tool_call>\n{\"name\": \"talos.grep\"}\n</tool_call>\nMiddle.\n<tool_call>\n{\"name\": \"talos.read_file\"}\n</tool_call>\nEnd.";
         String sanitized = invokeSanitizeAnswer(input);
 
         assertFalse(sanitized.contains("<tool_call>"),

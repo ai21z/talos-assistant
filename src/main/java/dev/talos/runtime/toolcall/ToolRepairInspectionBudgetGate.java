@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ActionObligation;
@@ -25,7 +26,8 @@ final class ToolRepairInspectionBudgetGate {
             return Optional.empty();
         }
 
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
                 .noChangeAnswerIfCurrentWorkspacePasses(
                         contract,
@@ -34,7 +36,7 @@ final class ToolRepairInspectionBudgetGate {
                         state.mutatingToolSuccesses,
                         state.workspace);
         if (conditionalNoChange.isPresent()) {
-            state.finishWithAnswer(conditionalNoChange.get());
+            state.finishWithToolAnswer(conditionalNoChange.get());
             state.clearPendingActionObligation();
             LOG.debug("Stopping conditional review/fix loop after inspection found no current static blocker.");
             return Optional.of(false);
@@ -58,7 +60,8 @@ final class ToolRepairInspectionBudgetGate {
 
     private static boolean repairReadOnlyBudgetExceeded(LoopState state, int readOnlyToolBudget) {
         if (state == null || state.toolNames.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract =
+                TurnTaskContractCapture.currentOrResolve(state.messages);
         boolean staticRepairMutation = hasStaticRepairContext(state)
                 && contract != null
                 && contract.mutationAllowed()

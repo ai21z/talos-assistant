@@ -169,7 +169,7 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
-    void mutationContractInApplyIncludesWriteAndEditNativeSpecs() {
+    void contractOnlyMutationSurfaceExcludesWorkspaceOperationSpecs() {
         var contract = TaskContractResolver.fromUserRequest("Create a README.md file.");
 
         List<String> names = NativeToolSpecPolicy.names(
@@ -178,11 +178,12 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
-        assertTrue(names.contains("talos.apply_workspace_batch"));
-        assertTrue(names.contains("talos.mkdir"));
-        assertTrue(names.contains("talos.move_path"));
-        assertTrue(names.contains("talos.copy_path"));
-        assertTrue(names.contains("talos.rename_path"));
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.delete_path"), names.toString());
         assertFalse(names.contains("talos.run_command"), names.toString());
     }
 
