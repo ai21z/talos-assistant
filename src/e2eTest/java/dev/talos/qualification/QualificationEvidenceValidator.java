@@ -103,6 +103,11 @@ final class QualificationEvidenceValidator {
             QualificationScenarioBank.Catalog catalog,
             String transactionId) {
         Objects.requireNonNull(lease, "qualification publication lease");
+        try {
+            QualificationProtocol.requireRecordProtocol(catalog.protocolVersion());
+        } catch (IllegalArgumentException unsupported) {
+            return empty(unsupported.getMessage());
+        }
         return validateSnapshot(lease.packetRoot(), catalog, true, transactionId);
     }
 
@@ -113,6 +118,11 @@ final class QualificationEvidenceValidator {
             String recoveryTransactionId) {
         if (root == null) {
             return empty("Qualification packet root is missing or not a directory");
+        }
+        try {
+            QualificationProtocol.requireRecordProtocol(catalog.protocolVersion());
+        } catch (IllegalArgumentException unsupported) {
+            return empty(unsupported.getMessage());
         }
         if (catalog.protocolVersion() != QualificationProtocol.VERSION) {
             return validateSnapshot(root, catalog, requireRuns, recoveryTransactionId);

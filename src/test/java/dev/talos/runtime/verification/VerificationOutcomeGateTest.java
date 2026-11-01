@@ -25,6 +25,7 @@ class VerificationOutcomeGateTest {
         assertEquals(TaskVerificationStatus.PASSED, override.get().status());
         assertTrue(override.get().summary().contains("Required verification passed"),
                 override.get().summary());
+        assertTrue(override.get().requestBound());
     }
 
     @Test
@@ -88,6 +89,7 @@ class VerificationOutcomeGateTest {
         assertEquals(TaskVerificationStatus.PASSED, override.get().status());
         assertTrue(override.get().summary().contains("Required verification passed"),
                 override.get().summary());
+        assertTrue(override.get().requestBound());
     }
 
     @Test
@@ -114,6 +116,49 @@ class VerificationOutcomeGateTest {
         assertEquals(1, report.unsatisfiedRequiredClaimCount());
         assertTrue(override.isPresent());
         assertEquals(TaskVerificationStatus.UNAVAILABLE, override.get().status());
+    }
+
+    @Test
+    void aRequiredClaimIsRequestBoundOnlyForChangesItsProofRead() {
+        TargetBinding binding = new TargetBinding("#teaser-button", "#teaser-status", "click");
+        VerificationClaim claim = new VerificationClaim(
+                "static-web-interaction:#teaser-button->#teaser-status",
+                "Static interaction #teaser-button -> #teaser-status.",
+                ProofKind.STATIC_INTERACTION_GUARD,
+                binding,
+                true,
+                List.of("index.html", "js\\scripts.js"));
+        VerificationReport report = VerificationReport.ofClaim(new ClaimResult(
+                claim,
+                new VerificationObligation(claim, Set.of(ProofKind.STATIC_INTERACTION_GUARD),
+                        EvidenceAuthority.AUTHORITATIVE, binding),
+                VerificationVerdict.VERIFIED,
+                ProofKind.STATIC_INTERACTION_GUARD,
+                EvidenceAuthority.AUTHORITATIVE,
+                EvidenceCoverage.SCOPED,
+                List.of(),
+                List.of(),
+                List.of()));
+
+        TaskVerificationResult covered = VerificationOutcomeGate.compatibilityOverride(
+                report, List.of(), List.of("./index.html", "js/scripts.js")).orElseThrow();
+        TaskVerificationResult uncovered = VerificationOutcomeGate.compatibilityOverride(
+                report, List.of(), List.of("index.html", "styles.css")).orElseThrow();
+        TaskVerificationResult unnamed = VerificationOutcomeGate.compatibilityOverride(
+                VerificationReport.ofClaim(claimResult(VerificationVerdict.VERIFIED, EvidenceAuthority.AUTHORITATIVE)),
+                List.of(), List.of("index.html")).orElseThrow();
+
+        assertTrue(covered.requestBound(), covered.summary());
+        assertEquals(TaskVerificationStatus.PASSED, uncovered.status());
+        assertFalse(uncovered.requestBound(), uncovered.summary());
+        assertTrue(uncovered.summary().endsWith("Changes outside the required claims were checked only."),
+                uncovered.summary());
+        assertFalse(unnamed.requestBound(), unnamed.summary());
+        // Paths fold case where the file system does, as the static verifier's own path checks do.
+        TaskVerificationResult caseVariant = VerificationOutcomeGate.compatibilityOverride(
+                report, List.of(), List.of("Index.HTML")).orElseThrow();
+        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        assertEquals(windows, caseVariant.requestBound(), caseVariant.summary());
     }
 
     private static ClaimResult claimResult(VerificationVerdict verdict, EvidenceAuthority authority) {

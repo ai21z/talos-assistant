@@ -1229,6 +1229,7 @@ class ExecutionOutcomeTest {
                 assertTrue(outcome.finalAnswer().contains("[Action obligation failed:"),
                         outcome.finalAnswer());
                 assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+                assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
                 assertNotNull(trace);
                 assertNotNull(trace.outcome());
                 assertEquals("BLOCKED", trace.outcome().status());
@@ -1842,6 +1843,8 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.finalAnswer().contains("file-level verification reported warning"),
                     outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("[Static verification: passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "),
                     outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -2725,8 +2728,8 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed -"));
-            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Checks passed -"));
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(List.of("index.html"), outcome.taskOutcome().contract().expectedTargets().stream().toList());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
         } finally {
@@ -2786,6 +2789,7 @@ class ExecutionOutcomeTest {
                     "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Source-derived coverage checks passed"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -2886,6 +2890,7 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
             assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
             assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("summary semantics were not verified"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("PDF text extraction may not match visual order"),
                     outcome.finalAnswer());
@@ -2936,7 +2941,7 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed - "
+            assertTrue(outcome.finalAnswer().startsWith("[Checks passed - "
                     + "Scoped static web checks passed"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Contextual static-web finding outside this turn"),
                     outcome.finalAnswer());
@@ -2944,7 +2949,7 @@ class ExecutionOutcomeTest {
                     outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("Static web coherence checks passed"),
                     outcome.finalAnswer());
-            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -3097,6 +3102,7 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.finalAnswer().contains("No task-specific verifier was applicable"));
             assertTrue(outcome.finalAnswer().contains("task completion was not verified"));
             assertFalse(outcome.finalAnswer().contains("Static verification: passed"));
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "));
             assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.READBACK_ONLY, outcome.taskOutcome().verificationResult().status());
         } finally {
@@ -3659,12 +3665,12 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().contains("Static verification: passed"),
+            assertTrue(outcome.finalAnswer().contains("[Checks passed - "),
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains(
                             "Updated 3 files: index.html, styles.css, scripts.js."),
                     outcome.finalAnswer());
-            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -5012,6 +5018,7 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.verificationReport().limitations().stream()
                     .anyMatch(line -> line.contains("does not assign visible text")), outcome.verificationReport().limitations().toString());
             assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("No task-specific verifier was applicable"),
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
@@ -5090,6 +5097,7 @@ class ExecutionOutcomeTest {
             assertEquals(2, outcome.verificationReport().requiredClaimCount());
             assertEquals(1, outcome.verificationReport().unsatisfiedRequiredClaimCount());
             assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("requested status paragraph prefix"), outcome.finalAnswer());
             assertNotNull(trace);
             assertEquals(2, trace.verification().requiredClaimCount());
@@ -5269,7 +5277,8 @@ class ExecutionOutcomeTest {
                     loopResult.finalAnswer(), messages, loopResult, ws, 0);
 
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            // The interaction claim read index.html and scripts.js. The styles.css change was checked only.
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertNotNull(outcome.verificationReport());
             assertTrue(outcome.verificationReport().limitations().stream()
                             .anyMatch(line -> line.contains("Remote static-web asset references were not fetched")),
@@ -5317,6 +5326,7 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
         assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
         assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("[Checks passed - "), outcome.finalAnswer());
         assertNotNull(outcome.verificationReport());
         assertEquals(0, outcome.verificationReport().requiredClaimCount());
         assertEquals(0, outcome.verificationReport().unsatisfiedRequiredClaimCount());

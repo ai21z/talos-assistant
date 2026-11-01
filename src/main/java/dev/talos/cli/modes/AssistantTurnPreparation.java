@@ -38,10 +38,13 @@ import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ToolSpec;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 final class AssistantTurnPreparation {
 
@@ -95,6 +98,44 @@ final class AssistantTurnPreparation {
             boolean workspaceBoundaryReplayedRequest,
             CapabilityPosture capabilityPosture
     ) {
+        return prepare(
+                messages,
+                workspace,
+                ctx,
+                workspaceBoundaryReplayedRequest,
+                workspaceBoundaryReplayedRequest,
+                capabilityPosture);
+    }
+
+    /**
+     * Prepares a turn whose latest user request may have replaced the one the mode received. A replaced request
+     * gets its tool surface and primary prompt from its own resolution, not from the mode's selection.
+     */
+    static PreparedTurn prepare(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            boolean workspaceBoundaryReplayedRequest,
+            boolean requestReplaced,
+            CapabilityPosture capabilityPosture
+    ) {
+        return prepare(messages, workspace, ctx, workspaceBoundaryReplayedRequest, requestReplaced,
+                capabilityPosture, pendingAtStart(ctx));
+    }
+
+    /**
+     * Prepares a turn with the pending state the caller observed at the turn boundary, before any preflight could
+     * drop a pending item.
+     */
+    static PreparedTurn prepare(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            boolean workspaceBoundaryReplayedRequest,
+            boolean requestReplaced,
+            CapabilityPosture capabilityPosture,
+            boolean pendingAtStart
+    ) {
         TaskResolution initialResolution =
                 TaskContractResolver.resolveFromMessages(messages);
         if (workspaceBoundaryReplayedRequest) {
@@ -131,6 +172,18 @@ final class AssistantTurnPreparation {
                 rawTaskContract,
                 initialResolution,
                 ctx);
+        activeDecision = withinAuthorityCeiling(
+                AssistantTurnExecutor.latestUserRequest(messages),
+                rawTaskContract,
+                activeDecision,
+                workspaceBoundaryReplayedRequest || saveContinuation.handled());
+        ReferentDecision referent = withinReferentOrigin(
+                AssistantTurnExecutor.latestUserRequest(messages),
+                initialResolution,
+                activeDecision,
+                workspaceBoundaryReplayedRequest || saveContinuation.handled(),
+                pendingAtStart);
+        activeDecision = referent.decision();
         if (ctx != null && ctx.requestFrame() != null) {
             ctx.requestFrame().adopt(initialResolution.projectOnto(activeDecision.taskContract(),
                     TaskIntentProjector.project(rawTaskIntent, activeDecision.taskContract(),
@@ -174,11 +227,14 @@ final class AssistantTurnPreparation {
                 ? ExecutionPhase.INSPECT
                 : effectiveTurn.phase();
         initializeExecutionPhaseForTurn(authoritativePhase, ctx);
+        boolean pinLacksAuthorizedOperationTools = ctx != null
+                && ctx.hasNativeToolSpecOverride()
+                && !carriesAuthorizedOperationTools(ctx.nativeToolSpecs(), effectiveResolution);
         Context turnContext = withNativeToolSurface(
                 ctx,
                 effectiveResolution,
                 activeDecisionUpdatesTurnSurface
-                        || workspaceBoundaryReplayedRequest
+                        || requestReplaced
                         || saveContinuation.consumed()
                         || effectiveTurn.forceNativeSurfaceRecompute());
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(
@@ -193,10 +249,16 @@ final class AssistantTurnPreparation {
         LocalTurnTraceCapture.recordMutationRequestDecision(
                 MutationIntent.classifyShape(
                         AssistantTurnExecutor.latestUserRequest(messages)),
-                effectiveResolution.provenance());
+                effectiveResolution.provenance(),
+                activeDecision.origin().name());
         ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
         CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, projectMemory);
-        if (saveContinuation.consumed()) {
+        // The mode's primary prompt describes the request and pin it received. A replaced or consumed request, a
+        // consumed carried context, or a pin reselected for its operation tools, is described by the surface
+        // selected for it.
+        if ((saveContinuation.consumed() || requestReplaced || activeDecision.consumed()
+                || pinLacksAuthorizedOperationTools)
+                && turnContext != null) {
             ProviderPromptSurfaceReconciler.reconcile(messages, currentTurnPlan, turnContext.nativeToolSpecs());
         }
         CurrentTurnPromptInstructions.replaceTaskContractInstruction(messages, currentTurnPlan);
@@ -213,7 +275,10 @@ final class AssistantTurnPreparation {
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, turnContext, projectMemory);
         recordPromptDebugDiagnostics(promptAudit, currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, turnContext);
-        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution, saveContinuation.directAnswer(), draft.generate());
+        String directAnswer = saveContinuation.directAnswer() != null
+                ? saveContinuation.directAnswer()
+                : referent.directAnswer();
+        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution, directAnswer, draft.generate());
     }
 
     private static void initializeExecutionPhaseForTurn(ExecutionPhase phase, Context ctx) {
@@ -242,7 +307,8 @@ final class AssistantTurnPreparation {
                 && !forceRecompute
                 && !contractRemovesToolAuthority
                 && !blocksWorkspaceOperations
-                && !blocksUnscopedMutation) {
+                && !blocksUnscopedMutation
+                && carriesAuthorizedOperationTools(ctx.nativeToolSpecs(), resolution)) {
             return ctx;
         }
         ExecutionPhase phase = ctx.executionPhaseState() == null
@@ -254,6 +320,24 @@ final class AssistantTurnPreparation {
                         phase,
                         ctx.toolRegistry(),
                         ctx.cfg()));
+    }
+
+    /** A kept surface must carry the exact tool of every authorized workspace operation (P3d). */
+    private static boolean carriesAuthorizedOperationTools(
+            List<ToolSpec> surface,
+            TaskResolution resolution
+    ) {
+        if (resolution == null || resolution.workspaceOperationPlan() == null) return true;
+        List<String> required = resolution.workspaceOperationPlan().toolNames();
+        if (required.isEmpty()) return true;
+        Set<String> offered = surface == null
+                ? Set.of()
+                : surface.stream()
+                        .filter(Objects::nonNull)
+                        .map(ToolSpec::name)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toUnmodifiableSet());
+        return offered.containsAll(required);
     }
 
     private static CurrentTurnPlan buildCurrentTurnPlan(
@@ -350,6 +434,109 @@ final class AssistantTurnPreparation {
                                 .authorityLimitExceeded());
     }
 
+    /**
+     * The one authority ceiling of a turn (MICA invariant I1, decision D2, part D-b).
+     *
+     * <p>Carried context may supply the referent of a change only when the current message carries a directive,
+     * or when the reply binds a typed confirmation the runtime issued. Otherwise the turn is resolved from the
+     * current message alone, the carried context stays available and unconsumed, and the trace records the denial.
+     * The mutation gate reads only the contract this ceiling produced.
+     */
+    static ActiveTaskContextPolicy.Decision withinAuthorityCeiling(
+            String userRequest,
+            TaskContract rawTaskContract,
+            ActiveTaskContextPolicy.Decision decision,
+            boolean typedContinuation
+    ) {
+        if (decision == null || !decision.consumed() || typedContinuation || decision.typedConfirmation()) {
+            return decision;
+        }
+        if (!decision.taskContract().mutationAllowed()
+                || rawTaskContract == null
+                || rawTaskContract.mutationAllowed()
+                || dev.talos.runtime.intent.ContinuationDirective.present(userRequest)) {
+            return decision;
+        }
+        LocalTurnTraceCapture.warning("CARRIED_AUTHORITY_DENIED",
+                "carried context was not consumed because the current message carries no directive");
+        return new ActiveTaskContextPolicy.Decision(
+                rawTaskContract,
+                ActiveTaskContext.none(),
+                ArtifactGoal.none(),
+                decision.memoryContext(),
+                false);
+    }
+
+    static final String NOTHING_PENDING_ANSWER =
+            "Nothing is pending, so Talos did not change any file. Name the file and the change you want.";
+
+    /** The decision after the referent rule, and the runtime answer when nothing was pending. */
+    record ReferentDecision(ActiveTaskContextPolicy.Decision decision, String directAnswer) {}
+
+    /**
+     * A directive that names nothing of its own to act on (MICA invariant I1).
+     *
+     * <p>A referentless directive, such as "apply it" or "check it and edit it", can only act on what is pending.
+     * When it consumed no carried context, continued no typed confirmation and resolved no target or operation from
+     * its own text or from history, it carries no mutation authority. With nothing pending at the start of the turn,
+     * the runtime answers that nothing is pending. Otherwise the model answers on the non-mutating contract, because
+     * a statement that nothing is pending would be false. An objectless reply that requested no change, such as
+     * "continue", is left as it is.
+     */
+    static ReferentDecision withinReferentOrigin(
+            String userRequest,
+            TaskResolution resolution,
+            ActiveTaskContextPolicy.Decision decision,
+            boolean typedContinuation,
+            boolean pendingAtStart
+    ) {
+        if (decision == null || decision.consumed() || typedContinuation) return new ReferentDecision(decision, null);
+        TaskContract contract = decision.taskContract();
+        if (!unboundReferentless(userRequest, contract, resolution)) return new ReferentDecision(decision, null);
+        LocalTurnTraceCapture.warning("REFERENTLESS_DIRECTIVE_UNBOUND",
+                "the current message names nothing to act on and binds nothing pending, so it carries no mutation "
+                        + "authority");
+        TaskContract bounded = contract.mutationAllowed()
+                ? new TaskContract(contract.type(), contract.mutationRequested(), false,
+                        contract.verificationRequired(), Set.of(), Set.of(), contract.forbiddenTargets(),
+                        contract.originalUserRequest(), "referentless-directive-unbound")
+                : contract;
+        return new ReferentDecision(
+                new ActiveTaskContextPolicy.Decision(bounded, decision.planContext(), decision.artifactGoal(),
+                        decision.memoryContext(), false),
+                pendingAtStart ? null : NOTHING_PENDING_ANSWER);
+    }
+
+    /**
+     * Whether the request is a referentless directive that binds nothing of its own: no expected or source target
+     * and no authorized operation, from its text or from history. An objectless reply that requested no change is
+     * not one. The one rule serves every boundary that could otherwise grant such a request authority.
+     */
+    static boolean unboundReferentless(String userRequest, TaskContract contract, TaskResolution resolution) {
+        if (contract == null) return false;
+        var form = dev.talos.runtime.intent.ContinuationDirective.referentForm(userRequest);
+        if (form == dev.talos.runtime.intent.ContinuationDirective.ReferentForm.NOT_REFERENTLESS
+                || form == dev.talos.runtime.intent.ContinuationDirective.ReferentForm.OBJECTLESS
+                        && !contract.mutationRequested()) {
+            return false;
+        }
+        return contract.expectedTargets().isEmpty() && contract.sourceEvidenceTargets().isEmpty()
+                && (resolution == null || resolution.workspaceOperationPlan().authorizedOperations().isEmpty());
+    }
+
+    /**
+     * Whether a carried context inside its window, a content save, a content draft or a workspace confirmation was
+     * pending. The executor reads it before its preflights, which may drop a pending item.
+     */
+    static boolean pendingAtStart(Context ctx) {
+        if (ctx == null || ctx.memory() == null) return false;
+        SessionMemory memory = ctx.memory();
+        return memory.activeTaskContext().activeAt(currentUserTurnNumber(ctx))
+                || memory.pendingContentSave() != null
+                || memory.pendingContentDraft() != null
+                || memory.pendingWorkspaceMutationConfirmation() != null;
+    }
+
     private static boolean activeDecisionUpdatesTurnSurface(
             TaskContract rawTaskContract,
             ActiveTaskContextPolicy.Decision decision
@@ -360,7 +547,7 @@ final class AssistantTurnPreparation {
         return planContext != null && planContext.hasPromptContext();
     }
 
-    private static int currentUserTurnNumber(Context ctx) {
+    static int currentUserTurnNumber(Context ctx) {
         int tracedTurn = LocalTurnTraceCapture.currentTurnNumber();
         if (tracedTurn > 0) return tracedTurn;
         if (ctx == null || ctx.memory() == null) return 1;

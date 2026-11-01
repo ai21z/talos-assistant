@@ -36,11 +36,17 @@ public final class Redactor {
     // Absolute *filesystem* paths (Windows & POSIX). Avoids matching dotted package names.
     // POSIX arm requires: (1) preceded by whitespace or start-of-line (truly absolute),
     // and (2) at least one internal '/' to avoid matching REPL commands like /help.
+    // A path never ends in sentence punctuation, a closing bracket or a markdown backtick. Those
+    // characters belong to the surrounding text, so they stay visible after the path is masked.
+    private static final String PATH_CHAR = "[^\\s\"'<>|]";
+    private static final String PATH_END = "[^\\s\"'<>|.,;:!?)\\]}`*]";
     private static final Pattern ABS_PATH = Pattern.compile(
             // Windows: C:\... or C:/...
-            "(?i)\\b[A-Z]:[\\\\/](?:[^\\s\"'<>|]{1,200}[\\\\/])*[^\\s\"'<>|]{1,200}" +
-                    // OR POSIX: /usr/bin/... (must start after whitespace/SOL, must have 2+ segments)
-                    "|(?:(?<=\\s)|(?<=^))(/[^\\s\"'<>|/]{1,200}(?:/[^\\s\"'<>|]{1,200})+)"
+            "(?i)\\b[A-Z]:[\\\\/](?:" + PATH_CHAR + "{1,200}[\\\\/])*" + PATH_CHAR + "{0,199}" + PATH_END +
+                    // OR POSIX: /usr/bin/... (must start after whitespace/SOL, must have 2+ segments).
+                    // A quoted or backticked POSIX path is not matched, because quoted web routes such as
+                    // href="/css/site.css" cannot be told apart lexically (open item, P1 review M3).
+                    "|(?:(?<=\\s)|(?<=^))(/[^\\s\"'<>|/]{1,200}(?:/" + PATH_CHAR + "{0,199}" + PATH_END + ")+)"
     );
 
     // IPv4 with octet validation (0-255). Excludes loopback 127.x.x.x.

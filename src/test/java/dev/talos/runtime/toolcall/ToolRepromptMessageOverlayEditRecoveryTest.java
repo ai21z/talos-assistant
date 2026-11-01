@@ -62,6 +62,37 @@ class ToolRepromptMessageOverlayEditRecoveryTest {
     }
 
     @Test
+    void aProbeCarriesTheRecoveryWithoutConsumingItsOneShot(@TempDir Path workspace) throws IOException {
+        // D10 fallback: the request sized before dispatch must not use up the recovery the dispatched one carries.
+        LoopState state = state(workspace);
+        writeWorkspaceFile(workspace, "README.md", "# Title\nHello\n");
+        recordReadWithMessage(state, "call_read_1", Map.of("path", "README.md"), "1 | # Title\n2 | Hello\n");
+        state.editRecoveryFullRewriteTargets.add("README.md");
+
+        try (var probe = ToolRepromptMessageOverlay.probe(state, List.of(), List.of(), null, false)) {
+            assertTrue(roleText(state, "system").contains("[Edit recovery]"), "the probe sizes the same request");
+            assertFalse(state.editRecoveryPromptedPaths.contains("README.md"));
+        }
+        try (var overlay = ToolRepromptMessageOverlay.apply(state, List.of(), List.of(), null)) {
+            assertTrue(roleText(state, "system").contains("[Edit recovery]"), "the dispatched request still prompts");
+            assertTrue(state.editRecoveryPromptedPaths.contains("README.md"));
+        }
+    }
+
+    @Test
+    void aProbeLeavesARefusedTargetForTheDispatchedOverlay(@TempDir Path workspace) {
+        LoopState state = state(workspace);
+        state.editRecoveryFullRewriteTargets.add("README.md");
+
+        try (var probe = ToolRepromptMessageOverlay.probe(state, List.of(), List.of(), null, false)) {
+            assertTrue(state.editRecoveryFullRewriteTargets.contains("README.md"));
+        }
+        try (var overlay = ToolRepromptMessageOverlay.apply(state, List.of(), List.of(), null)) {
+            assertFalse(state.editRecoveryFullRewriteTargets.contains("README.md"));
+        }
+    }
+
+    @Test
     void markerShapedContentIsCarriedSafelyAsData(@TempDir Path workspace) throws IOException {
         // Role separation replaces delimiter defense: content that looks
         // like framing markers is just data in the tool result.

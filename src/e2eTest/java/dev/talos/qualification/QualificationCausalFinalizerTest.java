@@ -2235,7 +2235,7 @@ class QualificationCausalFinalizerTest {
 
         assertEquals(1, exit, stderr.toString(StandardCharsets.UTF_8));
         assertTrue(stderr.toString(StandardCharsets.UTF_8)
-                .contains("run finalization writes exactly protocol v6"));
+                .contains("run finalization writes exactly protocol v" + QualificationProtocol.VERSION));
         assertFalse(Files.exists(output));
         assertTrue(stdout.toString(StandardCharsets.UTF_8).isBlank());
     }
@@ -2245,7 +2245,7 @@ class QualificationCausalFinalizerTest {
         QualificationScenarioBank.Catalog current = QualificationTestPacket.protocol6Catalog();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, current);
         QualificationScenarioBank.Catalog future = new QualificationScenarioBank.Catalog(
-                7,
+                QualificationProtocol.VERSION + 1,
                 current.admission(),
                 current.full(),
                 current.fixtures(),
@@ -2259,7 +2259,8 @@ class QualificationCausalFinalizerTest {
                         current.admission().scenarios().getFirst().id(),
                         future));
 
-        assertTrue(failure.getMessage().contains("exactly protocol v6 is writable"));
+        assertTrue(failure.getMessage().contains(
+                "exactly protocol v" + QualificationProtocol.VERSION + " is writable"));
     }
 
     private QualificationTestPacket packet(

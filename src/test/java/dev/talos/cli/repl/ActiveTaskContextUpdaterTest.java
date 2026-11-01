@@ -5,6 +5,7 @@ import dev.talos.runtime.Result;
 import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
@@ -383,6 +384,869 @@ class ActiveTaskContextUpdaterTest {
     }
 
     @Test
+    void aDeniedWorkspaceOperationCreatesNoCarriedContext() {
+        // A removal is resolved from the current message alone (MICA invariant I2), so its outcome is not carried.
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(true, operation(
+                        "talos.delete_path", "index.html", false, "approval denied by user for talos.delete_path",
+                                asTarget("index.html"))),
+                "ok can you delete this page now please?",
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+        assertEquals(ArtifactGoal.none(), update.artifactGoal());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void aWorkspaceOperationOnACarriedTargetRetiresTheContext(boolean approved) {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(!approved, operation(
+                        "talos.delete_path", "index.html", approved, approved ? "" : "approval denied by user",
+                                asTarget("index.html"))),
+                "delete index.html",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+        assertEquals(ArtifactGoal.none(), update.artifactGoal());
+    }
+
+    @Test
+    void aMoveWhoseDestinationIsACarriedTargetRetiresTheContext() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation(
+                        "talos.move_path", "./index.html", true, "",
+                                asSource("draft.html"), asDestination("./index.html"))),
+                "move draft.html to index.html",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+    }
+
+    @Test
+    void anApprovedRenameOfACarriedTargetRetiresTheContext() {
+        // The request names both files, and the audit of the applied rename names its source as an operand.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.rename_path", "home.html", true, "",
+                        asSource("index.html"), asDestination("home.html")),
+                        "index.html", "home.html"),
+                "rename index.html to home.html",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+    }
+
+    @Test
+    void aDeletedFolderRetiresTheContextOfTheFilesInsideIt() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("site/index.html", "site/style.css"),
+                "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.delete_path", "site", true, "", asTarget("site"))),
+                "delete the site folder recursively",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+    }
+
+    @Test
+    void aFolderWhoseNameStartsLikeACarriedFolderDoesNotRetireIt() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("site-old/index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.delete_path", "site", true, "", asTarget("site"))),
+                "delete the site folder recursively",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertSame(previous, update.activeTaskContext());
+    }
+
+    @Test
+    void aWorkspaceOperationOnAnotherPathKeepsTheCarriedContext() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(true, operation(
+                        "talos.delete_path", "notes.txt", false, "approval denied by user", asTarget("notes.txt"))),
+                "delete notes.txt",
+                previous,
+                previousGoal);
+
+        assertSame(previous, update.activeTaskContext());
+        assertSame(previousGoal, update.artifactGoal());
+    }
+
+    @Test
+    void aDeniedEditBesideAWorkspaceOperationStillCreatesItsDeniedContext() {
+        TurnResult result = turn(
+                4,
+                new Result.Ok("No files were changed because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(4, "trace-mixed", true, true, List.of("index.html"),
+                        "", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL"),
+                List.of(new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "index.html", false, "approval denied by user"),
+                        operation(
+                                "talos.delete_path", "style.css", false, "approval denied by user",
+                                        asTarget("style.css"))),
+                2);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "Edit index.html so it works, then delete style.css.",
+                ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aDeniedOperationBesideADeniedEditIsNotCarriedAsAnEditTarget() {
+        // The request names neither file, so the model chose both. Neither denial is carried.
+        TurnResult result = turn(
+                4,
+                new Result.Ok("No files were changed because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(4, "trace-mixed", true, true, List.of(),
+                        "", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL"),
+                List.of(new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "index.html", false, "approval denied by user"),
+                        operation(
+                                "talos.delete_path", "style.css", false, "approval denied by user",
+                                        asTarget("style.css"))),
+                2);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix the page and delete the old stylesheet", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aDeniedEditOfAFileTheRequestNamedOnlyAsARoleIsCarried() {
+        // Without expected targets, a call path that the request named still counts as requested.
+        LocalTurnTrace localTrace = LocalTurnTrace.builder("trace-named", "session", 4, "2026-05-01T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary("FILE_EDIT", true, true, true, List.of(),
+                        List.of(), "explicit-request-pattern", List.of(new LocalTurnTrace.RolefulTargetSummary(
+                                "index.html", "MUST_MUTATE", "USER_REQUEST", "named", "index.html", 1.0))))
+                .verification("", "", List.of(), 0, 0, List.of(), List.of())
+                .outcome("BLOCKED_BY_APPROVAL", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL")
+                .build();
+        TurnResult result = turn(4, new Result.Ok("No files were changed because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of()), localTrace,
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.edit_file", "index.html", false, "approval denied by user")), 1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "change the heading in index.html", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aFailedWriteThatChangedAFileTheModelChoseKeepsItsRepairContext() {
+        // The write reached the disk before it failed, so the file was changed and its failed check stays repairable.
+        TurnResult result = turn(4, new Result.Ok("index.html still links style.css."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(4, "trace-applied-failed", true, true, List.of(),
+                        "FAILED", "index.html still links style.css", "GRANTED_OR_NOT_REQUIRED", "FAILED", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", List.of("index.html"),
+                        false, "read-back integrity check failed",
+                        dev.talos.tools.ToolMutationEffects.applied("index.html"), null, null, null, List.of())),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix the page", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind(),
+                update.activeTaskContext().toString());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aFailedWriteThatChangedOnlyAnotherPathDoesNotCarryItsFile() {
+        // The folder was created, but the file the model chose was never written.
+        TurnResult result = turn(4, new Result.Ok("The write of pages/new/index.html failed."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(4, "trace-folder-only", true, true, List.of(),
+                        "FAILED", "pages/new/index.html is missing", "GRANTED_OR_NOT_REQUIRED", "FAILED", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "pages/new/index.html",
+                        List.of("pages/new/index.html"), false, "write failed",
+                        dev.talos.tools.ToolMutationEffects.applied("pages/new"), null, null, null, List.of())),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix the page", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aFailedCheckKeepsOnlyTheFilesTheModelChoseThatChanged() {
+        // style.css was changed and failed its check, script.js was only proposed and changed nothing.
+        TurnResult result = turn(4, new Result.Ok("style.css failed its check."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(4, "trace-failed-model", true, true, List.of(),
+                        "FAILED", "style.css is not linked", "GRANTED_OR_NOT_REQUIRED", "PARTIAL", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "style.css", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "script.js", false, "old_string not found")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "make the page look better", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind(),
+                update.activeTaskContext().toString());
+        assertEquals(List.of("style.css"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void anAppliedEditBesideADeniedEditOfFilesTheModelChoseCarriesNoDenial() {
+        // The applied file was approved, the denied one was only proposed. Neither is a denied request of the user.
+        TurnResult result = turn(4, new Result.Ok("Updated style.css. The edit of index.html was denied."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(4, "trace-mixed-model", true, true, List.of(),
+                        "", "", "DENIED", "PARTIAL", "PARTIAL"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "style.css", true, ""),
+                        new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "index.html", false, "approval denied by user")),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "make the page look better", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aPolicyDeniedOperationBesideAnApprovedEditIsNotADeniedEdit() {
+        TurnResult result = turn(
+                5,
+                new Result.Ok("Updated index.html."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(5, "trace-policy", true, true, List.of("index.html"),
+                        "READBACK_ONLY", "", "GRANTED_OR_NOT_REQUIRED", "PARTIAL", "PARTIAL"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.delete_path", ".env", List.of(), false,
+                                "permission policy denied talos.delete_path (PROTECTED_PATH_DENY)",
+                                dev.talos.tools.ToolMutationEffects.none(),
+                                TurnRecord.ToolCallDisposition.BLOCKED,
+                                dev.talos.tools.ToolFailureReason.PERMISSION_POLICY_DENIED,
+                                null, List.of(asTarget(".env")))),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "edit index.html and delete .env", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertFalse(update.activeTaskContext().kind() == ActiveTaskContext.Kind.DENIED_MUTATION,
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void anAppliedOperationBesideAnEditRetiresTheCarriedContextOfItsPath() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("style.css"), "No files changed; approval denied by user.");
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated index.html and deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(3, "trace-mixed", true, true, List.of("index.html"),
+                        "READBACK_ONLY", "", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_UNVERIFIED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "Edit index.html so it works, then delete style.css.", previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aCreatedFolderKeepsTheDeniedContextOfAWriteInsideIt() {
+        TurnResult result = turn(
+                2,
+                new Result.Ok("No files were changed because approval was denied."),
+                policy("FILE_CREATE", true, true, List.of("site/index.html")),
+                trace(2, "trace-mkdir", true, true, List.of("site/index.html"),
+                        "", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL"),
+                List.of(operation("talos.mkdir", "site", true, "", asTarget("site")),
+                        new TurnRecord.ToolCallSummary(
+                                "talos.write_file", "site/index.html", false, "approval denied by user")),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "create a folder site and put an index.html in it", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("site/index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aFileTheOperationRequestExcludedKeepsItsCarriedContext() {
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        TurnResult result = operationTurnWithRoles(
+                operation("talos.delete_path", "notes.txt", true, "", asTarget("notes.txt")),
+                List.of(new LocalTurnTrace.RolefulTargetSummary(
+                                "notes.txt", "MENTIONED_ONLY", "USER_REQUEST", "named", "notes.txt", 1.0),
+                        new LocalTurnTrace.RolefulTargetSummary(
+                                "index.html", "FORBIDDEN", "USER_REQUEST", "excluded", "index.html", 1.0)));
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "delete notes.txt but do not touch index.html", previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertSame(previous, update.activeTaskContext());
+    }
+
+    @Test
+    void aFailedCheckBesideAnAppliedDeleteDoesNotCarryTheDeletedPath() {
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated index.html and deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(3, "trace-mixed", true, true, List.of(),
+                        "FAILED", "index.html still links style.css", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix the page and delete the old stylesheet", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aRetiredStaticWebContextDoesNotWidenTheTargetsOfTheTurn() {
+        ActiveTaskContext previous = ActiveTaskContext.partialMutation(
+                1, "trace-site", List.of("index.html", "style.css", "script.js"), "PARTIAL",
+                StaticWebRequirements.none());
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Updated the page and deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "script.js")),
+                trace(2, "trace-mixed", true, true, List.of("index.html", "script.js"),
+                        "PASSED", "", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "inline the styles and delete style.css", previous, ArtifactGoal.fromActiveContext(previous));
+
+        assertFalse(update.activeTaskContext().targets().contains("style.css"),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aRenameBesideAnEditRetiresTheCarriedContextOfItsSource() {
+        // The audit of the applied rename names only the destination. The request mentioned the source.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("notes.md"), "No files changed; approval denied by user.");
+        LocalTurnTrace localTrace = LocalTurnTrace.builder("trace-mixed", "session", 2, "2026-05-01T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary("FILE_EDIT", true, true, true,
+                        List.of("README.md"), List.of(), "explicit-request-pattern",
+                        List.of(new LocalTurnTrace.RolefulTargetSummary(
+                                        "notes.md", "MENTIONED_ONLY", "USER_REQUEST", "named", "notes.md", 1.0),
+                                new LocalTurnTrace.RolefulTargetSummary(
+                                        "README.md", "MUST_MUTATE", "USER_REQUEST", "named", "README.md", 1.0))))
+                .verification("READBACK_ONLY", "", List.of(), 0, 0, List.of(), List.of())
+                .outcome("COMPLETED_UNVERIFIED", "READBACK_ONLY", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "COMPLETED_UNVERIFIED")
+                .build();
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Renamed notes.md and fixed README.md."),
+                policy("FILE_EDIT", true, true, List.of("README.md")),
+                localTrace,
+                List.of(operation("talos.rename_path", "archive.md", true, "",
+                        asSource("notes.md"), asDestination("archive.md")),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "README.md", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "rename notes.md to archive.md and fix the typo in README.md", previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aFailedCheckOfAnOperationWhoseContractListsItsTargetCreatesNoContext() {
+        // Only the operation-only rule keeps this outcome from becoming a repair context on the deleted file.
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Deleted index.html."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(2, "trace-operation", true, true, List.of("index.html"),
+                        "FAILED", "index.html still exists", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(operation("talos.delete_path", "index.html", true, "", asTarget("index.html"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "delete index.html", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void anOperationPathTheContractListsIsNotCarriedAsADeniedEditTarget() {
+        TurnResult result = turn(
+                4,
+                new Result.Ok("No files were changed because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css")),
+                trace(4, "trace-mixed", true, true, List.of("index.html", "style.css"),
+                        "", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL"),
+                List.of(new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "index.html", false, "approval denied by user"),
+                        operation(
+                                "talos.delete_path", "style.css", false, "approval denied by user",
+                                        asTarget("style.css"))),
+                2);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "edit index.html and delete style.css", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aDeletedPathTheContractListsIsNotARepairTarget() {
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated index.html and deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css")),
+                trace(3, "trace-mixed", true, true, List.of("index.html", "style.css"),
+                        "FAILED", "index.html still links style.css", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix index.html and delete style.css", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aDeletedPathTheContractListsIsNotAVerifiedTarget() {
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated the page and deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css", "script.js")),
+                trace(3, "trace-mixed", true, true, List.of("index.html", "style.css", "script.js"),
+                        "PASSED", "", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "script.js", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "inline the styles, update script.js and delete style.css", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html", "script.js"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aCopiedFileThatIsThenEditedStaysARepairTarget() {
+        // The copy destination is also changed by a content call, so it remains a content target.
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Copied a.html to b.html and edited b.html."),
+                policy("FILE_EDIT", true, true, List.of("b.html")),
+                trace(3, "trace-mixed", true, true, List.of("b.html"),
+                        "FAILED", "b.html has no title", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(operation("talos.copy_path", "b.html", true, "", asSource("a.html"), asDestination("b.html")),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "b.html", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "copy a.html to b.html and give b.html a title", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("b.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aCreatedFolderKeepsTheCarriedContextOfAFileInsideIt() {
+        // Creating a folder moves nothing, so a carried task on a file inside it stays.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("site/index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.mkdir", "site", true, "", asTarget("site"))),
+                "create the folder site",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertSame(previous, update.activeTaskContext());
+    }
+
+    @Test
+    void aFailedCheckOfAnOperationOnlyTurnCarriesNoOtherFileItsContractListed() {
+        // No repair offer is rendered for an operation-only turn, so no repair context may be carried for it either.
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(2, "trace-operation", true, true, List.of("index.html"),
+                        "FAILED", "index.html still links style.css", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "FAILED"),
+                List.of(operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "delete style.css and keep index.html working", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aDeniedEditOfAFileTheTurnDeletedIsNotCarried() {
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Deleted style.css. The edit was not applied because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(2, "trace-mixed", true, true, List.of(),
+                        "", "", "DENIED", "SUCCEEDED", "COMPLETED_UNVERIFIED"),
+                List.of(new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "style.css", false, "approval denied by user"),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "delete style.css", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void aDeniedEditOfAFileInsideADeletedFolderIsNotCarried() {
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Deleted docs. The edit was not applied because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of()),
+                trace(2, "trace-mixed", true, true, List.of(),
+                        "", "", "DENIED", "SUCCEEDED", "COMPLETED_UNVERIFIED"),
+                List.of(new TurnRecord.ToolCallSummary(
+                                "talos.edit_file", "docs/a.md", false, "approval denied by user"),
+                        operation("talos.delete_path", "docs", true, "", asTarget("docs"))),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "update docs/a.md, then delete docs", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(),
+                update.activeTaskContext().toString());
+    }
+
+    @Test
+    void anEditedFileThatTheTurnThenDeletedIsNotARepairTarget() {
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated index.html and style.css, then deleted style.css."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css")),
+                trace(3, "trace-mixed", true, true, List.of("index.html", "style.css"),
+                        "FAILED", "index.html still links style.css", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "style.css", true, ""),
+                        operation("talos.delete_path", "style.css", true, "", asTarget("style.css"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix index.html and style.css, then delete style.css", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aDeniedWriteOfACopiedFileKeepsItsRetryContext() {
+        // The copy leaves the file in place, so the denied write to it is a denied content edit (I2). The resolver
+        // names b.html as the expected target of this request.
+        TurnResult result = turn(
+                2,
+                new Result.Ok("Copied a.html to b.html. The write was not applied because approval was denied."),
+                policy("FILE_EDIT", true, true, List.of("b.html")),
+                trace(2, "trace-mixed", true, true, List.of("b.html"),
+                        "", "", "DENIED", "SUCCEEDED", "COMPLETED_UNVERIFIED"),
+                List.of(operation("talos.copy_path", "b.html", true, "", asSource("a.html"), asDestination("b.html")),
+                        new TurnRecord.ToolCallSummary(
+                                "talos.write_file", "b.html", false, "approval denied by user")),
+                1);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "copy a.html to b.html and write a new heading into b.html", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("b.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aCopyDestinationTheContractListsIsNotARepairTarget() {
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Updated index.html and copied app.js to app.bak.js."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "app.bak.js")),
+                trace(3, "trace-mixed", true, true, List.of("index.html", "app.bak.js"),
+                        "FAILED", "index.html has no title", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        operation("talos.copy_path", "app.bak.js", true, "",
+                                asSource("app.js"), asDestination("app.bak.js"))),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "fix index.html and copy app.js to app.bak.js", ActiveTaskContext.none(), ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void theDestinationOfADeniedMoveIsNotCarriedBesideADeniedEdit() {
+        assertEquals(List.of("c.md"), deniedBesideADeniedEdit(
+                deniedOperation("talos.move_path", "a.md", asSource("a.md"), asDestination("archive/a.md")),
+                List.of("a.md", "archive/a.md", "c.md"), "c.md",
+                "move a.md to archive/a.md and add a heading to c.md"));
+    }
+
+    @Test
+    void theDestinationOfADeniedCopyIsNotCarriedBesideADeniedEdit() {
+        assertEquals(List.of("c.html"), deniedBesideADeniedEdit(
+                deniedOperation("talos.copy_path", "a.html", asSource("a.html"), asDestination("b.html")),
+                List.of("b.html", "c.html"), "c.html",
+                "copy a.html to b.html and add a title to c.html"));
+    }
+
+    @Test
+    void theDestinationOfADeniedRenameIsNotCarriedBesideADeniedEdit() {
+        assertEquals(List.of("README.md"), deniedBesideADeniedEdit(
+                deniedOperation("talos.rename_path", "notes.md", asSource("notes.md"), asDestination("archive.md")),
+                List.of("notes.md", "archive.md", "README.md"), "README.md",
+                "rename notes.md to archive.md and fix the typo in README.md"));
+    }
+
+    @Test
+    void theSourceOfAnAppliedMoveIsNotARepairTarget() {
+        // The applied move records its destination as the changed path, and its audit names the moved source.
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Moved a.md to archive/a.md and updated c.md."),
+                policy("FILE_EDIT", true, true, List.of("a.md", "archive/a.md", "c.md")),
+                trace(3, "trace-mixed", true, true, List.of("a.md", "archive/a.md", "c.md"),
+                        "FAILED", "c.md has no heading", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(operation("talos.move_path", "archive/a.md", true, "",
+                                asSource("a.md"), asDestination("archive/a.md")),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "c.md", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, "move a.md to archive/a.md and add a heading to c.md", ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, update.activeTaskContext().kind());
+        assertEquals(List.of("c.md"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aMoveDestinationIsMatchedExactlyAndKeepsTheCarriedContextOfAFileInsideIt() {
+        // A destination is created, so only the destination itself ends a carried task, not a file inside it.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("out/index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.move_path", "out", true, "",
+                        asSource("a.md"), asDestination("out"))),
+                "move a.md to out",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("out/index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void aCopyEndsTheCarriedContextOfItsSourceAtAnyOutcome() {
+        // Every operand of an operation is one of its paths, whatever the outcome, so the audit alone ends a carried
+        // task on the copied source although the request named no file.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("a.html"), "No files changed; approval denied by user.");
+        for (boolean denied : List.of(true, false)) {
+            ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                    operationTurn(denied, denied
+                            ? deniedOperation("talos.copy_path", "a.html", asSource("a.html"), asDestination("b.html"))
+                            : operation("talos.copy_path", "b.html", true, "",
+                                    asSource("a.html"), asDestination("b.html"))),
+                    "copy a.html to b.html",
+                    previous,
+                    ArtifactGoal.fromActiveContext(previous));
+
+            assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state(), "denied " + denied);
+        }
+    }
+
+    @Test
+    void aCopiedFolderIsMatchedExactlyAndKeepsTheCarriedContextOfAFileInsideIt() {
+        // A copy leaves its source in place, so only the copied folder itself ends a carried task, not a file inside.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("site/index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.copy_path", "backup", true, "",
+                        asSource("site"), asDestination("backup"))),
+                "copy site to backup",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("site/index.html"), update.activeTaskContext().targets());
+    }
+
+    @Test
+    void anAppliedRenameOfAFolderEndsTheCarriedContextOfAFileInsideItsSource() {
+        // The request names no file, so only the audited source of the rename relocates the carried file.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("site/index.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(false, operation("talos.rename_path", "web", true, "",
+                        asSource("site"), asDestination("web"))),
+                "rename site to web",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+    }
+
+    @Test
+    void aDeniedRenameEndsTheCarriedContextOfItsDestination() {
+        // The audit names the destination of the denied rename, so a carried task on it ends without request names.
+        ActiveTaskContext previous = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("home.html"), "No files changed; approval denied by user.");
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                operationTurn(true, deniedOperation("talos.rename_path", "index.html",
+                        asSource("index.html"), asDestination("home.html"))),
+                "rename index.html to home.html",
+                previous,
+                ArtifactGoal.fromActiveContext(previous));
+
+        assertEquals(ActiveTaskContext.State.NONE, update.activeTaskContext().state());
+    }
+
+    /** The targets carried after a denied operation and a denied content edit in one turn. */
+    private List<String> deniedBesideADeniedEdit(
+            TurnRecord.ToolCallSummary operation, List<String> listed, String edited, String request) {
+        TurnResult result = turn(
+                2,
+                new Result.Ok("No file changes were applied because approval was denied."),
+                policy("FILE_EDIT", true, true, listed),
+                trace(2, "trace-mixed", true, true, listed, "", "", "DENIED", "DENIED", "BLOCKED_BY_APPROVAL"),
+                List.of(operation, new TurnRecord.ToolCallSummary(
+                        "talos.edit_file", edited, false, "approval denied by user")),
+                2);
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result, request, ActiveTaskContext.none(), ArtifactGoal.none());
+        assertEquals(ActiveTaskContext.Kind.DENIED_MUTATION, update.activeTaskContext().kind(),
+                update.activeTaskContext().toString());
+        return update.activeTaskContext().targets();
+    }
+
+    /** An operation call the user denied, as the audit records it. */
+    private static TurnRecord.ToolCallSummary deniedOperation(
+            String tool, String pathHint, TurnRecord.OperationOperand... operands) {
+        return new TurnRecord.ToolCallSummary(tool, pathHint, List.of(), false, "approval denied by user",
+                dev.talos.tools.ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.BLOCKED,
+                dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED, null, List.of(operands));
+    }
+
+    /** An operation call as the audit records it, naming each operand with its role. */
+    private static TurnRecord.ToolCallSummary operation(
+            String tool, String pathHint, boolean success, String reason, TurnRecord.OperationOperand... operands) {
+        return new TurnRecord.ToolCallSummary(tool, pathHint, List.of(), success, reason, null, null, null, null,
+                List.of(operands));
+    }
+
+    private static TurnRecord.OperationOperand asSource(String path) {
+        return new TurnRecord.OperationOperand(path, WorkspaceOperationObligation.Role.SOURCE);
+    }
+
+    private static TurnRecord.OperationOperand asDestination(String path) {
+        return new TurnRecord.OperationOperand(path, WorkspaceOperationObligation.Role.DESTINATION);
+    }
+
+    private static TurnRecord.OperationOperand asTarget(String path) {
+        return new TurnRecord.OperationOperand(path, WorkspaceOperationObligation.Role.TARGET);
+    }
+
+    private static TurnResult operationTurnWithRoles(
+            TurnRecord.ToolCallSummary call, List<LocalTurnTrace.RolefulTargetSummary> roles) {
+        LocalTurnTrace localTrace = LocalTurnTrace.builder("trace-operation", "session", 2, "2026-05-01T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary("FILE_EDIT", true, true, true, List.of(),
+                        List.of(), "sequential-workspace-operation-awaits-typed-owner", roles))
+                .verification("READBACK_ONLY", "", List.of(), 0, 0, List.of(), List.of())
+                .outcome("COMPLETED_UNVERIFIED", "READBACK_ONLY", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "COMPLETED_UNVERIFIED")
+                .build();
+        return turn(2, new Result.Ok("Done."), policy("FILE_EDIT", true, true, List.of()), localTrace,
+                List.of(call), 0);
+    }
+
+    /** A delete turn as the delete rerun recorded it, a FILE_EDIT contract without expected targets. */
+    private static TurnResult operationTurn(boolean denied, TurnRecord.ToolCallSummary call, String... named) {
+        LocalTurnTrace base = trace(2, "trace-operation", true, true, List.of(),
+                denied ? "" : "READBACK_ONLY", "", denied ? "DENIED" : "GRANTED_OR_NOT_REQUIRED",
+                denied ? "DENIED" : "SUCCEEDED", denied ? "BLOCKED_BY_APPROVAL" : "COMPLETED_UNVERIFIED");
+        LocalTurnTrace localTrace = LocalTurnTrace.builder("trace-operation", "session", 2, "2026-05-01T00:00:00Z")
+                .taskContract(new LocalTurnTrace.TaskContractSummary("FILE_EDIT", true, true, true, List.of(),
+                        List.of(), "sequential-workspace-operation-awaits-typed-owner",
+                        java.util.Arrays.stream(named).map(path -> new LocalTurnTrace.RolefulTargetSummary(
+                                path, "MENTIONED_ONLY", "USER_REQUEST", "named", path, 1.0)).toList()))
+                .verification(base.verification().status(), "", List.of(), 0, 0, List.of(), List.of())
+                .outcome(base.outcome().status(), base.outcome().verificationStatus(), base.outcome().approvalStatus(),
+                        base.outcome().mutationStatus(), base.outcome().classification())
+                .build();
+        return turn(
+                2,
+                new Result.Ok(denied ? "No file changes were applied because approval was denied." : "Done."),
+                policy("FILE_EDIT", true, true, List.of()),
+                localTrace,
+                List.of(call),
+                denied ? 1 : 0);
+    }
+
+    @Test
     void failedVerificationCreatesRepairContextWithFindings() {
         TurnResult result = turn(
                 9,
@@ -529,6 +1393,31 @@ class ActiveTaskContextUpdaterTest {
         assertEquals(ActiveTaskContext.Kind.VERIFIED_MUTATION, update.activeTaskContext().kind());
         assertEquals(List.of("index.html", "style.css", "script.js"), update.activeTaskContext().targets());
         assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, update.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void aChecksPassCompletedUnverifiedKeepsTheSameTaskContextKind() {
+        TurnResult result = turn(
+                10,
+                new Result.Ok("Done."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css", "script.js")),
+                trace(10, "trace-static-checks", true, true, List.of("index.html", "style.css", "script.js"),
+                        "PASSED", "Static web coherence checks passed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED",
+                        "COMPLETED_UNVERIFIED"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "style.css", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "script.js", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Make it a modern landing page.",
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), update.activeTaskContext().targets());
     }
 
     @Test
@@ -768,6 +1657,58 @@ class ActiveTaskContextUpdaterTest {
 
         assertSame(previous, update.activeTaskContext());
         assertSame(previousGoal, update.artifactGoal());
+    }
+
+    @Test
+    void failedStaticVerificationWithTheRenderedOfferBindsTheRepairOffer() {
+        ActiveTaskContext context = failedTurnContext(
+                "[Task incomplete: Static verification failed - Missing #app root]\n\n"
+                        + "The requested task is not verified complete.\n\n"
+                        + dev.talos.runtime.context.RepairOffer.LINE);
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, context.kind());
+        assertTrue(context.hasBoundRepairOffer());
+        assertFalse(context.hasBoundProposal());
+    }
+
+    @Test
+    void anOfferLineWithoutTheRuntimeFailureHeaderIsNotBound() {
+        ActiveTaskContext context = failedTurnContext(
+                "Static verification failed.\n\n" + dev.talos.runtime.context.RepairOffer.LINE);
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, context.kind());
+        assertFalse(context.hasBoundRepairOffer());
+    }
+
+    @Test
+    void aBoundRepairOfferExpiresWithItsContext() {
+        ActiveTaskContext offered = failedTurnContext(
+                "[Task incomplete: Static verification failed - Missing #app root]\n\n"
+                        + dev.talos.runtime.context.RepairOffer.LINE);
+        var raw = dev.talos.runtime.task.TaskContractResolver.fromUserRequest("yes");
+
+        var live = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(
+                "yes", raw, offered, ArtifactGoal.fromActiveContext(offered), 10);
+        var expired = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(
+                "yes", raw, offered, ArtifactGoal.fromActiveContext(offered), 13);
+
+        assertTrue(live.consumed());
+        assertTrue(live.taskContract().mutationAllowed());
+        assertFalse(expired.consumed());
+        assertFalse(expired.taskContract().mutationAllowed());
+    }
+
+    private ActiveTaskContext failedTurnContext(String answer) {
+        TurnResult result = turn(
+                9,
+                new Result.Ok(answer),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(9, "trace-failed-offer", true, true, List.of("index.html"),
+                        "FAILED", "Missing #app root", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, "")),
+                0);
+        return updater.updateAfterTurn(result, "Update index.html.", ActiveTaskContext.none(), ArtifactGoal.none())
+                .activeTaskContext();
     }
 
     private void assertSuccessfulUnverifiedMutationPreservesContext(

@@ -642,6 +642,50 @@ class WorkspaceOperationTurnProcessorTest {
     }
 
     @Test
+    void typedDeleteRejectsAMissingTargetBeforeApprovalOrConsumption(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("index.html"), "<p>Index</p>");
+        AtomicInteger approvals = new AtomicInteger();
+        Config config = config(false);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new DeletePathTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(approvals),
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(
+                        temp.resolve("checkpoints"))));
+        String request = "please remove the page";
+        LocalTurnTraceCapture.begin(
+                "trc-missing-delete", "sid", 1,
+                "2026-10-27T00:00:00Z", "sid", "auto", "test", "model",
+                request);
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver
+                .resolveFromUserRequest(request));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.delete_path", Map.of("path", "page")),
+                context(workspace, config));
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("does not exist in the workspace"),
+                result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals(0, lifecycleCount(
+                trace, "WORKSPACE_OPERATION_APPROVAL_REQUIRED"));
+        assertEquals(0, lifecycleCount(
+                trace, "WORKSPACE_OPERATION_OBLIGATION_CONSUMED"));
+        assertTrue(Files.exists(workspace.resolve("index.html")));
+    }
+
+    @Test
     void activeApprovalPolicyDenyBlocksExactWorkspaceOperationBeforeGateOrExecution(
             @TempDir Path temp
     ) throws Exception {

@@ -2082,7 +2082,8 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void missingStylingCorrectionAfterSiteMutationInheritsApplyCapableContract() {
+    void missingStylingComplaintWithoutADirectiveStaysReadOnly() {
+        // P2 D-a: a correction without a directive is answered, not executed.
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user(
                 "make the rest files please according to txt. I need a good modern synthwave style"));
@@ -2092,6 +2093,24 @@ class TaskContractResolverTest {
                 Updated index.html.
                 """));
         messages.add(ChatMessage.user("But you just changed the index and reduced it. You never put any style in the index"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationAllowed(), contract.toString());
+    }
+
+    @Test
+    void missingStylingCorrectionAfterSiteMutationInheritsApplyCapableContract() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "make the rest files please according to txt. I need a good modern synthwave style"));
+        messages.add(ChatMessage.assistant("""
+                [File write/readback passed. No task-specific verifier was applicable.]
+
+                Updated index.html.
+                """));
+        messages.add(ChatMessage.user("But you just changed the index and reduced it. You never put any style in the index, "
+                + "fix it"));
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
@@ -2173,7 +2192,10 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        // P2 D-c: the existing site is bound from disk by the workspace reconciler, not by convention.
+        assertEquals(Set.of(), contract.expectedTargets());
+        assertTrue(contract.classificationReason().contains(TaskContractResolver.CONTEXTUAL_STATIC_WEB_SURFACE),
+                contract.classificationReason());
     }
 
     @Test
@@ -2188,7 +2210,11 @@ class TaskContractResolverTest {
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        // P2 D-c: the conventional triplet is no longer invented. The workspace reconciler binds the
+        // static-web files that exist on disk (AssistantTurnPreparationAuthorityOriginTest).
+        assertEquals(Set.of(), contract.expectedTargets());
+        assertTrue(contract.classificationReason().contains(TaskContractResolver.CONTEXTUAL_STATIC_WEB_SURFACE),
+                contract.classificationReason());
     }
 
     @Test

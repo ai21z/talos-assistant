@@ -118,8 +118,9 @@ class ToolCallDispositionTest {
         append(store, original);
         ObjectNode row = (ObjectNode) JSON.readTree(Files.readString(log()));
         ArrayNode calls = (ArrayNode) row.get("toolCalls");
-        ((ObjectNode) calls.get(0)).remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason"));
-        ((ObjectNode) calls.get(1)).remove(List.of("executionDisposition", "failureReason"));
+        ((ObjectNode) calls.get(0)).remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason",
+                "operands"));
+        ((ObjectNode) calls.get(1)).remove(List.of("executionDisposition", "failureReason", "operands"));
         String legacyPrefix = JSON.writeValueAsString(row) + "\n";
         Files.writeString(log(), legacyPrefix);
 

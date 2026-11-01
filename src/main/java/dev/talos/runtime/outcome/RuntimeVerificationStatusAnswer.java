@@ -92,9 +92,9 @@ public final class RuntimeVerificationStatusAnswer {
                 || !context.unresolvedVerificationFailures().isEmpty()) {
             return false;
         }
-        boolean latestPassed = "PASSED".equalsIgnoreCase(context.verificationStatus())
-                || "COMPLETED_VERIFIED".equalsIgnoreCase(context.completionStatus());
-        if (!latestPassed) return false;
+        if (!ChangeSummaryContext.verifiedComplete(context.verificationStatus(), context.completionStatus())) {
+            return false;
+        }
         List<ChangeSummaryContext.FileChange> statefulChanges = context.changedFiles().stream()
                 .filter(RuntimeVerificationStatusAnswer::hasRuntimeFileVerificationState)
                 .toList();
@@ -157,7 +157,6 @@ public final class RuntimeVerificationStatusAnswer {
 
     private static boolean runtimeFileVerifiedComplete(ChangeSummaryContext.FileChange change) {
         if (change == null) return false;
-        return "PASSED".equalsIgnoreCase(change.verificationStatus())
-                || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
+        return ChangeSummaryContext.verifiedComplete(change.verificationStatus(), change.completionStatus());
     }
 }

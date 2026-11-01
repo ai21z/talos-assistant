@@ -1389,10 +1389,12 @@ class AssistantTurnExecutorTest {
         }
     }
 
+    // A bounded continuation prompt names the frame header, so a frame is matched by its leading header.
     private static boolean isCurrentTurnCapabilityFrame(ChatMessage message) {
         return message != null
+                && "system".equals(message.role())
                 && message.content() != null
-                && message.content().contains("[CurrentTurnCapability]");
+                && message.content().startsWith("[CurrentTurnCapability]");
     }
 
     @Test
@@ -1820,6 +1822,10 @@ class AssistantTurnExecutorTest {
             assertEquals(1, request.messages.stream()
                     .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
                     .count(), "exactly one current-turn frame should be sent");
+            assertTrue(request.messages.getFirst().content().contains(
+                            "No tools are available in this provider request."),
+                    "the replayed request's primary prompt must describe its own surface: "
+                            + request.messages.getFirst().content());
             assertTrue(prompt.contains("type: FILE_CREATE"), prompt);
             assertTrue(prompt.contains("mutationAllowed: false"), prompt);
             assertTrue(request.tools.isEmpty(), request.tools.toString());
@@ -2299,6 +2305,7 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("Source-derived coverage checks passed"), out.text());
             assertTrue(out.text().contains("summary semantics were not fully verified"), out.text());
             assertFalse(out.text().contains("[Static verification: passed"), out.text());
+            assertFalse(out.text().contains("[Checks passed - "), out.text());
         }
 
         @Test
@@ -2907,13 +2914,37 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys " + "large-system-token ".repeat(600)));
             messages.add(ChatMessage.user("Here is the proposal: change README somehow."));
             messages.add(ChatMessage.assistant("Proposal: update README.md with a clearer heading."));
-            messages.add(ChatMessage.user("Apply that proposal now."));
+            messages.add(ChatMessage.user("Update README.md as that proposal says."));
 
             assertThrows(EngineException.ContextBudgetExceeded.class, () ->
                     AssistantTurnExecutor.execute(
                             messages, workspace, ctx, new AssistantTurnExecutor.Options()));
             assertTrue(recorded.requests().isEmpty(),
                     "non-literal/deictic mutation requests must not use the exact-write compact fallback");
+        }
+
+        @Test
+        void aDeicticApplyWithNothingPendingIsAnsweredBeforeAnyBudgetOrFallback(@TempDir Path workspace)
+                throws Exception {
+            // The proposal exists only as prose, so nothing is pending and the runtime answers without a request.
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("This should not be reached.", List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys " + "large-system-token ".repeat(600)));
+            messages.add(ChatMessage.user("Here is the proposal: change README somehow."));
+            messages.add(ChatMessage.assistant("Proposal: update README.md with a clearer heading."));
+            messages.add(ChatMessage.user("Apply that proposal now."));
+
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals(AssistantTurnPreparation.NOTHING_PENDING_ANSWER, output.text());
+            assertTrue(recorded.requests().isEmpty(), recorded.requests().toString());
         }
 
         @Test

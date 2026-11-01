@@ -81,6 +81,21 @@ public final class ResponseObligationVerifier {
                 + "the required write/edit tool calls on this turn, so no files were changed.";
     }
 
+    /**
+     * The answer when tools an obligation needs were not offered to the model on this turn. The operation text applies
+     * when the exact workspace operation tool was missing, and the write and edit text otherwise.
+     */
+    public static String deterministicRequiredToolsUnavailableAnswer(boolean workspaceOperationToolUnavailable) {
+        if (workspaceOperationToolUnavailable) {
+            return "[Action obligation failed: no workspace operation was performed in this turn.]\n\n"
+                    + "The workspace operation tool this request needs was not available to the model on this "
+                    + "turn, so the requested workspace operation was not applied.";
+        }
+        return "[Action obligation failed: no file was changed in this turn.]\n\n"
+                + "The write/edit tools this request needs were not available to the model on this turn, "
+                + "so no files were changed.";
+    }
+
     public static String deterministicNoActionAnswer(ActionObligation obligation) {
         if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
             return "[Action obligation failed: no workspace operation was performed in this turn.]\n\n"

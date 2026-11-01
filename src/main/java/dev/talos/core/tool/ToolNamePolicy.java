@@ -214,6 +214,15 @@ public final class ToolNamePolicy {
         return Optional.empty();
     }
 
+    /** Every dotted or colon-separated name token in the text, in order of appearance. */
+    public static java.util.List<String> toolLikeTokens(String text) {
+        if (text == null || text.isBlank()) return java.util.List.of();
+        java.util.List<String> tokens = new java.util.ArrayList<>();
+        Matcher matcher = TOOL_LIKE_TOKEN.matcher(text);
+        while (matcher.find()) tokens.add(matcher.group(1));
+        return java.util.List.copyOf(tokens);
+    }
+
     public static String normalizeTalosSeparator(String rawName) {
         if (rawName == null) return "";
         String normalized = rawName.strip();

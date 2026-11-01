@@ -64,7 +64,7 @@ public final class ActionObligationPolicy {
         if (!contract.mutationAllowed() || phase != ExecutionPhase.APPLY) {
             return ActionObligation.INSPECT_REQUIRED;
         }
-        if ("explicit-review-and-fix-request".equals(contract.classificationReason())) {
+        if (contract.hasClassificationReason("explicit-review-and-fix-request")) {
             return ActionObligation.CONDITIONAL_REVIEW_FIX;
         }
         return ActionObligation.MUTATING_TOOL_REQUIRED;

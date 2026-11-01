@@ -102,7 +102,7 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
-    void protocolV6RejectsLegacyRunSchemaV1() throws Exception {
+    void currentProtocolRejectsLegacyRunSchemaV1() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path resultPath = packet.runRoot().resolve("result.json");
@@ -122,7 +122,8 @@ class QualificationEvidenceValidatorTest {
 
         assertFalse(validation.valid());
         assertTrue(validation.findings().stream().anyMatch(finding ->
-                        finding.contains("protocol v6 requires run schema v2")),
+                        finding.contains("protocol v" + QualificationProtocol.VERSION
+                                + " requires run schema v2")),
                 () -> String.join("\n", validation.findings()));
     }
 

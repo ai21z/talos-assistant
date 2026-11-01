@@ -19,22 +19,22 @@ class QualificationCampaignContinuationMainTest {
     Path temp;
 
     @Test
-    void duplicateProtocolSixThenFiveCannotDowngradeIntoLegacyContinuation() throws Exception {
+    void duplicateCurrentThenLegacyProtocolCannotDowngradeIntoLegacyContinuation() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
         QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog, scenario);
         Path campaignPath = packet.root().resolve("campaign.json");
         String campaign = Files.readString(campaignPath, StandardCharsets.UTF_8);
-        String protocolSix = "\"protocolVersion\" : 6";
-        assertTrue(campaign.contains(protocolSix));
+        String current = "\"protocolVersion\" : " + QualificationProtocol.VERSION;
+        assertTrue(campaign.contains(current));
 
-        // This is the exact {6,5} downgrade shape that permissive JSON readers
+        // This is the exact {current,5} downgrade shape that permissive JSON readers
         // collapse to one value. The Java authority must reject both keys.
         Files.writeString(
                 campaignPath,
                 campaign.replace(
-                        protocolSix,
-                        protocolSix + ",\n  \"protocolVersion\" : 5"),
+                        current,
+                        current + ",\n  \"protocolVersion\" : 5"),
                 StandardCharsets.UTF_8);
 
         Invocation invocation = invoke(packet.root(), scenario.id(), 1);
@@ -54,7 +54,8 @@ class QualificationCampaignContinuationMainTest {
         String campaign = Files.readString(campaignPath, StandardCharsets.UTF_8);
         Files.writeString(
                 campaignPath,
-                campaign.replace("\"protocolVersion\" : 6", "\"protocolVersion\" : 5"),
+                campaign.replace("\"protocolVersion\" : " + QualificationProtocol.VERSION,
+                        "\"protocolVersion\" : 5"),
                 StandardCharsets.UTF_8);
 
         Invocation invocation = invoke(packet.root(), scenario.id(), 1);

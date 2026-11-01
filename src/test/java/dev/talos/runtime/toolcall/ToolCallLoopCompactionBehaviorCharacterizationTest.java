@@ -139,6 +139,94 @@ class ToolCallLoopCompactionBehaviorCharacterizationTest {
         );
     }
 
+    @Test
+    void anOlderResultIsKeptExactlyWhileTheKeptCharactersFitTheBudget() {
+        String oldest = successBody("talos.grep", "a".repeat(300));
+        String older = successBody("talos.grep", "b".repeat(200));
+        String recent = successBody("talos.grep", "c".repeat(100));
+        String newest = successBody("talos.grep", "d".repeat(100));
+        int fitsOlder = newest.length() + recent.length() + older.length();
+
+        List<ChatMessage> atBoundary = budgetMessages(oldest, older, recent, newest);
+        var compactedAtBoundary = ToolCallSupport.compactOlderToolResultsInPlace(atBoundary, null, java.util.Set.of(), fitsOlder);
+        List<ChatMessage> belowBoundary = budgetMessages(oldest, older, recent, newest);
+        var compactedBelow = ToolCallSupport.compactOlderToolResultsInPlace(belowBoundary, null, java.util.Set.of(), fitsOlder - 1);
+
+        assertAll(
+                () -> assertEquals(List.of(new ToolCallSupport.CompactedToolResult(2, oldest.length())), compactedAtBoundary),
+                () -> assertEquals(older, atBoundary.get(3).content()),
+                () -> assertEquals(List.of(new ToolCallSupport.CompactedToolResult(2, oldest.length()),
+                        new ToolCallSupport.CompactedToolResult(3, older.length())), compactedBelow),
+                () -> assertEquals(recent, belowBoundary.get(4).content()),
+                () -> assertEquals(newest, belowBoundary.get(5).content()));
+    }
+
+    @Test
+    void aPreexistingStubKeepsItsTextAndTheBudgetWalkContinuesPastIt() {
+        String stub = "[compacted: talos.grep result, 900 chars - already compacted]";
+        String older = successBody("talos.grep", "o".repeat(400));
+        String recent = successBody("talos.grep", "c".repeat(100));
+        String newest = successBody("talos.grep", "d".repeat(100));
+        List<ChatMessage> messages = budgetMessages(older, stub, recent, newest);
+        int fitsStubNotOlder = newest.length() + recent.length() + stub.length();
+
+        var compacted = ToolCallSupport.compactOlderToolResultsInPlace(messages, null, java.util.Set.of(), fitsStubNotOlder);
+
+        assertAll(
+                () -> assertEquals(List.of(new ToolCallSupport.CompactedToolResult(2, older.length())), compacted),
+                () -> assertEquals(stub, messages.get(3).content()),
+                () -> assertEquals(recent, messages.get(4).content()));
+    }
+
+    @Test
+    void theTwoNewestResultsAreKeptEvenWhenTheyExceedTheBudget() {
+        String older = successBody("talos.grep", "small");
+        String recent = successBody("talos.grep", "c".repeat(500));
+        String newest = successBody("talos.grep", "d".repeat(500));
+        List<ChatMessage> messages = budgetMessages(older, recent, newest);
+
+        var compacted = ToolCallSupport.compactOlderToolResultsInPlace(messages, null, java.util.Set.of(), 10);
+
+        assertAll(
+                () -> assertEquals(List.of(new ToolCallSupport.CompactedToolResult(2, older.length())), compacted),
+                () -> assertEquals(recent, messages.get(3).content()),
+                () -> assertEquals(newest, messages.get(4).content()));
+    }
+
+    @Test
+    void aNoticeTakesNoBudgetAndStaysIntact() {
+        String older = successBody("talos.grep", "OLDER_HIT");
+        String notice = "[Runtime notice] " + "n".repeat(5_000);
+        String recent = successBody("talos.grep", "RECENT_HIT");
+        String newest = successBody("talos.grep", "NEWEST_HIT");
+        List<ChatMessage> messages = budgetMessages(older, notice, recent, newest);
+        int fitsAllResults = older.length() + recent.length() + newest.length();
+
+        var compacted = ToolCallSupport.compactOlderToolResultsInPlace(messages, null, java.util.Set.of(3), fitsAllResults);
+
+        assertAll(
+                () -> assertEquals(List.of(), compacted),
+                () -> assertEquals(older, messages.get(2).content()),
+                () -> assertEquals(notice, messages.get(3).content()));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theKeepBudgetIsHalfTheConfiguredContextAtFourCharactersAToken() {
+        var configured = new dev.talos.core.Config();
+        ((Map<String, Object>) configured.data.get("limits")).put("llm_context_max_tokens", 16_384);
+        assertAll(
+                () -> assertEquals(16_384, ToolCallSupport.keepBudgetChars(new dev.talos.core.Config())),
+                () -> assertEquals(32_768, ToolCallSupport.keepBudgetChars(configured)),
+                () -> assertEquals(16_384, ToolCallSupport.keepBudgetChars(null)));
+    }
+
+    private static List<ChatMessage> budgetMessages(String... toolBodies) {
+        List<ChatMessage> messages = new ArrayList<>(List.of(ChatMessage.system("system"), ChatMessage.user("find the hits")));
+        for (int i = 0; i < toolBodies.length; i++) messages.add(ChatMessage.toolResult("call-" + i, toolBodies[i]));
+        return messages;
+    }
+
     private static String successBody(String toolName, String output) {
         return "[tool_result: " + toolName + "]\n" + output + "\n[/tool_result]";
     }

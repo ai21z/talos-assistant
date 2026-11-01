@@ -21,7 +21,7 @@ public final class ConditionalReviewFixPolicy {
     public static boolean isConditionalReviewAndFix(TaskContract contract) {
         return contract != null
                 && contract.mutationAllowed()
-                && CLASSIFICATION_REASON.equals(contract.classificationReason());
+                && contract.hasClassificationReason(CLASSIFICATION_REASON);
     }
 
     public static Optional<String> noChangeAnswerIfCurrentWorkspacePasses(

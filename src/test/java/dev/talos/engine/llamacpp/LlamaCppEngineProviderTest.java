@@ -585,7 +585,7 @@ class LlamaCppEngineProviderTest {
                                     "e".repeat(64),
                                     ProviderProcessLaunchReceipt.EndpointObserverKind
                                             .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
-                                    "f".repeat(64), 6)));
+                                    "f".repeat(64), 7)));
             LlamaCppEngine engine = new LlamaCppEngine(
                     llamaCfg,
                     SyntheticManagedServer.manager(llamaCfg, (command, logPath) -> {

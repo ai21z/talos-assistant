@@ -21,8 +21,8 @@ class QualificationRequestObligationTest {
                     "F21-context-multi-requirement-edit");
 
     @Test
-    void protocolV6F21CarriesTheProductionFinalLinePreservationAndForbiddenTargetContract() {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+    void currentProtocolF21CarriesTheProductionFinalLinePreservationAndForbiddenTargetContract() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -56,8 +56,8 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6F16AndF17CarryTheirExactProductionObligations() {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+    void currentProtocolF16AndF17CarryTheirExactProductionObligations() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
 
         assertEquals(
                 V6_MIGRATED_SCENARIOS,
@@ -197,7 +197,7 @@ class QualificationRequestObligationTest {
         QualificationScenarioBank.Catalog legacy =
                 QualificationScenarioBank.load(5);
         QualificationScenarioBank.Catalog current =
-                QualificationScenarioBank.load(6);
+                QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.ScenarioBank legacyBank = legacy.full();
         var v6Obligation = current.expectedRequestObligation(
                 "F21-context-multi-requirement-edit");
@@ -248,8 +248,8 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6FailsClosedWhenF21ObligationIsMissingOrNamesAnExtraScenario() {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+    void currentProtocolFailsClosedWhenF21ObligationIsMissingOrNamesAnExtraScenario() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.ScenarioBank full = catalog.full();
 
         QualificationProtocol.ScenarioBank missing = new QualificationProtocol.ScenarioBank(
@@ -260,7 +260,7 @@ class QualificationRequestObligationTest {
                 Map.of(),
                 full.scenarios());
         assertThrows(IllegalArgumentException.class, () ->
-                QualificationScenarioBank.validateExpectedRequestObligations(missing, 6));
+                QualificationScenarioBank.validateExpectedRequestObligations(missing, QualificationProtocol.VERSION));
 
         Map<String, dev.talos.runtime.obligation.RequestObligation> extra =
                 new LinkedHashMap<>(full.expectedRequestObligations());
@@ -275,12 +275,12 @@ class QualificationRequestObligationTest {
                 extra,
                 full.scenarios());
         assertThrows(IllegalArgumentException.class, () ->
-                QualificationScenarioBank.validateExpectedRequestObligations(overDeclared, 6));
+                QualificationScenarioBank.validateExpectedRequestObligations(overDeclared, QualificationProtocol.VERSION));
     }
 
     @Test
-    void protocolV6FailsClosedWhenPreservationOrFinalLineDriftsFromProduction() throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+    void currentProtocolFailsClosedWhenPreservationOrFinalLineDriftsFromProduction() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         var preservationTree = (com.fasterxml.jackson.databind.node.ObjectNode)
                 QualificationJson.tree(catalog.full());
         var f21 = (com.fasterxml.jackson.databind.node.ObjectNode)
@@ -309,8 +309,8 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6RejectsUnknownObligationFieldsKindsAndMissingTopLevelField() throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+    void currentProtocolRejectsUnknownObligationFieldsKindsAndMissingTopLevelField() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
 
         var unknownField = (com.fasterxml.jackson.databind.node.ObjectNode)
                 QualificationJson.tree(catalog.full());
@@ -342,7 +342,7 @@ class QualificationRequestObligationTest {
 
     @Test
     void f21SharedObligationPassesOnlyTheExactPreservedFinalAppend() throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -387,7 +387,7 @@ class QualificationRequestObligationTest {
     @Test
     void f16SharedObligationRequiresTheExactPreservedUniqueFinalSection()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F16-recovery-append-section");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -430,7 +430,7 @@ class QualificationRequestObligationTest {
     @Test
     void f17SharedObligationRequiresOneReplacementAndPreservesEveryOtherLine()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F17-recovery-full-file-preservation");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -463,9 +463,9 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6MechanicalResultPersistsTheExactRequestObligationIdentity()
+    void currentProtocolMechanicalResultPersistsTheExactRequestObligationIdentity()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -481,7 +481,7 @@ class QualificationRequestObligationTest {
 
         QualificationRequirementFinalizer.Document document =
                 QualificationRequirementFinalizer.evaluate(
-                        6,
+                        QualificationProtocol.VERSION,
                         catalog.sha256(),
                         scenario,
                         new QualificationRequirementEvaluator.Evidence(
@@ -510,9 +510,9 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6F16AndF17MechanicalResultsPersistTheirExactTypedBindings()
+    void currentProtocolF16AndF17MechanicalResultsPersistTheirExactTypedBindings()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         for (String scenarioId : java.util.List.of(
                 "F16-recovery-append-section",
                 "F17-recovery-full-file-preservation")) {
@@ -543,7 +543,7 @@ class QualificationRequestObligationTest {
 
             QualificationRequirementFinalizer.Document document =
                     QualificationRequirementFinalizer.evaluate(
-                            6,
+                            QualificationProtocol.VERSION,
                             catalog.sha256(),
                             scenario,
                             new QualificationRequirementEvaluator.Evidence(
@@ -603,14 +603,14 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void protocolV6NonMigratedMechanicalResultRoundTripsWithExplicitEmptyBinding()
+    void currentProtocolNonMigratedMechanicalResultRoundTripsWithExplicitEmptyBinding()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F22-weak-hardware-short-read");
         QualificationRequirementFinalizer.Document document =
                 QualificationRequirementFinalizer.evaluate(
-                        6,
+                        QualificationProtocol.VERSION,
                         catalog.sha256(),
                         scenario,
                         new QualificationRequirementEvaluator.Evidence(
@@ -634,15 +634,15 @@ class QualificationRequestObligationTest {
     }
 
     @Test
-    void parentProtocolV6MechanicalSchemaRemainsReadableButExplicitlyUnbound()
+    void parentCurrentProtocolMechanicalSchemaRemainsReadableButExplicitlyUnbound()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var legacy = QualificationJson.tree(Map.of(
                 "schemaName", "talos.modelQualification.mechanicalRequirements",
                 "schemaVersion", 1,
-                "protocolVersion", 6,
+                "protocolVersion", QualificationProtocol.VERSION,
                 "scenarioBankSha256", catalog.sha256(),
                 "scenarioId", scenario.id(),
                 "requirements", java.util.List.of()));
@@ -665,12 +665,30 @@ class QualificationRequestObligationTest {
                 QualificationJson.read(
                         reencoded,
                         QualificationRequirementFinalizer.Document.class));
+
+        // Protocol 6 was never published, so its mechanical records are refused. The record uses
+        // schema 2 so that the protocol gate, not the legacy schema adapter, refuses it.
+        var frozen = (com.fasterxml.jackson.databind.node.ObjectNode) legacy.deepCopy();
+        frozen.put("protocolVersion", 6);
+        frozen.put("schemaVersion", 2);
+        frozen.put("scenarioBankSha256", QualificationScenarioBank.load(6).sha256());
+        frozen.put("requestObligationSha256", "");
+        frozen.putObject("requestObligation");
+        Throwable refused = assertThrows(java.io.IOException.class, () -> QualificationJson.read(
+                QualificationJson.bytes(frozen),
+                QualificationRequirementFinalizer.Document.class));
+        boolean protocolRefusal = false;
+        for (Throwable cause = refused; cause != null; cause = cause.getCause()) {
+            protocolRefusal |= String.valueOf(cause.getMessage())
+                    .contains("unsupported mechanical requirements protocol version");
+        }
+        assertTrue(protocolRefusal, String.valueOf(refused));
     }
 
     @Test
-    void protocolV6MechanicalObligationProjectionIsExactTypedAndImmutable()
+    void currentProtocolMechanicalObligationProjectionIsExactTypedAndImmutable()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var obligation = catalog.expectedRequestObligation(scenario.id());
@@ -685,7 +703,7 @@ class QualificationRequestObligationTest {
                 decisions + "\nDecision 004: health checks remain read-only.\n");
         QualificationRequirementFinalizer.Document document =
                 QualificationRequirementFinalizer.evaluate(
-                        6,
+                        QualificationProtocol.VERSION,
                         catalog.sha256(),
                         scenario,
                         new QualificationRequirementEvaluator.Evidence(
@@ -751,7 +769,7 @@ class QualificationRequestObligationTest {
     void preparedF21RuntimeTraceAndQualificationConsumeTheSameObligation(
             @org.junit.jupiter.api.io.TempDir java.nio.file.Path workspace
     ) throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         Map<String, byte[]> before = fixtureBytes(
@@ -868,7 +886,7 @@ class QualificationRequestObligationTest {
     @Test
     void f21SharedObligationFailsClosedOnMissingDuplicateMalformedOrMismatchedTraceEvidence()
             throws Exception {
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(QualificationProtocol.VERSION);
         QualificationProtocol.Scenario scenario =
                 catalog.scenario("F21-context-multi-requirement-edit");
         var obligation = catalog.expectedRequestObligation(scenario.id());

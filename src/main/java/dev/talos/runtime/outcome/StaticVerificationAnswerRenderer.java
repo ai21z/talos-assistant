@@ -1,6 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.context.RepairOffer;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -25,7 +26,8 @@ public final class StaticVerificationAnswerRenderer {
             VerificationReport report
     ) {
         StringBuilder out = new StringBuilder();
-        out.append("[Static verification: passed - ")
+        // A pass bound to the request is verification. Any other pass keeps its own checks wording (MICA I3, D5).
+        out.append(result != null && result.requestBound() ? "[Static verification: passed - " : "[Checks passed - ")
                 .append(verificationSummary(result))
                 .append("]\n\n");
         List<String> limitations = generalLimitations(report);
@@ -122,13 +124,22 @@ public final class StaticVerificationAnswerRenderer {
                 out.append("\n- ... ").append(problems.size() - 5).append(" more");
             }
         }
-        out.append("\n\n");
+        out.append("\n\n").append(RepairOffer.LINE).append("\n\n");
         return out.toString();
     }
 
     public static String failedReplacement(
             TaskVerificationResult result,
             ToolCallLoop.LoopResult loopResult
+    ) {
+        return failedReplacement(result, loopResult, true);
+    }
+
+    /** The repair offer is omitted when the turn had a denied change, because no offer is bound then. */
+    public static String failedReplacement(
+            TaskVerificationResult result,
+            ToolCallLoop.LoopResult loopResult,
+            boolean offerRepair
     ) {
         StringBuilder out = new StringBuilder();
         out.append("[Task incomplete: Static verification failed - ")
@@ -160,10 +171,16 @@ public final class StaticVerificationAnswerRenderer {
             }
         }
         out.append("\n\nThe assistant success summary was replaced with this runtime verification result because verification failed.");
+        if (offerRepair) out.append("\n\n").append(RepairOffer.LINE);
         return out.toString().stripTrailing();
     }
 
     public static String partialFailedAnnotation(TaskVerificationResult result) {
+        return partialFailedAnnotation(result, true);
+    }
+
+    /** The repair offer is omitted when the turn had a denied change, because no offer is bound then. */
+    public static String partialFailedAnnotation(TaskVerificationResult result, boolean offerRepair) {
         StringBuilder out = new StringBuilder();
         out.append("[Partial verification: static checks failed - ")
                 .append(verificationSummary(result))
@@ -180,6 +197,7 @@ public final class StaticVerificationAnswerRenderer {
             }
         }
         out.append("\n\n");
+        if (offerRepair) out.append(RepairOffer.LINE).append("\n\n");
         return out.toString();
     }
 

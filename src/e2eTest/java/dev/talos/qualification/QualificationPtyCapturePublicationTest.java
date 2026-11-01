@@ -33,7 +33,8 @@ class QualificationPtyCapturePublicationTest {
                             "1"
                     }));
 
-            assertTrue(failure.getMessage().contains("publication writes exactly protocol v6"),
+            assertTrue(failure.getMessage().contains(
+                            "publication writes exactly protocol v" + QualificationProtocol.VERSION),
                     failure::getMessage);
             assertEquals(before, treeState(packet.root()), "protocol=" + protocol);
         }

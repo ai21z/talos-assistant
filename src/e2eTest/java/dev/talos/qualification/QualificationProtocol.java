@@ -7,11 +7,30 @@ import java.util.Map;
 import java.util.Objects;
 
 final class QualificationProtocol {
-    static final int VERSION = 6;
+    static final int VERSION = 7;
+    /** First causal protocol. Its frozen resources share the causal format with the current protocol. */
+    static final int FIRST_CAUSAL_VERSION = 6;
+    /** Last protocol whose published evidence is read under the legacy rules. */
+    static final int LAST_LEGACY_VERSION = 5;
     static final String BANK_SCHEMA = "talos.modelQualification.scenarioBank";
     static final String FIXTURE_SCHEMA = "talos.modelQualification.fixture";
 
     private QualificationProtocol() {}
+
+    /** Frozen resources of the causal protocols use canonical LF and typed request obligations. */
+    static boolean causal(int protocolVersion) {
+        return protocolVersion >= FIRST_CAUSAL_VERSION && protocolVersion <= VERSION;
+    }
+
+    /**
+     * Campaigns and records are read only under a legacy protocol with published evidence or the current protocol.
+     * Protocol 6 was never published, so its frozen banks stay loadable while its records are refused.
+     */
+    static void requireRecordProtocol(int protocolVersion) {
+        if ((protocolVersion < 1 || protocolVersion > LAST_LEGACY_VERSION) && protocolVersion != VERSION) {
+            throw new IllegalArgumentException("Unsupported qualification protocol version: " + protocolVersion);
+        }
+    }
 
     enum BankKind {
         ADMISSION,

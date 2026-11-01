@@ -73,7 +73,10 @@ public record TurnAudit(
                 mutation && !call.pathHint().isBlank() ? withheldPath(call.pathHint()) : "",
                 mutation ? call.pathHints().stream().map(TurnAudit::withheldPath).toList() : List.of(),
                 call.success(), call.success() ? "" : "Document-derived operation did not succeed.",
-                call.mutationEffects().mapPaths(TurnAudit::withheldPath), call.executionDisposition(), call.failureReason());
+                call.mutationEffects().mapPaths(TurnAudit::withheldPath), call.executionDisposition(), call.failureReason(),
+                dev.talos.tools.impl.ExecutedEditDetail.none(),
+                call.operands().stream().map(operand -> new TurnRecord.OperationOperand(
+                        withheldPath(operand.path()), operand.role())).toList());
     }
 
     private static String withheldPath(String path) {

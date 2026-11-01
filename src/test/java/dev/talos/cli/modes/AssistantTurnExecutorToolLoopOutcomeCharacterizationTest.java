@@ -75,6 +75,33 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 "the last provider call should be the post-tool synthesis retry");
     }
 
+    /**
+     * Live session 2026-10-27, turn 4: in native tool mode the model wrote its listing call as JSON
+     * text. The runtime refused it and stopped, and the turn must not be recorded as answered.
+     */
+    @Test
+    void aTextFormToolCallRefusedInNativeModeEndsTheTurnBlockedNotAnswered(@TempDir Path workspace)
+            throws Exception {
+        ToolRegistry registry = registryWith(new dev.talos.tools.impl.ListDirTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}", List.of())),
+                16_384);
+        Context ctx = context(workspace, registry, recorded, 4);
+
+        AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                messages("print the working directory and tell me where we are please"),
+                workspace,
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        var trace = LocalTurnTraceCapture.complete();
+        assertTrue(trace.events().stream().anyMatch(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())),
+                "precondition: the text-form call reached the authority check and was refused");
+        assertEquals("BLOCKED", trace.outcome().status(), out.text());
+        assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification(), out.text());
+    }
+
     @Test
     void postToolLoopMissingMutationRetryUsesRetryLoopEvidenceForFinalAnswer(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("problem.md"), "Create result.txt containing AFTER.\n");

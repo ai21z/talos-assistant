@@ -1,8 +1,11 @@
 package dev.talos.runtime;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.tools.ToolMutationEffects;
 import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.impl.ExecutedEditDetail;
@@ -144,6 +147,8 @@ public record TurnRecord(
      * @param reason    compact failure/block reason, if the call did not succeed
      * @param executionDisposition explicit runtime execution status, independent of success
      * @param failureReason typed producer cause, NONE when unavailable in legacy evidence
+     * @param operands  the operands a single workspace operation names, with their roles, at every disposition;
+     *                  empty for any other call and for legacy evidence
      */
     public record ToolCallSummary(
             String name,
@@ -154,10 +159,13 @@ public record TurnRecord(
             ToolMutationEffects mutationEffects,
             ToolCallDisposition executionDisposition,
             ToolFailureReason failureReason,
-            @com.fasterxml.jackson.annotation.JsonIgnore ExecutedEditDetail executedEditDetail
+            @com.fasterxml.jackson.annotation.JsonIgnore ExecutedEditDetail executedEditDetail,
+            List<OperationOperand> operands
     ) {
         public ToolCallSummary {
             name = (name == null) ? "" : name;
+            operands = operands == null ? List.of() : List.copyOf(operands);
+            requireOperandRoles(name, operands);
             pathHints = normalizePathHints(pathHint, pathHints);
             pathHint = primaryPathHint(pathHint, pathHints);
             reason = (reason == null) ? "" : reason;
@@ -182,6 +190,15 @@ public record TurnRecord(
                     && (success || mutationEffects.hasEffects())) {
                 throw new IllegalArgumentException("A blocked tool call cannot report success or mutation effects");
             }
+        }
+
+        /** A call that is not a single workspace operation, or legacy evidence, names no operands. */
+        public ToolCallSummary(String name, String pathHint, List<String> pathHints,
+                               boolean success, String reason, ToolMutationEffects mutationEffects,
+                               ToolCallDisposition executionDisposition, ToolFailureReason failureReason,
+                               ExecutedEditDetail executedEditDetail) {
+            this(name, pathHint, pathHints, success, reason, mutationEffects,
+                    executionDisposition, failureReason, executedEditDetail, List.of());
         }
 
         /** Compatibility constructors cannot establish whether execution was reached. */
@@ -236,12 +253,67 @@ public record TurnRecord(
             return List.copyOf(out);
         }
 
+        private static void requireOperandRoles(String name, List<OperationOperand> operands) {
+            if (!operandRolesMatch(name, operands)) {
+                throw new IllegalArgumentException("The operands do not match the tool call " + name);
+            }
+        }
+
+        /** Only a single workspace operation names operands, each role at most once and only a role of its kind. */
+        private static boolean operandRolesMatch(String name, List<OperationOperand> operands) {
+            if (operands == null || operands.isEmpty()) return true;
+            var tool = dev.talos.tools.ToolAliasPolicy.resolve(name);
+            WorkspaceOperationObligation.Kind kind = null;
+            for (WorkspaceOperationObligation.Kind candidate : WorkspaceOperationObligation.Kind.values()) {
+                if (tool.accepted() && candidate.toolName().equals(tool.canonicalToolName())) kind = candidate;
+            }
+            if (kind == null) return false;
+            Set<WorkspaceOperationObligation.Role> allowed = switch (kind) {
+                case COPY_PATH, MOVE_PATH, RENAME_PATH -> EnumSet.of(
+                        WorkspaceOperationObligation.Role.SOURCE, WorkspaceOperationObligation.Role.DESTINATION);
+                case MKDIR, DELETE_PATH -> EnumSet.of(WorkspaceOperationObligation.Role.TARGET);
+            };
+            Set<WorkspaceOperationObligation.Role> seen = EnumSet.noneOf(WorkspaceOperationObligation.Role.class);
+            for (OperationOperand operand : operands) {
+                if (operand == null || !allowed.contains(operand.role()) || !seen.add(operand.role())) return false;
+            }
+            return true;
+        }
+
         private static String normalizePath(String value) {
             if (value == null) return "";
             String normalized = value.strip().replace('\\', '/');
             while (normalized.startsWith("./")) {
                 normalized = normalized.substring(2);
             }
+            return normalized;
+        }
+    }
+
+    /**
+     * One operand of a single workspace operation call and the role the operation gives it. A copy, move or rename
+     * names a SOURCE and a DESTINATION, and a mkdir or delete names its TARGET. The role alone does not say whether
+     * the path changes, because a copy leaves its source in place while a move or rename relocates it.
+     */
+    public record OperationOperand(String path, WorkspaceOperationObligation.Role role) {
+        public OperationOperand {
+            if (role == null) throw new IllegalArgumentException("An operation operand requires a role");
+            path = normalizedPath(path);
+            if (path.isBlank()) throw new IllegalArgumentException("An operation operand requires a path");
+        }
+
+        /**
+         * The stored spelling of an operand path, with slashes, without surrounding space and without a leading
+         * {@code ./}. It is repeated until it no longer changes, so a stored path reads back as itself.
+         */
+        static String normalizedPath(String path) {
+            String normalized = path == null ? "" : path.replace('\\', '/');
+            String previous;
+            do {
+                previous = normalized;
+                normalized = normalized.strip();
+                while (normalized.startsWith("./")) normalized = normalized.substring(2);
+            } while (!normalized.equals(previous));
             return normalized;
         }
     }

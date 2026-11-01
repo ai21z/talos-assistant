@@ -64,6 +64,7 @@ public final class SessionCommand implements Command {
     private final String workspaceId;
     private final String activeSessionId;
     private final Path exportsDir;
+    private final java.util.function.IntSupplier activeTurnCount;
 
     /** Legacy wiring: the active session IS the bare-hash slot (pre-T799 tests). */
     public SessionCommand(Path workspace, SessionStore store) {
@@ -71,12 +72,23 @@ public final class SessionCommand implements Command {
     }
 
     public SessionCommand(Path workspace, SessionStore store, String activeSessionId) {
+        this(workspace, store, activeSessionId, () -> 0);
+    }
+
+    /** {@code activeTurnCount} gives the turns this process has run, the numbering a restored context joins. */
+    public SessionCommand(Path workspace, SessionStore store, String activeSessionId,
+                          java.util.function.IntSupplier activeTurnCount) {
         this(workspace, store, activeSessionId,
-                Path.of(System.getProperty("user.home"), ".talos", "exports"));
+                Path.of(System.getProperty("user.home"), ".talos", "exports"), activeTurnCount);
     }
 
     public SessionCommand(Path workspace, SessionStore store, String activeSessionId,
                           Path exportsDir) {
+        this(workspace, store, activeSessionId, exportsDir, () -> 0);
+    }
+
+    public SessionCommand(Path workspace, SessionStore store, String activeSessionId,
+                          Path exportsDir, java.util.function.IntSupplier activeTurnCount) {
         this.workspace = workspace;
         this.store = store;
         this.workspaceId = JsonSessionStore.sessionIdFor(workspace);
@@ -84,6 +96,7 @@ public final class SessionCommand implements Command {
                 ? this.workspaceId
                 : activeSessionId;
         this.exportsDir = exportsDir;
+        this.activeTurnCount = activeTurnCount == null ? () -> 0 : activeTurnCount;
     }
     @Override
     public CommandSpec spec() {
@@ -203,7 +216,8 @@ public final class SessionCommand implements Command {
         else mem.clear();
 
         ConversationManager targetCm = cm != null ? cm : new ConversationManager(mem);
-        TalosBootstrap.RestoreSummary restored = TalosBootstrap.restoreSavedSession(store, targetId, mem, targetCm);
+        TalosBootstrap.RestoreSummary restored = TalosBootstrap.restoreSavedSession(
+                store, targetId, mem, targetCm, activeTurnCount.getAsInt());
         String modelNotice = TalosBootstrap.restoreSavedModel(ctx.llm(), restored.model());
         String age = formatAge(restored.createdAt());
         return new Result.Info("Session restored: " + restored.pairsReplayed() + " exchange"

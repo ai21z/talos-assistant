@@ -112,6 +112,27 @@ record ExecutionOutcome(
         UNAVAILABLE
     }
 
+    /**
+     * The runtime repair offer is rendered only when the context updater can bind it, and the updater binds an
+     * offer only when the delivered answer carries it. A turn with a denied tool call gets no offer. A turn whose
+     * changes are only single workspace operations leaves no carried context (MICA invariant I2), so it gets no
+     * offer either.
+     */
+    private static boolean repairOffered(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return true;
+        List<ToolCallLoop.ToolOutcome> mutating = loopResult.toolOutcomes().stream()
+                .filter(outcome -> outcome != null && outcome.mutating())
+                .toList();
+        boolean operationsOnly = !mutating.isEmpty() && mutating.stream().allMatch(outcome -> {
+            var tool = dev.talos.tools.ToolAliasPolicy.resolve(outcome.toolName());
+            return tool.accepted()
+                    && dev.talos.runtime.intent.WorkspaceOperationObligation.Kind.isOperationTool(
+                            tool.canonicalToolName());
+        });
+        return !operationsOnly
+                && loopResult.toolOutcomes().stream().noneMatch(outcome -> outcome != null && outcome.denied());
+    }
+
     static ExecutionOutcome fromToolLoop(
             String answer,
             List<ChatMessage> messages,
@@ -188,6 +209,8 @@ record ExecutionOutcome(
         TaskContract contract = safePlan.taskContract();
         String readOnlyLimitationReason = dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswer.limitationReason(loopResult);
         boolean readOnlyLimited = !readOnlyLimitationReason.isEmpty();
+        OutcomeDominancePolicy.RuntimeStop runtimeStop =
+                OutcomeDominancePolicy.runtimeStop(loopResult, readOnlyLimited, extraMutationSuccesses);
         String selectedRuntimeLimitation = readOnlyLimited ? loopResult.finalAnswer() : null;
         boolean mutationRequested = contract.mutationRequested();
         boolean unsupportedDocumentCapabilityLimited = UnsupportedDocumentCapabilityOutcome.assess(loopResult).limited();
@@ -486,9 +509,11 @@ record ExecutionOutcome(
                 missingEvidence,
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
-                VerificationStatus.NOT_RUN);
+                VerificationStatus.NOT_RUN,
+                false);
         preVerificationDecision = OutcomeDominancePolicy.withReadEvidencePolicyBlock(
                 preVerificationDecision, readEvidencePolicyBlocked);
+        preVerificationDecision = OutcomeDominancePolicy.withRuntimeStop(preVerificationDecision, runtimeStop);
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             current = EvidenceContainmentAnswerGuard.missingEvidencePrefix(current);
@@ -579,8 +604,10 @@ record ExecutionOutcome(
                 missingEvidence,
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
-                verificationStatus);
+                verificationStatus,
+                taskVerification.requestBound());
         finalDecision = OutcomeDominancePolicy.withReadEvidencePolicyBlock(finalDecision, readEvidencePolicyBlocked);
+        finalDecision = OutcomeDominancePolicy.withRuntimeStop(finalDecision, runtimeStop);
         completionStatus = finalDecision.completionStatus();
         if (requestCoverageBoundExceeded(contract) && completionStatus == CompletionStatus.COMPLETE) {
             finalDecision = new OutcomeDominancePolicy.Decision(CompletionStatus.ADVISORY_ONLY,
@@ -602,9 +629,11 @@ record ExecutionOutcome(
                 // the dominant action-obligation failure. Keep that precise answer intact
                 // while still recording FAILED verification in outcome/trace evidence.
             } else if (completionStatus == CompletionStatus.PARTIAL) {
-                current = StaticVerificationAnswerRenderer.partialFailedAnnotation(taskVerification) + current;
+                current = StaticVerificationAnswerRenderer.partialFailedAnnotation(taskVerification, repairOffered(loopResult))
+                        + current;
             } else {
-                current = StaticVerificationAnswerRenderer.failedReplacement(taskVerification, loopResult);
+                current = StaticVerificationAnswerRenderer.failedReplacement(
+                        taskVerification, loopResult, repairOffered(loopResult));
                 outputLimitRelevant = false;
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
@@ -708,6 +737,12 @@ record ExecutionOutcome(
         LocalTurnTraceCapture.recordReadOnlyAnswerComponentsPresented(webDiagnostic.components(), current);
         dev.talos.runtime.TurnAuditCapture.recordReadOnlyResults(
                 contract.originalUserRequest(), webDiagnostic.components());
+        // Whole-request coverage is assessed only from the verifier's receipt for one exact complete request
+        // obligation. The final status records it only for a turn whose final classification is verified
+        // (MICA invariant I3, decision D5).
+        if (taskVerificationEvidence.requestObligationReceipt().verified()) {
+            LocalTurnTraceCapture.recordRequestCoverage();
+        }
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 finalDecision.taskCompletionStatus(),
@@ -945,7 +980,8 @@ record ExecutionOutcome(
                 missingEvidence,
                 protectedReadApprovalMissing,
                 false,
-                VerificationStatus.NOT_RUN);
+                VerificationStatus.NOT_RUN,
+                false);
         CompletionStatus completionStatus = decision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             shaped = EvidenceContainmentAnswerGuard.missingEvidencePrefix(shaped);
@@ -1066,7 +1102,8 @@ record ExecutionOutcome(
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
             boolean approvedProtectedReadPostcondition,
-            VerificationStatus verificationStatus
+            VerificationStatus verificationStatus,
+            boolean requestBoundProof
     ) {
         return OutcomeDominancePolicy.decide(new OutcomeDominancePolicy.Facts(
                 contract,
@@ -1087,7 +1124,8 @@ record ExecutionOutcome(
                 missingEvidence,
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
-                verificationStatus));
+                verificationStatus,
+                requestBoundProof));
     }
 
 }

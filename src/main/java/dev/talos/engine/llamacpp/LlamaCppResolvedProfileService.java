@@ -218,7 +218,10 @@ public final class LlamaCppResolvedProfileService {
         if (!config.managed() || qualificationCandidate.isEmpty()) return Optional.empty();
         LlamaCppQualificationCandidateLoader.LoadedCandidate candidate =
                 qualificationCandidate.get();
-        if (candidate.protocolVersion() != 6) return Optional.empty();
+        if (candidate.protocolVersion()
+                != LlamaCppQualificationCandidateLoader.CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+            return Optional.empty();
+        }
         LlamaCppProfileResolver.ArtifactIdentity artifact = candidate.artifactIdentity();
         if (artifact == null) {
             throw new IllegalStateException(

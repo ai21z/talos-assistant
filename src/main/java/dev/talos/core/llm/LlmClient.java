@@ -1780,13 +1780,7 @@ public final class LlmClient implements AutoCloseable {
         // Sanitize message content while preserving tool-call structure
         // (toolCalls, toolCallId) - these carry the native tool-call context
         // the engine needs to format the chat request.
-        List<ChatMessage> sanitized = messages.stream()
-                .map(m -> new ChatMessage(
-                        m.role(),
-                        Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
-                        m.toolCalls(),
-                        m.toolCallId(), m.contentRestrictions()))
-                .toList();
+        List<ChatMessage> sanitized = sanitizedForRequest(messages);
         ContextDeliveryCapture.Prepared contextPrepared = contextDelivery.prepare(messages, sanitized);
         List<ToolSpec> tools = effectiveToolSpecs(
                 requestToolSpecs, generation.toolAuthorityMode());
@@ -2393,6 +2387,40 @@ public final class LlmClient implements AutoCloseable {
     /** Test seam: the parsed llm.sampling config overrides. */
     SamplingControls configSampling() {
         return configSampling;
+    }
+
+    private static List<ChatMessage> sanitizedForRequest(List<ChatMessage> messages) {
+        return messages.stream()
+                .map(m -> new ChatMessage(
+                        m.role(),
+                        Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
+                        m.toolCalls(),
+                        m.toolCallId(), m.contentRestrictions()))
+                .toList();
+    }
+
+    /**
+     * Whether a request fits the input budget without trimming, prepared as dispatch prepares it. A scripted
+     * or placeholder client, or a tool surface dispatch would refuse, answers true, so dispatch decides.
+     */
+    public boolean fitsContextBudgetUntrimmed(List<ChatMessage> messages,
+                                              List<ToolSpec> requestToolSpecs,
+                                              ChatRequestControls controls) {
+        if (messages == null || scriptedResponses != null || scriptedFailure != null
+                || mode == TransportMode.PLACEHOLDER) return true;
+        ProviderResponseCapture.ToolAuthorityMode authority = toolAuthorityMode(responseSource(controls), controls);
+        List<ToolSpec> selected = selectedToolSpecs(requestToolSpecs);
+        List<ToolSpec> tools;
+        try {
+            tools = effectiveToolSpecs(selected, authority);
+        } catch (IllegalStateException refused) {
+            return true;
+        }
+        List<ChatMessage> prepared = TextToolCallInstructions.forRequest(
+                sanitizedForRequest(messages), authority, selected);
+        ChatRequestControls requestControls = withConfigSampling(controls);
+        return estimateChatRequestTokens(prepared, tools, requestControls)
+                <= inputBudgetTokens(effectiveContextWindowTokens(), requestControls);
     }
 
     private List<ChatMessage> fitMessagesToContextBudget(List<ChatMessage> messages,

@@ -39,6 +39,14 @@ public final class WorkspaceOperationObligation {
         public String toolName() {
             return toolName;
         }
+
+        /** True for the canonical name of a single workspace operation tool. A batch is not one. */
+        public static boolean isOperationTool(String canonicalToolName) {
+            for (Kind kind : values()) {
+                if (kind.toolName.equals(canonicalToolName)) return true;
+            }
+            return false;
+        }
     }
 
     public enum Role {

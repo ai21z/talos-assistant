@@ -602,6 +602,21 @@ class QualificationMutationRecoveryEvidenceTest {
     }
 
     @Test
+    void aReceiptBoundRecoveryMustCompleteVerified() {
+        // The matched obligation's receipt is request-bound proof, so a checks-only completion contradicts it.
+        ObjectNode unverified =
+                (ObjectNode) QualificationJson.tree(
+                        matchedRecoveryTrace(true, false, REPAIR_CALL_ID));
+        ((ObjectNode) unverified.path("outcome")).put("classification", "COMPLETED_UNVERIFIED");
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(
+                        QualificationJson.bytes(unverified),
+                        scenario()));
+        assertEquals("matched-obligation recovery disagrees with the trace outcome", rejected.getMessage());
+    }
+
+    @Test
     void outcomeOrdinalGapCannotReplaceButDoesNotConflictWithExactCallBinding()
             throws Exception {
         ObjectNode trace =

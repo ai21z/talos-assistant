@@ -53,7 +53,47 @@ class TaskVerificationOutcomeSelectorTest {
                 sourceDerivedResult(false));
 
         assertEquals(TaskVerificationStatus.PASSED, result.status());
-        assertEquals("Exact edit replacement verification passed.", result.summary());
+        assertEquals("Exact edit replacement checks passed.", result.summary());
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS, result.proofScope());
+    }
+
+    @Test
+    void aRequestExpectationPassIsRequestBoundAndCoherenceAloneIsNot() {
+        TaskVerificationResult replacement = TaskVerificationOutcomeSelector.select(
+                List.of("notes.md: replacement text observed and old text absent."), List.of(), 1, false,
+                expectationResult(true, true, false, false), exactEditResult(false, false, false),
+                sourceDerivedResult(false));
+        TaskVerificationResult coherence = TaskVerificationOutcomeSelector.select(
+                List.of("HTML/CSS/JS selector coherence passed."), List.of(), 1, true,
+                expectationResult(false, false, false, false), exactEditResult(true, true, false),
+                sourceDerivedResult(false));
+        // A replacement expectation on a web file is the request-derived expectation production pairs with
+        // coherence. Exact content turns web coherence off.
+        TaskVerificationResult coherenceWithExpectation = TaskVerificationOutcomeSelector.select(
+                List.of("index.html: replacement text observed and old text absent."), List.of(), 1, true,
+                expectationResult(true, true, false, false), exactEditResult(false, false, false),
+                sourceDerivedResult(false));
+        TaskVerificationResult partialExpectation = TaskVerificationOutcomeSelector.select(
+                List.of("index.html: exact content observed."), List.of(), 2, true,
+                expectationResult(true, false, false, false, false), exactEditResult(false, false, false),
+                sourceDerivedResult(false));
+
+        assertEquals(TaskVerificationResult.ProofScope.REQUEST_BOUND, replacement.proofScope());
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS, coherence.proofScope());
+        assertEquals(TaskVerificationResult.ProofScope.REQUEST_BOUND, coherenceWithExpectation.proofScope());
+        assertEquals("Static web coherence checks passed for 1 mutated target(s).", coherenceWithExpectation.summary());
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS, partialExpectation.proofScope());
+    }
+
+    @Test
+    void onlyAPassCarriesAProofScopeAndAnUnstatedScopeIsNotRequestBound() {
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS,
+                new TaskVerificationResult(TaskVerificationStatus.PASSED, "pass", List.of(), List.of()).proofScope());
+        assertEquals(TaskVerificationResult.ProofScope.NONE, new TaskVerificationResult(
+                TaskVerificationStatus.FAILED, "fail", List.of(), List.of("x"),
+                TaskVerificationResult.ProofScope.REQUEST_BOUND).proofScope());
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS, new TaskVerificationResult(
+                TaskVerificationStatus.PASSED, "pass", List.of(), List.of(), null).proofScope());
     }
 
     @Test

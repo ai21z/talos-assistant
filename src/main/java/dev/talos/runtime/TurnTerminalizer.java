@@ -39,8 +39,10 @@ final class TurnTerminalizer {
         beginFreeze();
         try {
             if (result instanceof Result.Ok ok) {
-                result = new Result.Ok(ok.text, PreparedAnswer.freeze(ok.text, ctx, turnNumber));
+                String text = withCapabilityNotes(ok.text);
+                result = new Result.Ok(text, PreparedAnswer.freeze(text, ctx, turnNumber));
             } else if (result instanceof Result.Streamed legacy) {
+                // A streamed answer was printed while it arrived, so it gains no note that history would lack.
                 String text = legacy.fullText.endsWith(legacy.suffix)
                         ? legacy.fullText : legacy.fullText + legacy.suffix;
                 result = new Result.Streamed(legacy.fullText, legacy.suffix, PreparedAnswer.freeze(text, ctx, turnNumber));
@@ -81,6 +83,19 @@ final class TurnTerminalizer {
             state = State.BROKEN;
             throw failure;
         }
+    }
+
+    /** Talos tool names the model states without running them gain runtime notes (MICA invariant I4). */
+    private static String withCapabilityNotes(String answer) {
+        if (answer == null || answer.isBlank()) return answer;
+        // Runtime-composed text is a runtime fact already, and a bound presentation must stay byte exact.
+        if (TurnAuditCapture.boundPresentationActive()) return answer;
+        String prose = LocalTurnTraceCapture.providerProseOf(answer);
+        if (prose.isBlank()) return answer;
+        TurnPolicyTrace policy = TurnAuditCapture.currentPolicyTrace();
+        java.util.List<String> offered = new java.util.ArrayList<>(policy.nativeTools());
+        offered.addAll(policy.promptTools());
+        return CapabilityStatementNote.annotate(answer, prose, offered, TurnAuditCapture.currentSuccessfulToolNames());
     }
 
     synchronized TurnSettlement noResult(RuntimeTurnContext ctx) {

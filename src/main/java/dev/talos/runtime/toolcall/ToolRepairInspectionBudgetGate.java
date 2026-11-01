@@ -87,9 +87,8 @@ final class ToolRepairInspectionBudgetGate {
 
     private static boolean isRepairOrFixMutationContract(TaskContract contract) {
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
-        String reason = contract.classificationReason();
-        return "explicit-review-and-fix-request".equals(reason)
-                || "repair-follow-up-inherits-previous-mutation-contract".equals(reason);
+        return contract.hasClassificationReason("explicit-review-and-fix-request")
+                || contract.hasClassificationReason("repair-follow-up-inherits-previous-mutation-contract");
     }
 
     private static String conditionalRepairObligationName(TaskContract contract) {

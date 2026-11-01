@@ -4,6 +4,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolMutationEffects;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
 
 import java.util.ArrayList;
@@ -57,6 +58,7 @@ public final class TurnAuditCapture {
         int approvalsRequired;
         int approvalsGranted;
         int approvalsDenied;
+        boolean toolModeCorrectionSent;
     }
 
     private static final ThreadLocal<Bag> HOLDER = new ThreadLocal<>();
@@ -236,6 +238,38 @@ public final class TurnAuditCapture {
         return bag == null ? TurnPolicyTrace.empty() : bag.policyTrace;
     }
 
+    /** The tools that ran successfully in this turn, by recorded name. */
+    static List<String> currentSuccessfulToolNames() {
+        Bag bag = HOLDER.get();
+        if (bag == null) return List.of();
+        return bag.toolCalls.stream().filter(TurnRecord.ToolCallSummary::success)
+                .map(TurnRecord.ToolCallSummary::name).toList();
+    }
+
+    /** A work-status receipt or a location presentation binds the exact answer bytes of this turn. */
+    static boolean boundPresentationActive() {
+        Bag bag = HOLDER.get();
+        return bag != null && (bag.workStatusReceipt.active() || bag.locationPresentation != null);
+    }
+
+    /** Whether any call of this turn reached the tool registry, across every tool loop of the turn. */
+    public static boolean anyToolExecutedThisTurn() {
+        Bag bag = HOLDER.get();
+        return bag != null && bag.toolCalls.stream()
+                .anyMatch(call -> call.executionDisposition() == TurnRecord.ToolCallDisposition.EXECUTED);
+    }
+
+    /** The tool-mode correction is limited to one per turn, not one per tool loop (MICA decision D7). */
+    public static boolean toolModeCorrectionSentThisTurn() {
+        Bag bag = HOLDER.get();
+        return bag != null && bag.toolModeCorrectionSent;
+    }
+
+    public static void recordToolModeCorrectionSent() {
+        Bag bag = HOLDER.get();
+        if (bag != null) bag.toolModeCorrectionSent = true;
+    }
+
     /** Append a tool-call summary to the current audit (no-op if none active). */
     public static void recordToolCall(String name, String pathHint, boolean success) {
         recordToolCall(name, pathHint, success, "");
@@ -278,7 +312,9 @@ public final class TurnAuditCapture {
             boolean success,
             String reason) {
         String name = call == null ? "" : call.toolName();
-        recordToolCallSummary(name, pathHint, pathHints, success, reason);
+        recordToolCallSummary(name, pathHint, pathHints, success, reason, ToolMutationEffects.none(),
+                TurnRecord.ToolCallDisposition.UNKNOWN, ToolFailureReason.NONE,
+                dev.talos.tools.impl.ExecutedEditDetail.none(), operands(call));
         String normalizedReason = reason == null ? "" : reason.strip();
         if (success) {
             LocalTurnTraceCapture.recordToolExecuted("", call, true, "", pathHints);
@@ -328,7 +364,7 @@ public final class TurnAuditCapture {
                 success,
                 reason,
                 effects,
-                TurnRecord.ToolCallDisposition.EXECUTED, failureReason, executedEditDetail);
+                TurnRecord.ToolCallDisposition.EXECUTED, failureReason, executedEditDetail, operands(call));
         LocalTurnTraceCapture.recordToolExecuted(
                 "", call, success, reason == null ? "" : reason.strip(), pathHints, effects);
     }
@@ -381,7 +417,8 @@ public final class TurnAuditCapture {
             String traceReason, ToolFailureReason failureReason) {
         String name = call == null ? "" : call.toolName();
         recordToolCallSummary(name, pathHint, List.of(), false, auditReason,
-                ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.BLOCKED, failureReason);
+                ToolMutationEffects.none(), TurnRecord.ToolCallDisposition.BLOCKED, failureReason,
+                dev.talos.tools.impl.ExecutedEditDetail.none(), operands(call));
         if (call != null) {
             LocalTurnTraceCapture.recordToolCallBlocked(phase, call, traceReason);
         }
@@ -424,6 +461,47 @@ public final class TurnAuditCapture {
             String name, String pathHint, List<String> pathHints, boolean success,
             String reason, ToolMutationEffects effects, TurnRecord.ToolCallDisposition executionDisposition,
             ToolFailureReason failureReason, dev.talos.tools.impl.ExecutedEditDetail executedEditDetail) {
+        return recordToolCallSummary(name, pathHint, pathHints, success, reason, effects, executionDisposition,
+                failureReason, executedEditDetail, List.of());
+    }
+
+    /**
+     * The operands of a single workspace operation call. A call that the captured authority binds names the operands
+     * of its obligation. Any other operation call names the operands its parameters spell, so a blocked call is
+     * described by what it asked for. An operand whose path is blank once normalized is left out.
+     */
+    private static List<TurnRecord.OperationOperand> operands(ToolCall call) {
+        if (call == null) return List.of();
+        var tool = dev.talos.tools.ToolAliasPolicy.resolve(call.toolName());
+        if (!tool.accepted() || !WorkspaceOperationObligation.Kind.isOperationTool(tool.canonicalToolName())) {
+            return List.of();
+        }
+        WorkspaceOperationAuthorityPlan authority = TurnTaskContractCapture.workspaceOperationPlan();
+        List<TurnRecord.OperationOperand> operands = new ArrayList<>();
+        if (authority != null && authority.authorizes(call)) {
+            for (WorkspaceOperationObligation.Operand operand : authority.authorizedOperations().getFirst().operands()) {
+                addOperand(operands, operand.effectivePath(), operand.role());
+            }
+        } else {
+            for (var operand : dev.talos.runtime.workspace.WorkspaceOperationPlanner.namedOperands(call)) {
+                addOperand(operands, operand.path(), operand.role());
+            }
+        }
+        return List.copyOf(operands);
+    }
+
+    private static void addOperand(
+            List<TurnRecord.OperationOperand> operands, String path, WorkspaceOperationObligation.Role role) {
+        if (!TurnRecord.OperationOperand.normalizedPath(path).isBlank()) {
+            operands.add(new TurnRecord.OperationOperand(path, role));
+        }
+    }
+
+    private static boolean recordToolCallSummary(
+            String name, String pathHint, List<String> pathHints, boolean success,
+            String reason, ToolMutationEffects effects, TurnRecord.ToolCallDisposition executionDisposition,
+            ToolFailureReason failureReason, dev.talos.tools.impl.ExecutedEditDetail executedEditDetail,
+            List<TurnRecord.OperationOperand> operands) {
         Bag b = HOLDER.get();
         if (b == null) return false;
         String normalizedReason = reason == null ? "" : reason.strip();
@@ -433,12 +511,13 @@ public final class TurnAuditCapture {
         if (!restrictions.modelAllowed() || !restrictions.historyAllowed() || !restrictions.artifactAllowed())
             detail = dev.talos.tools.impl.ExecutedEditDetail.none();
         var summary = new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success,
-                normalizedReason, effects, executionDisposition, failureReason, detail);
+                normalizedReason, effects, executionDisposition, failureReason, detail, operands);
         if (summary.executedEditDetail().available()) {
             int chars = detail.before().length() + detail.after().length();
             if (chars > b.remainingEditDetailChars) {
                 summary = new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success,
-                        normalizedReason, effects, executionDisposition, failureReason);
+                        normalizedReason, effects, executionDisposition, failureReason,
+                        dev.talos.tools.impl.ExecutedEditDetail.none(), operands);
             } else {
                 b.remainingEditDetailChars -= chars;
             }

@@ -563,7 +563,7 @@ public final class TalosBootstrap {
         registry.register(new UndoCommand(workspace, checkpointService));
         registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence (T800: list/resume need the active instance id)
-        registry.register(new SessionCommand(workspace, sessionStore, activeSessionId));
+        registry.register(new SessionCommand(workspace, sessionStore, activeSessionId, activeTurnCount));
         // Context-window meter (T803) + manual compaction (T804)
         registry.register(new ContextCommand(terminalWidth, assistModeCompaction));
         registry.register(new CompactCommand(assistModeCompaction));
@@ -697,10 +697,19 @@ public final class TalosBootstrap {
                 || (goal != null && goal.source() != ArtifactGoal.Source.NONE);
     }
 
-    /** Restore saved session context through snapshot-first, JSONL-fallback replay. */
+    /** Restore saved session context through snapshot-first, JSONL-fallback replay, into a session with no turns. */
     public static RestoreSummary restoreSavedSession(SessionStore store, String sessionId,
                                          SessionMemory memory, ConversationManager cm) {
-        RestoreSummary restoreSummary = replaySnapshot(store, sessionId, memory, cm);
+        return restoreSavedSession(store, sessionId, memory, cm, 0);
+    }
+
+    /**
+     * Restore saved session context into a session whose last turn is {@code receivingLastTurn}, the count of
+     * turns the receiving process has already run.
+     */
+    public static RestoreSummary restoreSavedSession(SessionStore store, String sessionId,
+                                         SessionMemory memory, ConversationManager cm, int receivingLastTurn) {
+        RestoreSummary restoreSummary = replaySnapshot(store, sessionId, memory, cm, receivingLastTurn);
         if (restoreSummary.pairsReplayed() == 0) {
             int turnLogTurnsReplayed = replayTurnLog(store, sessionId, memory);
             if (turnLogTurnsReplayed > 0) {
@@ -739,6 +748,11 @@ public final class TalosBootstrap {
 
     static RestoreSummary replaySnapshot(SessionStore store, String sessionId,
                               SessionMemory memory, ConversationManager cm) {
+        return replaySnapshot(store, sessionId, memory, cm, 0);
+    }
+
+    static RestoreSummary replaySnapshot(SessionStore store, String sessionId,
+                              SessionMemory memory, ConversationManager cm, int receivingLastTurn) {
         var loaded = store.load(sessionId);
         if (loaded.isEmpty()) return new RestoreSummary(0, null, "");
         SessionData data = loaded.get();
@@ -756,10 +770,14 @@ public final class TalosBootstrap {
         if (data.sketch() != null && !data.sketch().isBlank()) {
             cm.setSketch(data.sketch());
         }
-        memory.setActiveTaskContext(data.activeTaskContext());
+        var records = store.loadTurns(sessionId);
+        // Each process numbers its turns from 1, so the context keeps only what is left of its window. Without a
+        // readable turn log, the saved exchange count is the closest bound on the last turn.
+        int savedLastTurn = records.stream().mapToInt(dev.talos.runtime.TurnRecord::turnNumber).max()
+                .orElse(data.turnCount());
+        memory.setActiveTaskContext(data.activeTaskContext().rebasedForRestore(savedLastTurn, receivingLastTurn));
         memory.setArtifactGoal(data.artifactGoal());
-        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(
-                store.loadTurns(sessionId)));
+        memory.setChangeSummaryContext(dev.talos.runtime.context.ChangeSummaryContext.fromTurnRecords(records));
         return new RestoreSummary(pairs, data.createdAt(), data.model(), pairs > 0 || hasSavedActiveContext(data));
     }
 

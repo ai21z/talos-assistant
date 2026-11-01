@@ -31,13 +31,13 @@ class QualificationArtifactPublicationTest {
 
     @Test
     void onlyCurrentProtocolIsWritable() {
-        for (int protocol = 1; protocol <= 5; protocol++) {
+        for (int protocol = 1; protocol < QualificationProtocol.VERSION; protocol++) {
             int candidate = protocol;
             assertThrows(IllegalArgumentException.class,
                     () -> QualificationArtifactPublication.requireWritableProtocol(candidate));
         }
         assertThrows(IllegalArgumentException.class,
-                () -> QualificationArtifactPublication.requireWritableProtocol(7));
+                () -> QualificationArtifactPublication.requireWritableProtocol(QualificationProtocol.VERSION + 1));
         QualificationArtifactPublication.requireWritableProtocol(QualificationProtocol.VERSION);
     }
 

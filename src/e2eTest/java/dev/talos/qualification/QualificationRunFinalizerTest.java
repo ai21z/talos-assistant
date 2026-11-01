@@ -138,13 +138,14 @@ class QualificationRunFinalizerTest {
             assertNoAuthorityArtifacts(packet.runRoot());
         }
 
-        QualificationScenarioBank.Catalog v6 = QualificationTestPacket.protocol6Catalog();
+        QualificationScenarioBank.Catalog current = QualificationTestPacket.protocol6Catalog();
         QualificationScenarioBank.Catalog future = new QualificationScenarioBank.Catalog(
-                7, v6.admission(), v6.full(), v6.fixtures(), v6.sha256());
-        QualificationTestPacket packet = unfinalizedPacket(temp.resolve("protocol-7"), v6);
+                QualificationProtocol.VERSION + 1, current.admission(), current.full(), current.fixtures(),
+                current.sha256());
+        QualificationTestPacket packet = unfinalizedPacket(temp.resolve("protocol-future"), current);
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationRunFinalizer.finalizeRun(
-                        packet.root(), packet.runRoot(), scenarioId(v6), future));
+                        packet.root(), packet.runRoot(), scenarioId(current), future));
         assertNoAuthorityArtifacts(packet.runRoot());
     }
 

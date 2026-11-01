@@ -17,6 +17,8 @@ import java.util.Set;
 public final class ToolCallSupport {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallSupport.class);
     public static final int KEEP_RECENT_TOOL_RESULTS = 2;
+    /** Older tool results are compacted from this loop iteration on. */
+    public static final int COMPACTION_START_ITERATION = 3;
 
     // T757: the duplicate READ_ONLY_TOOLS/MUTATING_TOOLS name sets are gone.
     // Static name classification delegates to ToolAliasPolicy (the alias
@@ -106,7 +108,9 @@ public final class ToolCallSupport {
         String c = content.stripLeading();
         return c.startsWith("[tool_result:")
                 || c.startsWith("[compacted:")
-                || c.startsWith("[tool_result]");
+                || c.startsWith("[tool_result]")
+                // The tool-mode correction notice reports a rejected call and is never the user's request.
+                || c.startsWith(ToolModeCorrectionReprompt.NOTICE_PREFIX);
     }
 
     public static String summarizeToolResult(String body) {
@@ -252,6 +256,31 @@ public final class ToolCallSupport {
             Map<Integer, String> originalsOut,
             java.util.Set<Integer> noticeIndices
     ) {
+        return compactOlderToolResultsInPlace(messages, originalsOut, noticeIndices, 0);
+    }
+
+    /**
+     * D10: the keep budget is half of limits.llm_context_max_tokens at four characters a token, so a small
+     * result read several calls earlier stays in the model's view while the request has room for it.
+     */
+    public static int keepBudgetChars(dev.talos.core.Config cfg) {
+        var budget = cfg == null
+                ? new dev.talos.core.context.TokenBudget()
+                : dev.talos.core.context.TokenBudget.fromConfig(cfg);
+        return budget.tokensToChars(budget.contextMaxTokens() / 2);
+    }
+
+    /**
+     * Results are kept from the newest while their characters fit {@code keepBudgetChars}, and the two most
+     * recent are always kept, so the kept results stay a contiguous newest suffix. Without a budget only
+     * those two are kept.
+     */
+    public static List<CompactedToolResult> compactOlderToolResultsInPlace(
+            List<ChatMessage> messages,
+            Map<Integer, String> originalsOut,
+            java.util.Set<Integer> noticeIndices,
+            int keepBudgetChars
+    ) {
         List<CompactedToolResult> compacted = new ArrayList<>();
         if (messages == null || messages.size() < 4) return compacted;
         List<Integer> toolResultIndices = new ArrayList<>();
@@ -261,7 +290,16 @@ public final class ToolCallSupport {
                 toolResultIndices.add(i);
             }
         }
-        int keepFrom = toolResultIndices.size() - KEEP_RECENT_TOOL_RESULTS;
+        int keepFrom = toolResultIndices.size();
+        int keptChars = 0;
+        while (keepFrom > 0) {
+            String content = messages.get(toolResultIndices.get(keepFrom - 1)).content();
+            int chars = content == null ? 0 : content.length();
+            int kept = toolResultIndices.size() - keepFrom;
+            if (kept >= KEEP_RECENT_TOOL_RESULTS && keptChars + chars > keepBudgetChars) break;
+            keptChars += chars;
+            keepFrom--;
+        }
         if (keepFrom <= 0) return compacted;
         for (int k = 0; k < keepFrom; k++) {
             int idx = toolResultIndices.get(k);

@@ -34,7 +34,8 @@ final class LlamaCppQualificationCandidateLoader {
     private static final int LEGACY_CALIBRATION_SCHEMA_VERSION = 1;
     private static final int CURRENT_CALIBRATION_SCHEMA_VERSION = 2;
     private static final int LEGACY_QUALIFICATION_PROTOCOL_VERSION = 5;
-    private static final int CURRENT_QUALIFICATION_PROTOCOL_VERSION = 6;
+    // Protocol 7 keeps the protocol-6 launch contract and changes only the frozen scenario banks.
+    static final int CURRENT_QUALIFICATION_PROTOCOL_VERSION = 7;
     private static final int MAX_CALIBRATION_BYTES = 1024 * 1024;
     private static final Pattern ALIAS = Pattern.compile("[a-z0-9][a-z0-9._-]*");
     private static final Pattern REVISION = Pattern.compile("[0-9a-f]{40}");

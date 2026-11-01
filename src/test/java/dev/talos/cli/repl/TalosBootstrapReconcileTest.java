@@ -236,6 +236,147 @@ class TalosBootstrapReconcileTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "jsonl-fallback"})
+    void aRestoredContextKeepsOnlyTheRemainderOfItsWindow(String route, @TempDir Path dir) {
+        // The restored session numbers its turns from 1, so an absolute expiry would reopen the whole window.
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-window-" + route;
+        ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                3, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        boolean fallback = route.equals("jsonl-fallback");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            List<SessionData.Turn> turns = fallback ? List.of()
+                    : List.of(new SessionData.Turn("user", "u", ""), new SessionData.Turn("assistant", "a", "ok"));
+            writer.save(new SessionData(sid, "/ws", "", turns.size() / 2, Instant.now(), turns, "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            for (int turn = 1; turn <= 5; turn++) {
+                writer.appendTurn(sid, new TurnRecord(turn, Instant.now(), 0L,
+                        "u" + turn, "a" + turn, List.of(), 0, 0, 0, ""));
+            }
+        }
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        ActiveTaskContext restored = mem.activeTaskContext();
+        assertEquals(1, restored.expiresAfterTurnNumber(), restored.toString());
+        assertEquals(3, restored.sourceTurnNumber());
+        assertEquals(context.targets(), restored.targets());
+        assertEquals(context.proposalProvenance(), restored.proposalProvenance());
+        assertTrue(restored.activeAt(1));
+        assertFalse(restored.activeAt(2));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 4})
+    void aRestoredContextJoinsTheTurnNumberingOfTheReceivingSession(int receivingLastTurn, @TempDir Path dir) {
+        // /session resume restores into a running process whose turn counter keeps counting.
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-receiving-" + receivingLastTurn;
+        ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                3, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "u", ""), new SessionData.Turn("assistant", "a", "ok")), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            for (int turn = 1; turn <= 5; turn++) {
+                writer.appendTurn(sid, new TurnRecord(turn, Instant.now(), 0L,
+                        "u" + turn, "a" + turn, List.of(), 0, 0, 0, ""));
+            }
+        }
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem), receivingLastTurn);
+
+        ActiveTaskContext restored = mem.activeTaskContext();
+        assertSameExceptWindow(context, restored);
+        assertEquals(receivingLastTurn, restored.updatedTurnNumber());
+        assertTrue(restored.activeAt(receivingLastTurn + 1), restored.toString());
+        assertFalse(restored.activeAt(receivingLastTurn + 2), restored.toString());
+    }
+
+    @Test
+    void aReloadOfTheSameSessionKeepsTheWindowItHad(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-reload";
+        ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                5, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "u", ""), new SessionData.Turn("assistant", "a", "ok")), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            for (int turn = 1; turn <= 5; turn++) {
+                writer.appendTurn(sid, new TurnRecord(turn, Instant.now(), 0L,
+                        "u" + turn, "a" + turn, List.of(), 0, 0, 0, ""));
+            }
+        }
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem), 5);
+
+        assertEquals(context.expiresAfterTurnNumber(), mem.activeTaskContext().expiresAfterTurnNumber());
+        assertSameExceptWindow(context, mem.activeTaskContext());
+    }
+
+    @Test
+    void withoutATurnLogTheSavedExchangeCountBoundsTheLastTurn(@TempDir Path dir) {
+        // A context kept without an update through later turns must not regain those turns on restore.
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-no-log";
+        ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        List<SessionData.Turn> turns = new java.util.ArrayList<>();
+        for (int turn = 1; turn <= 3; turn++) {
+            turns.add(new SessionData.Turn("user", "u" + turn, ""));
+            turns.add(new SessionData.Turn("assistant", "a" + turn, "ok"));
+        }
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 3, Instant.now(), turns, "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+        }
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertEquals(1, mem.activeTaskContext().expiresAfterTurnNumber(), mem.activeTaskContext().toString());
+    }
+
+    /** Every component of the restored context equals the saved one, apart from the two turns of its window. */
+    private static void assertSameExceptWindow(ActiveTaskContext saved, ActiveTaskContext restored) {
+        for (var component : ActiveTaskContext.class.getRecordComponents()) {
+            String name = component.getName();
+            if (name.equals("updatedTurnNumber") || name.equals("expiresAfterTurnNumber")) continue;
+            try {
+                assertEquals(component.getAccessor().invoke(saved), component.getAccessor().invoke(restored), name);
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError(e);
+            }
+        }
+    }
+
+    @Test
+    void aContextWhoseWindowEndedBeforeTheRestoreIsNotActiveAfterIt(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-window-ended";
+        ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                1, "trace-denied", List.of("index.html"), "No files changed; approval denied by user.");
+        try (var writer = store.acquireSessionWriter(sid)) {
+            writer.save(new SessionData(sid, "/ws", "", 1, Instant.now(),
+                    List.of(new SessionData.Turn("user", "u", ""), new SessionData.Turn("assistant", "a", "ok")), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+            for (int turn = 1; turn <= 4; turn++) {
+                writer.appendTurn(sid, new TurnRecord(turn, Instant.now(), 0L,
+                        "u" + turn, "a" + turn, List.of(), 0, 0, 0, ""));
+            }
+        }
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertFalse(mem.activeTaskContext().activeAt(1), mem.activeTaskContext().toString());
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"snapshot", "restore", "jsonl-fallback"})
     void legacyProposalRestorationRetainsContextWithoutAuthorityOrRewritingFiles(
             String route, @TempDir Path dir) throws Exception {
@@ -267,16 +408,18 @@ class TalosBootstrapReconcileTest {
             assertTrue(mem.get().contains("from-jsonl-u"));
             assertTrue(mem.get().contains("from-jsonl-a"));
         }
-        assertEquals(context, mem.activeTaskContext());
+        // The restore keeps the context and rebases only its window, three turns left from a session with no turns.
+        assertSameExceptWindow(context, mem.activeTaskContext());
+        assertEquals(3, mem.activeTaskContext().expiresAfterTurnNumber());
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertFalse(mem.activeTaskContext().hasBoundProposal());
         assertEquals(ArtifactGoal.none(), mem.artifactGoal());
         var decision = ActiveTaskContextPolicy.evaluate("apply those changes",
-                TaskContract.unknown("apply those changes"), mem.activeTaskContext(), mem.artifactGoal(), 4);
+                TaskContract.unknown("apply those changes"), mem.activeTaskContext(), mem.artifactGoal(), 1);
         assertFalse(decision.consumed());
         assertFalse(decision.taskContract().mutationRequested());
         assertFalse(decision.taskContract().mutationAllowed());
-        assertEquals(context, decision.memoryContext());
+        assertEquals(mem.activeTaskContext(), decision.memoryContext());
         assertEquals(ActiveTaskContext.State.SUPPRESSED, decision.planContext().state());
         assertArrayEquals(snapshotBefore, Files.readAllBytes(snapshot));
         if (fallback) assertArrayEquals(turnLogBefore, Files.readAllBytes(turnLog));

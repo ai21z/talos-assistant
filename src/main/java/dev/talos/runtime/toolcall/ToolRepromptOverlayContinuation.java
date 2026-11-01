@@ -5,6 +5,7 @@ import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
 
 import java.util.ArrayList;
@@ -31,6 +32,8 @@ final class ToolRepromptOverlayContinuation {
                             + "current-turn surface");
             return false;
         }
+        fallBackToKeepFloorIfTrimmed(state, remainingRepairTargets, remainingExpectedTargets, userTask,
+                staticRepairObligationActive, repromptToolSpecs);
         List<ChatMessage> requestMessages = List.of();
         TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
@@ -93,5 +96,55 @@ final class ToolRepromptOverlayContinuation {
             }
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * D10 fallback: from the compaction iteration on, the request is first sized through a probe overlay that
+     * commits no one-shot repair. When the client would trim it, older results are compacted to the two newest,
+     * which the count rule kept, before the request is built and dispatched once. The client decides fit with
+     * the preparation it dispatches, so the runtime holds no size estimate.
+     */
+    private static void fallBackToKeepFloorIfTrimmed(
+            LoopState state,
+            List<String> remainingRepairTargets,
+            List<String> remainingExpectedTargets,
+            String userTask,
+            boolean staticRepairObligationActive,
+            List<ToolSpec> repromptToolSpecs
+    ) {
+        if (state == null || state.ctx == null || state.ctx.llm() == null
+                || state.iterations < ToolCallSupport.COMPACTION_START_ITERATION) return;
+        boolean fits;
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.probe(
+                state,
+                remainingRepairTargets,
+                remainingExpectedTargets,
+                userTask,
+                staticRepairObligationActive)) {
+            List<ChatMessage> probe = ToolRepromptRequestBuilder.messages(
+                    state,
+                    staticRepairObligationActive,
+                    remainingRepairTargets,
+                    userTask,
+                    repromptToolSpecs);
+            ChatRequestControls controls = ToolRepromptRequestBuilder.controls(state);
+            controls = (controls == null ? ChatRequestControls.defaults() : controls)
+                    .withToolAuthorityMode(state.ctx.llm().toolAuthorityModeForToolSurface(repromptToolSpecs));
+            if (!ReadEvidenceDeliveryRequest.expected(ReadOnlyEvidenceContext.delivery(state)).isEmpty()) {
+                controls = ReadEvidenceDeliveryRequest.controls(controls);
+            }
+            fits = state.ctx.llm().fitsContextBudgetUntrimmed(probe, repromptToolSpecs, controls);
+        }
+        if (!fits) compactToKeepFloor(state);
+    }
+
+    private static void compactToKeepFloor(LoopState state) {
+        var compacted = ToolCallSupport.compactOlderToolResultsInPlace(
+                state.messages, state.compactedToolResultOriginals, state.noticeMessageIndices);
+        for (ToolCallSupport.CompactedToolResult result : compacted) {
+            LocalTurnTraceCapture.recordToolResultCompacted(result.messageIndex(), result.chars());
+        }
+        if (compacted.isEmpty()) return;
+        LocalTurnTraceCapture.recordRepair("KEEP_BUDGET_FLOOR_FALLBACK", "compacted=" + compacted.size());
     }
 }

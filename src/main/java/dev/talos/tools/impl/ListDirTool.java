@@ -157,7 +157,9 @@ public final class ListDirTool implements TalosTool {
     private static boolean hidden(Path path, WorkspaceObservationBoundary boundary) {
         try {
             return boundary.observe(Action.METADATA, path, () -> {
-                if (path.getFileSystem().supportedFileAttributeViews().contains("dos"))
+                // A POSIX file system marks hidden entries by name. Its emulated DOS view cannot read a link itself.
+                var views = path.getFileSystem().supportedFileAttributeViews();
+                if (views.contains("dos") && !views.contains("posix"))
                     return Files.readAttributes(path, java.nio.file.attribute.DosFileAttributes.class,
                             LinkOption.NOFOLLOW_LINKS).isHidden();
                 return path.getFileName().toString().startsWith(".");

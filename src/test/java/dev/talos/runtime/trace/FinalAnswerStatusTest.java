@@ -36,6 +36,40 @@ class FinalAnswerStatusTest {
         assertEquals(status, FinalAnswerStatus.decode(mapper.readValue(mapper.writeValueAsBytes(trace), LocalTurnTrace.class)));
     }
 
+    @Test void aReceiptCoveredVerifiedTurnReportsCoverageAndSurvivesPersistence() throws Exception {
+        begin();
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected("Done.");
+        LocalTurnTraceCapture.recordOutcome("COMPLETE", "PASSED", "APPROVED", "SUCCEEDED", "COMPLETED_VERIFIED");
+        LocalTurnTraceCapture.recordRequestCoverage();
+        var trace = finish("Done.");
+
+        var status = FinalAnswerStatus.decode(trace);
+        assertTrue(status.available());
+        assertEquals(FinalAnswerStatus.Coverage.COVERED, status.coverage());
+        var mapper = new ObjectMapper();
+        assertEquals(status, FinalAnswerStatus.decode(mapper.readValue(mapper.writeValueAsBytes(trace), LocalTurnTrace.class)));
+        assertTrue(dev.talos.cli.ui.FinalAnswerStatusRenderer.lines(trace)
+                .contains("Whole-request coverage: covered by an exact request check"));
+    }
+
+    @Test void coverageIsNeverWrittenOrReadForATurnThatIsNotVerified() throws Exception {
+        begin();
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected("Done.");
+        LocalTurnTraceCapture.recordOutcome("COMPLETE", "PASSED", "APPROVED", "SUCCEEDED", "COMPLETED_UNVERIFIED");
+        LocalTurnTraceCapture.recordRequestCoverage();
+        var unverified = finish("Done.");
+        assertEquals(FinalAnswerStatus.Coverage.NOT_ASSESSED, FinalAnswerStatus.decode(unverified).coverage());
+
+        var mapper = new ObjectMapper();
+        var node = mapper.valueToTree(unverified);
+        for (var event : node.path("events")) {
+            if (TYPE.equals(event.path("type").asText())) {
+                ((com.fasterxml.jackson.databind.node.ObjectNode) event.path("data")).put("coverage", "COVERED");
+            }
+        }
+        assertFalse(FinalAnswerStatus.decode(mapper.treeToValue(node, LocalTurnTrace.class)).available());
+    }
+
     @Test void stopAndWarningLikeTextNeverProveCoverageOrTruncation() {
         begin();
         String text = "OVERRIDE_CONFIRMED [output truncated] finish_reason=length";

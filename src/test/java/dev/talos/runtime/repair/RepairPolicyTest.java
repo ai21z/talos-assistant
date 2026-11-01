@@ -45,6 +45,21 @@ class RepairPolicyTest {
     }
 
     @Test
+    void aLaterChecksPassEndsTheEarlierFailureLikeAVerifiedPass() {
+        List<ChatMessage> messages = repairMessages("Fix the remaining static verification problems now.");
+        messages.add(messages.size() - 1, ChatMessage.assistant("""
+                [Checks passed - Exact edit replacement checks passed.]
+
+                Updated scripts.js.
+                """));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        assertTrue(decision.plan().isEmpty(), decision.toString());
+    }
+
+    @Test
     void structuralWebFailuresRequireCompleteWritesForExpectedSmallWebTargets() {
         List<ChatMessage> messages = repairMessages("Fix the remaining static verification problems now.");
         TaskContract contract = TaskContractResolver.fromMessages(messages);

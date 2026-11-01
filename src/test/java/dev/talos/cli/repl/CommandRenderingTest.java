@@ -100,7 +100,18 @@ class CommandRenderingTest {
         assertTrue(sink.toString(StandardCharsets.UTF_8).contains("/path/private/file"));
     }
 
-    @Test void builtinsUseCommandPresentationButWorkspaceTemplatesStillUseAnswers() throws Exception {
+    @Test void builtinsUseCommandPresentationButWorkspaceTemplatesStillUseAnswers(@TempDir Path home) throws Exception {
+        // Managed model aliases are read from the user home, so models on the host cannot leak into the result.
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            assertTemplatesUseAnswers();
+        } finally {
+            if (previousHome == null) System.clearProperty("user.home");
+            else System.setProperty("user.home", previousHome);
+        }
+    }
+    private void assertTemplatesUseAnswers() throws Exception {
         var sink = new ByteArrayOutputStream();
         var registry = new CommandRegistry();
         registry.register(new HelpCommand(registry, null, () -> 40));

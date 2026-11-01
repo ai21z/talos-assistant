@@ -25,7 +25,7 @@ public final class QualificationCausalFinalizerMain {
                     QualificationJson.readTree(packetRoot.resolve("campaign.json"))
                             .path("protocolVersion"),
                     "campaign protocolVersion");
-            QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
+            QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadForRecords(protocolVersion);
             Path output = QualificationRunFinalizer.finalizeRun(
                     packetRoot, runRoot, scenarioId, catalog);
             out.println(output.toAbsolutePath().normalize());

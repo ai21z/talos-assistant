@@ -91,7 +91,8 @@ final class StaticWebBrowserBehaviorVerifier {
                 "Browser behavior " + binding.triggerSelector() + " -> " + binding.outputSelector() + ".",
                 ProofKind.BROWSER_BEHAVIOR,
                 binding,
-                true);
+                true,
+                StaticWebInteractionVerifier.evaluatedFiles(facts));
         VerificationObligation obligation = new VerificationObligation(
                 claim,
                 Set.of(ProofKind.STATIC_INTERACTION_GUARD, ProofKind.BROWSER_BEHAVIOR),

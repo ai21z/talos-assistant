@@ -33,21 +33,21 @@ public final class RuntimeLocationPresentation {
         this.answerIdentity = Hash.sha256Hex(answer.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** No inferred request or model-authored matching path can issue this field. */
+    /** No model-authored matching path can issue this field. An ordinary request issues it only from the runtime fact. */
     public static RuntimeLocationPresentation issue(WorkspaceResultEvidencePolicy.Assessment assessment,
                                                     String selectedAnswer) {
         if (assessment == null || !assessment.admittedRuntimeLocation()) return null;
         TurnRequestFrame frame = assessment.publicationFrame();
         if (frame == null) return null;
         try { frame.requireCurrent(); } catch (SecurityException stale) { return null; }
-        if (frame.state() != TurnRequestFrame.State.ADOPTED || !frame.hasControlledSource()
-                || frame.meaning() == null || !frame.meaning().locationPublic()
-                || !assessment.location().equals(frame.workspace().toString())) return null;
+        if (!publishable(frame) || !assessment.location().equals(frame.workspace().toString())) return null;
         var result = assessment.results().stream()
                 .filter(value -> value.requested().kind() == RequestedResultInventory.Kind.WORKSPACE_LOCATION
+                    && value.requested().disposition() == RequestedResultInventory.Disposition.ACTIVE
                     && value.evidence().status() == dev.talos.runtime.policy.EvidenceObligationVerifier.Status.SATISFIED)
                 .map(WorkspaceResultEvidencePolicy.ResultAssessment::requested).findFirst().orElse(null);
-        if (result == null || !frame.meaning().inventory().results().contains(result)) return null;
+        if (result == null || frame.hasControlledSource() && !frame.meaning().inventory().results().contains(result))
+            return null;
         String answer = assessment.compose(selectedAnswer);
         int start = assessment.locationOffset(selectedAnswer);
         String location = frame.workspace().toString();
@@ -83,11 +83,21 @@ public final class RuntimeLocationPresentation {
 
     private boolean binds(String currentRequest, Path currentWorkspace, int currentRevision) {
         try { frame.requireCurrent(); } catch (SecurityException stale) { return false; }
-        return frame.state() == TurnRequestFrame.State.ADOPTED && currentRevision == revision
+        return publishable(frame) && currentRevision == revision
                 && request.equals(currentRequest) && currentWorkspace != null
                 && workspace.equals(currentWorkspace.toAbsolutePath().normalize())
-                && frame.meaning() != null && frame.meaning().locationPublic()
-                && frame.meaning().inventory().results().stream().anyMatch(result -> result.id().equals(resultId)
-                    && result.kind() == RequestedResultInventory.Kind.WORKSPACE_LOCATION);
+                && (!frame.hasControlledSource()
+                    || frame.meaning().inventory().results().stream().anyMatch(result -> result.id().equals(resultId)
+                        && result.kind() == RequestedResultInventory.Kind.WORKSPACE_LOCATION));
+    }
+
+    /**
+     * A controlled frame publishes only through an adopted meaning that allows the location. An ordinary frame stays
+     * delegated, and its admission is the bounded runtime assessment (MICA decision D8).
+     */
+    private static boolean publishable(TurnRequestFrame frame) {
+        if (!frame.hasControlledSource()) return frame.state() == TurnRequestFrame.State.DELEGATED;
+        return frame.state() == TurnRequestFrame.State.ADOPTED
+                && frame.meaning() != null && frame.meaning().locationPublic();
     }
 }

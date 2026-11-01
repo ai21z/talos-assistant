@@ -591,7 +591,7 @@ class TaskResolutionPropagationTest {
                         ChatMessage.user("Edit style.css."),
                         ChatMessage.assistant("Updated style.css."),
                         ChatMessage.user(
-                                "But you never put any style in style.css."))),
+                                "But you never put any style in the index, fix it."))),
                 "correction-follow-up-inherits-previous-mutation-contract");
     }
 
@@ -618,7 +618,7 @@ class TaskResolutionPropagationTest {
     }
 
     @Test
-    void filenameBearingCorrectionInheritsPriorMutationWithoutFalseConstraint() {
+    void filenameBearingCorrectionWithoutADirectiveStaysReadOnly() {
         String followUp =
                 "But you never put any style in style.css.";
         TaskResolution current =
@@ -637,21 +637,15 @@ class TaskResolutionPropagationTest {
                         .derivation()
                         .reason());
 
-        TaskResolution resolved =
+        // P2 D-a: the complaint alone is answered, not executed.
+        TaskResolution complaint =
                 TaskContractResolver.resolveFromMessages(List.of(
                         ChatMessage.system("sys"),
                         ChatMessage.user("Edit style.css."),
                         ChatMessage.assistant("Updated index.html only."),
                         ChatMessage.user(followUp)));
-
-        assertEquals(
-                "correction-follow-up-inherits-previous-mutation-contract",
-                resolved.contract().classificationReason());
-        assertTrue(resolved.hasAuthorizedContentMutation());
-        assertEquals(Set.of("style.css"), resolved.contract().expectedTargets());
-        assertTrue(
-                resolved.contract().originalUserRequest()
-                        .endsWith("\n\nRepair follow-up: " + followUp));
+        assertFalse(complaint.contract().mutationAllowed(), complaint.contract().toString());
+        // A directive with an anaphor beside a named file ("..., fix it") is bound in P3, not here.
     }
 
     @Test
