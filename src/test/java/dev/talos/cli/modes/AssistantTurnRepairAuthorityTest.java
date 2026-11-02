@@ -117,7 +117,9 @@ class AssistantTurnRepairAuthorityTest extends ActiveToolAuthorityTraceTest {
         assertTrue(prepared.taskResolution().contract().mutationAllowed());
         assertTrue(prepared.taskResolution().contract().expectedTargets().contains("scripts.js"));
         assertTrue(result.success(), result.errorMessage());
-        assertEquals(permission == Permission.ASK ? 1 : 0, fixture.approvals().get());
+        // The repair target comes from the saved repair context, not from this request, so remembered approval
+        // does not cover it and it is approved once. A configured allow rule still applies (MICA authority origin).
+        assertEquals(permission == Permission.CONFIG_ALLOW ? 0 : 1, fixture.approvals().get());
         assertEquals(REPAIRED, Files.readString(workspace.resolve("scripts.js")));
     }
 

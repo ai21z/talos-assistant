@@ -5,6 +5,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.repl.slash.SessionCommand;
+import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.core.Audit;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
@@ -258,6 +259,30 @@ class CarriedContextLifecycleReplEntryTest {
             String system = systemText(first);
             assertFalse(system.contains(READ_ONLY_CONTRACT), system);
             assertEquals(new TreeSet<>(toolNames(first)), advertisedTools(first), system);
+        }
+    }
+
+    // L5: a target from carried context was not named by the current request, so it is approved once only.
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    void aResumedEditFromCarriedContextIsApprovedOnceAndNeverRemembered(boolean restore) throws Exception {
+        try (Harness harness = new Harness(temp)) {
+            Launch launch = harness.launch();
+            Turn denied = launch.turn(EDIT, Script.EDIT, "n");
+            assertEquals(List.of(ApprovalPromptText.SESSION_PROMPT_LINE), harness.prompts, denied.transcript());
+            if (restore) launch = harness.restore(launch);
+
+            Turn follow = launch.turn("do it now", Script.EDIT, "a");
+            assertEquals("FILE_EDIT", follow.trace().taskContract().type(), follow.transcript());
+            assertEquals(1, follow.prompts(), follow.transcript());
+            assertEquals(ApprovalPromptText.ONCE_PROMPT_LINE, harness.prompts.getLast(), follow.transcript());
+            // The once-only prompt accepts no session answer, so "a" approves nothing and nothing is remembered.
+            assertEquals(PAGE, Files.readString(harness.workspace.resolve("index.html")));
+
+            Turn named = launch.turn(EDIT, Script.EDIT, "y");
+            assertEquals(1, named.prompts(), named.transcript());
+            assertEquals(ApprovalPromptText.SESSION_PROMPT_LINE, harness.prompts.getLast(), named.transcript());
+            assertEquals("<main>Done</main>\n", Files.readString(harness.workspace.resolve("index.html")));
         }
     }
 

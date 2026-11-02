@@ -36,6 +36,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       auto-approve is unsafe regardless of workspace containment.</li>
  * </ul>
  *
+ * <p>The permission policy narrows this flag further: the choice is offered,
+ * and an auto-approval applies, only for a write whose target the current
+ * request named (see {@code DeclarativePermissionPolicy}).
+ *
  * <p>Thread-safe: the single remember flag is an {@link AtomicBoolean}.
  */
 public final class SessionApprovalPolicy implements ApprovalPolicy {

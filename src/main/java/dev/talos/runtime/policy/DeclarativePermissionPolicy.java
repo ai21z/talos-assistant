@@ -80,7 +80,10 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     "Permission policy denied the tool call through the active approval policy.",
                     resource);
         }
-        if ((typedWorkspaceOperation || commandExecution)
+        // A remembered approval is the operator's standing answer for files the current request names. A target
+        // the model chose or that carried context supplied was never named, so it is approved once
+        // (MICA authority origin).
+        if ((typedWorkspaceOperation || commandExecution || !request.targetNamedByRequest())
                 && sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
             sessionDecision = ApprovalPolicy.Decision.ASK;
         }
@@ -91,6 +94,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         boolean rememberEligible = risk == ToolRiskLevel.WRITE
                 && !typedWorkspaceOperation
                 && !commandExecution
+                && request.targetNamedByRequest()
                 && resource.hasPath()
                 && resource.insideWorkspace()
                 && !resource.protectedPath();

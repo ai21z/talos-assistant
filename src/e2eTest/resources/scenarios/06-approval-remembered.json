@@ -7,6 +7,6 @@
   ],
   "runner": "loop",
   "approvalPolicy": "APPROVE_REMEMBER_WRITES",
-  "userPrompt": "Update the homepage files in this website.",
+  "userPrompt": "Update index.html and style.css in this website.",
   "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>remembered</h1>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"style.css\",\"content\":\"body { color: cyan; }\\n\"}}\n```"
 }

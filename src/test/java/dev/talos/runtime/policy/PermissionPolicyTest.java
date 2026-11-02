@@ -398,8 +398,47 @@ class PermissionPolicyTest {
         }
     }
 
+    /** A call whose target the current request named, as in every case before the L5 binding. */
     private PermissionRequest request(Config cfg, ToolCall call, ToolRiskLevel risk, ExecutionPhase phase) {
-        return new PermissionRequest(workspace, cfg, call, risk, phase);
+        return request(cfg, call, risk, phase, true);
+    }
+
+    private PermissionRequest request(Config cfg, ToolCall call, ToolRiskLevel risk, ExecutionPhase phase,
+                                      boolean targetNamedByRequest) {
+        return new PermissionRequest(workspace, cfg, call, risk, phase, targetNamedByRequest);
+    }
+
+    @Test
+    void writeToATargetTheRequestDidNotNameIsNeverRememberEligible() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(new SessionApprovalPolicy());
+
+        PermissionDecision decision = policy.decide(request(new Config(),
+                new ToolCall("talos.write_file", Map.of("path", "src/app.js", "content", "x")),
+                ToolRiskLevel.WRITE, ExecutionPhase.APPLY, false));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("DEFAULT_WRITE_ASK", decision.reasonCode());
+        assertFalse(decision.rememberEligible());
+    }
+
+    @Test
+    void rememberedApprovalCoversOnlyTargetsTheRequestNamed() {
+        SessionApprovalPolicy sessionPolicy = new SessionApprovalPolicy();
+        sessionPolicy.rememberApproval(workspace,
+                new ToolCall("talos.write_file", Map.of("path", "src/first.txt", "content", "x")),
+                ToolRiskLevel.WRITE);
+        PermissionPolicy policy = new DeclarativePermissionPolicy(sessionPolicy);
+        ToolCall write = new ToolCall("talos.write_file", Map.of("path", "src/second.txt", "content", "x"));
+
+        PermissionDecision named = policy.decide(request(new Config(), write,
+                ToolRiskLevel.WRITE, ExecutionPhase.APPLY, true));
+        PermissionDecision unnamed = policy.decide(request(new Config(), write,
+                ToolRiskLevel.WRITE, ExecutionPhase.APPLY, false));
+
+        assertEquals("SESSION_REMEMBER_ALLOW", named.reasonCode());
+        assertEquals(PermissionAction.ASK, unnamed.action());
+        assertEquals("DEFAULT_WRITE_ASK", unnamed.reasonCode());
+        assertFalse(unnamed.rememberEligible());
     }
 
     @Test

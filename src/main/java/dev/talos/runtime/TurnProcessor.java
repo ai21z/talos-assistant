@@ -18,7 +18,10 @@ import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.safety.SafeLogFormatter;
+import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TargetSource;
+import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskResolution;
@@ -70,6 +73,13 @@ public final class TurnProcessor {
     }
 
     private static final Logger LOG = LoggerFactory.getLogger(TurnProcessor.class);
+
+    /** Roles in which the request itself asks for a file to change. */
+    private static final Set<TargetRole> REQUESTED_CHANGE_ROLES = java.util.EnumSet.of(
+            TargetRole.MUST_MUTATE,
+            TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE,
+            TargetRole.OUTPUT_DESTINATION,
+            TargetRole.MAY_MUTATE);
 
     private final TurnRouter modes;
     private final ApprovalGate approvalGate;
@@ -964,12 +974,19 @@ public final class TurnProcessor {
             LocalTurnTraceCapture.warning("EMPTYING_CHANGE_DESTRUCTIVE", "effect risk raised for " + path);
         }
 
+        boolean targetNamedByRequest = false;
+        if (risk.requiresApproval()) {
+            TaskIntent turnIntent = turnIntent(taskContract);
+            String currentRequest = userRequest != null ? userRequest : taskContract.originalUserRequest();
+            targetNamedByRequest = targetNamedByRequest(turnIntent, currentRequest, session.workspace(), path);
+        }
         PermissionDecision permissionDecision = permissionPolicy.decide(new PermissionRequest(
                 session.workspace(),
                 session.config(),
                 call,
                 risk,
-                ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase()));
+                ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase(),
+                targetNamedByRequest));
         // Raising the risk may only add a prompt. A rule that refuses the call at its original risk
         // keeps refusing it, so an erasing effect can never turn a configured deny into an ask.
         if (emptyingWarning != null && permissionDecision.action() != PermissionAction.DENY) {
@@ -978,7 +995,8 @@ public final class TurnProcessor {
                     session.config(),
                     call,
                     descriptorEffectRisk,
-                    ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase()));
+                    ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase(),
+                    targetNamedByRequest));
             if (atOriginalRisk.action() == PermissionAction.DENY) permissionDecision = atOriginalRisk;
         }
 
@@ -1301,6 +1319,27 @@ public final class TurnProcessor {
     /** Access the tool registry for tool discovery and registration. */
     public ToolRegistry toolRegistry() {
         return toolRegistry;
+    }
+
+    /**
+     * True when the current request named the call's target as a file to change. A target the model chose, or one
+     * from carried or repair context, message history, workspace reconciliation or a runtime default, was not named.
+     * Neither was a target recorded from another message, such as the request that produced a selected draft.
+     */
+    static boolean targetNamedByRequest(TaskIntent intent, String currentRequest, Path workspace, String path) {
+        if (intent == null || currentRequest == null || workspace == null || path == null || path.isBlank()) {
+            return false;
+        }
+        if (!intent.originalUserRequest().equals(currentRequest)) return false;
+        Path root = workspace.toAbsolutePath().normalize();
+        for (TargetRef target : intent.targets().targets()) {
+            if (target.derivation().source() == TargetSource.USER_REQUEST
+                    && REQUESTED_CHANGE_ROLES.contains(target.role())
+                    && WorkspacePathIdentity.matches(root, target.path(), path)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static ToolRiskLevel effectiveRisk(ToolRiskLevel descriptorRisk, ToolCall call) {
@@ -1933,12 +1972,7 @@ public final class TurnProcessor {
             return Set.of();
         }
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        var capturedIntent = TurnTaskContractCapture.getIntent();
-        var intent = capturedIntent == null
-                ? TaskContractResolver.resolveFromUserRequest(
-                        taskContract.originalUserRequest()).intent()
-                : capturedIntent;
-        intent
+        turnIntent(taskContract)
                 .targets()
                 .targets()
                 .stream()
@@ -1947,6 +1981,15 @@ public final class TurnProcessor {
                 .filter(path -> path != null && !path.isBlank())
                 .forEach(out::add);
         return Set.copyOf(out);
+    }
+
+    /** The captured turn intent, or, when no turn was captured, the intent compiled from the contract request. */
+    private static TaskIntent turnIntent(TaskContract taskContract) {
+        var capturedIntent = TurnTaskContractCapture.getIntent();
+        return capturedIntent == null
+                ? TaskContractResolver.resolveFromUserRequest(
+                        taskContract.originalUserRequest()).intent()
+                : capturedIntent;
     }
 
     private static ToolResult validateSandboxPathBeforeApproval(

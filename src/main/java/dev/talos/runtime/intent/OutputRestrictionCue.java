@@ -38,9 +38,39 @@ public final class OutputRestrictionCue {
         for (String sentence : SENTENCE.split(lower)) {
             String text = sentence.strip().replaceAll("\\s+", " ");
             if (!CUE.matcher(text).find()) continue;
-            if (MUTATION_ONLY.matcher(text).matches()) continue;
+            if (mutationProhibitionOnly(text)) continue;
             return true;
         }
         return false;
+    }
+
+    /**
+     * True when one sentence consists only of a mutation prohibition, such as "Don't change any files.".
+     * Such a sentence restricts what may be done. It neither asks for a result nor limits what an answer shows.
+     */
+    public static boolean mutationProhibitionOnly(String sentence) {
+        if (sentence == null || sentence.isBlank()) return false;
+        String text = sentence.replace('’', '\'').toLowerCase(Locale.ROOT).strip()
+                .replaceAll("[.!?;:]+$", "").strip().replaceAll("\\s+", " ");
+        return MUTATION_ONLY.matcher(text).matches();
+    }
+
+    /**
+     * The request without its top-level sentences that consist only of a mutation prohibition. The request is
+     * returned unchanged when it has no such sentence or consists of nothing else.
+     */
+    public static String withoutMutationProhibitions(String request) {
+        if (request == null || request.isBlank()) return request;
+        StringBuilder kept = new StringBuilder(request);
+        boolean removed = false;
+        var sentences = CurrentRequestClauses.sentences(request);
+        for (int index = sentences.size() - 1; index >= 0; index--) {
+            var sentence = sentences.get(index);
+            if (!mutationProhibitionOnly(sentence.text())) continue;
+            kept.delete(sentence.start(), sentence.end());
+            removed = true;
+        }
+        String rest = kept.toString().strip();
+        return !removed || rest.isEmpty() ? request : rest;
     }
 }

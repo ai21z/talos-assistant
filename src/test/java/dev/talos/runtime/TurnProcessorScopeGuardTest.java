@@ -195,7 +195,8 @@ class TurnProcessorScopeGuardTest {
         Session s = new Session(WS, new Config());
         Context ctx = Context.builder(new Config()).build();
 
-        TurnUserRequestCapture.set("redesign this site - tweak the homepage");
+        // Remembered approval covers only a write whose target the current request names (MICA authority origin).
+        TurnUserRequestCapture.set("redesign this site - tweak the homepage and style.css");
         ToolCall onScope = new ToolCall("test.write", Map.of(
                 "path", WS.resolve("style.css").toString(),
                 "content", "body{}"));
