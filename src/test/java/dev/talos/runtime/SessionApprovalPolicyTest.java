@@ -311,6 +311,8 @@ class SessionApprovalPolicyTest {
                 .sandbox(new dev.talos.core.security.Sandbox(ws, null))
                 .build();
 
+        // A remembered approval covers only files the current request names (L5).
+        TurnUserRequestCapture.set("Write a.txt and b.txt.");
         ToolCall c1 = new ToolCall("test.w",
                 Map.of("path", ws.resolve("a.txt").toString(), "content", "1"));
         ToolResult r1 = tp.executeTool(s, c1, ctx);
@@ -352,7 +354,8 @@ class SessionApprovalPolicyTest {
                 .sandbox(new dev.talos.core.security.Sandbox(ws, null))
                 .build();
 
-        // Remember approval for in-workspace writes.
+        // Remember approval for in-workspace writes the current request names (L5).
+        TurnUserRequestCapture.set("Write a.txt.");
         tp.executeTool(s, new ToolCall("test.w",
                 Map.of("path", ws.resolve("a.txt").toString(), "content", "1")), ctx);
         assertTrue(policy.rememberInWorkspaceWritesEnabled());

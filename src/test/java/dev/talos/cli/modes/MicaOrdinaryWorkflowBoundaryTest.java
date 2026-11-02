@@ -61,6 +61,7 @@ class MicaOrdinaryWorkflowBoundaryTest {
     private final ToolRegistry registry = registry();
     private TurnProcessor processor;
     private Gate sessionGate;
+    private ApprovalPolicy approvalPolicy = ApprovalPolicy.ALWAYS_ASK;
     private int turn;
 
     @BeforeEach void isolateHome() throws Exception {
@@ -481,6 +482,81 @@ class MicaOrdinaryWorkflowBoundaryTest {
         assertTrue(run.answer().contains("notes.txt"), run.answer());
     }
 
+    // R1: a sentence that only prohibits mutation is a restriction, so the listing stays the requested result.
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Which files are in this workspace?",
+            "Which files are in this workspace? Don't change any files.",
+            "Don't change any files. Which files are in this workspace?",
+            "What files are in this folder? Please do not modify anything.",
+            "List the files here. Don't edit anything.",
+            "Which files are in this workspace? Never modify the files, please."
+    })
+    void mutationProhibitionKeepsTheListingInAnEmptyWorkspace(String request) throws Exception {
+        Run run = run(request, new Gate(), list("."), "The workspace is empty.");
+        assertEquals("DIRECTORY_LISTING", run.contract().type(), run.answer());
+        assertFalse(run.contract().mutationAllowed(), run.answer());
+        assertEquals(1, successes(run, "talos.list_dir"), run.answer());
+        assertEquals(0, run.audit().approvalsRequired(), run.answer());
+        assertFalse(run.answer().contains("Evidence incomplete"), run.answer());
+        assertFalse(run.answer().contains("project summary"), run.answer());
+        assertTrue(run.answer().contains("empty"), run.answer());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Which files are in this workspace?",
+            "Which files are in this workspace? Don't change any files."
+    })
+    void mutationProhibitionNeedsNoFileContentForAListing(String request) throws Exception {
+        Files.writeString(workspace.resolve("notes.txt"), "fixture\n");
+        Run run = run(request, new Gate(), list("."), "The workspace holds notes.txt.");
+        assertEquals("DIRECTORY_LISTING", run.contract().type(), run.answer());
+        assertEquals(0, successes(run, "talos.read_file"), run.answer());
+        assertFalse(run.answer().contains("Evidence incomplete"), run.answer());
+        assertTrue(run.answer().contains("notes.txt"), run.answer());
+    }
+
+    // L5: the session choice is offered, and a remembered approval applies, only to a write the current request named.
+    @Test void sessionChoiceIsOfferedOnlyForAWriteTheRequestNamed() throws Exception {
+        approvalPolicy = new SessionApprovalPolicy();
+        var gate = new Gate(ApprovalResponse.APPROVED_REMEMBER, ApprovalResponse.APPROVED_REMEMBER);
+        Run named = run("Create story.txt with a short medieval story.", gate, write(), read(), SAVED_CLAIM);
+        assertEquals(1, gate.sessionPrompts, named.answer());
+        assertEquals(0, gate.oncePrompts, named.answer());
+        assertEquals(STORY, readStory());
+
+        String revised = "Mara crossed the bridge at dawn.\n";
+        Run renamed = run("Replace the text of story.txt with a one-line story.", gate,
+                call("talos.write_file", Map.of("path", "story.txt", "content", revised)), SAVED_CLAIM);
+        assertEquals(1, gate.calls, "A remembered approval covers a later write the request names. " + renamed.answer());
+        assertEquals(revised, readStory(), renamed.answer());
+
+        String chosen = "Mara crossed the bridge at dusk.\n";
+        Run unnamed = run("Fix the typo in the story.", gate,
+                call("talos.write_file", Map.of("path", "story.txt", "content", chosen)), SAVED_CLAIM);
+        assertEquals(2, gate.calls, "A remembered approval never covers a target the model chose. " + unnamed.answer());
+        assertEquals(1, gate.sessionPrompts, unnamed.answer());
+        assertEquals(1, gate.oncePrompts, unnamed.answer());
+    }
+
+    @Test void modelChosenWriteIsApprovedOnceWithoutTheSessionChoice() throws Exception {
+        approvalPolicy = new SessionApprovalPolicy();
+        Files.writeString(workspace.resolve("story.txt"), STORY);
+        var gate = new Gate(ApprovalResponse.APPROVED_REMEMBER,
+                ApprovalResponse.APPROVED_REMEMBER, ApprovalResponse.APPROVED_REMEMBER);
+        String chosen = "Mara crossed the bridge at dusk.\n";
+        Run first = run("Fix the typo in the story.", gate,
+                call("talos.write_file", Map.of("path", "story.txt", "content", chosen)), SAVED_CLAIM);
+        assertEquals(0, gate.sessionPrompts, first.answer());
+        assertEquals(1, gate.oncePrompts, first.answer());
+        assertEquals(chosen, readStory(), first.answer());
+
+        Run second = run("Fix the typo in the story.", gate,
+                call("talos.write_file", Map.of("path", "story.txt", "content", STORY)), SAVED_CLAIM);
+        assertEquals(2, gate.oncePrompts, "The once-only answer must not have been remembered. " + second.answer());
+    }
+
     @Test void knownLocationSurvivesUnresolvedProjectPurpose() throws Exception {
         String answer = "The current workspace is " + workspace
                 + ". Its purpose cannot be established from the empty directory listing.";
@@ -512,7 +588,7 @@ class MicaOrdinaryWorkflowBoundaryTest {
         var config = new Config(null);
         if (processor == null) {
             sessionGate = gate;
-            processor = new TurnProcessor(null, gate, registry, ApprovalPolicy.ALWAYS_ASK);
+            processor = new TurnProcessor(null, gate, registry, approvalPolicy);
         }
         assertSame(sessionGate, gate, "The operator and processor must be retained across this conversation.");
         var specs = registry.descriptors().stream().map(d -> new ToolSpec(d.name(), d.description(), d.parametersSchema())).toList();
@@ -603,9 +679,20 @@ class MicaOrdinaryWorkflowBoundaryTest {
     private static final class Gate implements ApprovalGate {
         private final List<ApprovalResponse> responses;
         private int calls;
+        private int sessionPrompts;
+        private int oncePrompts;
         private Gate(ApprovalResponse... responses) { this.responses = List.of(responses); }
         @Override public boolean approve(String description, String detail) { return approveFull(description, detail).isApproved(); }
         @Override public ApprovalResponse approveFull(String description, String detail) {
+            sessionPrompts++;
+            return next();
+        }
+        // The once-only prompt offers no session choice, so a remembered answer is reduced to one approval.
+        @Override public ApprovalResponse approveOnce(String description, String detail) {
+            oncePrompts++;
+            return next().isApproved() ? ApprovalResponse.APPROVED : ApprovalResponse.DENIED;
+        }
+        private ApprovalResponse next() {
             calls++;
             return calls <= responses.size() ? responses.get(calls - 1) : ApprovalResponse.DENIED;
         }

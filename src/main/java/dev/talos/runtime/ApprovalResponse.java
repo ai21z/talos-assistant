@@ -17,7 +17,10 @@ public enum ApprovalResponse {
     /** One-time approval - do not remember. */
     APPROVED,
 
-    /** Approved AND remember: auto-approve similar in-workspace edits for the session. */
+    /**
+     * Approved AND remember: auto-approve later in-workspace writes for the session, only to files the
+     * current request names. Offered only for a write whose target the current request named.
+     */
     APPROVED_REMEMBER,
 
     /** Denied / cancelled / EOF. */

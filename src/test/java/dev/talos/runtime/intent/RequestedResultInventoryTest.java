@@ -8,6 +8,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
@@ -162,6 +163,35 @@ class RequestedResultInventoryTest {
             "What is in the check-in folder?"
     })
     void foreignSubjectsRestrictionsAndPurposeStayUnbounded(String request) {
+        assertFalse(plan(request).requestedResults().boundedWorkspaceQuery(), request);
+    }
+
+    // R1: a sentence that only prohibits mutation is framing, so the inventory matches the request without it.
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', quoteCharacter = '"', value = {
+            "What files are in this workspace? Don't change any files.|What files are in this workspace?",
+            "Don't change any files. What files are in this workspace?|What files are in this workspace?",
+            "Is this folder empty? Please do not modify anything.|Is this folder empty?",
+            "Where is this workspace? Never edit or delete anything.|Where is this workspace?",
+            "Hey, what can you see in this folder? Please don't edit anything.|Hey, what can you see in this folder?"
+    })
+    void mutationOnlyProhibitionKeepsTheInventoryBounded(String request, String bare) {
+        var restricted = plan(request).requestedResults();
+        var unrestricted = plan(bare).requestedResults();
+        assertTrue(unrestricted.boundedWorkspaceQuery(), bare);
+        assertTrue(restricted.boundedWorkspaceQuery(), restricted.toString());
+        assertEquals(unrestricted.results().stream().map(RequestedResultInventory.RequestedResult::kind).toList(),
+                restricted.results().stream().map(RequestedResultInventory.RequestedResult::kind).toList(), request);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "What files are in this workspace? Don't change anything else.",
+            "What files are in this workspace? Don't change any files or list them.",
+            "What files are in this workspace? \"Don't change any files.\"",
+            "What files are in this workspace? Don't change any files except notes.md."
+    })
+    void prohibitionsOutsideTheMutationOnlyGrammarStayUnresolved(String request) {
         assertFalse(plan(request).requestedResults().boundedWorkspaceQuery(), request);
     }
 

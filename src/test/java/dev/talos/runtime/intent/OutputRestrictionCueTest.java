@@ -3,6 +3,7 @@ package dev.talos.runtime.intent;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,5 +54,57 @@ class OutputRestrictionCueTest {
     })
     void ordinaryWordingAndMutationOnlyProhibitionsAreNotRestrictions(String request) {
         assertFalse(OutputRestrictionCue.present(request), request);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Don't change any files.",
+            "do not modify anything",
+            "Please don't edit or delete anything!",
+            "Never touch the workspace, please.",
+            "Don’t write to disk.",
+            "And don't rename any files for now."
+    })
+    void sentenceOfOnlyAMutationProhibitionIsRecognized(String sentence) {
+        assertTrue(OutputRestrictionCue.mutationProhibitionOnly(sentence), sentence);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Don't change anything else.",
+            "Don't touch or list any files.",
+            "Don't change any files except notes.md.",
+            "Don't change any files, but tell me what is here.",
+            "Which files are here? Don't change any files.",
+            "Please change the files.",
+            "",
+            " "
+    })
+    void sentenceWithAnythingBesidesAMutationProhibitionIsNotRecognized(String sentence) {
+        assertFalse(OutputRestrictionCue.mutationProhibitionOnly(sentence), sentence);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Which files are in this workspace? Don't change any files.",
+            "Don't change any files. Which files are in this workspace?",
+            "Which files are in this workspace? Please do not modify or delete anything. Never touch the repo."
+    })
+    void mutationProhibitionSentencesAreLeftOutOfTheRequest(String request) {
+        assertEquals("Which files are in this workspace?",
+                OutputRestrictionCue.withoutMutationProhibitions(request), request);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Don't change any files.",
+            "Don't change any files. Please do not delete anything.",
+            "Which files are here? \"Don't change any files.\"",
+            "Which files are here? Don't change anything else.",
+            "Which files are here? Don't touch or list any files.",
+            "Which files are here?"
+    })
+    void otherwiseTheRequestIsKeptAsWritten(String request) {
+        assertEquals(request, OutputRestrictionCue.withoutMutationProhibitions(request), request);
     }
 }

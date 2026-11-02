@@ -146,6 +146,28 @@ class MicaContentDraftBoundaryTest {
         }
     }
 
+    // L5: the destination of a draft was named by the earlier request that asked for it, not by "Save draft",
+    // so a remembered session approval does not cover the save and it is approved once.
+    @Test
+    void savingADraftIsApprovedOnceEvenAfterASessionApproval() throws Exception {
+        try (var conversation = new Conversation(true, new SessionApprovalPolicy(),
+                ApprovalResponse.APPROVED_REMEMBER, ApprovalResponse.APPROVED_REMEMBER)) {
+            conversation.runResponses("Create log.txt containing exactly \"ready\"", List.of(
+                    new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall("write-log", "talos.write_file",
+                            Map.of("path", "log.txt", "content", "ready")))),
+                    new LlmClient.StreamResult("Saved log.txt.", List.of())));
+            assertEquals(1, conversation.approvals.get());
+            assertEquals(0, conversation.oncePrompts.get());
+
+            conversation.run(NAMED_REQUEST, proposal("draft", STORY));
+            Run saved = conversation.run("Save draft " + requireDraft(conversation).id());
+            assertEquals(2, conversation.approvals.get(), "The draft save must not be covered by the remembered approval. "
+                    + saved.answer());
+            assertEquals(1, conversation.oncePrompts.get(), saved.answer());
+            assertEquals(STORY, Files.readString(workspace.resolve("story.txt")));
+        }
+    }
+
     @Test
     void selectedBytesAreNotRewrittenToThePreviousFilesBomOrNewlines() throws Exception {
         Files.writeString(workspace.resolve("story.txt"), "\uFEFFPrevious story.\r\n");
@@ -811,6 +833,7 @@ class MicaContentDraftBoundaryTest {
         private final SessionMemory memory = new SessionMemory();
         private final ToolRegistry registry = new ToolRegistry();
         private final AtomicInteger approvals = new AtomicInteger();
+        private final AtomicInteger oncePrompts = new AtomicInteger();
         private final List<String> approvalDetails = new ArrayList<>();
         private final List<ApprovalResponse> decisions;
         private final boolean schemaSupported;
@@ -822,6 +845,10 @@ class MicaContentDraftBoundaryTest {
         }
 
         private Conversation(boolean schemaSupported, ApprovalResponse... decisions) {
+            this(schemaSupported, ApprovalPolicy.ALWAYS_ASK, decisions);
+        }
+
+        private Conversation(boolean schemaSupported, ApprovalPolicy approvalPolicy, ApprovalResponse... decisions) {
             this.schemaSupported = schemaSupported;
             this.decisions = List.of(decisions);
             registry.register(new FileWriteTool());
@@ -833,10 +860,15 @@ class MicaContentDraftBoundaryTest {
                     int index = approvals.getAndIncrement();
                     return index < Conversation.this.decisions.size() ? Conversation.this.decisions.get(index) : ApprovalResponse.DENIED;
                 }
+                // The once-only prompt offers no session choice, so a remembered answer is reduced to one approval.
+                @Override public ApprovalResponse approveOnce(String description, String detail) {
+                    oncePrompts.incrementAndGet();
+                    return approveFull(description, detail).isApproved() ? ApprovalResponse.APPROVED : ApprovalResponse.DENIED;
+                }
             };
             var mode = new UnifiedAssistantMode();
             processor = new TurnProcessor((request, root, context) -> mode.handle(request, root, (Context) context),
-                    gate, registry, ApprovalPolicy.ALWAYS_ASK);
+                    gate, registry, approvalPolicy);
             processor.addListener(new MemoryUpdateListener(new ConversationManager(memory, TokenBudget.fromConfig(config)), null, memory));
             processor.addListener(new dev.talos.cli.repl.ActiveTaskContextUpdateListener(memory));
             session = new Session(workspace, config, memory);
