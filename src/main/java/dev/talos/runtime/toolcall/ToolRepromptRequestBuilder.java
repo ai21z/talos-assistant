@@ -184,6 +184,18 @@ final class ToolRepromptRequestBuilder {
     }
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
+        return nativeToolSpecs(state, true);
+    }
+
+    /**
+     * The native tools the current request offered, also when its response earned no tool call authority. Only the
+     * one tool-mode correction uses it, so the corrected request offers no tool the rejected request did not.
+     */
+    static List<ToolSpec> offeredNativeToolSpecs(LoopState state) {
+        return nativeToolSpecs(state, false);
+    }
+
+    private static List<ToolSpec> nativeToolSpecs(LoopState state, boolean requireToolCallEligibility) {
         if (state == null || state.ctx == null) return List.of();
         List<ToolSpec> available;
         if (state.ctx.hasNativeToolSpecOverride()) {
@@ -195,7 +207,7 @@ final class ToolRepromptRequestBuilder {
         }
         ProviderResponseCapture.Receipt receipt =
                 state.currentResponseReceipt;
-        if (receipt == null || !receipt.providerToolCallEligible()) {
+        if (receipt == null || requireToolCallEligibility && !receipt.providerToolCallEligible()) {
             return List.of();
         }
         ProviderResponseCapture.ToolAuthorityContract authority =

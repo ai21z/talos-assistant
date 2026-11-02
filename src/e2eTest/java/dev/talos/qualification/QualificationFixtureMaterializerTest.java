@@ -24,7 +24,8 @@ class QualificationFixtureMaterializerTest {
         Path workspace = temp.resolve("workspace");
 
         QualificationFixtureMaterializer.Snapshot snapshot =
-                QualificationFixtureMaterializer.materialize(catalog, "basic-workspace-v6.json", workspace);
+                QualificationFixtureMaterializer.materialize(catalog,
+                        "basic-workspace-v" + QualificationProtocol.VERSION + ".json", workspace);
 
         assertEquals("# Atlas Notes", Files.readString(workspace.resolve("README.md"),
                 StandardCharsets.UTF_8).lines().findFirst().orElseThrow());
@@ -40,9 +41,10 @@ class QualificationFixtureMaterializerTest {
         Files.createDirectories(workspace);
         Files.writeString(workspace.resolve("keep.txt"), "keep", StandardCharsets.UTF_8);
 
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
                 () -> QualificationFixtureMaterializer.materialize(
-                        catalog, "basic-workspace-v6.json", workspace));
+                        catalog, "basic-workspace-v" + QualificationProtocol.VERSION + ".json", workspace));
+        assertEquals("qualification workspace must be empty", refused.getMessage());
         assertEquals("keep", Files.readString(workspace.resolve("keep.txt"), StandardCharsets.UTF_8));
     }
 

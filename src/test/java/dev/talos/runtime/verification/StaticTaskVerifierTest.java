@@ -3258,6 +3258,51 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void requiredClaimsAreRequestBoundOnlyWhenTheyCoverEveryChangedFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+        var contract = TaskContractResolver.fromUserRequest(
+                "Create a synthwave website with a button with id teaser-button "
+                        + "that updates visible text in #teaser-status when clicked.");
+
+        TaskVerificationResult covered = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0).compatibilityResult();
+        TaskVerificationResult uncovered = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                contract,
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0).compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, covered.status(), covered.summary());
+        assertTrue(covered.requestBound(), covered.summary());
+        assertEquals(TaskVerificationStatus.PASSED, uncovered.status(), uncovered.summary());
+        assertFalse(uncovered.requestBound(), uncovered.summary());
+    }
+
+    @Test
     void browserVerifiedInteractionIsNotFailedByCssUtilityOrStateSelectors() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -4090,7 +4135,7 @@ class StaticTaskVerifierTest {
                 0);
 
         assertEquals(TaskVerificationStatus.PASSED, result.status());
-        assertTrue(result.summary().contains("Exact edit replacement verification passed"), result.summary());
+        assertTrue(result.summary().contains("Exact edit replacement checks passed"), result.summary());
         assertTrue(result.facts().stream()
                 .anyMatch(f -> f.contains("notes.md: exact edit replacement observed")),
                 result.facts().toString());
@@ -4112,7 +4157,7 @@ class StaticTaskVerifierTest {
                 0);
 
         assertEquals(TaskVerificationStatus.PASSED, result.status());
-        assertTrue(result.summary().contains("Exact edit replacement verification passed"), result.summary());
+        assertTrue(result.summary().contains("Exact edit replacement checks passed"), result.summary());
     }
 
     @Test

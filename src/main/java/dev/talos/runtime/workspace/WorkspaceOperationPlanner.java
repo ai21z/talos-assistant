@@ -1,10 +1,13 @@
 package dev.talos.runtime.workspace;
 
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRiskLevel;
+import dev.talos.tools.WorkspacePathIdentity;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -44,6 +47,61 @@ public final class WorkspaceOperationPlanner {
             return Optional.empty();
         }
         return authorityPlan(authorityPlan);
+    }
+
+    /** One operand that a single operation call names in its parameters, with the role the operation gives it. */
+    public record NamedOperand(String path, WorkspaceOperationObligation.Role role) {
+    }
+
+    /** Parameters that name the one path of a mkdir or delete, beside the ones its tool accepts. */
+    private static final List<String> OTHER_TARGET_KEYS = List.of("file_path", "filepath", "file", "filename",
+            "target", "dir", "directory", "src", "source", "source_path", "from");
+    /**
+     * Parameters that name the source of a move or copy beside the ones its tool accepts. A folder or destination
+     * parameter is not one, because beside a destination it can name where the source goes.
+     */
+    private static final List<String> OTHER_SOURCE_KEYS = List.of("file_path", "filepath", "file", "filename");
+    /** Parameters that name the source of a rename beside the ones its tool accepts. Its destination is a name. */
+    private static final List<String> OTHER_RENAME_SOURCE_KEYS = List.of("file_path", "filepath", "file",
+            "filename", "src", "target", "dir", "directory");
+
+    /**
+     * The operands a single workspace operation call names, read from its parameters with the aliases its tool
+     * accepts. When those name no source or target, a parameter that can only mean that operand is read as it, so a
+     * call refused for a parameter its tool does not accept is still described by the path it asked for. It describes
+     * a call for the audit and never plans or authorizes it. A rename destination is the sibling of its source, and
+     * it is left out when the source ends with a slash or the new name is not one path segment. A batch and any other
+     * call name no operands.
+     */
+    public static List<NamedOperand> namedOperands(ToolCall call) {
+        if (call == null) return List.of();
+        List<NamedOperand> operands = new ArrayList<>();
+        switch (ToolAliasPolicy.localCanonicalName(call.toolName())) {
+            case "mkdir" -> requirePath(call, "path", "dir", "directory")
+                    .or(() -> describedPath(call, OTHER_TARGET_KEYS))
+                    .ifPresent(path -> operands.add(new NamedOperand(path, WorkspaceOperationObligation.Role.TARGET)));
+            case "delete_path" -> requirePath(call, "path", "target", "file", "filename")
+                    .or(() -> describedPath(call, OTHER_TARGET_KEYS))
+                    .ifPresent(path -> operands.add(new NamedOperand(path, WorkspaceOperationObligation.Role.TARGET)));
+            case "move_path", "copy_path" -> {
+                sourcePath(call).or(() -> describedPath(call, OTHER_SOURCE_KEYS)).ifPresent(path ->
+                        operands.add(new NamedOperand(path, WorkspaceOperationObligation.Role.SOURCE)));
+                destinationPath(call).ifPresent(path ->
+                        operands.add(new NamedOperand(path, WorkspaceOperationObligation.Role.DESTINATION)));
+            }
+            case "rename_path" -> {
+                Optional<String> source = requirePath(call, "path", "from", "source", "source_path")
+                        .or(() -> describedPath(call, OTHER_RENAME_SOURCE_KEYS));
+                String newName = param(call, "new_name", "newName", "name", "to_name");
+                source.ifPresent(path -> operands.add(new NamedOperand(path, WorkspaceOperationObligation.Role.SOURCE)));
+                if (source.isPresent() && !source.get().endsWith("/") && validateNewName(newName).isEmpty()) {
+                    operands.add(new NamedOperand(siblingPath(source.get(), newName.strip()),
+                            WorkspaceOperationObligation.Role.DESTINATION));
+                }
+            }
+            default -> { }
+        }
+        return List.copyOf(operands);
     }
 
     /** Builds the one runtime plan directly from parser-owned typed authority. */
@@ -141,6 +199,11 @@ public final class WorkspaceOperationPlanner {
 
     public static Optional<String> validateBeforeApproval(ToolCall call) {
         if (call == null || !isWorkspaceOperationTool(call.toolName())) return Optional.empty();
+        Optional<String> invalid = validateParameters(call);
+        return invalid.isPresent() ? invalid : validateSeparators(call);
+    }
+
+    private static Optional<String> validateParameters(ToolCall call) {
         return switch (ToolAliasPolicy.localCanonicalName(call.toolName())) {
             case "apply_workspace_batch" -> validateBatch(call);
             case "mkdir" -> requirePath(call, "path", "dir", "directory").isPresent()
@@ -156,6 +219,37 @@ public final class WorkspaceOperationPlanner {
                             + "No approval was requested and no file was changed.");
             default -> Optional.empty();
         };
+    }
+
+    /**
+     * The plan rewrites a backslash to a separator, while a single-operation tool resolves the spelling as
+     * given. Where a backslash can be part of a file name, the approved and checkpointed path would then not be
+     * the path the tool changes. A batch applies its parsed plan, so it is not affected.
+     */
+    private static Optional<String> validateSeparators(ToolCall call) {
+        if (WorkspacePathIdentity.normalizedSpellingIsLossless()) return Optional.empty();
+        String toolName = ToolAliasPolicy.localCanonicalName(call.toolName());
+        List<String> spellings = switch (toolName) {
+            case "mkdir" -> spellings(param(call, "path", "dir", "directory"));
+            case "move_path", "copy_path" -> spellings(
+                    param(call, "from", "source", "source_path", "src", "path"),
+                    param(call, "to", "destination", "destination_path", "dest", "target"));
+            case "rename_path" -> spellings(param(call, "path", "from", "source", "source_path"));
+            case "delete_path" -> spellings(param(call, "path", "target", "file", "filename"));
+            default -> List.of();
+        };
+        for (String spelling : spellings) {
+            if (spelling.indexOf('\\') >= 0) {
+                return Optional.of("Invalid talos." + toolName + " call: a path contains a backslash, which is "
+                        + "not a path separator on this system. Use `/` between folders. "
+                        + "No approval was requested and no file was changed.");
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static List<String> spellings(String... values) {
+        return java.util.Arrays.stream(values).filter(value -> value != null).toList();
     }
 
     private static Optional<WorkspaceOperationPlan> batchPlan(ToolCall call) {
@@ -263,6 +357,14 @@ public final class WorkspaceOperationPlanner {
 
     private static Optional<String> destinationPath(ToolCall call) {
         return requirePath(call, "to", "destination", "destination_path", "dest", "target");
+    }
+
+    private static Optional<String> describedPath(ToolCall call, List<String> keys) {
+        for (String key : keys) {
+            Optional<String> path = requirePath(call, key);
+            if (path.isPresent()) return path;
+        }
+        return Optional.empty();
     }
 
     private static Optional<String> requirePath(ToolCall call, String canonical, String... aliases) {

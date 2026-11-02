@@ -1,5 +1,6 @@
 package dev.talos.runtime.context;
 
+import dev.talos.runtime.intent.ContinuationDirective;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.StaticWebRequirements;
@@ -27,6 +28,8 @@ public final class ActiveTaskContextPolicy {
             "^apply\\s+(?:(?:that|the)\\s+)?(?:[a-z0-9._/-]+\\s+)?proposal(?:\\s+now)?$"
     );
 
+    private static final Pattern REPAIR_VERB = Pattern.compile("\\b(?:fix|repair)\\b");
+
     private static final Set<ActiveTaskContext.Kind> CONSUMABLE_KINDS = Set.of(
             ActiveTaskContext.Kind.PROPOSED_CHANGES,
             ActiveTaskContext.Kind.VERIFIER_FINDINGS,
@@ -49,18 +52,51 @@ public final class ActiveTaskContextPolicy {
 
     private ActiveTaskContextPolicy() {}
 
+    /** Where the authority of a consumed context came from (MICA invariant I1). */
+    public enum AuthorityOrigin {
+        /** The context was not consumed. The current message alone decides. */
+        CURRENT_MESSAGE,
+        /** A directive clause of the current message binds the carried referent. */
+        CARRIED_DIRECTIVE,
+        /** The current message applies a proposal bound to its source turn, request and answer. */
+        BOUND_PROPOSAL,
+        /** An affirmation accepts the repair offer the runtime rendered after failed verification. */
+        RUNTIME_REPAIR_OFFER,
+        /** An affirmation accepts the change offer the runtime rendered after an indirect change request. */
+        RUNTIME_CHANGE_OFFER
+    }
+
     public record Decision(
             TaskContract taskContract,
             ActiveTaskContext planContext,
             ArtifactGoal artifactGoal,
             ActiveTaskContext memoryContext,
-            boolean consumed) {
+            boolean consumed,
+            AuthorityOrigin origin) {
 
         public Decision {
             taskContract = taskContract == null ? TaskContract.unknown("") : taskContract;
             planContext = planContext == null ? ActiveTaskContext.none() : planContext;
             artifactGoal = artifactGoal == null ? ArtifactGoal.none() : artifactGoal;
             memoryContext = memoryContext == null ? planContext : memoryContext;
+            origin = origin == null || !consumed ? AuthorityOrigin.CURRENT_MESSAGE : origin;
+        }
+
+        public Decision(
+                TaskContract taskContract,
+                ActiveTaskContext planContext,
+                ArtifactGoal artifactGoal,
+                ActiveTaskContext memoryContext,
+                boolean consumed) {
+            this(taskContract, planContext, artifactGoal, memoryContext, consumed,
+                    consumed ? AuthorityOrigin.CARRIED_DIRECTIVE : AuthorityOrigin.CURRENT_MESSAGE);
+        }
+
+        /** A typed runtime confirmation, not the wording of the current message, supplied the authority. */
+        public boolean typedConfirmation() {
+            return origin == AuthorityOrigin.BOUND_PROPOSAL
+                    || origin == AuthorityOrigin.RUNTIME_REPAIR_OFFER
+                    || origin == AuthorityOrigin.RUNTIME_CHANGE_OFFER;
         }
     }
 
@@ -92,6 +128,40 @@ public final class ActiveTaskContextPolicy {
             return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), ActiveTaskContext.none(), false);
         }
 
+        // A bare affirmation is the expected reply to a runtime repair offer, so it is matched before small talk
+        // suppression. It binds only an offer bound to the delivered failed answer of the immediately preceding
+        // turn. A later acceptance would answer something else, so it has no authority.
+        if (mutationAuthorityComplete
+                && ContinuationDirective.isAffirmation(userRequest)
+                && currentUserTurnNumber <= savedContext.sourceTurnNumber() + 1
+                && savedContext.activeAt(currentUserTurnNumber)
+                && savedContext.hasTargets()
+                && savedContext.hasBoundRepairOffer()) {
+            return new Decision(
+                    contextualizedContract(userRequest, savedContext),
+                    savedContext,
+                    savedGoal,
+                    savedContext,
+                    true,
+                    AuthorityOrigin.RUNTIME_REPAIR_OFFER);
+        }
+
+        // The change offer answers the indirect request of the immediately preceding turn, the same way.
+        if (mutationAuthorityComplete
+                && (ContinuationDirective.isAffirmation(userRequest) || isNarrowDeicticApply(userRequest))
+                && currentUserTurnNumber <= savedContext.sourceTurnNumber() + 1
+                && savedContext.activeAt(currentUserTurnNumber)
+                && savedContext.hasTargets()
+                && savedContext.hasBoundChangeOffer()) {
+            return new Decision(
+                    contextualizedContract(userRequest, savedContext),
+                    savedContext,
+                    savedGoal,
+                    savedContext,
+                    true,
+                    AuthorityOrigin.RUNTIME_CHANGE_OFFER);
+        }
+
         if (suppressesContext(userRequest, current)) {
             if (!savedContext.activeAt(currentUserTurnNumber)) {
                 return new Decision(
@@ -118,8 +188,11 @@ public final class ActiveTaskContextPolicy {
                     false);
         }
 
+        // An offer that was not accepted on the next turn keeps its files as referents, like the task it came from,
+        // but it is no longer a proposal that a later apply phrase can accept.
         if (savedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES
-                && !savedContext.hasBoundProposal()) {
+                && !savedContext.hasBoundProposal()
+                && !savedContext.hasBoundChangeOffer()) {
             return new Decision(current,
                     savedContext.suppressed("Proposal provenance is unavailable. Explicit edit scope is required."),
                     ArtifactGoal.none(), savedContext, false);
@@ -158,13 +231,17 @@ public final class ActiveTaskContextPolicy {
                     true);
         }
 
-        if (isNarrowDeicticApply(userRequest) && savedContext.hasTargets() && isConsumable(savedContext.kind())) {
+        if (isNarrowDeicticApply(userRequest) && savedContext.hasTargets() && isConsumable(savedContext.kind())
+                && !savedContext.hasBoundChangeOffer()) {
             return new Decision(
                     contextualizedContract(userRequest, savedContext),
                     savedContext,
                     savedGoal,
                     savedContext,
-                    true);
+                    true,
+                    savedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES
+                            ? AuthorityOrigin.BOUND_PROPOSAL
+                            : AuthorityOrigin.CARRIED_DIRECTIVE);
         }
 
         if (isStaticWebRedesignContinuation(userRequest, savedGoal)
@@ -213,14 +290,14 @@ public final class ActiveTaskContextPolicy {
         if (savedGoal == null || savedGoal.artifactKind() != ArtifactGoal.ArtifactKind.STATIC_WEB) {
             return false;
         }
-        String lower = normalized(userRequest).replaceAll("[.!?]+$", "");
-        if (isStatusQuestion(lower)) return false;
-        if (lower.startsWith("what ")
-                || lower.startsWith("why ")
-                || lower.startsWith("how ")
-                || lower.startsWith("which ")) {
-            return false;
+        if (isStatusQuestion(normalized(userRequest))) return false;
+        for (String clause : ContinuationDirective.clauses(userRequest)) {
+            if (isStaticWebRedesignCue(clause)) return true;
         }
+        return false;
+    }
+
+    private static boolean isStaticWebRedesignCue(String lower) {
         return lower.contains("make it better")
                 || lower.contains("look better")
                 || lower.contains("looks better")
@@ -293,10 +370,15 @@ public final class ActiveTaskContextPolicy {
     }
 
     private static boolean isRepairContinuation(String userRequest) {
-        String lower = normalized(userRequest);
-        if (isStatusQuestion(lower)) return false;
-        return lower.contains("fix")
-                || lower.contains("repair")
+        if (isStatusQuestion(normalized(userRequest))) return false;
+        for (String clause : ContinuationDirective.clauses(userRequest)) {
+            if (isRepairCue(clause)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isRepairCue(String lower) {
+        return REPAIR_VERB.matcher(lower).find()
                 || lower.contains("remaining")
                 || lower.contains("try again")
                 || startsWithImperative(lower, "complete")
@@ -313,7 +395,11 @@ public final class ActiveTaskContextPolicy {
                 || lower.startsWith("was ")
                 || lower.startsWith("are ")
                 || lower.startsWith("did ")
+                || lower.startsWith("do ")
                 || lower.startsWith("does ")
+                || lower.startsWith("has ")
+                || lower.startsWith("have ")
+                || lower.startsWith("should ")
                 || lower.startsWith("what ")
                 || lower.startsWith("where ")
                 || lower.startsWith("why ")

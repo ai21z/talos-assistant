@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,6 +72,23 @@ public final class TaskExpectationResolver {
             "(?:" + QUOTED_REPLACEMENT_TEXT + "|" + REPLACEMENT_TEXT + ")";
     private static final String EXACT_REPLACEMENT_DESCRIPTOR =
             "(?:the\\s+exact\\s+(?:text|string|word|phrase)\\s+)?";
+    private static final Pattern OPERAND_SENTENCE_END = Pattern.compile("[.!?](?=\\s|$)|[\\r\\n]");
+    private static final Pattern OPERAND_CLAUSE_BOUNDARY = Pattern.compile(
+            "(?i)\\s*[,;(]|\\s+(?:and|but)\\b"
+                    + "|\\s+(?:then|while|without|keeping|preserving|leaving|keep|leave|preserve|do\\s+not|don'?t"
+                    + "|if|unless|so|because|except)\\b"
+                    + "|\\s+" + TARGET_REFERENCE_CLAUSE);
+    private static final Pattern WEAK_CLAUSE_BOUNDARY = Pattern.compile("(?i)\\s*[,;]|\\s+(?:and|but)");
+    private static final Pattern CLAUSE_START = Pattern.compile(
+            "(?i)\\s*(?:(?:and|but)\\s+)?(?:then|keep|leave|preserve|do|don'?t|please|also|make|change|update"
+                    + "|replace|stop|save|otherwise|if|unless|while|without|so)\\b");
+    private static final Pattern DESCRIPTOR_FROM = Pattern.compile("(?i)(?:^|\\s+)from\\s+");
+    private static final Set<String> OPERAND_DETERMINERS = Set.of(
+            "a", "an", "the", "this", "that", "these", "those", "its", "my", "your", "our", "their", "only");
+    private static final Set<String> OPERAND_CLAUSE_WORDS = Set.of(
+            "of", "for", "with", "on", "at", "by", "as", "from", "into", "onto", "to", "in", "so", "than", "per",
+            "via", "about", "after", "before", "until", "when", "where", "which", "that", "or", "and", "but", "if",
+            "is", "are", "be", "please", "now", "also", "too", "instead");
 
     private TaskExpectationResolver() {}
 
@@ -593,8 +611,8 @@ public final class TaskExpectationResolver {
                         + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
         Matcher matcher = scopedPrefixChangeTo.matcher(request);
         if (findUnquotedInstruction(request, matcher)) {
-            String oldText = matcher.group(1);
-            String newText = matcher.group(2);
+            String oldText = withoutDescriptor(matcher.group(1));
+            String newText = scopedOperand(request, matcher, 2);
             if (findUnquotedInstruction(request, matcher)) return null;
             return replacementExpectation(
                     normalizedTarget,
@@ -617,7 +635,7 @@ public final class TaskExpectationResolver {
             return replacementExpectation(
                     normalizedTarget,
                     matcher.group(1),
-                    matcher.group(2),
+                    scopedOperand(request, matcher, 2),
                     "replacement-scoped-prefix-replace-with",
                     preserveRest);
         }
@@ -690,7 +708,82 @@ public final class TaskExpectationResolver {
         String oldText = normalizeReplacementText(rawOldText);
         String newText = normalizeReplacementText(rawNewText);
         if (oldText.isBlank() || newText.isBlank()) return null;
+        if (ambiguousUnquotedOperand(rawOldText, oldText) || ambiguousUnquotedOperand(rawNewText, newText)) {
+            return null;
+        }
         return new ReplacementExpectation(normalizedTarget, oldText, newText, sourcePattern, preserveRest);
+    }
+
+    /**
+     * An unquoted operand from a scoped-prefix form runs to the end of its sentence or to the next clause boundary.
+     * The pattern's lazy capture stops at the first following word, so the operand is widened here. A comma or
+     * conjunction ends the operand only when a new clause starts after it, as in "final, then stop". Otherwise the
+     * boundary is undecidable ("Hello, World", "Tom and Jerry"), and so is a widened span that carries a preposition
+     * or conjunction ("final for release"). Both bind nothing rather than a guessed operand.
+     */
+    private static String scopedOperand(String request, Matcher matcher, int group) {
+        String captured = matcher.group(group);
+        if (quotedOperand(captured)) return captured;
+        int start = matcher.start(group);
+        Matcher sentenceEnd = OPERAND_SENTENCE_END.matcher(request);
+        int end = sentenceEnd.find(start) ? sentenceEnd.start() : request.length();
+        String span = request.substring(start, end);
+        Matcher clause = OPERAND_CLAUSE_BOUNDARY.matcher(span);
+        if (clause.find()) {
+            boolean weak = WEAK_CLAUSE_BOUNDARY.matcher(clause.group()).matches();
+            if (weak && !CLAUSE_START.matcher(span).region(clause.end(), span.length()).lookingAt()) return null;
+            span = span.substring(0, clause.start());
+        }
+        return carriesClauseWord(span) ? null : span;
+    }
+
+    private static boolean carriesClauseWord(String span) {
+        String[] words = span.strip().split("\\s+");
+        if (words.length < 2) return false;
+        for (String word : words) {
+            if (OPERAND_CLAUSE_WORDS.contains(word.toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * In "change D from X to Y" the descriptor D names what changes and X is the old text. D is a descriptor only
+     * when it opens with a determiner ("only the returned greeting") or is absent. In "Made from Wood" the words may
+     * be the old text itself, so the operand binds nothing. Quoted text is never split.
+     */
+    private static String withoutDescriptor(String operand) {
+        if (operand == null || quotedOperand(operand) || operand.matches("(?s).*[\"'`].*")) return operand;
+        Matcher from = DESCRIPTOR_FROM.matcher(operand);
+        int fromStart = -1;
+        int fromEnd = -1;
+        while (from.find()) {
+            fromStart = from.start();
+            fromEnd = from.end();
+        }
+        if (fromEnd < 0) return operand;
+        String descriptor = operand.substring(0, fromStart).strip();
+        if (descriptor.isEmpty()
+                || OPERAND_DETERMINERS.contains(descriptor.split("\\s+")[0].toLowerCase(Locale.ROOT))) {
+            return operand.substring(fromEnd);
+        }
+        return null;
+    }
+
+    /**
+     * An unquoted operand of several words that opens with a determiner describes the text ("the status") rather
+     * than quoting it, so it binds nothing.
+     */
+    private static boolean ambiguousUnquotedOperand(String raw, String normalized) {
+        if (quotedOperand(raw)) return false;
+        String[] words = normalized.strip().split("\\s+");
+        return words.length > 1 && OPERAND_DETERMINERS.contains(words[0].toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean quotedOperand(String raw) {
+        String trimmed = raw == null ? "" : raw.strip();
+        if (trimmed.length() < 2) return false;
+        char first = trimmed.charAt(0);
+        return (first == '"' || first == '\'' || first == '`') && trimmed.charAt(trimmed.length() - 1) == first;
     }
 
     private static boolean preserveRestRequested(String request) {

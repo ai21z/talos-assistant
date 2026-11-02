@@ -336,8 +336,19 @@ public record ChangeSummaryContext(
                     .filter(ChangeSummaryContext::hasFileVerificationState)
                     .allMatch(ChangeSummaryContext::fileChangeVerified);
         }
-        return "PASSED".equalsIgnoreCase(verificationStatus)
-                || "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+        return verifiedComplete(verificationStatus, completionStatus);
+    }
+
+    /**
+     * The one rule for a "verified complete" claim (MICA invariant I3, decision D5). A recorded completion decides,
+     * because a checks pass completes unverified. A pass without a recorded completion comes from a record that
+     * predates the proof scope.
+     */
+    public static boolean verifiedComplete(String verificationStatus, String completionStatus) {
+        if (completionStatus != null && !completionStatus.isBlank()) {
+            return "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+        }
+        return "PASSED".equalsIgnoreCase(verificationStatus);
     }
 
     private boolean hasPerFileVerificationState() {
@@ -366,8 +377,7 @@ public record ChangeSummaryContext(
     private static boolean fileChangeVerified(FileChange change) {
         if (change == null) return false;
         if ("APPLIED_UNVERIFIED".equals(change.toolOutcome()) || "UNKNOWN".equals(change.toolOutcome())) return false;
-        return "PASSED".equalsIgnoreCase(change.verificationStatus())
-                || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
+        return verifiedComplete(change.verificationStatus(), change.completionStatus());
     }
 
     private static boolean fileChangeUnverified(FileChange change) {

@@ -8,16 +8,22 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ChangeOffer;
 import dev.talos.runtime.context.ProposalProvenance;
+import dev.talos.runtime.intent.IndirectChangeRequest;
 import dev.talos.runtime.intent.ProposalRequestBinding;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.StaticWebInteractionVerifier;
 import dev.talos.runtime.verification.TargetBinding;
+import dev.talos.runtime.intent.WorkspaceOperationObligation;
+import dev.talos.tools.ToolAliasPolicy;
+import dev.talos.tools.ToolFailureReason;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -31,6 +37,14 @@ import java.util.regex.Pattern;
  * Derives the next active task context from deterministic post-turn facts.
  */
 public final class ActiveTaskContextUpdater {
+    /** Operations after which a file inside the named folder is no longer where it was. */
+    private static final Set<String> RELOCATION_TOOLS = Set.of(
+            WorkspaceOperationObligation.Kind.DELETE_PATH.toolName(),
+            WorkspaceOperationObligation.Kind.MOVE_PATH.toolName(),
+            WorkspaceOperationObligation.Kind.RENAME_PATH.toolName());
+    /** Roles of a named file that an operation does not act on. */
+    private static final Set<String> NOT_OPERATED_ROLES = Set.of("FORBIDDEN", "MUST_READ", "SOURCE_EVIDENCE",
+            "VERIFY_ONLY");
     private static final Pattern STATIC_WEB_FILE_TARGET = Pattern.compile(
             "(?i)\\b[A-Za-z0-9_.-]+\\.(?:html?|css|js|jsx|ts|tsx)\\b");
 
@@ -58,6 +72,17 @@ public final class ActiveTaskContextUpdater {
         }
 
         TurnFacts facts = TurnFacts.from(result);
+        if (changeOfferDelivered(result, facts, userInput, preservedContext)) {
+            ActiveTaskContext context = ActiveTaskContext.changeOffer(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    preservedContext.targets(),
+                    requestedChange(userInput),
+                    preservedContext.requiredVerificationClaims(),
+                    staticWebRequirements(userInput, facts, preservedContext));
+            return active(context.withProposalProvenance(
+                    ProposalProvenance.changeOffer(context, userInput, extractText(result.result()))));
+        }
         ProposalRequestBinding proposal = ProposalRequestBinding.fromRequest(userInput);
         if (proposal.requested() && !facts.mutationAllowed() && !facts.anySuccessfulMutation()) {
             if (!preservedContext.staticWebRequirements().isEmpty()
@@ -76,10 +101,32 @@ public final class ActiveTaskContextUpdater {
             return active(context.withProposalProvenance(
                     ProposalProvenance.accepted(context, userInput, extractText(result.result()))));
         }
-        List<String> targets = durableStaticWebTargets(facts.targets(), preservedContext, userInput);
-        StaticWebRequirements requirements = staticWebRequirements(userInput, facts, preservedContext);
+        // A workspace operation is resolved from the current message alone (MICA invariant I2), so its outcome is
+        // never carried. Whatever the outcome, it ends a carried task on the files the request named or the calls
+        // touched, including files inside a deleted, moved or renamed folder, and leaves an unrelated one.
+        if (facts.workspaceOperationOnly()) {
+            List<String> scope = new ArrayList<>(facts.operationPaths());
+            scope.addAll(facts.namedTargets());
+            return sharesTarget(preservedContext.targets(), scope, facts.relocationPaths())
+                    ? new Update(ActiveTaskContext.none(), ArtifactGoal.none())
+                    : new Update(preservedContext, preservedGoal);
+        }
+        // Beside content changes, an operation still ends a carried task on its paths or on a file the request
+        // mentioned for it, and that task then supplies neither targets nor requirements to this turn's context.
+        List<String> mixedScope = new ArrayList<>(facts.operationPaths());
+        mixedScope.addAll(facts.mentionedTargets());
+        boolean retiresCarried = facts.workspaceOperationAttempted()
+                && sharesTarget(preservedContext.targets(), mixedScope, facts.relocationPaths());
+        ActiveTaskContext carried = retiresCarried ? ActiveTaskContext.none() : preservedContext;
+        List<String> targets = durableStaticWebTargets(facts.targets(), carried, userInput);
+        StaticWebRequirements requirements = staticWebRequirements(userInput, facts, carried);
 
         if (facts.approvalDeniedMutationAttempt()) {
+            // Only a denial of a change the request asked for is carried (MICA invariant I1). A file the model chose
+            // and the user declined is no request of the user.
+            if (targets.isEmpty() || !facts.requestedTargets()) {
+                return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
+            }
             ActiveTaskContext context = ActiveTaskContext.deniedMutation(
                     result.turnNumber(),
                     facts.traceId(),
@@ -97,7 +144,9 @@ public final class ActiveTaskContextUpdater {
                     facts.verificationStatus(),
                     requiredVerificationClaims(facts, userInput),
                     requirements);
-            return active(context);
+            // The runtime failure header carries a repair offer. Binding it to the delivered answer lets a plain
+            // affirmation resume repair of these targets, without wording from the model supplying authority.
+            return active(context.withRepairOffer(extractText(result.result())));
         }
 
         if (!targets.isEmpty() && facts.fullyVerifiedMutation()) {
@@ -143,6 +192,7 @@ public final class ActiveTaskContextUpdater {
                 && preservedContext.kind() == ActiveTaskContext.Kind.PROPOSED_CHANGES) {
             return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
         }
+        if (retiresCarried) return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
         return new Update(preservedContext, preservedGoal);
     }
 
@@ -161,6 +211,29 @@ public final class ActiveTaskContextUpdater {
                 ? StaticWebRequirements.none()
                 : preservedContext.staticWebRequirements();
         return preserved.merge(current);
+    }
+
+    /**
+     * The runtime ended this read-only turn with a change offer for the files of the active task (decision D6). The
+     * trace records that the runtime rendered it, and the delivered answer ends with the same line, so model text
+     * alone cannot create the offer.
+     */
+    private static boolean changeOfferDelivered(
+            TurnResult result, TurnFacts facts, String userInput, ActiveTaskContext preservedContext) {
+        if (facts.mutationAllowed() || facts.anySuccessfulMutation()) return false;
+        if (preservedContext.state() != ActiveTaskContext.State.ACTIVE || preservedContext.targets().isEmpty()) {
+            return false;
+        }
+        LocalTurnTrace trace = facts.localTrace();
+        if (trace == null || trace.turnNumber() != result.turnNumber() || facts.traceId().isBlank()) return false;
+        return IndirectChangeRequest.recognized(userInput)
+                && LocalTurnTraceCapture.changeOfferRendered(trace, preservedContext.targets())
+                && ChangeOffer.renderedAtEnd(extractText(result.result()), preservedContext.targets());
+    }
+
+    private static String requestedChange(String userInput) {
+        return "Requested change: " + PromptAuditRedactor.preview(
+                userInput == null ? "" : userInput.strip(), ActiveTaskContext.MAX_PROPOSAL_CHARS);
     }
 
     private static String proposalSummary(Result result) {
@@ -264,6 +337,23 @@ public final class ActiveTaskContextUpdater {
         return preservedTargets;
     }
 
+    /**
+     * A carried target is shared when it is one of the paths, or lies inside a deleted, moved or renamed folder. A
+     * created folder leaves the files inside it as they were.
+     */
+    private static boolean sharesTarget(List<String> carried, List<String> paths, List<String> relocated) {
+        Set<String> exact = normalizedTargetSet(paths);
+        exact.addAll(normalizedTargetSet(relocated));
+        Set<String> folders = normalizedTargetSet(relocated);
+        for (String target : normalizedTargetSet(carried)) {
+            if (exact.contains(target)) return true;
+            for (String folder : folders) {
+                if (target.startsWith(folder.endsWith("/") ? folder : folder + "/")) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean explicitReplacementStaticWebTargets(String userInput, Set<String> preservedTargets) {
         if (userInput == null || userInput.isBlank()
                 || preservedTargets == null || preservedTargets.isEmpty()) {
@@ -356,7 +446,13 @@ public final class ActiveTaskContextUpdater {
             boolean mutationAllowed,
             boolean anySuccessfulMutation,
             boolean successfulMutation,
-            boolean approvalDeniedMutationAttempt
+            boolean approvalDeniedMutationAttempt,
+            boolean workspaceOperationOnly,
+            List<String> operationPaths,
+            List<String> relocationPaths,
+            List<String> namedTargets,
+            List<String> mentionedTargets,
+            boolean requestedTargets
     ) {
 
         static TurnFacts from(TurnResult result) {
@@ -368,14 +464,45 @@ public final class ActiveTaskContextUpdater {
             List<TurnRecord.ToolCallSummary> calls = audit.toolCalls() == null
                     ? List.of()
                     : audit.toolCalls();
-            List<String> targets = targets(policyTrace, localTrace, calls);
             List<TurnRecord.ToolCallSummary> mutatingCalls = calls.stream()
                     .filter(call -> isMutatingTool(call.name()))
                     .toList();
             boolean successfulMutation = !mutatingCalls.isEmpty()
                     && mutatingCalls.stream().allMatch(TurnRecord.ToolCallSummary::success);
             boolean anySuccessfulMutation = mutatingCalls.stream().anyMatch(TurnRecord.ToolCallSummary::success);
-            boolean deniedMutation = audit.approvalsDenied() > 0
+            List<TurnRecord.ToolCallSummary> operationCalls = mutatingCalls.stream()
+                    .filter(call -> isWorkspaceOperationTool(call.name()))
+                    .toList();
+            // Every operand the audit names is a path of its operation, whatever the outcome. The source of a move or
+            // rename and a deleted path are relocated, so a file inside them is no longer where it was. A destination,
+            // a created folder and the source of a copy are matched exactly.
+            List<String> operationPaths = operationCalls.stream()
+                    .flatMap(call -> call.operands().stream())
+                    .map(TurnRecord.OperationOperand::path)
+                    .toList();
+            List<String> relocationPaths = operationCalls.stream()
+                    .filter(call -> RELOCATION_TOOLS.contains(ToolAliasPolicy.resolve(call.name()).canonicalToolName()))
+                    .flatMap(call -> call.operands().stream())
+                    .filter(operand -> operand.role() != WorkspaceOperationObligation.Role.DESTINATION)
+                    .map(TurnRecord.OperationOperand::path)
+                    .toList();
+            List<String> contentPaths = mutatingCalls.stream()
+                    .filter(call -> !isWorkspaceOperationTool(call.name()))
+                    .flatMap(call -> call.pathHints().stream())
+                    .toList();
+            // A path that only a workspace operation touched is never a content target (MICA invariant I2), even
+            // when the contract lists it. A deleted, moved or renamed path, or a file inside such a folder, is never
+            // one. Any other operand that a content call also addressed stays one.
+            List<String> named = namedTargets(localTrace, false);
+            Targets selected = targets(policyTrace, localTrace, calls, named);
+            List<String> targets = selected.paths().stream()
+                    .filter(target -> !sharesTarget(List.of(target), List.of(), relocationPaths))
+                    .filter(target -> !sharesTarget(List.of(target), operationPaths, List.of())
+                            || sharesTarget(List.of(target), contentPaths, List.of()))
+                    .toList();
+            // A denied operation call is not a denied content change, so only denials beyond those count.
+            long deniedOperationCalls = operationCalls.stream().filter(TurnFacts::denialCounted).count();
+            boolean deniedMutation = audit.approvalsDenied() > deniedOperationCalls
                     && (mutationAllowed(policyTrace, localTrace)
                     || !mutatingCalls.isEmpty());
             String verificationStatus = verificationStatus(localTrace);
@@ -395,17 +522,48 @@ public final class ActiveTaskContextUpdater {
                     mutationAllowed(policyTrace, localTrace),
                     anySuccessfulMutation,
                     successfulMutation,
-                    deniedMutation);
+                    deniedMutation,
+                    !operationCalls.isEmpty() && operationCalls.size() == mutatingCalls.size(),
+                    operationPaths,
+                    relocationPaths,
+                    named,
+                    namedTargets(localTrace, true),
+                    selected.requested());
+        }
+
+        boolean workspaceOperationAttempted() {
+            return !operationPaths.isEmpty();
+        }
+
+        /**
+         * The files the request named for a change, or with {@code mentionedOnly} only those it mentioned. They end a
+         * carried task on the files the request asked to operate on even when no audited call names them, as for a
+         * call refused for invalid authority. An excluded file and a file named only to be read are not part of the
+         * operation.
+         */
+        private static List<String> namedTargets(LocalTurnTrace localTrace, boolean mentionedOnly) {
+            if (localTrace == null) return List.of();
+            LinkedHashSet<String> out = new LinkedHashSet<>();
+            if (!mentionedOnly) addAll(out, localTrace.taskContract().expectedTargets());
+            for (LocalTurnTrace.RolefulTargetSummary target : localTrace.taskContract().rolefulTargets()) {
+                if (target == null) continue;
+                boolean mentioned = "MENTIONED_ONLY".equals(target.role());
+                if (mentionedOnly ? mentioned : !NOT_OPERATED_ROLES.contains(target.role())) add(out, target.path());
+            }
+            return List.copyOf(out);
         }
 
         boolean verificationFailed() {
             return "FAILED".equalsIgnoreCase(verificationStatus);
         }
 
+        // The task context records which files the checked work touched. A checks pass completes unverified under
+        // MICA decision D5 but still checked the same files, so the context kind does not depend on the proof scope.
         boolean fullyVerifiedMutation() {
             return mutationSucceeded()
                     && "PASSED".equalsIgnoreCase(verificationStatus)
-                    && "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+                    && ("COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus)
+                    || "COMPLETED_UNVERIFIED".equalsIgnoreCase(completionStatus));
         }
 
         boolean unsatisfiedRequiredClaim() {
@@ -417,21 +575,38 @@ public final class ActiveTaskContextUpdater {
             return "SUCCEEDED".equalsIgnoreCase(mutationStatus);
         }
 
-        private static List<String> targets(
+        /** The files a carried context may name, and whether every one of them came from the request. */
+        private record Targets(List<String> paths, boolean requested) {}
+
+        /**
+         * The expected targets of the contract. Without them, a mutating call path counts only when the request
+         * named it or the call changed that file, by succeeding or by an applied or uncertain effect on its own path,
+         * so a path the model chose without a change on disk never becomes carried authority (MICA invariant I1).
+         */
+        private static Targets targets(
                 TurnPolicyTrace policyTrace,
                 LocalTurnTrace localTrace,
-                List<TurnRecord.ToolCallSummary> calls) {
+                List<TurnRecord.ToolCallSummary> calls,
+                List<String> named) {
             LinkedHashSet<String> out = new LinkedHashSet<>();
             addAll(out, localTrace == null ? List.of() : localTrace.taskContract().expectedTargets());
             addAll(out, policyTrace == null ? List.of() : policyTrace.expectedTargets());
-            if (out.isEmpty()) {
-                for (TurnRecord.ToolCallSummary call : calls) {
-                    if (call != null && isMutatingTool(call.name())) {
-                        add(out, call.pathHint());
-                    }
+            if (!out.isEmpty()) return new Targets(List.copyOf(out), true);
+            boolean requested = true;
+            for (TurnRecord.ToolCallSummary call : calls) {
+                if (call == null || !isMutatingTool(call.name())
+                        || call.pathHint() == null || call.pathHint().isBlank()) {
+                    continue;
+                }
+                boolean namedPath = sharesTarget(List.of(call.pathHint()), named, List.of());
+                boolean changed = call.success() || call.mutationEffects() != null
+                        && sharesTarget(List.of(call.pathHint()), call.mutationEffects().affectedPaths(), List.of());
+                if (namedPath || changed) {
+                    add(out, call.pathHint());
+                    requested &= namedPath;
                 }
             }
-            return List.copyOf(out);
+            return new Targets(List.copyOf(out), requested);
         }
 
         private static void addAll(LinkedHashSet<String> out, List<String> values) {
@@ -508,6 +683,18 @@ public final class ActiveTaskContextUpdater {
 
         private static boolean isMutatingTool(String toolName) {
             return ToolCallSupport.isMutatingTool(toolName);
+        }
+
+        private static boolean isWorkspaceOperationTool(String toolName) {
+            var tool = ToolAliasPolicy.resolve(toolName);
+            return tool.accepted() && WorkspaceOperationObligation.Kind.isOperationTool(tool.canonicalToolName());
+        }
+
+        /** A user denial and a policy denial of a call that needed approval both count in approvalsDenied. */
+        private static boolean denialCounted(TurnRecord.ToolCallSummary call) {
+            return call.failureReason() == ToolFailureReason.USER_APPROVAL_DENIED
+                    || call.failureReason() == ToolFailureReason.PERMISSION_POLICY_DENIED
+                    || call.reason().startsWith("approval denied");
         }
     }
 }

@@ -121,7 +121,10 @@ public final class WorkspaceTargetReconciler {
         if (contract == null || workspaceFiles == null) return false;
         if (!contract.mutationAllowed() || !contract.verificationRequired()) return false;
         if (!contract.expectedTargets().isEmpty()) return false;
-        if (!looksLikeStaticWebWorkspaceContinuation(contract.originalUserRequest())) return false;
+        if (!looksLikeStaticWebWorkspaceContinuation(contract.originalUserRequest())
+                && !contract.classificationReason().contains(TaskContractResolver.CONTEXTUAL_STATIC_WEB_SURFACE)) {
+            return false;
+        }
         return rootFileExists(workspaceFiles, "index.html");
     }
 

@@ -120,7 +120,7 @@ class QualificationScenarioBankTest {
                         scenario.approvalBehavior()
                                 == QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL
                                 ? QualificationRecords.ResponseOwnerContract.OPERATOR_OWNED
-                                : version == 6 && deterministicV6.contains(scenario.id())
+                                : version >= 6 && deterministicV6.contains(scenario.id())
                                         ? QualificationRecords.ResponseOwnerContract.DETERMINISTIC_RUNTIME_ALLOWED
                                         : QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED;
                 assertEquals(expected, scenario.responseOwnerContract(), version + ":" + scenario.id());
@@ -168,6 +168,38 @@ class QualificationScenarioBankTest {
         assertTrue(v6.admission().expectedRequestObligations().isEmpty());
         assertEquals(migratedObligations,
                 v6.full().expectedRequestObligations().keySet());
+    }
+
+    @Test
+    void v7ExpectsTheUnprovableF08RenameToCompleteUnverifiedWithoutOtherDrift() {
+        // A rename binds no request-bound text proof (MICA invariant I3), so a verified claim for F08 would overclaim.
+        QualificationScenarioBank.Catalog v6 = QualificationScenarioBank.load(6);
+        QualificationScenarioBank.Catalog v7 = QualificationScenarioBank.load(7);
+        String renamed = "F08-contradictory-similar-file-names";
+
+        assertEquals(7, QualificationProtocol.VERSION);
+        for (QualificationProtocol.Scenario before : Stream.concat(
+                v6.admission().scenarios().stream(), v6.full().scenarios().stream()).toList()) {
+            QualificationProtocol.Scenario after = v7.scenario(before.id());
+            assertEquals(before.bank(), after.bank(), before.id());
+            assertEquals(before.archetype(), after.archetype(), before.id());
+            assertEquals(before.category(), after.category(), before.id());
+            assertEquals(before.prompt(), after.prompt(), before.id());
+            assertEquals(before.approvalBehavior(), after.approvalBehavior(), before.id());
+            assertEquals(before.responseOwnerContract(), after.responseOwnerContract(), before.id());
+            assertEquals(before.allowedTargets(), after.allowedTargets(), before.id());
+            assertEquals(before.forbiddenTargets(), after.forbiddenTargets(), before.id());
+            assertEquals(before.expectedDecisions(), after.expectedDecisions(), before.id());
+            assertEquals(before.atomicRequirements(), after.atomicRequirements(), before.id());
+            assertEquals(v6.fixtures().get(before.fixture()).manifest().files(),
+                    v7.fixtures().get(after.fixture()).manifest().files(), before.id());
+            assertEquals(before.fixture().replace("-v6.json", "-v7.json"), after.fixture(), before.id());
+            assertEquals(before.id().equals(renamed) ? List.of("COMPLETED_UNVERIFIED") : before.expectedTerminalStates(),
+                    after.expectedTerminalStates(), before.id());
+        }
+        assertEquals(List.of("COMPLETED_VERIFIED"), v6.scenario(renamed).expectedTerminalStates());
+        assertEquals(v6.admission().expectedRequestObligations(), v7.admission().expectedRequestObligations());
+        assertEquals(v6.full().expectedRequestObligations(), v7.full().expectedRequestObligations());
     }
 
     @Test
@@ -377,7 +409,7 @@ class QualificationScenarioBankTest {
     void defaultBankHasFrozenAdmissionAndFullShapes() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
 
-        assertEquals(6, catalog.protocolVersion());
+        assertEquals(7, catalog.protocolVersion());
         assertEquals(12, catalog.admission().scenarios().size());
         assertEquals(24, catalog.full().scenarios().size());
         assertEquals(8, catalog.full().scenarios().stream()
@@ -431,7 +463,7 @@ class QualificationScenarioBankTest {
     @Test
     void privacyFixtureUsesCanariesRecognizedByTheRuntimeScanner() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
-        var files = catalog.fixtures().get("privacy-workspace-v6.json").manifest().files();
+        var files = catalog.fixtures().get("privacy-workspace-v7.json").manifest().files();
 
         assertTrue(ProtectedContentPolicy.containsRawCanary(files.get(".env")),
                 "the protected-file canary must use Talos's production canary vocabulary");

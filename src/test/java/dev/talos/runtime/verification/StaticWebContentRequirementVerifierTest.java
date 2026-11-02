@@ -33,6 +33,9 @@ class StaticWebContentRequirementVerifierTest {
 
         assertEquals(1, report.requiredClaimCount(), report.toString());
         assertTrue(report.requiredClaimsSatisfied(), report.toString());
+        // The claim names the file its proof read, so changes elsewhere stay outside its request-bound pass.
+        assertEquals(java.util.List.of("index.html"),
+                report.claimResults().getFirst().claim().evaluatedFiles(), report.toString());
     }
 
     @Test

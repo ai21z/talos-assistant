@@ -198,13 +198,14 @@ class MicaRequestBoundaryIntegrationTest {
     }
 
     @Test
-    void defaultInferredLocationRetainsGenericTerminalPathMasking() throws Exception {
+    void ordinaryLocationQuestionPublishesOnlyTheRuntimeWorkspacePath() throws Exception {
         String unrelatedPath = temp.resolve("unrelated-private-default-7e31").toString();
         try (var conversation = new Conversation(null)) {
             Run run = conversation.run("Where is this workspace?", "Unused provider location " + unrelatedPath);
+            // MICA D8: only the runtime-composed workspace path is published in the terminal answer.
             assertTrue(run.answer().contains(workspace.toString()), run.answer());
-            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
-            assertTrue(run.terminalAnswer().contains("[path]"), run.terminalAnswer());
+            assertTrue(run.terminalAnswer().contains(workspace.toString()), run.terminalAnswer());
+            assertFalse(run.terminalAnswer().contains("[path]"), run.terminalAnswer());
             assertAbsent(run, unrelatedPath, "Unused provider location");
             assertTrue(conversation.frames.isEmpty());
             assertParity(run);
@@ -212,16 +213,93 @@ class MicaRequestBoundaryIntegrationTest {
     }
 
     @Test
-    void ordinaryPathQuestionNamesTheFolderWhileTheFullPathStaysMasked() throws Exception {
+    void ordinaryPathQuestionNamesTheFolderAndPublishesTheRuntimeWorkspacePath() throws Exception {
         try (var conversation = new Conversation(null)) {
             Run run = conversation.run("What's the path of this directory?", "Unused provider location.");
             String folder = workspace.getFileName().toString();
             assertTrue(run.terminalAnswer().contains("The current workspace folder is " + folder + "."),
                     run.terminalAnswer());
-            assertTrue(run.terminalAnswer().contains("[path]"), run.terminalAnswer());
-            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
+            assertTrue(run.terminalAnswer().contains(workspace.toString()), run.terminalAnswer());
+            assertFalse(run.terminalAnswer().contains("[path]"), run.terminalAnswer());
             assertFalse(run.terminal().contains("[Evidence incomplete"), run.terminal());
             assertAbsent(run, "Unused provider location");
+            assertParity(run);
+        }
+    }
+
+    @Test
+    void aRuntimeComposedLocationNamingATalosLikeFolderGainsNoCapabilityNote() throws Exception {
+        workspace = Files.createDirectory(temp.resolve("talos.release_tools"));
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("Where is this workspace?", "Unused provider location.");
+            // MICA I4: the runtime fact is not model prose, so it stays byte exact and keeps its publication.
+            assertTrue(run.terminalAnswer().contains(workspace.toString()), run.terminalAnswer());
+            assertFalse(run.terminal().contains("Runtime note"), run.terminal());
+            assertFalse(run.persisted().contains("Runtime note"), run.persisted());
+            assertParity(run);
+        }
+    }
+
+    @Test
+    void onlyTheModelExplanationOfAComposedAnswerIsScannedForToolNames() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "A small harbor story project.\n");
+        Files.writeString(workspace.resolve("talos.release_tools"), "notes\n");
+        String readme = "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("List the entries in this workspace and what does this project do?", LIST,
+                    readme, "It is a harbor story. Files could be removed with talos.delete_file.");
+            assertTrue(run.answer().contains("talos.release_tools"), run.answer());
+            // MICA I4: the runtime listing is not model prose and gains no note. The composed answer no longer carries
+            // a known provider span, so the explanation gains none either (recorded P5 limitation).
+            assertFalse(run.terminal().contains("talos.release_tools is not a Talos tool"), run.terminal());
+            assertFalse(run.persisted().contains("Runtime note"), run.persisted());
+            // assertParity is not used here because its parser strips one tool-summary line and this one wraps.
+        }
+    }
+
+    @Test
+    void aPublishedLocationAnswerGainsNoNoteThatWouldBreakItsBinding() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "A small harbor story project.\n");
+        String readme = "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("Where is this workspace and what does this project do?", readme,
+                    "It is a harbor story. Files could be removed with talos.delete_file.");
+            // The location answer stays byte exact, so the explanation gains no capability note. Its path still masks
+            // after a tool ran, because the tool summary is added after issue (open P5 item, not a P5 regression).
+            assertFalse(run.terminal().contains("Runtime note"), run.terminal());
+            assertFalse(run.persisted().contains("Runtime note"), run.persisted());
+            assertParity(run);
+        }
+    }
+
+    @Test
+    void locationQuestionWithAPathRestrictionKeepsTheWorkspacePathMasked() throws Exception {
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("Where is this workspace? Do not show the full path.", "Unused provider location.");
+            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
+            assertFalse(run.persisted().contains(workspace.toString()), run.persisted());
+            assertParity(run);
+        }
+    }
+
+    @Test
+    void anotherFolderQuestionDoesNotPublishTheWorkspacePath() throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("Where is the docs folder?", "The docs folder is inside the workspace.");
+            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
+            assertFalse(run.persisted().contains(workspace.toString()), run.persisted());
+            assertParity(run);
+        }
+    }
+
+    @Test
+    void modelAuthoredWorkspacePathIsNeverPublished() throws Exception {
+        try (var conversation = new Conversation(null)) {
+            Run run = conversation.run("Tell me a short fact about this project.",
+                    "This project lives in " + workspace + " and has no files yet.");
+            assertFalse(run.terminal().contains(workspace.toString()), run.terminal());
+            assertFalse(run.persisted().contains(workspace.toString()), run.persisted());
             assertParity(run);
         }
     }

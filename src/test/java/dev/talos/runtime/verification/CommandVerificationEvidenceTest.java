@@ -90,7 +90,7 @@ class CommandVerificationEvidenceTest {
                 workspace, "Update notes.txt",
                 loopResult(List.of(writeOutcome("notes.txt"), commandSuccess("gradle_check"))), 0);
         assertEquals(TaskVerificationStatus.PASSED, withCommand.status(), withCommand.summary());
-        assertEquals("Command verification passed: gradle_check exited 0.",
+        assertEquals("Command checks passed: gradle_check exited 0.",
                 withCommand.summary());
     }
 

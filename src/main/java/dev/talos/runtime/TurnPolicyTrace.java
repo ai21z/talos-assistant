@@ -48,6 +48,9 @@ public record TurnPolicyTrace(
         boolean mutationRequested,
         WorkspaceOperationPlanEvidence workspaceOperationPlan
 ) {
+    /** The classification of a turn the runtime answered before turn preparation without executing anything. */
+    public static final String ANSWERED_WITHOUT_EXECUTION_REASON =
+            "operand-answered-without-execution";
     private static final String TARGET_OUTPUT_LIMIT_REASON =
             "sequential-target-output-limit-exceeded";
     private static final String TARGET_OCCURRENCE_LIMIT_REASON =
@@ -134,6 +137,14 @@ public record TurnPolicyTrace(
                     occurrenceSha256,
                     selectedForPath,
                     activeInResolution);
+        }
+
+        /** The same decision with no authority active in the resolution. */
+        LexicalDecisionEvidence inactive() {
+            return new LexicalDecisionEvidence(ordinal, owner, path, pathSha256, storedPathSha256, authority,
+                    action, actionFamily, source, evidenceState, sourceRequestSha256, sourceRequestChars,
+                    sourceRequestBytes, actionStartOffset, actionEndOffset, targetStartOffset, startOffset,
+                    authorityEndOffset, endOffset, selectedForPath, false, sourceSpanSha256, occurrenceSha256);
         }
     }
 
@@ -607,6 +618,54 @@ public record TurnPolicyTrace(
                 promptTools,
                 WorkspaceOperationPlanEvidence.from(
                         resolution.workspaceOperationPlan()));
+    }
+
+    /**
+     * The record of a request the runtime answered before turn preparation without executing anything (MICA
+     * invariants I1 and I2). It keeps the complete parser manifest of the typed request, so the store binds it to
+     * that request (T1204), with no decision active, no targets, no tool surface, no workspace operation and no
+     * mutation authority, so it cannot seed later authority or an active task context.
+     */
+    public static TurnPolicyTrace answeredWithoutExecution(TaskResolution resolution) {
+        TurnPolicyTrace view = lexicalValidationView(resolution);
+        return new TurnPolicyTrace(
+                "UNKNOWN",
+                false,
+                false,
+                List.of(),
+                List.of(),
+                "unknown",
+                "unknown",
+                List.of(),
+                List.of(),
+                List.of(),
+                ANSWERED_WITHOUT_EXECUTION_REASON,
+                List.of(),
+                view.lexicalDecisions().stream()
+                        .map(LexicalDecisionEvidence::inactive)
+                        .toList(),
+                view.lexicalRegions(),
+                false,
+                view.workspaceOperationPlan());
+    }
+
+    /**
+     * Whether this is the record of a turn answered without execution. The classification alone is a claim, so it
+     * holds only for a record that also carries no authority: no targets, no tools, no mutation, no active decision
+     * and no workspace operation.
+     */
+    public boolean answeredWithoutExecution() {
+        return ANSWERED_WITHOUT_EXECUTION_REASON.equals(classificationReason)
+                && !mutationAllowed
+                && !mutationRequested
+                && !verificationRequired
+                && expectedTargets.isEmpty()
+                && forbiddenTargets.isEmpty()
+                && nativeTools.isEmpty()
+                && promptTools.isEmpty()
+                && rolefulTargets.isEmpty()
+                && lexicalDecisions.stream().noneMatch(LexicalDecisionEvidence::activeInResolution)
+                && "NONE".equals(workspaceOperationPlan == null ? "NONE" : workspaceOperationPlan.state());
     }
 
     /**

@@ -478,7 +478,7 @@ class QualificationMutationRecoveryRuntimeTraceIntegrationTest {
         assertEquals("PASSED", trace.outcome().verificationStatus());
         assertEquals("SUCCEEDED", trace.outcome().mutationStatus());
         assertEquals(
-                "COMPLETED_VERIFIED",
+                "COMPLETED_UNVERIFIED",
                 trace.outcome().classification());
 
         List<TurnTraceEvent> recoveries = trace.events().stream()

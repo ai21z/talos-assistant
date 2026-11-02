@@ -17,6 +17,8 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
@@ -277,8 +279,16 @@ class DocumentComparisonOutcomeTest {
         assertFalse(outcome.finalAnswer().contains("Untrusted prose"));
     }
 
-    @ParameterizedTest @ValueSource(strings = {"./a.txt", "nested/../a.txt", ".\\a.txt"})
+    @ParameterizedTest @ValueSource(strings = {"./a.txt", "nested/../a.txt"})
     void requestedOperandSpellingIsNormalizedWithoutChangingOrder(String left) throws Exception {
+        assertSpellingCompletesComparison(left);
+    }
+    // A backslash is a separator only on Windows. Elsewhere it names a different file, and admission refuses the pair.
+    @Test @EnabledOnOs(OS.WINDOWS)
+    void backslashOperandSpellingIsNormalizedOnWindows() throws Exception {
+        assertSpellingCompletesComparison(".\\a.txt");
+    }
+    private void assertSpellingCompletesComparison(String left) throws Exception {
         Files.createDirectories(workspace.resolve("nested"));
         Files.writeString(workspace.resolve("a.txt"), "left\n");
         Files.writeString(workspace.resolve("b.txt"), "right\n");

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationPtyEvidenceTest {
     @Test
@@ -23,29 +24,34 @@ class QualificationPtyEvidenceTest {
         assertParses(capture(4, true, true));
         assertParses(capture(5, true, true));
         assertParses(capture(QualificationProtocol.VERSION, true, true));
+        // Protocol 6 was never published, so its PTY evidence is refused.
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> QualificationPtyEvidence.parse(QualificationJson.bytes(capture(6, true, true)), 6));
+        assertTrue(refused.getMessage().contains("unsupported qualification protocol: 6"),
+                refused.getMessage());
     }
 
     @Test
     void rejectsScalarNullUnknownAndDuplicateV6Fields() throws Exception {
-        ObjectNode textualVersion = tree(capture(6, true, true));
+        ObjectNode textualVersion = tree(capture(QualificationProtocol.VERSION, true, true));
         textualVersion.put("schemaVersion", "6");
         assertThrows(IllegalArgumentException.class,
-                () -> QualificationPtyEvidence.parse(textualVersion, 6));
+                () -> QualificationPtyEvidence.parse(textualVersion, QualificationProtocol.VERSION));
 
-        ObjectNode fractionalVersion = tree(capture(6, true, true));
+        ObjectNode fractionalVersion = tree(capture(QualificationProtocol.VERSION, true, true));
         fractionalVersion.put("schemaVersion", 6.9);
         assertThrows(IllegalArgumentException.class,
-                () -> QualificationPtyEvidence.parse(fractionalVersion, 6));
+                () -> QualificationPtyEvidence.parse(fractionalVersion, QualificationProtocol.VERSION));
 
-        ObjectNode nullWorkspace = tree(capture(6, true, true));
+        ObjectNode nullWorkspace = tree(capture(QualificationProtocol.VERSION, true, true));
         nullWorkspace.putNull("workspace");
         assertThrows(IllegalArgumentException.class,
-                () -> QualificationPtyEvidence.parse(nullWorkspace, 6));
+                () -> QualificationPtyEvidence.parse(nullWorkspace, QualificationProtocol.VERSION));
 
-        ObjectNode unknown = tree(capture(6, true, true));
+        ObjectNode unknown = tree(capture(QualificationProtocol.VERSION, true, true));
         unknown.put("unownedClaim", true);
         assertThrows(IllegalArgumentException.class,
-                () -> QualificationPtyEvidence.parse(unknown, 6));
+                () -> QualificationPtyEvidence.parse(unknown, QualificationProtocol.VERSION));
 
         byte[] duplicate = """
                 {
@@ -227,9 +233,9 @@ class QualificationPtyEvidenceTest {
     @Test
     void typedFalseTtyRemainsAvailableForHarnessCausalityButIsNotValidEvidence()
             throws Exception {
-        QualificationPtyEvidence.Capture falseTty = capture(6, true, true, false);
+        QualificationPtyEvidence.Capture falseTty = capture(QualificationProtocol.VERSION, true, true, false);
         QualificationPtyEvidence.Capture parsed = QualificationPtyEvidence.parse(
-                QualificationJson.bytes(falseTty), 6);
+                QualificationJson.bytes(falseTty), QualificationProtocol.VERSION);
 
         assertFalse(parsed.tty());
         assertFalse(QualificationPtyEvidence.validEvidence(
@@ -251,12 +257,12 @@ class QualificationPtyEvidenceTest {
     private static void assertRejected(
             Consumer<ObjectNode> mutation,
             String label) throws Exception {
-        ObjectNode root = tree(capture(6, true, true));
+        ObjectNode root = tree(capture(QualificationProtocol.VERSION, true, true));
         mutation.accept(root);
         byte[] bytes = QualificationJson.write(root).getBytes(StandardCharsets.UTF_8);
         assertThrows(
                 Exception.class,
-                () -> QualificationPtyEvidence.parse(bytes, 6),
+                () -> QualificationPtyEvidence.parse(bytes, QualificationProtocol.VERSION),
                 label);
     }
 

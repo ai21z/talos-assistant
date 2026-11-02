@@ -4443,22 +4443,187 @@ class ToolCallLoopTest {
         }
     }
 
+    /** D10: small search results within the keep budget stay in the model's view, so nothing is compacted. */
+    @Test
+    void smallSearchResultsWithinTheKeepBudgetAreNotCompacted() throws Exception {
+        var run = runFourSearches(new Config(), 1);
+        assertEquals(List.of(), run.compactedChars(), "nothing exceeds the keep budget");
+        assertTrue(run.dispatchedIntact("a.txt:1"), "the oldest search reaches the answering request: " + run.toolHeads());
+    }
+
+    /** D10: once the newest results fill half the configured context, older results are compacted, never the newest two. */
+    @Test
+    void searchResultsBeyondTheKeepBudgetCompactTheOldestAndKeepTheNewestTwo() throws Exception {
+        var run = runFourSearches(new Config(), 40);
+        assertEquals(2, run.compactedChars().size(), "a.txt and b.txt cross the budget: " + run.compactedChars());
+        assertTrue(run.compactedChars().stream().allMatch(chars -> chars > 5_000), run.compactedChars().toString());
+        assertTrue(run.dispatchedIntact("c.txt:40"), run.toolHeads());
+        assertTrue(run.dispatchedIntact("d.txt:40"), run.toolHeads());
+    }
+
+    /** D10 fallback: kept results that overflow the request are compacted to the newest two, and the turn continues. */
+    @Test
+    void anOverflowingRequestFallsBackToTheNewestTwoResults() throws Exception {
+        // Four results of about 4,000 characters fit the keep budget, but with a large system prompt the
+        // request exceeds the client input budget of the default 8,192 tokens, while the newest two fit.
+        var run = runFourSearches(new Config(), 25, "sys " + "s".repeat(8_000), 1);
+        assertEquals("Each marker is in its own file.", run.answer());
+        // The request would be trimmed at the third and the fourth reprompt, so each falls back once.
+        assertEquals(List.of("KEEP_BUDGET_FLOOR_FALLBACK", "KEEP_BUDGET_FLOOR_FALLBACK"), run.repairs());
+        assertEquals(2, run.compactedChars().size(), run.compactedChars().toString());
+        assertTrue(run.dispatchedIntact("c.txt:25"), run.toolHeads());
+        assertTrue(run.dispatchedIntact("d.txt:25"), run.toolHeads());
+        assertTrue(run.dispatched().stream().anyMatch(message -> "user".equals(message.role())
+                        && "Which files hold MARK_a, MARK_b, MARK_c and MARK_d?".equals(message.content())),
+                "the original request is dispatched, so the client did not trim the request");
+    }
+
+    /** D10 fallback: a request that still overflows with the newest two is dispatched once, as the count rule left it. */
+    @Test
+    void aRequestThatOverflowsWithTheNewestTwoGainsNoFallback() throws Exception {
+        // Results of about 6,400 characters cross the keep budget, so the size rule already keeps only the
+        // newest two, and the large system prompt still exceeds the input budget, so the client trims.
+        var run = runFourSearches(new Config(), 40, "sys " + "s".repeat(12_000), 1);
+        assertEquals("Each marker is in its own file.", run.answer());
+        assertEquals(List.of(), run.repairs(), "nothing is left to compact, so no fallback is recorded");
+        assertEquals(2, run.compactedChars().size(), run.compactedChars().toString());
+    }
+
+    /** D10 fallback: compaction never starts before the compaction iteration, as under the count rule. */
+    @Test
+    void theFallbackDoesNotCompactBeforeTheCompactionIteration() throws Exception {
+        // Three searches run in the first iteration and the request would be trimmed, but no compaction is due yet.
+        var run = runFourSearches(new Config(), 25, "sys " + "s".repeat(8_000), 3);
+        assertEquals("Each marker is in its own file.", run.answer());
+        assertEquals(List.of(), run.repairs());
+        assertEquals(List.of(), run.compactedChars());
+    }
+
+    /** D10: the budget is read from limits.llm_context_max_tokens. */
+    @Test
+    void aLargerConfiguredContextKeepsTheSameSearchResults() throws Exception {
+        var run = runFourSearches(withContextLimit(16_384), 40);
+        assertEquals(List.of(), run.compactedChars(), "four results fit half of 16,384 tokens");
+        assertTrue(run.dispatchedIntact("a.txt:40"), run.toolHeads());
+    }
+
+    private record FourSearches(List<Integer> compactedChars, List<ChatMessage> dispatched, String answer,
+                                List<String> repairs) {
+        boolean dispatchedIntact(String marker) {
+            return dispatched.stream().anyMatch(message -> "tool".equals(message.role())
+                    && message.content() != null && message.content().contains(marker)
+                    && !message.content().stripLeading().startsWith("[compacted:"));
+        }
+
+        String toolHeads() {
+            return dispatched.stream().filter(message -> "tool".equals(message.role()))
+                    .map(message -> message.content().substring(0, Math.min(60, message.content().length())))
+                    .toList().toString();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Config withContextLimit(int tokens) {
+        var config = new Config();
+        ((Map<String, Object>) config.data.get("limits")).put("llm_context_max_tokens", tokens);
+        return config;
+    }
+
+    private static String filler(String name, int lines) {
+        StringBuilder text = new StringBuilder("MARK_" + name + "\n");
+        for (int line = 0; line < lines; line++) text.append(name.charAt(0)).append("x".repeat(104)).append('\n');
+        return text.toString();
+    }
+
+    private FourSearches runFourSearches(Config config, int matchingLines) throws Exception {
+        return runFourSearches(config, matchingLines, "sys", 1);
+    }
+
+    /** Four content searches whose results are not re-delivered as read evidence, so compaction alone decides their view. */
+    private FourSearches runFourSearches(Config config, int matchingLines, String systemPrompt, int initialCalls)
+            throws Exception {
+        Path ws = Files.createTempDirectory("talos-keep-budget-");
+        try {
+            for (String name : List.of("a", "b", "c", "d")) {
+                StringBuilder body = new StringBuilder();
+                for (int line = 0; line < matchingLines; line++) {
+                    body.append("MARK_").append(name).append(' ').append("y".repeat(140)).append('\n');
+                }
+                Files.writeString(ws.resolve(name + ".txt"), body.toString());
+            }
+            var registry = new ToolRegistry();
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+            java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> grep = (id, name) ->
+                    new ChatMessage.NativeToolCall(id, "talos.grep", Map.of("pattern", "MARK_" + name, "path", "."));
+            // The client reads the same configuration as the runtime, as in a session.
+            List<String> names = List.of("a", "b", "c", "d");
+            List<LlmClient.StreamResult> responses = new ArrayList<>();
+            for (int i = initialCalls; i < names.size(); i++) {
+                responses.add(new LlmClient.StreamResult("", List.of(grep.apply("g" + (i + 1), names.get(i)))));
+            }
+            responses.add(new LlmClient.StreamResult("Each marker is in its own file.", List.of()));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(config, responses, 16_384);
+            // A content lookup without named targets takes the generic reprompt path, which compacts.
+            String request = "Which files hold MARK_a, MARK_b, MARK_c and MARK_d?";
+            var messages = new ArrayList<>(List.of(ChatMessage.system(systemPrompt), ChatMessage.user(request)));
+            var ctx = Context.builder(config)
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(registry))
+                    .build();
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-keep-budget", "session", 1,
+                    "2026-10-30T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderNative(
+                        loop, names.subList(0, initialCalls).stream()
+                                .map(name -> grep.apply("g" + (names.indexOf(name) + 1), name)).toList(),
+                        List.of("talos.grep"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+            assertEquals(4, result.toolsInvoked(), "each marker is searched once: " + result.finalAnswer()
+                    + " | " + result.toolOutcomes());
+            List<Integer> compacted = trace.events().stream()
+                    .filter(event -> "TOOL_RESULT_COMPACTED".equals(event.type()))
+                    .map(event -> Integer.parseInt(String.valueOf(event.data().get("chars"))))
+                    .toList();
+            List<String> repairs = trace.events().stream()
+                    .map(event -> String.valueOf(event.data().get("status")))
+                    .filter(status -> status.startsWith("KEEP_BUDGET")).toList();
+            return new FourSearches(compacted, recorded.requests().getLast().messages, result.finalAnswer(), repairs);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     /** C4: a compacted full read is still available, because the overlay re-delivers it, so its repeat is redundant. */
     @Test
     void aCompactedFullReadIsStillAvailableAndItsRepeatIsSuppressed() throws Exception {
         Path ws = Files.createTempDirectory("talos-compacted-read-available-");
         try {
             Files.writeString(ws.resolve("README.md"), "README_BODY_MARKER line\n");
-            Files.writeString(ws.resolve("a.txt"), "alpha\n");
-            Files.writeString(ws.resolve("b.txt"), "beta\n");
-            Files.writeString(ws.resolve("c.txt"), "gamma\n");
+            // Three reads exceed half of the configured 6,000 tokens, so README.md crosses the keep budget,
+            // while every read still fits the request and the evidence cap when the overlay re-delivers it.
+            Files.writeString(ws.resolve("a.txt"), filler("alpha", 38));
+            Files.writeString(ws.resolve("b.txt"), filler("beta", 38));
+            Files.writeString(ws.resolve("c.txt"), filler("gamma", 38));
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
             var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
             var loop = new ToolCallLoop(processor, 8);
             java.util.function.BiFunction<String, String, ChatMessage.NativeToolCall> read = (id, path) ->
                     new ChatMessage.NativeToolCall(id, "talos.read_file", Map.of("path", path));
-            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+            var config = withContextLimit(6_000);
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(config, List.of(
                     new LlmClient.StreamResult("", List.of(read.apply("r2", "a.txt"))),
                     new LlmClient.StreamResult("", List.of(read.apply("r3", "b.txt"))),
                     new LlmClient.StreamResult("", List.of(read.apply("r4", "c.txt"))),
@@ -4467,7 +4632,7 @@ class ToolCallLoopTest {
             // A content lookup without named targets takes the generic reprompt path, which compacts.
             String request = "Which file holds README_BODY_MARKER?";
             var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(config)
                     .sandbox(new Sandbox(ws, Map.of()))
                     .llm(recorded.client())
                     .nativeToolSpecs(nativeSpecs(registry))
@@ -4494,7 +4659,7 @@ class ToolCallLoopTest {
                     "the fixture crosses the compaction boundary and compaction is traced with index and size: "
                             + trace.events().stream().map(event -> event.type()).distinct().toList());
             assertEquals(4, result.toolsInvoked(), "README.md is read once: " + result.toolOutcomes());
-            assertEquals(1, result.cushionFiresRedundantRead(), "the repeated README.md read is redundant");
+            assertEquals(1, result.cushionFiresRedundantRead(), "the repeated README.md read is redundant: " + result.finalAnswer());
             var dispatched = recorded.requests().getLast().messages;
             assertTrue(dispatched.stream().anyMatch(message -> message.content() != null
                             && message.content().contains("README_BODY_MARKER")

@@ -346,7 +346,8 @@ public final class StaticTaskVerifier {
                 expectationVerification,
                 exactEditVerification,
                 sourceDerivedVerification,
-                claimReport);
+                claimReport,
+                mutatedPaths);
         compatibilityResult = withCommandVerificationUpgrade(compatibilityResult, outcomes);
         return TaskVerificationEvidence.postApply(
                 compatibilityResult,
@@ -364,7 +365,8 @@ public final class StaticTaskVerifier {
     /**
      * T792: a user-approved, successful, verification-class run_command
      * ordered after the last successful mutation upgrades a would-be
-     * READBACK_ONLY verdict to PASSED. Additive only - FAILED is never
+     * READBACK_ONLY verdict to a checks pass. The command was not derived
+     * from the request, so the pass is not request-bound (MICA I3, D5). Additive only - FAILED is never
      * overridden, and ambiguous evidence changes nothing (fail closed).
      */
     private static TaskVerificationResult withCommandVerificationUpgrade(
@@ -375,7 +377,7 @@ public final class StaticTaskVerifier {
         }
         return CommandVerificationEvidence.verificationProfilePassedAfterMutations(outcomes)
                 .map(profile -> {
-                    String summary = "Command verification passed: " + profile + " exited 0.";
+                    String summary = "Command checks passed: " + profile + " exited 0.";
                     List<String> upgradedFacts = new ArrayList<>(result.facts());
                     upgradedFacts.add(summary);
                     return TaskVerificationResult.passed(summary, upgradedFacts);

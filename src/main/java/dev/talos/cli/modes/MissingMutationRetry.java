@@ -149,18 +149,39 @@ final class MissingMutationRetry {
                         capturedCurrentRequestBoundary(retryContract))
                 : null;
 
-        LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
-                + "tool calls succeeded. Re-prompting with an explicit write nudge.");
-
         List<String> retryToolNames = toolNames(safePlan, messages);
+        List<ToolSpec> retryToolSpecs = toolSpecs(ctx, retryToolNames);
+        List<String> unofferedRetryTools = unofferedRetryTools(safePlan, obligation, retryToolNames, retryToolSpecs);
+        boolean retryCanSatisfy = !retryToolSpecs.isEmpty() && unofferedRetryTools.isEmpty();
         LocalTurnTraceCapture.recordActionObligation(
                 obligation.name(),
                 "UNSATISFIED",
                 invalidParamsError != null
-                        ? "mutating tool call failed with invalid parameters; bounded corrected retry"
+                        ? "mutating tool call failed with invalid parameters"
+                                + (retryCanSatisfy ? "; bounded corrected retry" : "")
                         : "model response had no " + requiredToolCallLabel(obligation, retryToolNames));
         String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
-        List<ToolSpec> retryToolSpecs = toolSpecs(ctx, retryToolNames);
+        if (!retryCanSatisfy) {
+            // The model was never offered the tools this obligation needs, so a retry cannot satisfy it.
+            LocalTurnTraceCapture.recordActionObligation(
+                    obligation.name(),
+                    "FAILED",
+                    String.join("/", unofferedRetryTools.isEmpty() ? retryToolNames : unofferedRetryTools)
+                            + " not in the dispatched tool surface; no retry was sent",
+                    "REQUIRED_TOOL_NOT_DISPATCHED");
+            boolean operationToolUnoffered = unofferedRetryTools.stream()
+                    .anyMatch(safePlan.workspaceOperationPlan().toolNames()::contains);
+            return new Result(
+                    selectDeterministicAnswer(
+                            ResponseObligationVerifier
+                                    .deterministicRequiredToolsUnavailableAnswer(operationToolUnoffered)),
+                    0,
+                    null,
+                    null,
+                    true, AnswerOutputLimit.CLEAR);
+        }
+        LOG.info("Missing-mutation retry: the turn's mutation obligation is unsatisfied, so one bounded retry "
+                + "is prepared with the required tools.");
         String retryInstruction = mutationRetryInstruction(
                 safePlan,
                 obligation,
@@ -832,6 +853,39 @@ final class MissingMutationRetry {
                 : List.of("talos.write_file");
     }
 
+    /**
+     * The tools the obligation needs that the retry surface does not offer: the exact tool of a pending operation, or
+     * write and edit when neither is offered for a pending content step. Every required tool is unoffered when the
+     * surface offers none.
+     */
+    private static List<String> unofferedRetryTools(
+            CurrentTurnPlan plan,
+            ActionObligation obligation,
+            List<String> retryToolNames,
+            List<ToolSpec> retryToolSpecs) {
+        Set<String> offered = new LinkedHashSet<>();
+        if (retryToolSpecs != null) {
+            for (ToolSpec spec : retryToolSpecs) {
+                if (spec != null && spec.name() != null) offered.add(spec.name());
+            }
+        }
+        if (offered.isEmpty()) return List.copyOf(retryToolNames);
+        if (obligation != ActionObligation.WORKSPACE_OPERATION_REQUIRED || plan == null) return List.of();
+        List<String> unoffered = new ArrayList<>();
+        List<String> contentTools = retryToolNames.stream()
+                .filter(name -> "talos.write_file".equals(name) || "talos.edit_file".equals(name))
+                .toList();
+        if (!contentTools.isEmpty() && contentTools.stream().noneMatch(offered::contains)) {
+            unoffered.addAll(contentTools);
+        }
+        for (String operationTool : plan.workspaceOperationPlan().toolNames()) {
+            if (retryToolNames.contains(operationTool) && !offered.contains(operationTool)) {
+                unoffered.add(operationTool);
+            }
+        }
+        return List.copyOf(unoffered);
+    }
+
     private static String requiredToolCallLabel(ActionObligation obligation, List<String> toolNames) {
         if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
             String tools = toolNames == null || toolNames.isEmpty()
@@ -1207,9 +1261,8 @@ final class MissingMutationRetry {
 
     private static boolean isRepairOrFixContract(TaskContract contract) {
         if (contract == null) return false;
-        String reason = contract.classificationReason();
-        return "explicit-review-and-fix-request".equals(reason)
-                || "repair-follow-up-inherits-previous-mutation-contract".equals(reason);
+        return contract.hasClassificationReason("explicit-review-and-fix-request")
+                || contract.hasClassificationReason("repair-follow-up-inherits-previous-mutation-contract");
     }
 
     private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {
@@ -1273,8 +1326,7 @@ final class MissingMutationRetry {
 
     private static boolean retryShouldReissuePriorMutationRequest(TaskContract retryContract) {
         return retryContract != null
-                && "repair-follow-up-inherits-previous-mutation-contract"
-                .equals(retryContract.classificationReason());
+                && retryContract.hasClassificationReason("repair-follow-up-inherits-previous-mutation-contract");
     }
 
     private static String capturedCurrentRequestBoundary(TaskContract retryContract) {

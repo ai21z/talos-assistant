@@ -104,7 +104,44 @@ class MicaFinalAnswerParityTest {
         assertEquals(normalize(observed.persisted()), normalize(observed.terminalAnswer()));
     }
 
+    @Test
+    void publishedWorkspaceLocationIsPreviewedByLastWhileTheRecordStaysMasked() throws Exception {
+        var observed = run("location", "Where is this workspace?", "Unused provider location.", false, true);
+
+        // MICA D8: the rendered terminal answer and the rendered /last preview both show the runtime path.
+        assertTrue(observed.terminalAnswer().contains(observed.workspace()), observed.terminalAnswer());
+        assertTrue(observed.lastRendered().contains(observed.workspace()), observed.lastRendered());
+        assertFalse(observed.lastRendered().contains("Unused provider location"), observed.lastRendered());
+    }
+
+    @Test
+    void modelAuthoredWorkspacePathIsMaskedInTheTerminalAndInLast() throws Exception {
+        var observed = run("authored", "Tell me a short fact about this project.",
+                "This project lives in " + temp.resolve("authored-workspace") + " and has no files yet.", false, true);
+
+        assertFalse(observed.terminalAnswer().contains(observed.workspace()), observed.terminalAnswer());
+        assertFalse(observed.lastRendered().contains(observed.workspace()), observed.lastRendered());
+    }
+
+    @Test
+    void aNamedToolThatDidNotRunGainsOneRuntimeNoteInTheTerminalAndTheRecord() throws Exception {
+        String providerText = "I cannot delete files here. You could run talos.delete_file commands yourself.";
+        var observed = run("capability", "ok you didnt that's okay", providerText, false);
+
+        // MICA I4: the model text is kept, and the runtime states the alias and its availability once.
+        String note = "talos.delete_file is an alias of talos.delete_path";
+        assertTrue(normalize(observed.terminalAnswer()).startsWith(normalize(providerText)), observed.terminalAnswer());
+        assertEquals(1, observed.terminalAnswer().split(java.util.regex.Pattern.quote(note), -1).length - 1,
+                observed.terminalAnswer());
+        assertTrue(observed.persisted().contains(note), observed.persisted());
+    }
+
     private Observed run(String label, String request, String providerText, boolean withDraft) throws Exception {
+        return run(label, request, providerText, withDraft, false);
+    }
+
+    private Observed run(String label, String request, String providerText, boolean withDraft, boolean location)
+            throws Exception {
         Path workspace = Files.createDirectory(temp.resolve(label + "-workspace"));
         Path isolatedHome = Files.createDirectory(temp.resolve(label + "-home"));
         Path storage = isolatedHome.resolve(".talos/sessions");
@@ -156,10 +193,13 @@ class MicaFinalAnswerParityTest {
                 assertNotNull(selected);
                 assertFalse(selected.isBlank());
                 assertTrue(turn.audit().toolCalls().isEmpty(), "The scripted response contains no tool calls");
-                assertEquals(1, recorded.requests().size(), "No retry or unplanned provider call is expected");
-                List<ChatMessage> dispatched = recorded.requests().getFirst().messages;
-                assertEquals(request, dispatched.getLast().content(), "The original follow-up must be dispatched");
+                if (!location) {
+                    assertEquals(1, recorded.requests().size(), "No retry or unplanned provider call is expected");
+                    List<ChatMessage> dispatched = recorded.requests().getFirst().messages;
+                    assertEquals(request, dispatched.getLast().content(), "The original follow-up must be dispatched");
+                }
                 if (withDraft) {
+                    List<ChatMessage> dispatched = recorded.requests().getFirst().messages;
                     int priorUser = messageIndex(dispatched, "user", SAVE_REQUEST);
                     int priorAssistant = messageIndex(dispatched, "assistant", DRAFT);
                     assertTrue(priorUser >= 0 && priorAssistant > priorUser
@@ -189,13 +229,18 @@ class MicaFinalAnswerParityTest {
                     String last = assertInstanceOf(Result.TrustedInfo.class,
                             new ExplainLastTurnCommand(workspace, reopened, null, sessionId)
                                     .execute("", context)).text;
-                    assertTrue(last.contains("Assistant Preview\n  " + preview(persisted.assistantText())), last);
+                    if (!location) {
+                        assertTrue(last.contains("Assistant Preview\n  " + preview(persisted.assistantText())), last);
+                    }
                     // Exercise actual command presentation separately so /last cannot contaminate
                     // the answer bytes being compared in the regression.
                     bytes.reset();
                     renderer.renderCommand("last", new Result.TrustedInfo(last));
-                    assertTrue(normalize(stripAnsi(bytes.toString(StandardCharsets.UTF_8)))
-                            .contains(normalize(preview(persisted.assistantText()))));
+                    String lastRendered = stripAnsi(bytes.toString(StandardCharsets.UTF_8));
+                    if (!location) {
+                        assertTrue(normalize(stripAnsi(bytes.toString(StandardCharsets.UTF_8)))
+                                .contains(normalize(preview(persisted.assistantText()))));
+                    }
                     try (var contents = Files.list(workspace)) {
                         assertEquals(0, contents.count(), "A status follow-up with no tool calls must not create a story");
                     }
@@ -215,7 +260,8 @@ class MicaFinalAnswerParityTest {
                                     "taskContract", trace.taskContract(),
                                     "evidenceObligation", trace.promptAudit().evidenceObligation(),
                                     "outcome", trace.outcome()))));
-                    return new Observed(selected, terminalAnswer, persisted.assistantText(), last, streamed);
+                    return new Observed(selected, terminalAnswer, persisted.assistantText(), last, streamed,
+                            workspace.toString(), lastRendered);
                 }
             }
         } finally {
@@ -279,5 +325,6 @@ class MicaFinalAnswerParityTest {
         return oneLine.length() <= 240 ? oneLine : oneLine.substring(0, 237) + "...";
     }
 
-    private record Observed(String selected, String terminalAnswer, String persisted, String last, boolean streamed) {}
+    private record Observed(String selected, String terminalAnswer, String persisted, String last, boolean streamed,
+                            String workspace, String lastRendered) {}
 }

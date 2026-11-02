@@ -746,6 +746,23 @@ class SystemPromptBuilderTest {
     }
 
     @Test
+    void unifiedPromptToolsWithoutWriteFileDoNotAdvertiseTheWriteFileTool() {
+        // Without a visible tool selection the prompt tools are the surface, and the capability sentence names
+        // talos.write_file, so another mutation tool alone must not state it.
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", false));
+        registry.register(stubTool("talos.delete_path", "Delete a workspace path", true));
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withPromptTools(registry)
+                .withNativeTools(true)
+                .build();
+
+        assertTrue(prompt.contains("- **talos.delete_path**"), prompt);
+        assertFalse(prompt.contains("talos.write_file tool that writes files"), prompt);
+    }
+
+    @Test
     void askRulesContainReadOnlyModeBoundary() {
         String prompt = SystemPromptBuilder.forAsk().build();
 
@@ -778,6 +795,14 @@ class SystemPromptBuilderTest {
         assertTrue(prompt.contains("NEVER say \"I cannot create files\"")
                         || prompt.contains("You CAN create files"),
                 "RAG rules should reinforce file creation capability");
+    }
+
+    @Test
+    void ragRulesNeverMapAWorkspaceOperationToAContentWrite() {
+        String prompt = SystemPromptBuilder.forRag().build();
+
+        assertFalse(prompt.contains("DELETE, or MODIFY files - call the appropriate tool"), prompt);
+        assertTrue(prompt.contains("Never empty, rewrite, or edit a file to emulate it."), prompt);
     }
 
     @Test

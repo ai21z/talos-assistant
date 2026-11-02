@@ -63,7 +63,7 @@ final class QualificationRequirementFinalizer {
                     throw new IllegalArgumentException(
                         "legacy mechanical requirements cannot claim a request obligation");
                 }
-            } else if (protocolVersion == 6) {
+            } else if (protocolVersion == QualificationProtocol.VERSION) {
                 if (schemaVersion == 1) {
                     if (!requestObligationSha256.isEmpty()
                             || !requestObligation.isEmpty()) {
@@ -361,7 +361,7 @@ final class QualificationRequirementFinalizer {
                 .toList();
         return new Document(
                 SCHEMA,
-                protocolVersion >= 6 ? 2 : 1,
+                protocolVersion >= QualificationProtocol.FIRST_CAUSAL_VERSION ? 2 : 1,
                 protocolVersion,
                 scenarioBankSha256,
                 scenario.id(),

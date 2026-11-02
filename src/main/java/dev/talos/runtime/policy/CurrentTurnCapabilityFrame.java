@@ -130,7 +130,7 @@ public final class CurrentTurnCapabilityFrame {
                     Do not provide manual snippets instead of acting unless a narrow clarification is genuinely required.""");
             case WORKSPACE_OPERATION_REQUIRED -> frame.append("""
                     Use only the exact workspace operation tool named in the typed operation frame for that operation.
-                    Do not emulate move, copy, rename, or mkdir by manually writing or editing file contents.
+                    Do not emulate delete, move, copy, rename, or mkdir by manually writing or editing file contents.
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
                     Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.""");
@@ -222,7 +222,7 @@ public final class CurrentTurnCapabilityFrame {
     ) {
         if (!mutationAllowed
                 || contract == null
-                || !"explicit-text-format-request".equals(contract.classificationReason())
+                || !contract.hasClassificationReason("explicit-text-format-request")
                 || visibleTools == null
                 || !visibleTools.contains("talos.read_file")
                 || !visibleTools.contains("talos.write_file")) {

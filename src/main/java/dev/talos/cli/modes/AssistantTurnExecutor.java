@@ -56,6 +56,7 @@ import dev.talos.runtime.verification.ReadOnlyWebDiagnosticResult;
 import dev.talos.runtime.verification.ReadOnlyWebAnswerAssessment;
 import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
+import dev.talos.runtime.workspace.OperationOperandPreflight;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
@@ -246,8 +247,9 @@ public final class AssistantTurnExecutor {
         boolean composeRuntimeIdentity = RuntimeModelIdentityAnswerPolicy.requestsIdentityComponent(identityRequest)
                 && !RuntimeModelIdentityAnswerPolicy.isIdentityOnlyRequest(identityRequest);
         StringBuilder out = new StringBuilder();
+        boolean pendingAtStart = AssistantTurnPreparation.pendingAtStart(ctx);
         WorkspaceBoundaryPreflight workspaceBoundaryPreflight =
-                workspaceBoundaryPreflight(messages, workspace, ctx);
+                workspaceBoundaryPreflight(messages, workspace, ctx, pendingAtStart);
         if (ctx != null && ctx.memory() != null
                 && (workspaceBoundaryPreflight.directAnswer() != null
                     || workspaceBoundaryPreflight.effectiveUserRequest() != null)) {
@@ -259,8 +261,24 @@ public final class AssistantTurnExecutor {
                     runtimeIdentity, composeRuntimeIdentity);
         }
         boolean workspaceBoundaryReplayedRequest = workspaceBoundaryPreflight.effectiveUserRequest() != null;
+        // The mode selected its tool surface for the request it received, so a replacement is reselected.
+        boolean requestReplaced = workspaceBoundaryReplayedRequest;
         if (workspaceBoundaryPreflight.effectiveUserRequest() != null) {
             messages = replaceLatestUserRequest(messages, workspaceBoundaryPreflight.effectiveUserRequest());
+        } else {
+            OperationOperandPreflight.Result operand = operationOperandPreflight(messages, workspace, ctx);
+            if (operand.applies() && ctx != null && ctx.memory() != null) {
+                ctx.memory().setPendingContentSave(null);
+                ctx.memory().setPendingContentDraft(null);
+            }
+            if (operand.directAnswer() != null) {
+                recordAnsweredWithoutExecution(messages);
+                return directTurnOutput(operand.directAnswer(), ctx, opts, runtimeIdentity, composeRuntimeIdentity);
+            }
+            if (operand.effectiveRequest() != null) {
+                messages = replaceLatestUserRequest(messages, operand.effectiveRequest());
+                requestReplaced = true;
+            }
         }
         RuntimeModelIdentityAnswerPolicy.project(messages, runtimeIdentity);
         AssistantTurnPreparation.PreparedTurn preparedTurn = AssistantTurnPreparation.prepare(
@@ -268,7 +286,9 @@ public final class AssistantTurnExecutor {
                 workspace,
                 ctx,
                 workspaceBoundaryReplayedRequest,
-                opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture());
+                requestReplaced,
+                opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture(),
+                pendingAtStart);
         ctx = preparedTurn.ctx();
         CurrentTurnPlan currentTurnPlan = preparedTurn.plan();
         var currentTaskResolution = preparedTurn.taskResolution();
@@ -469,9 +489,57 @@ public final class AssistantTurnExecutor {
             TurnSourceEvidenceCapture.clear(); dev.talos.runtime.toolcall.TurnReadCallRegister.clear();
         }
 
+        String finalAnswer = withChangeOffer(
+                out.toString(), currentTaskResolution, messages, workspace, ctx, opts);
         return composeRuntimeIdentity
-                ? completeRuntimeIdentityOutput(out.toString(), runtimeIdentity, ctx, opts)
-                : completeTurnOutput(out.toString(), false);
+                ? completeRuntimeIdentityOutput(finalAnswer, runtimeIdentity, ctx, opts)
+                : completeTurnOutput(finalAnswer, false);
+    }
+
+    /**
+     * Ends a read-only answer to an indirect change request with the runtime change offer (MICA decision D6). The
+     * turn keeps its read-only surface. Only an acceptance on the next turn can apply the change, and only to the
+     * existing files of the active task.
+     */
+    private static String withChangeOffer(
+            String answer,
+            TaskResolution resolution,
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            Options opts
+    ) {
+        CapabilityPosture posture = opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture();
+        if (posture != CapabilityPosture.AGENT || resolution == null || resolution.contract().mutationAllowed()
+                || workspace == null || ctx == null || ctx.memory() == null) {
+            return answer;
+        }
+        // ActiveTaskContextPolicy owns expiry and a change of named targets. Either one clears the memory context
+        // during turn preparation, so only a context the policy kept active for this turn reaches this point.
+        dev.talos.runtime.context.ActiveTaskContext context = ctx.memory().activeTaskContext();
+        if (context == null || context.state() != dev.talos.runtime.context.ActiveTaskContext.State.ACTIVE) {
+            return answer;
+        }
+        List<String> targets = context.targets();
+        if (targets.isEmpty() || targets.size() > dev.talos.runtime.context.ActiveTaskContext.MAX_TARGETS) {
+            return answer;
+        }
+        try {
+            Path root = workspace.toRealPath();
+            for (String target : targets) {
+                Path resolved = root.resolve(target.replace('\\', '/')).normalize();
+                if (!resolved.startsWith(root)
+                        || !java.nio.file.Files.isRegularFile(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        || !resolved.getParent().toRealPath().startsWith(root)) {
+                    return answer;
+                }
+            }
+        } catch (java.io.IOException | RuntimeException unresolved) {
+            return answer;
+        }
+        if (!dev.talos.runtime.intent.IndirectChangeRequest.recognized(latestUserRequest(messages))) return answer;
+        LocalTurnTraceCapture.recordChangeOffer(targets);
+        return dev.talos.runtime.context.ChangeOffer.appendTo(answer, targets);
     }
 
     private static RuntimeException propagateGenerationFailure(Throwable failure) {
@@ -1411,7 +1479,8 @@ public final class AssistantTurnExecutor {
     private static WorkspaceBoundaryPreflight workspaceBoundaryPreflight(
             List<ChatMessage> messages,
             Path workspace,
-            Context ctx
+            Context ctx,
+            boolean pendingAtStart
     ) {
         if (ctx == null || ctx.memory() == null) return WorkspaceBoundaryPreflight.none();
         String userRequest = latestUserRequest(messages);
@@ -1444,7 +1513,11 @@ public final class AssistantTurnExecutor {
         }
 
         TaskContract contract = TaskContractResolver.fromUserRequest(userRequest);
-        if (isRelativeWorkspaceMutation(contract, userRequest)) {
+        // A referentless directive with nothing pending names no change to confirm, so it is not kept for a replay
+        // that would grant it authority (MICA invariant I1). Preparation then resolves it from its own message. With
+        // something pending, the confirmation is kept, and its replay may bind what is pending.
+        if (isRelativeWorkspaceMutation(contract, userRequest)
+                && (pendingAtStart || !AssistantTurnPreparation.unboundReferentless(userRequest, contract, null))) {
             String currentWorkspace = workspaceDisplay(workspace, failedSwitch.currentWorkspace());
             ctx.memory().recordPendingWorkspaceMutationConfirmation(userRequest, currentWorkspace);
             return WorkspaceBoundaryPreflight.direct(
@@ -1456,6 +1529,47 @@ public final class AssistantTurnExecutor {
 
         ctx.memory().clearFailedWorkspaceSwitch();
         return WorkspaceBoundaryPreflight.none();
+    }
+
+    /**
+     * Binds the operand of a removal request or answers (MICA invariant I2). The effective request it may return is
+     * parsed like a typed request, so the parser still owns the workspace-operation authority.
+     */
+    private static OperationOperandPreflight.Result operationOperandPreflight(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx
+    ) {
+        OperationOperandPreflight.Result result = OperationOperandPreflight.evaluate(
+                latestUserRequest(messages),
+                workspace,
+                ctx == null || ctx.memory() == null
+                        ? dev.talos.runtime.context.ActiveTaskContext.none()
+                        : ctx.memory().activeTaskContext(),
+                AssistantTurnPreparation.currentUserTurnNumber(ctx));
+        if (result.applies()) {
+            LocalTurnTraceCapture.recordOperationOperandResolution(
+                    result.operandClass().name(),
+                    result.outcome().name(),
+                    result.boundPath(),
+                    result.candidateCount());
+        }
+        return result;
+    }
+
+    /**
+     * A removal answered by the operand preflight executes nothing. The turn still records what the typed request
+     * said, with no authority active, so the turn and its trace are persisted against that request. The record is
+     * compiled by the canonical entry that turn preparation uses (T1205).
+     */
+    private static void recordAnsweredWithoutExecution(List<ChatMessage> messages) {
+        dev.talos.runtime.TurnPolicyTrace record = dev.talos.runtime.TurnPolicyTrace.answeredWithoutExecution(
+                TaskContractResolver.resolveFromMessages(messages));
+        if (dev.talos.runtime.TurnAuditCapture.isActive()) {
+            dev.talos.runtime.TurnAuditCapture.recordPolicyTrace(record);
+        } else {
+            LocalTurnTraceCapture.recordPolicyTrace(record);
+        }
     }
 
     private static List<ChatMessage> replaceLatestUserRequest(List<ChatMessage> messages, String effectiveUserRequest) {
@@ -1725,8 +1839,8 @@ public final class AssistantTurnExecutor {
             if (change == null) continue;
             boolean hasState = !change.verificationStatus().isBlank()
                     || !change.completionStatus().isBlank();
-            boolean verified = "PASSED".equalsIgnoreCase(change.verificationStatus())
-                    || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
+            boolean verified = ChangeSummaryContext.verifiedComplete(
+                    change.verificationStatus(), change.completionStatus());
             if (hasState && !verified) return true;
         }
         return false;
@@ -2062,6 +2176,8 @@ public final class AssistantTurnExecutor {
         if (content == null || content.isBlank()) return false;
         String lower = content.toLowerCase(Locale.ROOT);
         return lower.contains("static verification")
+                || lower.contains("[checks passed - ")
+                || lower.contains("so task completion was not verified")
                 || lower.contains("partial verification")
                 || lower.contains("remaining static verification problems")
                 || lower.contains("task incomplete");
@@ -2075,6 +2191,13 @@ public final class AssistantTurnExecutor {
             status = "Partially. The task remains partial: some files changed, but the previous verified outcome says it is not complete (not verified complete).";
         } else if (lower.contains("task incomplete") || lower.contains("static verification failed")) {
             status = "No. The previous verified outcome says the task is not complete.";
+        } else if (lower.contains("[static verification incomplete")) {
+            status = "No. Static verification was incomplete in the previous outcome, so the task is not verified complete.";
+        } else if (lower.contains("so task completion was not verified")) {
+            status = "No. The previous outcome confirmed the file readback only, so the task is not verified complete.";
+        } else if (lower.contains("[checks passed - ")) {
+            // A checks pass proves structure, not the request (MICA invariant I3, decision D5).
+            status = "Checks passed in the previous outcome, but the change is not verified complete.";
         } else if (lower.contains("static verification: passed")) {
             status = "Yes. Static verification passed in the previous outcome.";
         } else {
@@ -2106,6 +2229,9 @@ public final class AssistantTurnExecutor {
                 || lower.startsWith("partially. some files changed")
                 || lower.startsWith("no. the previous verified outcome says")
                 || lower.startsWith("yes. static verification passed")
+                || lower.startsWith("checks passed in the previous outcome")
+                || lower.startsWith("no. static verification was incomplete")
+                || lower.startsWith("no. the previous outcome confirmed the file readback only")
                 || lower.equals("verified details:");
     }
 

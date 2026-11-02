@@ -9,8 +9,9 @@ public final class EmbeddedStaticVerificationResultParser {
     private static final String NOT_APPLICABLE_SUMMARY = "Post-apply verification was not applicable.";
     private static final String FAILURE_MARKER = "[Task incomplete: Static verification failed - ";
     private static final String PROBLEMS_MARKER = "Unresolved static verification problems:";
+    // Runtime pass headers, for either proof scope. Model text cannot carry them into the answer.
     private static final Pattern PASS_MARKER_LINE = Pattern.compile(
-            "(?m)^\\[Static verification: passed - [^\\r\\n]*]\\s*(?:\\R\\s*)?");
+            "(?m)^\\[(?:Static verification: passed|Checks passed) - [^\\r\\n]*]\\s*(?:\\R\\s*)?");
 
     private EmbeddedStaticVerificationResultParser() {}
 

@@ -24,12 +24,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StaticVerificationAnswerRendererTest {
     @Test
     void passedAnnotationPreservesExistingWording() {
-        TaskVerificationResult result = TaskVerificationResult.passed(
+        TaskVerificationResult result = TaskVerificationResult.passedForRequest(
                 "Static web verification passed.",
                 List.of("HTML links script.js"));
 
         assertEquals(
                 "[Static verification: passed - Static web verification passed.]\n\n",
+                StaticVerificationAnswerRenderer.passedAnnotation(result));
+    }
+
+    @Test
+    void aChecksPassKeepsItsOwnWordingWithoutClaimingVerification() {
+        TaskVerificationResult result = TaskVerificationResult.passed(
+                "Static web coherence checks passed for 1 mutated target(s).",
+                List.of("HTML links script.js"));
+
+        assertEquals(
+                "[Checks passed - Static web coherence checks passed for 1 mutated target(s).]\n\n",
                 StaticVerificationAnswerRenderer.passedAnnotation(result));
     }
 
@@ -147,6 +158,8 @@ class StaticVerificationAnswerRendererTest {
                 Unresolved static verification problems:
                 - HTML does not link JavaScript file: `scripts.js`
 
+                Reply yes to let Talos try to repair the unresolved problems. File changes still follow your approval settings.
+
                 """, StaticVerificationAnswerRenderer.failedAnnotation(result));
     }
 
@@ -179,7 +192,9 @@ class StaticVerificationAnswerRendererTest {
                 Applied mutating tool calls:
                 - notes.md: Wrote notes.md
 
-                The assistant success summary was replaced with this runtime verification result because verification failed.""",
+                The assistant success summary was replaced with this runtime verification result because verification failed.
+
+                Reply yes to let Talos try to repair the unresolved problems. File changes still follow your approval settings.""",
                 StaticVerificationAnswerRenderer.failedReplacement(
                         result,
                         loopResult(mutatingOutcome("talos.write_file", "notes.md", "Wrote notes.md"))));
@@ -199,6 +214,8 @@ class StaticVerificationAnswerRendererTest {
 
                 Remaining static verification problems:
                 - HTML does not link CSS file: `styles.css`
+
+                Reply yes to let Talos try to repair the unresolved problems. File changes still follow your approval settings.
 
                 """, StaticVerificationAnswerRenderer.partialFailedAnnotation(result));
     }
@@ -235,7 +252,7 @@ class StaticVerificationAnswerRendererTest {
         assertEquals(
                 "[Static verification: passed - " + expectedSummary + "]\n\n",
                 StaticVerificationAnswerRenderer.passedAnnotation(
-                        TaskVerificationResult.passed(longSummary, List.of())));
+                        TaskVerificationResult.passedForRequest(longSummary, List.of())));
     }
 
     private static ToolCallLoop.ToolOutcome mutatingOutcome(String toolName, String pathHint, String summary) {

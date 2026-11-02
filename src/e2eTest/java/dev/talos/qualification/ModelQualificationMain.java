@@ -88,7 +88,7 @@ public final class ModelQualificationMain {
                 QualificationJson.readTree(
                         packetFiles.readAllBytes(campaignPath)).get("protocolVersion"),
                 "campaign protocolVersion");
-        return QualificationScenarioBank.load(protocolVersion);
+        return QualificationScenarioBank.loadForRecords(protocolVersion);
     }
 
     private static QualificationScenarioBank.Catalog catalogForMutation(Path root) throws Exception {
@@ -104,7 +104,7 @@ public final class ModelQualificationMain {
                 QualificationJson.readTree(
                         packetFiles.readAllBytes(campaignPath)).get("protocolVersion"),
                 "campaign protocolVersion");
-        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadForRecords(protocolVersion);
         QualificationArtifactPublication.requireWritableCampaign(root, catalog);
         return catalog;
     }

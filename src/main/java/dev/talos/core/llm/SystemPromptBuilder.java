@@ -524,7 +524,15 @@ public final class SystemPromptBuilder {
     }
 
     private boolean advertiseMutableWorkspaceCapability() {
-        return mode == Mode.UNIFIED && mutableWorkspaceCapabilityVisible();
+        // The capability sentence names talos.write_file, so it is stated only when that tool is visible.
+        return mode == Mode.UNIFIED && mutableWorkspaceCapabilityVisible() && writeFileToolVisible();
+    }
+
+    private boolean writeFileToolVisible() {
+        if (visibleToolNames != null) return visibleToolNames.contains("talos.write_file");
+        return promptTools != null && promptTools.stream()
+                .map(PromptToolDescriptor::name)
+                .anyMatch("talos.write_file"::equals);
     }
 
     private boolean mutableWorkspaceCapabilityVisible() {

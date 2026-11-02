@@ -14,6 +14,8 @@ import java.util.Optional;
 public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
     private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
+    /** The runtime refused a tool call's executable authority and stopped the loop. */
+    public static final String AUTHORITY_REJECTED_REASON = "tool-call execution authority was rejected";
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (state.toolOutcomes.stream().anyMatch(result -> result.mutating() && !result.success()
@@ -25,9 +27,11 @@ public final class ToolCallRepromptStage {
         }
         if (outcome != null
                 && outcome.executionAuthorityRejectedThisIteration()) {
+            Optional<Boolean> corrected = ToolModeCorrectionReprompt.tryHandle(state, outcome);
+            if (corrected.isPresent()) return corrected.get();
             FailureDecision decision = FailureDecision.stop(
                     FailureAction.ASK_USER,
-                    "tool-call execution authority was rejected");
+                    AUTHORITY_REJECTED_REASON);
             state.stopWithFailure(
                     decision,
                     "[Tool execution was blocked because executable tool authority was invalid"
@@ -151,9 +155,10 @@ public final class ToolCallRepromptStage {
         Optional<Boolean> supportingAcquisition = ReadOnlyEvidenceContinuation.tryContinueAcquisition(state);
         if (supportingAcquisition.isPresent()) return supportingAcquisition.get();
 
-        if (state.iterations >= 3) {
+        if (state.iterations >= ToolCallSupport.COMPACTION_START_ITERATION) {
             for (ToolCallSupport.CompactedToolResult compacted : ToolCallSupport.compactOlderToolResultsInPlace(
-                    state.messages, state.compactedToolResultOriginals, state.noticeMessageIndices)) {
+                    state.messages, state.compactedToolResultOriginals, state.noticeMessageIndices,
+                    ToolCallSupport.keepBudgetChars(state.ctx == null ? null : state.ctx.cfg()))) {
                 dev.talos.runtime.trace.LocalTurnTraceCapture.recordToolResultCompacted(
                         compacted.messageIndex(), compacted.chars());
             }

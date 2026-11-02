@@ -18,6 +18,14 @@ public final class StaticWebInteractionVerifier {
 
     private StaticWebInteractionVerifier() {}
 
+    /** An interaction proof reads the page and its script, never its stylesheet. */
+    static List<String> evaluatedFiles(StaticWebSelectorAnalyzer.Facts facts) {
+        if (facts == null) return List.of();
+        return java.util.stream.Stream.of(facts.htmlFile(), facts.jsFile())
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
     static VerificationReport verify(String request, StaticWebSelectorAnalyzer.Facts facts) {
         Optional<TargetBinding> maybeBinding = detectBinding(request);
         if (maybeBinding.isEmpty()) return VerificationReport.empty();
@@ -28,7 +36,8 @@ public final class StaticWebInteractionVerifier {
                         + " -> " + binding.outputSelector() + ".",
                 ProofKind.STATIC_INTERACTION_GUARD,
                 binding,
-                true);
+                true,
+                evaluatedFiles(facts));
         VerificationObligation obligation = new VerificationObligation(
                 claim,
                 Set.of(ProofKind.STATIC_INTERACTION_GUARD),

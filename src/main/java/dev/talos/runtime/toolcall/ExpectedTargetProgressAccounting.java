@@ -96,7 +96,8 @@ final class ExpectedTargetProgressAccounting {
 
     /**
      * Exact-case keys of a successful mutation, with the existing file-name key. A case variant is not the
-     * target by text, only when identity shows the file system treats it as the same file.
+     * target by text, only when identity shows the file system treats it as the same file. A path hint is the
+     * spelling the tool resolved, so where a backslash can be part of a file name such a hint gives no key.
      */
     static void addExactMutationKeys(Set<String> satisfied, ToolCallLoop.ToolOutcome outcome) {
         if (satisfied == null || outcome == null) return;
@@ -107,7 +108,11 @@ final class ExpectedTargetProgressAccounting {
             }
             return;
         }
-        addExactPathKeys(satisfied, outcome.pathHint());
+        if (hintKeyedLosslessly(outcome.pathHint())) addExactPathKeys(satisfied, outcome.pathHint());
+    }
+
+    private static boolean hintKeyedLosslessly(String pathHint) {
+        return WorkspacePathIdentity.normalizedSpellingIsLossless() || pathHint.indexOf('\\') < 0;
     }
 
     private static void addExactPathKeys(Set<String> satisfied, String path) {
@@ -300,7 +305,7 @@ final class ExpectedTargetProgressAccounting {
             }
             return;
         }
-        addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
+        if (hintKeyedLosslessly(outcome.pathHint())) addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
     }
 
     private static void addExpectedTargetPathKeys(Set<String> satisfiedTargets, String path) {

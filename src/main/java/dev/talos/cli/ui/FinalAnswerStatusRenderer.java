@@ -27,7 +27,10 @@ public final class FinalAnswerStatusRenderer {
         };
         return List.of("Work outcome: " + status.operational().status() + " ("
                         + status.operational().classification() + ")",
-                "Answer delivery: " + delivery + " (selected answer limits)", "Whole-request coverage: not assessed",
+                "Answer delivery: " + delivery + " (selected answer limits)",
+                status.coverage() == FinalAnswerStatus.Coverage.COVERED
+                        ? "Whole-request coverage: covered by an exact request check"
+                        : "Whole-request coverage: not assessed",
                 "Terminal sink delivery: not recorded in this trace");
     }
 }

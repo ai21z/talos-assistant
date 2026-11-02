@@ -23,7 +23,8 @@ class QualificationScenarioResourceIdentityTest {
             3, "da2c4558e43c1359025a408b4e12b30f4e1b08b9236ad1bee1940c86b3d40fa3",
             4, "d3df5675d1b764d846202012acc250caeb0324fe5ce81ec176928cc986a067ad",
             5, "28e3df731502dcbf3dbcdd4bd69131f93a71766aa6c42ebcebd5825619de7d6b",
-            6, "b402721da36bf215366f119ae38412b10d085a3fa759bd311f9d2664f540dbad");
+            6, "b402721da36bf215366f119ae38412b10d085a3fa759bd311f9d2664f540dbad",
+            7, "9c3d8d86fd913aaf9a784b2947bd9bea250eb5af0d2fea26c384dac3710aedd9");
 
     private static final Map<String, String> EXPECTED_RESOURCE_SHA256 = Map.ofEntries(
             Map.entry("model-qualification/banks/admission-v1.json", "54cd902f28399c09d9d52560db82d7dab7f5c6db7f3ebb30c43244ef99923a76"),
@@ -61,7 +62,13 @@ class QualificationScenarioResourceIdentityTest {
             Map.entry("model-qualification/fixtures/basic-workspace-v6.json", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473"),
             Map.entry("model-qualification/fixtures/context-workspace-v6.json", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da"),
             Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5"),
-            Map.entry("model-qualification/fixtures/web-workspace-v6.json", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337"));
+            Map.entry("model-qualification/fixtures/web-workspace-v6.json", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337"),
+            Map.entry("model-qualification/banks/admission-v7.json", "2e2f300a441b74907ab58b350947eda33e23269af8f9f4f3bf3069934ae7fb86"),
+            Map.entry("model-qualification/banks/full-v7.json", "add2a3486ba8db1a94042cc34d756e1768dc71a34927533d52e4673c95d0cfd3"),
+            Map.entry("model-qualification/fixtures/basic-workspace-v7.json", "1b4736b64029219931a002f08ef129443eaa7327b5ff527f6915d544eab46653"),
+            Map.entry("model-qualification/fixtures/context-workspace-v7.json", "7cbd3dd15cdfda2fe65cde48ce8bb5f23f5bc84df205b6693a032638a3f906a4"),
+            Map.entry("model-qualification/fixtures/privacy-workspace-v7.json", "c745599d1de0f2e88d29fde10a37650e39b03ce8a0114a3d006f452faaec7fe5"),
+            Map.entry("model-qualification/fixtures/web-workspace-v7.json", "4f23efb0b49062c0e590fd2d01e33d28bfdfc800dc75d240b37f96446d5a457c"));
 
     @Test
     void lfCrlfAndPublishedRepresentationsResolveToExactPinnedIdentities() throws Exception {

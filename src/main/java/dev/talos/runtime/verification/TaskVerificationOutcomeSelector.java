@@ -1,5 +1,6 @@
 package dev.talos.runtime.verification;
 
+import java.util.Collection;
 import java.util.List;
 
 /** Selects the final static-verification outcome without owning verifier mechanics. */
@@ -24,9 +25,15 @@ final class TaskVerificationOutcomeSelector {
                 expectationVerification,
                 exactEditVerification,
                 sourceDerivedVerification,
-                VerificationReport.empty());
+                VerificationReport.empty(),
+                List.of());
     }
 
+    /**
+     * Request-derived expectations and required claims give a request-bound pass. Exact edit replacement compares the
+     * file with the edit tool's own strings and static web coherence checks structure, so both give a checks pass
+     * (MICA invariant I3, decision D5).
+     */
     static TaskVerificationResult select(
             List<String> facts,
             List<String> problems,
@@ -35,7 +42,8 @@ final class TaskVerificationOutcomeSelector {
             TaskExpectationStaticVerifier.Result expectationVerification,
             ExactEditReplacementVerifier.Result exactEditVerification,
             SourceDerivedArtifactVerifier.Result sourceDerivedVerification,
-            VerificationReport verificationReport
+            VerificationReport verificationReport,
+            Collection<String> changedFiles
     ) {
         List<String> safeFacts = facts == null ? List.of() : facts;
         List<String> safeProblems = problems == null ? List.of() : problems;
@@ -78,43 +86,43 @@ final class TaskVerificationOutcomeSelector {
                     safeProblems);
         }
         java.util.Optional<TaskVerificationResult> claimOverride =
-                VerificationOutcomeGate.compatibilityOverride(verificationReport, safeFacts);
+                VerificationOutcomeGate.compatibilityOverride(verificationReport, safeFacts, changedFiles);
         if (claimOverride.isPresent()) {
             return claimOverride.get();
         }
         if (expectation.verifiedAny() && expectation.coversAllSuccessfulMutations() && !webCoherenceRequired) {
             if (expectation.replacementRequired()) {
-                return TaskVerificationResult.passed(
+                return TaskVerificationResult.passedForRequest(
                         "Replacement verification passed.",
                         safeFacts);
             }
             if (expectation.appendLineRequired()) {
-                return TaskVerificationResult.passed(
+                return TaskVerificationResult.passedForRequest(
                         "Append line verification passed.",
                         safeFacts);
             }
             if (expectation.appendSectionRequired()) {
-                return TaskVerificationResult.passed(
+                return TaskVerificationResult.passedForRequest(
                         "Append section verification passed.",
                         safeFacts);
             }
             if (expectation.appendStatementRequired()) {
-                return TaskVerificationResult.passed(
+                return TaskVerificationResult.passedForRequest(
                         "Append statement verification passed.",
                         safeFacts);
             }
             if (expectation.bulletCountRequired()) {
-                return TaskVerificationResult.passed(
+                return TaskVerificationResult.passedForRequest(
                         "Bullet count verification passed.",
                         safeFacts);
             }
-            return TaskVerificationResult.passed(
+            return TaskVerificationResult.passedForRequest(
                     "Exact content verification passed.",
                     safeFacts);
         }
         if (exactEdit.coversAllSuccessfulMutations() && !webCoherenceRequired) {
             return TaskVerificationResult.passed(
-                    "Exact edit replacement verification passed.",
+                    "Exact edit replacement checks passed.",
                     safeFacts);
         }
         if (sourceDerived.required() && !webCoherenceRequired) {
@@ -124,15 +132,16 @@ final class TaskVerificationOutcomeSelector {
                     safeFacts);
         }
         if (webCoherenceRequired) {
-            if (hasContextualStaticWebFindings(safeFacts)) {
-                return TaskVerificationResult.passed(
-                        "Scoped static web checks passed for " + mutatedTargetCount
-                                + " mutated target(s); contextual static-web findings remain outside this turn.",
-                        safeFacts);
-            }
-            return TaskVerificationResult.passed(
-                    "Static web coherence checks passed for " + mutatedTargetCount + " mutated target(s).",
-                    safeFacts);
+            // Coherence alone checks structure. A request-derived expectation that also covered every change keeps
+            // the pass request-bound.
+            boolean requestBound = expectation.verifiedAny() && expectation.coversAllSuccessfulMutations();
+            String summary = hasContextualStaticWebFindings(safeFacts)
+                    ? "Scoped static web checks passed for " + mutatedTargetCount
+                            + " mutated target(s); contextual static-web findings remain outside this turn."
+                    : "Static web coherence checks passed for " + mutatedTargetCount + " mutated target(s).";
+            return requestBound
+                    ? TaskVerificationResult.passedForRequest(summary, safeFacts)
+                    : TaskVerificationResult.passed(summary, safeFacts);
         }
         return TaskVerificationResult.readbackOnly(
                 "Target/readback checks passed for " + mutatedTargetCount

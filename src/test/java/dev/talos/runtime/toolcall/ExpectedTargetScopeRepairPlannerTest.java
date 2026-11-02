@@ -16,6 +16,9 @@ import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -221,7 +224,8 @@ class ExpectedTargetScopeRepairPlannerTest {
                 .reduce("", (left, right) -> left + "\n" + right);
     }
 
-    @Test
+    // Plan path effects are stored with backslashes rewritten, so identity uses them only where that is lossless.
+    @Test @EnabledOnOs(OS.WINDOWS)
     void planOmitsNestedTargetAlreadyWrittenThroughItsAbsolutePath() throws Exception {
         Path root = workspace.toRealPath();
         Files.createDirectories(root.resolve("docs"));
@@ -254,6 +258,32 @@ class ExpectedTargetScopeRepairPlannerTest {
         LoopState state = loopState(request, root);
         state.toolOutcomes.add(successfulWrite(
                 root.resolve("docs").resolve("docs").resolve("a.md").toString()));
+        addReadback(state, "docs/b.md", "1 | b\n");
+        state.toolOutcomes.add(expectedTargetFailure("b.md"));
+
+        Optional<ExpectedTargetScopeRepairPlanner.Plan> plan =
+                ExpectedTargetScopeRepairPlanner.nextPlan(state, baseTools(), request);
+
+        assertTrue(plan.isPresent(), "wrong-target scope block should produce expected-target repair");
+        ExpectedTargetScopeRepairPlanner.Plan repair = plan.get();
+        assertEquals(List.of("docs/a.md", "docs/b.md"), repair.expectedTargets());
+        assertEquals("b.md->docs/a.md,docs/b.md", repair.key());
+    }
+
+    // On POSIX a backslash is part of a file name, so a write to the root file docs\a.md is not a write to docs/a.md.
+    @Test @DisabledOnOs(OS.WINDOWS)
+    void planKeepsNestedTargetWhenOnlyARootFileNamedWithABackslashWasWritten() throws Exception {
+        Path root = workspace.toRealPath();
+        Files.createDirectories(root.resolve("docs"));
+        Files.writeString(root.resolve("docs").resolve("b.md"), "b\n");
+        String literal = "docs\\a.md";
+        Files.writeString(root.resolve(literal), "a\n");
+        assertEquals(root, root.resolve(literal).getParent());
+        assertFalse(Files.exists(root.resolve("docs").resolve("a.md")));
+        String request = "Create docs/a.md and docs/b.md.";
+        LoopState state = loopState(request, root);
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file", literal, true, true, false, "Wrote " + literal, ""));
         addReadback(state, "docs/b.md", "1 | b\n");
         state.toolOutcomes.add(expectedTargetFailure("b.md"));
 

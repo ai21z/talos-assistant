@@ -158,6 +158,10 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             "name", "pathHint", "pathHints", "success", "reason", "mutationEffects", "executionDisposition");
     private static final Set<String> TURN_TOOL_CALL_FAILURE_KEYS = Set.of(
             "name", "pathHint", "pathHints", "success", "reason", "mutationEffects", "executionDisposition", "failureReason");
+    private static final Set<String> TURN_TOOL_CALL_OPERAND_KEYS = Set.of(
+            "name", "pathHint", "pathHints", "success", "reason", "mutationEffects", "executionDisposition", "failureReason",
+            "operands");
+    private static final Set<String> TURN_TOOL_CALL_OPERAND_ENTRY_KEYS = Set.of("path", "role");
     private static final Set<String> ROLEFUL_TARGET_V1_KEYS = Set.of(
             "path", "role", "source", "reason", "sourceText",
             "confidence", "startOffset", "authorityEndOffset", "endOffset");
@@ -405,7 +409,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             TurnRecord record
     ) throws IOException {
         requireStoredUserRequestCoordinates(
-                record.userInput(),
+                evidenceRawRequest(record.userInput(), record.policyTrace()),
                 record.policyTrace(),
                 true);
         HistoricalRequestIndex prior = loadTurnLedger(sessionId).requests();
@@ -449,6 +453,14 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     "uncertainPaths", s.mutationEffects().uncertainPaths()));
             c.put("executionDisposition", s.executionDisposition().name());
             c.put("failureReason", s.failureReason().name());
+            List<Map<String, Object>> operands = new java.util.ArrayList<>();
+            for (TurnRecord.OperationOperand operand : s.operands()) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("path", operand.path());
+                entry.put("role", operand.role().name());
+                operands.add(entry);
+            }
+            c.put("operands", operands);
             calls.add(c);
         }
         row.put("toolCalls", calls);
@@ -494,9 +506,11 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
     private static boolean exactToolCallShape(Map<?, ?> call) {
         boolean legacy = TURN_TOOL_CALL_KEYS.equals(call.keySet());
         boolean withDisposition = TURN_TOOL_CALL_DISPOSITION_KEYS.equals(call.keySet());
-        boolean withFailure = TURN_TOOL_CALL_FAILURE_KEYS.equals(call.keySet());
+        boolean withOperands = TURN_TOOL_CALL_OPERAND_KEYS.equals(call.keySet());
+        boolean withFailure = TURN_TOOL_CALL_FAILURE_KEYS.equals(call.keySet()) || withOperands;
         if ((!legacy && !TURN_TOOL_CALL_EFFECT_KEYS.equals(call.keySet()) && !withDisposition && !withFailure)
                 || !exactToolCallValueTypes(call)) return false;
+        if (withOperands && storedOperands(call).isEmpty()) return false;
         dev.talos.tools.ToolFailureReason failureReason = dev.talos.tools.ToolFailureReason.NONE;
         if (withFailure) {
             if (!(call.get("failureReason") instanceof String cause)) return false;
@@ -523,6 +537,28 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         return Boolean.FALSE.equals(call.get("success"))
                 && ((List<?>) effects.get("appliedPaths")).isEmpty()
                 && ((List<?>) effects.get("uncertainPaths")).isEmpty();
+    }
+
+    /**
+     * The operands of a stored call, or empty when they are not an exact list of path and role entries. A list without
+     * entries is a call that named none. Whether the roles fit the operation is decided by the summary itself.
+     */
+    private static Optional<List<TurnRecord.OperationOperand>> storedOperands(Map<?, ?> call) {
+        if (!(call.get("operands") instanceof List<?> entries)) return Optional.empty();
+        List<TurnRecord.OperationOperand> operands = new java.util.ArrayList<>();
+        for (Object value : entries) {
+            if (!(value instanceof Map<?, ?> entry)
+                    || !TURN_TOOL_CALL_OPERAND_ENTRY_KEYS.equals(entry.keySet())
+                    || !(entry.get("path") instanceof String path)
+                    || !(entry.get("role") instanceof String role)) return Optional.empty();
+            try {
+                operands.add(new TurnRecord.OperationOperand(path,
+                        dev.talos.runtime.intent.WorkspaceOperationObligation.Role.valueOf(role)));
+            } catch (IllegalArgumentException invalidOperand) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(List.copyOf(operands));
     }
 
     private static boolean exactToolCallValueTypes(Map<?, ?> call) {
@@ -883,6 +919,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             for (int index = 0; index < physicalCalls.size(); index++) {
                 JsonNode call = physicalCalls.get(index);
                 if (!(currentCalls.get(index) instanceof ObjectNode currentCall)) continue;
+                if (!call.has("operands") && decoded.toolCalls().get(index).operands().isEmpty())
+                    currentCall.remove("operands");
                 if (!call.has("failureReason")
                         && decoded.toolCalls().get(index).failureReason() == dev.talos.tools.ToolFailureReason.NONE)
                     currentCall.remove("failureReason");
@@ -1155,6 +1193,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         LexicalEvidenceEnvelope evidence = LexicalEvidenceEnvelope.from(
                 record.policyTrace());
         if (evidence.empty()) return;
+        // A turn answered without execution has no executed manifest, so no later turn can bind to it. Its typed
+        // text may later execute with a different manifest, which must not poison either row.
+        if (record.policyTrace().answeredWithoutExecution()) return;
         String evidenceSource = evidence.decisions().isEmpty()
                 ? evidence.regions().isEmpty() ? ""
                         : evidence.regions().getFirst().source()
@@ -1186,7 +1227,10 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                     : evidence.decisions().getFirst().sourceRequestBytes();
             requestsByHash.addRedacted(hash, chars, bytes, manifest);
         } else if (canonicalManifestValidated) {
-            requestsByHash.addExact(record.userInput(), manifest);
+            // The manifest is registered under the request it was validated against, which a composition replaces.
+            requestsByHash.addExact(
+                    evidenceRequest(record.userInput(), record.policyTrace()),
+                    manifest);
         }
     }
 
@@ -1483,7 +1527,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 && number.intValue() == LEXICAL_EVIDENCE_SCHEMA_VERSION;
         TurnPolicyTrace policyTrace = policyTraceFrom(rawPolicyTrace, userInput);
         requireStoredUserRequestCoordinates(
-                userInput,
+                evidenceRawRequest(userInput, policyTrace),
                 policyTrace,
                 currentLexicalSchema,
                 manifestCache,
@@ -1502,11 +1546,14 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             dev.talos.tools.ToolMutationEffects effects = dev.talos.tools.ToolMutationEffects.none();
             TurnRecord.ToolCallDisposition disposition = TurnRecord.ToolCallDisposition.UNKNOWN;
             dev.talos.tools.ToolFailureReason failureReason = dev.talos.tools.ToolFailureReason.NONE;
+            List<TurnRecord.OperationOperand> operands = List.of();
             if (c.containsKey("mutationEffects") || c.containsKey("pathHints")
-                    || c.containsKey("executionDisposition") || c.containsKey("failureReason")) {
+                    || c.containsKey("executionDisposition") || c.containsKey("failureReason")
+                    || c.containsKey("operands")) {
                 if (!exactToolCallShape(c)) {
                     throw new IllegalArgumentException("Invalid stored tool call evidence");
                 }
+                if (c.containsKey("operands")) operands = storedOperands(c).orElseThrow();
                 Map<?, ?> storedEffects = (Map<?, ?>) c.get("mutationEffects");
                 effects = new dev.talos.tools.ToolMutationEffects(
                         stringList(storedEffects.get("appliedPaths")), stringList(storedEffects.get("uncertainPaths")));
@@ -1518,7 +1565,8 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 }
             }
             calls.add(new TurnRecord.ToolCallSummary(name, pathHint, stringList(c.get("pathHints")),
-                    success, reason, effects, disposition, failureReason));
+                    success, reason, effects, disposition, failureReason,
+                    dev.talos.tools.impl.ExecutedEditDetail.none(), operands));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
                 calls, reqd, grnt, deny, traceSummary, status, policyTrace, traceId);
@@ -1887,7 +1935,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
         try {
             try {
                 requireStoredUserRequestCoordinates(
-                        record.userInput(),
+                        evidenceRawRequest(record.userInput(), record.policyTrace()),
                         record.policyTrace(),
                         true);
             } catch (RuntimeException e) {
@@ -1939,7 +1987,7 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             if (trace != null) {
                 requireExactLocalTraceEvidence(
                         MAPPER.valueToTree(trace),
-                        record.userInput());
+                        evidenceRawRequest(record.userInput(), record.policyTrace()));
                 if (!lexicalEvidenceFromTrace(trace).equals(
                         LexicalEvidenceEnvelope.from(record.policyTrace()))) {
                     throw new IllegalArgumentException(
@@ -1948,10 +1996,13 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                 requireTracePolicyBinding(trace, record.policyTrace());
                 TraceRequestBinding binding = new TraceRequestBinding(
                         sanitizedRecord.turnNumber(),
-                        sanitizedRecord.userInput().strip(),
+                        evidenceRequest(
+                                sanitizedRecord.userInput(),
+                                sanitizedRecord.policyTrace()),
                         LexicalEvidenceEnvelope.from(
                                 sanitizedRecord.policyTrace()),
                         sanitizedRecord.policyTrace());
+                // Protected content is found in the typed request, which a composition may leave out.
                 preparedTraceJson = matchingTraceJson(
                         trace,
                         binding,
@@ -2494,9 +2545,9 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
             if (traceId == null || traceId.isBlank() || conflicts.contains(traceId)) {
                 continue;
             }
-            String canonical = record.userInput() == null
-                    ? ""
-                    : record.userInput().strip();
+            String canonical = evidenceRequest(
+                    record.userInput(),
+                    record.policyTrace());
             TraceRequestBinding candidate = new TraceRequestBinding(
                     record.turnNumber(),
                     canonical,
@@ -3208,6 +3259,73 @@ public final class JsonSessionStore implements SessionStore, AutoCloseable {
                         "durable lexical roles differ from the authoritative resolution");
             }
         }
+    }
+
+    /**
+     * The request the durable evidence of a turn is validated against: the typed request, or a request the removal
+     * operand preflight composed from it (MICA invariant I2). A composition is reproduced from the typed request and
+     * a path the evidence names, with the functions the preflight binds with, and it is admitted only when its exact
+     * identity is the identity the evidence records. Any other identity stays the typed request, so its validation
+     * fails as before and nothing is published (T1204).
+     */
+    private static String evidenceRequest(
+            String userInput,
+            TurnPolicyTrace policyTrace
+    ) {
+        String typed = userInput == null ? "" : userInput.strip();
+        LexicalEvidenceEnvelope evidence;
+        try {
+            evidence = LexicalEvidenceEnvelope.from(policyTrace);
+        } catch (RuntimeException invalid) {
+            return typed;
+        }
+        // Every composition parses into lexical decisions or regions, so evidence without them stays the typed request.
+        if (evidence.empty()) return typed;
+        String source = evidence.decisions().isEmpty()
+                ? evidence.regions().getFirst().source()
+                : evidence.decisions().getFirst().source();
+        if (!TargetSource.USER_REQUEST.name().equals(source)
+                || identifiesRequest(evidence, typed)) {
+            return typed;
+        }
+        Set<String> paths = new java.util.LinkedHashSet<>();
+        for (TurnPolicyTrace.LexicalDecisionEvidence decision
+                : evidence.decisions()) {
+            paths.add(decision.path());
+        }
+        for (TurnPolicyTrace.RolefulTarget target
+                : policyTrace.rolefulTargets()) {
+            paths.add(target.path());
+        }
+        for (String path : paths) {
+            for (String composed : dev.talos.runtime.workspace
+                    .OperationOperandPreflight.compositions(typed, path)) {
+                if (identifiesRequest(evidence, composed)) return composed;
+            }
+        }
+        return typed;
+    }
+
+    /** As {@link #evidenceRequest}, keeping the raw typed spelling when the evidence identifies the typed request. */
+    private static String evidenceRawRequest(
+            String userInput,
+            TurnPolicyTrace policyTrace
+    ) {
+        String request = evidenceRequest(userInput, policyTrace);
+        String typed = userInput == null ? "" : userInput.strip();
+        return request.equals(typed) ? userInput : request;
+    }
+
+    private static boolean identifiesRequest(
+            LexicalEvidenceEnvelope evidence,
+            String request
+    ) {
+        return evidence.requestSha256().equals(
+                        MutationPlanSelection.sourceRequestSha256(request))
+                && evidence.requestChars()
+                        == MutationPlanSelection.sourceRequestChars(request)
+                && evidence.requestBytes()
+                        == MutationPlanSelection.sourceRequestBytes(request);
     }
 
     private static TurnPolicyTrace policyTraceForPersistence(

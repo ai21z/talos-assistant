@@ -14,7 +14,12 @@ public final class FinalAnswerStatus {
         INCOMPLETE_PROVIDER_GENERATION_WITHOUT_TEXT
     }
     public enum Delivery { NO_KNOWN_LIMIT, LIMITED, UNAVAILABLE }
-    public enum Coverage { NOT_ASSESSED, UNAVAILABLE }
+    /**
+     * Whole-request coverage. COVERED is recorded only when the verifier issued a positive receipt for one exact
+     * complete request obligation and the turn completed verified (MICA invariant I3, decision D5). Everything else
+     * stays NOT_ASSESSED, and qualities that cannot be bound are never graded.
+     */
+    public enum Coverage { NOT_ASSESSED, UNAVAILABLE, COVERED }
     public record Decoded(boolean available, LocalTurnTrace.OutcomeSummary operational,
                           Delivery delivery, boolean associationAvailable, List<Cause> causes,
                           Coverage coverage) {
@@ -28,7 +33,8 @@ public final class FinalAnswerStatus {
 
     static TurnTraceEvent event(String timestamp, String traceId, int turnNumber, String answerHash,
                                 LocalTurnTrace.OutcomeSummary operational,
-                                LocalTurnTrace.OutcomeSummary combined, boolean associated, Set<Cause> causes) {
+                                LocalTurnTrace.OutcomeSummary combined, boolean associated, Set<Cause> causes,
+                                boolean requestCovered) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("version", 1);
         data.put("traceId", traceId);
@@ -44,7 +50,8 @@ public final class FinalAnswerStatus {
         data.put("associationAvailable", associated);
         data.put("delivery", delivery(associated, causes).name());
         data.put("causes", causes.stream().map(Enum::name).sorted().toList());
-        data.put("coverage", Coverage.NOT_ASSESSED.name());
+        data.put("coverage", (requestCovered && "COMPLETED_VERIFIED".equals(token(combined.classification()))
+                ? Coverage.COVERED : Coverage.NOT_ASSESSED).name());
         return TurnTraceEvent.simple(TYPE, timestamp, data);
     }
 
@@ -81,7 +88,16 @@ public final class FinalAnswerStatus {
                 || !(data.get("associationAvailable") instanceof Boolean associated)
                 || !(data.get("causes") instanceof List<?> rawCauses)
                 || rawCauses.size() > Cause.values().length
-                || !Coverage.NOT_ASSESSED.name().equals(data.get("coverage"))) return unavailable();
+                || !(data.get("coverage") instanceof String coverageName)) return unavailable();
+        Coverage coverage;
+        if (Coverage.NOT_ASSESSED.name().equals(coverageName)) {
+            coverage = Coverage.NOT_ASSESSED;
+        } else if (Coverage.COVERED.name().equals(coverageName)
+                && "COMPLETED_VERIFIED".equals(token(trace.outcome().classification()))) {
+            coverage = Coverage.COVERED;
+        } else {
+            return unavailable();
+        }
         for (String key : List.of("operationalStatus", "operationalClassification", "verification", "approval",
                 "mutation", "combinedStatus", "combinedClassification")) {
             if (!(data.get(key) instanceof String text) || !text.matches("[A-Z][A-Z0-9_]{0,127}")) return unavailable();
@@ -100,7 +116,7 @@ public final class FinalAnswerStatus {
             return new Decoded(true, new LocalTurnTrace.OutcomeSummary((String) data.get("operationalStatus"),
                     (String) data.get("verification"), (String) data.get("approval"), (String) data.get("mutation"),
                     (String) data.get("operationalClassification")), delivery(associated, Set.copyOf(causes)),
-                    associated, causes, Coverage.NOT_ASSESSED);
+                    associated, causes, coverage);
         } catch (IllegalArgumentException | ClassCastException | NullPointerException invalid) {
             return unavailable();
         }

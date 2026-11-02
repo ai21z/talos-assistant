@@ -40,6 +40,30 @@ class ToolRepromptMessageOverlayTest {
     }
 
     @Test
+    void aProbeAddsTheSameRepairInstructionsWithoutConsumingTheirOneShot() {
+        // D10 fallback: the request sized before dispatch must not use up the repairs the dispatched one carries.
+        LoopState state = stateWith(ChatMessage.system("existing"));
+        state.staleEditFailuresByPath.put("index.html", 1);
+        state.pathsMutatedSinceRead.add("index.html");
+        state.emptyEditArgumentFailuresByPath.put("app.js", 1);
+        state.pathsReadThisTurn.add("app.js");
+
+        List<ChatMessage> probed;
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.probe(
+                state, List.of(), List.of(), "", false)) {
+            probed = List.copyOf(state.messages);
+            assertTrue(state.staleEditRepairPromptedPaths.isEmpty());
+            assertTrue(state.emptyEditRepairPromptedPaths.isEmpty());
+        }
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(state, List.of(), List.of(), "")) {
+            assertEquals(probed, state.messages);
+            assertTrue(state.staleEditRepairPromptedPaths.contains("index.html"));
+            assertTrue(state.emptyEditRepairPromptedPaths.contains("app.js"));
+        }
+        assertEquals(List.of(ChatMessage.system("existing")), state.messages);
+    }
+
+    @Test
     void appliesProgressAndCurrentTaskMessagesWithExactWordingThenCleansOnlyOverlayMessages() {
         ChatMessage permanent = ChatMessage.system("[Static repair progress] permanent user-visible history");
         LoopState state = stateWith(permanent, ChatMessage.user("original task"));

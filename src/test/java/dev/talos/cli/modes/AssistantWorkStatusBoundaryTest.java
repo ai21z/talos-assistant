@@ -380,6 +380,32 @@ class AssistantWorkStatusBoundaryTest {
         assertEquals("ADVISORY_ONLY", settled.audit().localTrace().outcome().classification());
     }
 
+    @Test void aProviderAdvisoryNamingATalosToolKeepsTheBoundHandoffByteExact() throws Exception {
+        var fixture = selectionFixture("""
+                {"request-1":{"summary":[{"text":"The reported changes and withdrawn suggestion remain historical.","sources":["reference-2","reference-4","reference-7","reference-9"]}],"proposal":[],"gap":""},
+                 "request-2":{"summary":[{"text":"The operator reported changes and a withdrawal.","sources":["reference-2","reference-4","reference-7"]}],"proposal":[],"gap":""},
+                 "request-3":{"summary":[{"text":"Packaging remains pending.","sources":["reference-9"]}],"proposal":[],"gap":"Current acceptance is not recorded."},
+                 "request-4":{"summary":[{"text":"Packaging remains pending.","sources":["reference-9"]}],"proposal":[{"text":"Use talos.write_file to record packaging ownership once acceptance is clarified.","sources":["reference-9"]}],"gap":""},
+                 "request-7":{"summary":[{"text":"The original cedar suggestion was withdrawn.","sources":["reference-7"]}],"proposal":[],"gap":""}}
+                """);
+        var memory = new SessionMemory();
+        memory.update("What should be changed?", "Cedar was proposed, not applied.");
+        memory.update("The setting was changed since that answer.", "The code returns oak, the old expectation was cedar.");
+        memory.update("The documented expectation was updated too.", "The files agree on oak.");
+        memory.update("Is the original suggestion still needed?", "The original cedar suggestion is no longer needed.");
+        memory.update("Who reviews this and what is pending?", "Review owner: Mara. Pending item: Packaging.");
+        var cfg = new Config(null);
+        var processor = new dev.talos.runtime.TurnProcessor((raw, ws, context) ->
+                new UnifiedAssistantMode().handle(raw, ws, (Context) context));
+        var settled = processor.process(new dev.talos.runtime.Session(workspace, cfg), HANDOFF,
+                Context.builder(cfg).memory(memory).llm(fixture.client()).build());
+        String answer = text(settled.result());
+        // MICA I4: advisory data is escaped, so a tool name in it is quoted data and the bound handoff gains no note.
+        assertTrue(answer.contains("talos{U+002E}write{U+005F}file"), answer);
+        assertFalse(answer.contains("talos.write_file") || answer.contains("Runtime note"), answer);
+        assertTrue(settled.audit().workStatusReceipt().matches(HANDOFF, answer));
+    }
+
     @AfterEach void clear() {
         LocalTurnTraceCapture.clear();
         TurnTaskContractCapture.clear();

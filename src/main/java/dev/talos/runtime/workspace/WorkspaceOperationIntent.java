@@ -48,7 +48,7 @@ public final class WorkspaceOperationIntent {
 
     public static Optional<Intent> detect(TaskContract contract) {
         if (contract == null || !contract.mutationAllowed()) return Optional.empty();
-        if ("explicit-batch-workspace-apply-request".equals(contract.classificationReason())) {
+        if (contract.hasClassificationReason("explicit-batch-workspace-apply-request")) {
             return Optional.of(new Intent(Kind.COMPOUND));
         }
         Optional<Intent> intent = detect(contract.originalUserRequest());

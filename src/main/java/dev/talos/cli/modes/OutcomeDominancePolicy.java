@@ -26,7 +26,8 @@ final class OutcomeDominancePolicy {
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
             boolean approvedProtectedReadPostcondition,
-            ExecutionOutcome.VerificationStatus verificationStatus
+            ExecutionOutcome.VerificationStatus verificationStatus,
+            boolean requestBoundProof
     ) {
         Facts {
             verificationStatus = verificationStatus == null
@@ -69,7 +70,8 @@ final class OutcomeDominancePolicy {
                     missingEvidence,
                     protectedReadApprovalMissing,
                     false,
-                    verificationStatus);
+                    verificationStatus,
+                    false);
         }
 
         Facts(
@@ -110,7 +112,8 @@ final class OutcomeDominancePolicy {
                     missingEvidence,
                     protectedReadApprovalMissing,
                     false,
-                    verificationStatus);
+                    verificationStatus,
+                    false);
         }
     }
 
@@ -126,6 +129,33 @@ final class OutcomeDominancePolicy {
                 || (decision.completionStatus() != ExecutionOutcome.CompletionStatus.COMPLETE
                 && decision.completionStatus() != ExecutionOutcome.CompletionStatus.ADVISORY_ONLY)) return decision;
         return new Decision(ExecutionOutcome.CompletionStatus.BLOCKED, TaskCompletionStatus.BLOCKED_BY_POLICY, true);
+    }
+
+    /** How the runtime ended the tool loop, as a status fact rather than answer wording. */
+    enum RuntimeStop { NONE, AUTHORITY_REJECTED, OTHER }
+
+    /**
+     * A loop the runtime stopped is not a completed answer (MICA runtime-owned facts). Listed
+     * read-only limitations keep their own classification, and a turn that changed files is
+     * classified by its mutation and verification facts instead.
+     */
+    static RuntimeStop runtimeStop(dev.talos.runtime.ToolCallLoop.LoopResult loopResult,
+                                   boolean readOnlyLimited, int extraMutationSuccesses) {
+        if (loopResult == null || readOnlyLimited || !loopResult.failureDecision().shouldStop()) return RuntimeStop.NONE;
+        if (loopResult.mutatingToolSuccesses() > 0 || extraMutationSuccesses > 0) return RuntimeStop.NONE;
+        return dev.talos.runtime.toolcall.ToolCallRepromptStage.AUTHORITY_REJECTED_REASON
+                .equals(loopResult.failureDecision().reason())
+                ? RuntimeStop.AUTHORITY_REJECTED
+                : RuntimeStop.OTHER;
+    }
+
+    /** Only a COMPLETE is downgraded. Every other status already states that the turn did not complete. */
+    static Decision withRuntimeStop(Decision decision, RuntimeStop stop) {
+        if (decision == null || stop == null || stop == RuntimeStop.NONE
+                || decision.completionStatus() != ExecutionOutcome.CompletionStatus.COMPLETE) return decision;
+        return stop == RuntimeStop.AUTHORITY_REJECTED
+                ? new Decision(ExecutionOutcome.CompletionStatus.BLOCKED, TaskCompletionStatus.BLOCKED_BY_POLICY, true)
+                : advisory();
     }
 
     static Decision decide(Facts facts) {
@@ -149,7 +179,8 @@ final class OutcomeDominancePolicy {
                     false,
                     false,
                     false,
-                    ExecutionOutcome.VerificationStatus.NOT_RUN);
+                    ExecutionOutcome.VerificationStatus.NOT_RUN,
+                    false);
         }
 
         if (facts.malformedProtocolDebris() || facts.invalidMutationArguments()) {
@@ -207,10 +238,18 @@ final class OutcomeDominancePolicy {
                 || facts.approvedProtectedReadPostcondition()) {
             return advisory();
         }
-        if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED) {
+        // Only proof bound to the request completes as verified. A checks pass completes unverified with its own
+        // wording (MICA invariant I3, decision D5).
+        if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED && facts.requestBoundProof()) {
             return new Decision(
                     ExecutionOutcome.CompletionStatus.COMPLETE,
                     TaskCompletionStatus.COMPLETED_VERIFIED,
+                    false);
+        }
+        if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    TaskCompletionStatus.COMPLETED_UNVERIFIED,
                     false);
         }
         if (facts.contract() != null && !facts.contract().mutationRequested()) {

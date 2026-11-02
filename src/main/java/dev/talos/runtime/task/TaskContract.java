@@ -122,6 +122,26 @@ public record TaskContract(
                 : staticWebRequirements.merge(StaticWebRequirements.fromRequest(originalUserRequest, forbiddenTargets));
     }
 
+    /**
+     * The classification reason is a composite: later owners append markers with "+", such as the workspace
+     * reconciler's static-web surface binding. A consumer that asks whether a contract was classified for a
+     * reason checks membership, so an appended marker cannot silently disable it.
+     */
+    public boolean hasClassificationReason(String reason) {
+        if (reason == null || reason.isEmpty()) return false;
+        if (classificationReason.equals(reason)) return true;
+        for (String part : classificationReason.split("\\+")) {
+            if (part.equals(reason)) return true;
+        }
+        return false;
+    }
+
+    /** The reason the contract was first classified for, without appended markers. */
+    public String primaryClassificationReason() {
+        int plus = classificationReason.indexOf('+');
+        return plus < 0 ? classificationReason : classificationReason.substring(0, plus);
+    }
+
     public static TaskContract unknown(String userRequest) {
         return new TaskContract(
                 TaskType.UNKNOWN,

@@ -951,12 +951,36 @@ public final class TurnProcessor {
             scopeWarning = ScopeGuard.warningMessage(userRequest, path);
         }
 
+        // Effect-based risk (MICA operation preservation): a change that leaves an existing file with
+        // content empty erases that content, whatever tool makes it. It is destructive, so remembered
+        // write approval never covers it, and the prompt states the effect. Risk is only raised here,
+        // on the final call after sanitization, so the classified effect is the effect that runs.
+        String emptyingWarning = null;
+        ToolRiskLevel descriptorEffectRisk = risk;
+        if (risk.requiresApproval() && emptiesExistingContent(call, path, session.workspace())) {
+            risk = ToolRiskLevel.DESTRUCTIVE;
+            emptyingWarning = "This change leaves " + path + " empty although it has content now. "
+                    + "It erases that content, so it needs approval every time.";
+            LocalTurnTraceCapture.warning("EMPTYING_CHANGE_DESTRUCTIVE", "effect risk raised for " + path);
+        }
+
         PermissionDecision permissionDecision = permissionPolicy.decide(new PermissionRequest(
                 session.workspace(),
                 session.config(),
                 call,
                 risk,
                 ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase()));
+        // Raising the risk may only add a prompt. A rule that refuses the call at its original risk
+        // keeps refusing it, so an erasing effect can never turn a configured deny into an ask.
+        if (emptyingWarning != null && permissionDecision.action() != PermissionAction.DENY) {
+            PermissionDecision atOriginalRisk = permissionPolicy.decide(new PermissionRequest(
+                    session.workspace(),
+                    session.config(),
+                    call,
+                    descriptorEffectRisk,
+                    ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase()));
+            if (atOriginalRisk.action() == PermissionAction.DENY) permissionDecision = atOriginalRisk;
+        }
 
         // Scope-guard override: if the target looks off-scope, the user
         // MUST see the warning before the call runs. A remembered or configured
@@ -966,6 +990,13 @@ public final class TurnProcessor {
             permissionDecision = permissionDecision.forceAsk(
                     "SCOPE_WARNING_ASK",
                     "Scope warning requires approval before running " + call.toolName() + ".");
+        }
+        // A configured allow rule keeps its authority over ordinary writes, but an erasing effect is
+        // always shown to the user before it runs.
+        if (emptyingWarning != null && permissionDecision.action() == PermissionAction.ALLOW) {
+            permissionDecision = permissionDecision.forceAsk(
+                    "EMPTYING_EFFECT_ASK",
+                    "Erasing a file's content requires approval before running " + call.toolName() + ".");
         }
 
         // Format-change override (T1012): a BOM, line-ending, or
@@ -1058,7 +1089,8 @@ public final class TurnProcessor {
             String detail = buildApprovalDetail(
                     call,
                     path,
-                    scopeWarning,
+                    emptyingWarning == null ? scopeWarning
+                            : scopeWarning == null ? emptyingWarning : scopeWarning + " " + emptyingWarning,
                     permissionDecision.userMessage(),
                     session.workspace(),
                     session.config(),
@@ -1614,6 +1646,18 @@ public final class TurnProcessor {
                         "The typed directory-creation plan requires an absent "
                                 + "ordinary target. No approval was requested "
                                 + "and no file was changed."));
+            }
+            if (operation.kind()
+                            == dev.talos.runtime.intent
+                                    .WorkspaceOperationObligation.Kind.DELETE_PATH
+                    && workspaceTargetIsMissingWithoutLinks(
+                            workspace,
+                            operation.targetPath())) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "The typed delete plan names " + operation.targetPath()
+                                + ", which does not exist in the workspace. No "
+                                + "approval was requested and no file was changed."));
             }
             if (operation.parentPolicy()
                             == dev.talos.runtime.intent
@@ -2310,6 +2354,20 @@ public final class TurnProcessor {
      * have already run by the time this is called, and the builder itself
      * fail-closes (protected path, oversized, binary, unreadable → skipped).
      */
+    private static boolean emptiesExistingContent(ToolCall call, String path, Path workspace) {
+        if (call == null) return false;
+        if (isWriteFileTool(call.toolName())) {
+            return EmptyingChangeEffect.emptiesByWrite(workspace, path,
+                    resolveParam(call, "content", "text", "body", "data", "file_content"));
+        }
+        if (isEditFileTool(call.toolName())) {
+            return EmptyingChangeEffect.emptiesByEdit(workspace, path,
+                    resolveParam(call, "old_string", "oldString", "old_text", "search", "find", "original"),
+                    resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement"));
+        }
+        return false;
+    }
+
     private static ApprovalDiffPreview.Preview approvalDiffPreview(
             ToolCall call,
             String path,

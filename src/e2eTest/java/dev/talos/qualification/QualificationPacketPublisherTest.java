@@ -791,6 +791,16 @@ class QualificationPacketPublisherTest {
             return null;
         });
         QualificationPacketPublisher.requireSettledControlState(packet.root());
+        // Protocol 6 was never published, so lease recovery refuses its frozen banks.
+        QualificationPacketPublisher.withLease(packet.root(), lease -> {
+            QualificationEvidenceValidator.Validation frozen =
+                    QualificationEvidenceValidator.validateForTransactionRecovery(
+                            lease, QualificationScenarioBank.load(6), transactionId);
+            assertTrue(frozen.findings().contains(
+                            "Unsupported qualification protocol version: 6"),
+                    frozen.findings()::toString);
+            return null;
+        });
     }
 
     @Test

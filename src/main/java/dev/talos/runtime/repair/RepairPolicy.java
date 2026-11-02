@@ -763,6 +763,7 @@ public final class RepairPolicy {
         if (value == null || value.isBlank()) return false;
         String lower = value.toLowerCase(Locale.ROOT);
         return lower.contains("[static verification: passed")
+                || lower.contains("[checks passed - ")
                 || lower.contains("static web coherence checks passed")
                 || lower.contains("verification status: verified complete");
     }

@@ -355,7 +355,7 @@ class LlamaCppResolvedProfileServiceTest {
                         "e".repeat(64),
                         ProviderProcessLaunchReceipt.EndpointObserverKind
                                 .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
-                        "f".repeat(64), 6)));
+                        "f".repeat(64), 7)));
 
         var snapshot = service.resolveAvailable(true);
 
@@ -389,7 +389,7 @@ class LlamaCppResolvedProfileServiceTest {
                         "e".repeat(64),
                         ProviderProcessLaunchReceipt.EndpointObserverKind
                                 .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
-                        "f".repeat(64), 6)));
+                        "f".repeat(64), 7)));
 
         var snapshot = service.resolveAvailable(true);
 
@@ -420,7 +420,7 @@ class LlamaCppResolvedProfileServiceTest {
                         "e".repeat(64),
                         ProviderProcessLaunchReceipt.EndpointObserverKind
                                 .WINDOWS_NETSTAT_NOFOLLOW_SHA256,
-                        "f".repeat(64), 6)));
+                        "f".repeat(64), 7)));
 
         var snapshot = service.resolveAvailable(true);
 

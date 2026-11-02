@@ -306,7 +306,7 @@ public final class TurnTaskContractCapture {
         String canonical = Objects.toString(
                 contract.originalUserRequest(),
                 "");
-        String marker = switch (contract.classificationReason()) {
+        String marker = switch (contract.primaryClassificationReason()) {
             case "repair-follow-up-inherits-previous-mutation-contract",
                     "correction-follow-up-inherits-previous-mutation-contract" ->
                     "\n\nRepair follow-up: ";

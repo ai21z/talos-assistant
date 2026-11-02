@@ -1499,7 +1499,8 @@ final class QualificationTraceEvidence {
         if (!validMatchedRecoveryOutcome(
                 terminalState,
                 outcomeStatus,
-                mutationStatus)) {
+                mutationStatus,
+                false)) {
             throw new IllegalArgumentException(
                     "typed repair sequence disagrees with the trace outcome");
         }
@@ -1780,7 +1781,8 @@ final class QualificationTraceEvidence {
         if (!validMatchedRecoveryOutcome(
                 terminalState,
                 outcomeStatus,
-                mutationStatus)) {
+                mutationStatus,
+                true)) {
             throw new IllegalArgumentException(
                     "matched-obligation recovery disagrees with the trace outcome");
         }
@@ -1962,12 +1964,18 @@ final class QualificationTraceEvidence {
         }
     }
 
+    /**
+     * A successful recovery whose proof is the request obligation receipt completes verified. A typed repair
+     * sequence is not receipt-bound, so a checks-only pass completes unverified (MICA invariant I3, decision D5).
+     */
     private static boolean validMatchedRecoveryOutcome(
             String terminalState,
             String outcomeStatus,
-            String mutationStatus) {
+            String mutationStatus,
+            boolean receiptBound) {
         if ("SUCCEEDED".equals(mutationStatus)) {
-            return "COMPLETED_VERIFIED".equals(terminalState)
+            return ("COMPLETED_VERIFIED".equals(terminalState)
+                            || !receiptBound && "COMPLETED_UNVERIFIED".equals(terminalState))
                     && "COMPLETE".equals(outcomeStatus);
         }
         if (!"PARTIAL".equals(mutationStatus)) return false;

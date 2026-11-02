@@ -37,7 +37,7 @@ class JsonSessionStoreMutationEffectsTest {
         assertTrue(store.observeTurnLogTail("failure-cause").exact());
         Path file = sessions.resolve("failure-cause.turns.jsonl");
         ObjectNode row = (ObjectNode) json.readTree(Files.readString(file));
-        for (var call : row.path("toolCalls")) ((ObjectNode) call).remove("failureReason");
+        for (var call : row.path("toolCalls")) ((ObjectNode) call).remove(List.of("failureReason", "operands"));
         Files.writeString(file, json.writeValueAsString(row) + "\n");
         var legacy = store.loadTurns("failure-cause").getFirst();
         assertTrue(legacy.toolCalls().stream().allMatch(call -> call.failureReason() == dev.talos.tools.ToolFailureReason.NONE));
@@ -117,7 +117,7 @@ class JsonSessionStoreMutationEffectsTest {
         ObjectNode call = (ObjectNode) row.path("toolCalls").get(0);
         call.put("success", true);
         for (boolean typedFieldPresent : List.of(true, false)) {
-            if (!typedFieldPresent) call.remove("failureReason");
+            if (!typedFieldPresent) call.remove(List.of("failureReason", "operands"));
             Files.writeString(file, json.writeValueAsString(row) + "\n");
             var restored = store.loadTurns("cause-legacy").getFirst().toolCalls().getFirst();
             assertTrue(restored.success());
@@ -171,6 +171,7 @@ class JsonSessionStoreMutationEffectsTest {
         call.remove("pathHints");
         call.remove("executionDisposition");
         call.remove("failureReason");
+        call.remove("operands");
         Files.writeString(file, json.writeValueAsString(row) + "\n");
         TurnRecord restored = store.loadTurns("effect-shape").getFirst();
         assertFalse(restored.toolCalls().getFirst().success());
@@ -186,7 +187,7 @@ class JsonSessionStoreMutationEffectsTest {
         Path file = sessions.resolve("effect-shape.turns.jsonl");
         ObjectNode row = (ObjectNode) json.readTree(Files.readString(file));
         ObjectNode legacyCall = (ObjectNode) row.path("toolCalls").get(0);
-        legacyCall.remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason"));
+        legacyCall.remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason", "operands"));
         String legacy = json.writeValueAsString(row);
         Files.writeString(file, legacy + "\n");
         TurnLogTailObservation observation = store.observeTurnLogTail("effect-shape");
@@ -207,7 +208,7 @@ class JsonSessionStoreMutationEffectsTest {
         ObjectNode row = (ObjectNode) json.readTree(Files.readString(file));
         var calls = (com.fasterxml.jackson.databind.node.ArrayNode) row.get("toolCalls");
         ObjectNode legacy = ((ObjectNode) calls.get(0)).deepCopy();
-        legacy.remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason"));
+        legacy.remove(List.of("pathHints", "mutationEffects", "executionDisposition", "failureReason", "operands"));
         calls.add(legacy);
         Files.writeString(file, json.writeValueAsString(row) + "\n");
         TurnLogTailObservation observation = store.observeTurnLogTail("effect-shape");

@@ -140,7 +140,8 @@ final class StaticWebContentRequirementVerifier {
                 requirement.kind().description() + " in " + targetName + ".",
                 ProofKind.READBACK,
                 null,
-                true);
+                true,
+                List.of(target.pathHint()));
         VerificationObligation obligation = new VerificationObligation(
                 claim,
                 Set.of(ProofKind.READBACK),

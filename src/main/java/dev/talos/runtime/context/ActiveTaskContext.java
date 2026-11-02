@@ -197,12 +197,64 @@ public record ActiveTaskContext(
                 "");
     }
 
+    /**
+     * The offered change of an indirect change request (decision D6). The summary is the user's request, and the
+     * requirements and claims of the task it came from are kept, so an accepted change still honours them.
+     */
+    public static ActiveTaskContext changeOffer(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String requestedChange,
+            List<RequiredVerificationClaim> requiredVerificationClaims,
+            StaticWebRequirements staticWebRequirements) {
+        return new ActiveTaskContext(
+                SCHEMA_VERSION,
+                State.ACTIVE,
+                Kind.PROPOSED_CHANGES,
+                turnNumber,
+                traceId,
+                turnNumber,
+                turnNumber + 3,
+                targets,
+                Operation.APPLY_EDIT,
+                requestedChange,
+                "",
+                List.of(),
+                requiredVerificationClaims,
+                staticWebRequirements,
+                "",
+                "");
+    }
+
     public ActiveTaskContext withProposalProvenance(ProposalProvenance provenance) {
         return new ActiveTaskContext(schemaVersion, state, kind, sourceTurnNumber,
                 sourceTraceId, updatedTurnNumber, expiresAfterTurnNumber, targets,
                 operation, proposalSummary, previousOutcomeStatus, verifierFindings,
                 requiredVerificationClaims, staticWebRequirements, blockedReason,
                 suppressionReason, provenance);
+    }
+
+    /** Binds the repair offer only when the delivered answer carries the runtime failure header and the offer. */
+    public ActiveTaskContext withRepairOffer(String deliveredAnswer) {
+        if (kind != Kind.VERIFIER_FINDINGS || operation != Operation.REPAIR || targets.isEmpty()
+                || !RepairOffer.renderedIn(deliveredAnswer)) {
+            return this;
+        }
+        return withProposalProvenance(ProposalProvenance.repairOffer(this, deliveredAnswer));
+    }
+
+    /** A proposal context created from a runtime change offer after an indirect change request (decision D6). */
+    public boolean hasBoundChangeOffer() {
+        return kind == Kind.PROPOSED_CHANGES
+                && operation == Operation.APPLY_EDIT
+                && proposalProvenance.matchesChangeOffer(this);
+    }
+
+    public boolean hasBoundRepairOffer() {
+        return kind == Kind.VERIFIER_FINDINGS
+                && operation == Operation.REPAIR
+                && proposalProvenance.matchesRepairOffer(this);
     }
 
     public boolean hasBoundProposal() {
@@ -416,6 +468,36 @@ public record ActiveTaskContext(
 
     public ActiveTaskContext expired(String reason) {
         return withState(State.EXPIRED, reason);
+    }
+
+    /**
+     * The context as the session it is restored into sees it. Only the part of the window left after the last turn
+     * of the saved session is kept, counted from the last turn of the receiving session, whose turn numbers start
+     * again at a new process. The update turn moves into the receiving numbering, so a later restore counts from
+     * there. The source turn and the provenance do not change, so a proposal or offer stays bound.
+     */
+    public ActiveTaskContext rebasedForRestore(int savedLastTurnNumber, int receivingLastTurnNumber) {
+        if (state == State.NONE) return this;
+        int remaining = Math.max(0, expiresAfterTurnNumber - Math.max(savedLastTurnNumber, updatedTurnNumber));
+        int receivingLast = Math.max(0, receivingLastTurnNumber);
+        return new ActiveTaskContext(
+                schemaVersion,
+                state,
+                kind,
+                sourceTurnNumber,
+                sourceTraceId,
+                receivingLast,
+                receivingLast + remaining,
+                targets,
+                operation,
+                proposalSummary,
+                previousOutcomeStatus,
+                verifierFindings,
+                requiredVerificationClaims,
+                staticWebRequirements,
+                blockedReason,
+                suppressionReason,
+                proposalProvenance);
     }
 
     public boolean activeAt(int turnNumber) {

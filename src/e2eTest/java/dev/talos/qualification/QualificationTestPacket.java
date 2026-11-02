@@ -185,7 +185,7 @@ final class QualificationTestPacket {
         Objects.requireNonNull(scenario, "qualification scenario");
         if (catalog.protocolVersion() != QualificationProtocol.VERSION) {
             throw new IllegalArgumentException(
-                    "active-process fixture requires qualification protocol v6");
+                    "active-process fixture requires qualification protocol v" + QualificationProtocol.VERSION);
         }
         if (scenario.approvalBehavior()
                 == QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL) {

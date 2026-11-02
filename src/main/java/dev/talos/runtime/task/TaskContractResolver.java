@@ -323,15 +323,49 @@ public final class TaskContractResolver {
             "this"
     );
 
+    /** Marks a contract whose static-web referent is bound from the files on disk by the workspace reconciler. */
+    public static final String CONTEXTUAL_STATIC_WEB_SURFACE = "contextual-static-web-surface";
+
     private TaskContractResolver() {}
 
     public static TaskContract fromMessages(List<ChatMessage> messages) {
         return resolveFromMessages(messages).contract();
     }
 
+    /**
+     * Resolves the current request with the conversation history.
+     *
+     * <p>History may bind the referent of a current directive. It never originates mutation authority
+     * (MICA invariant I1). A history-derived contract that allows a change the current message alone does not
+     * allow is kept only when the current message carries a directive clause.
+     */
     public static TaskResolution resolveFromMessages(List<ChatMessage> messages) {
         String latest = latestUserRequest(messages);
         TaskResolution currentResolution = resolveFromUserRequest(latest);
+        return withinAuthorityOrigin(latest, currentResolution,
+                resolveWithHistory(messages, latest, currentResolution));
+    }
+
+    /** History may bind the referent of a current directive. It never adds authority to a non-directive. */
+    static TaskResolution withinAuthorityOrigin(
+            String latest,
+            TaskResolution currentResolution,
+            TaskResolution resolved
+    ) {
+        if (resolved != currentResolution
+                && resolved.contract().mutationAllowed()
+                && !currentResolution.contract().mutationAllowed()
+                && !dev.talos.runtime.intent.ContinuationDirective.present(latest)) {
+            return currentResolution;
+        }
+        return resolved;
+    }
+
+    private static TaskResolution resolveWithHistory(
+            List<ChatMessage> messages,
+            String latest,
+            TaskResolution currentResolution
+    ) {
         if (currentResolution.sequentialMutationPlan()
                 .authorityLimitExceeded()) {
             return currentResolution;
@@ -398,7 +432,7 @@ public final class TaskContractResolver {
             // Proposal continuation is resolved by request-bound active context, not assistant prose.
             return currentResolution;
         }
-        if (looksLikeRepairFollowUp(latest)) {
+        if (looksLikeRepairDirective(latest)) {
             TaskContract inherited =
                     inheritedRepairContract(
                             messages,
@@ -412,6 +446,7 @@ public final class TaskContractResolver {
                         "repair-follow-up-projection");
             }
         }
+        // A correction without a directive is held back by the history ceiling in resolveFromMessages.
         if (!current.mutationRequested() && looksLikeCorrectionFollowUp(latest)) {
             TaskContract inherited = inheritedCorrectionContract(
                     messages,
@@ -1694,6 +1729,14 @@ public final class TaskContractResolver {
                 || lower.equals("continue please");
     }
 
+    /** A retry or repair cue counts only inside a directive clause of the current message. */
+    private static boolean looksLikeRepairDirective(String userRequest) {
+        for (String clause : dev.talos.runtime.intent.ContinuationDirective.clauses(userRequest)) {
+            if (looksLikeRepairFollowUp(clause)) return true;
+        }
+        return false;
+    }
+
     private static boolean looksLikeRepairFollowUp(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.strip().toLowerCase(Locale.ROOT)
@@ -1779,6 +1822,27 @@ public final class TaskContractResolver {
                 || !priorMessagesMentionStaticWebSurface(messages, latestUserRequest)) {
             return contract;
         }
+        if (!looksContextualStaticWebAssetNaming(latestUserRequest)) {
+            // A page rewrite or a vague redesign binds the static-web files that exist on disk through the
+            // workspace reconciler. The conventional triplet is not invented for it (MICA invariant I1,
+            // decision D2, part D-c).
+            String reason = contract.mutationAllowed()
+                    ? contract.classificationReason()
+                    : "contextual-static-web-follow-up";
+            return new TaskContract(
+                    contract.mutationAllowed() ? contract.type() : TaskType.FILE_EDIT,
+                    true,
+                    true,
+                    true,
+                    Set.of(),
+                    contract.sourceEvidenceTargets(),
+                    contract.forbiddenTargets(),
+                    contract.originalUserRequest(),
+                    reason == null || reason.isBlank()
+                            ? CONTEXTUAL_STATIC_WEB_SURFACE
+                            : reason + "+" + CONTEXTUAL_STATIC_WEB_SURFACE,
+                    contract.staticWebRequirements());
+        }
         Set<String> expectedTargets = withoutForbiddenTargets(
                 conventionalStaticWebTargets(),
                 contract.forbiddenTargets());
@@ -1795,6 +1859,18 @@ public final class TaskContractResolver {
                 contract.mutationAllowed()
                         ? contract.classificationReason()
                         : "contextual-static-web-follow-up");
+    }
+
+    /** The current message itself names the style or script assets, or the remaining files. */
+    private static boolean looksContextualStaticWebAssetNaming(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (looksDocumentGuideAboutWebSurface(lower)) return false;
+        return lower.contains("rest files")
+                || lower.contains("remaining files")
+                || lower.contains("missing files")
+                || (lower.contains("files") && (mentionsStyleAsset(lower) || mentionsScriptAsset(lower)))
+                || (mentionsStyleAsset(lower) && mentionsScriptAsset(lower));
     }
 
     private static boolean looksContextualStaticWebAssetFollowUp(String userRequest) {

@@ -196,7 +196,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertAnswerNotContains("Static verification failed")
                     .assertFileContains("index.html", "class=\"cta-button\"");
         }
@@ -244,6 +244,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("not one of the expected task targets")
                     .assertAnswerNotContains("outside the current expected target set")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "class=\"cta-button\"")
                     .assertFileNotContains("style.css", ".does-not-exist");
             assertTraceExpectedTargets(result, "index.html", "style.css");
@@ -455,7 +456,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 3)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertFileContains("index.html", "BMI Calculator")
                     .assertFileContains("index.html", "styles.css")
                     .assertFileContains("index.html", "script.js")
@@ -478,6 +479,7 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("JavaScript references missing IDs")
                     .assertAnswerContains("`#bmi-form`")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "No form was added")
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("script.js", "getElementById('bmi-form')");
@@ -531,7 +533,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertAnswerNotContains("Tool loop stopped by failure policy")
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("index.html", "class=\"cta-button\"")
@@ -571,6 +573,7 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("Talos stopped this turn deterministically")
                     .assertAnswerNotContains("Created the BMI calculator website files")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "BMI Calculator")
                     .assertFileContains("style.css", ".calculator")
                     .assertFileAbsent("script.js");
@@ -1022,7 +1025,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertAnswerNotContains("Static verification failed")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("index.html", "id=\"bmiForm\"")
@@ -1053,7 +1056,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("index.html", "id=\"bmiForm\"")
                     .assertFileContains("styles.css", ".calculator")
@@ -1086,7 +1089,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
@@ -1107,7 +1110,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("index.html", "id=\"bmiForm\"")
                     .assertFileContains("styles.css", ".calculator")
@@ -1115,7 +1118,7 @@ class JsonScenarioPackTest {
                     .assertLocalTraceRecorded();
             assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("COMPLETE", result.localTrace().outcome().status());
-            assertEquals("COMPLETED_VERIFIED", result.localTrace().outcome().classification());
+            assertEquals("COMPLETED_UNVERIFIED", result.localTrace().outcome().classification());
         }
     }
 
@@ -1133,6 +1136,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("Remaining target(s): script.js")
                     .assertAnswerNotContains("Missing or unmutated target files: script.js")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileAbsent("scripts.js")
@@ -1169,7 +1173,7 @@ class JsonScenarioPackTest {
             assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
             assertRolefulTarget(result, "index.html", "FORBIDDEN");
             assertRolefulTarget(result, "scripts.js", "FORBIDDEN");
-            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_UNVERIFIED");
         }
     }
 
@@ -1212,7 +1216,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertAnswerNotContains("script.js")
                     .assertAnswerNotContains("style.css")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
@@ -1229,7 +1233,7 @@ class JsonScenarioPackTest {
             assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
             assertNoRolefulTarget(result, "script.js", "MUST_MUTATE");
             assertNoRolefulTarget(result, "style.css", "MUST_MUTATE");
-            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_UNVERIFIED");
         }
     }
 
@@ -1243,7 +1247,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(4, 4, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static interaction #teaser-button -> #teaser-status.")
                     .assertFileContains("index.html", "id=\"teaser-button\"")
                     .assertFileContains("index.html", "id=\"teaser-status\"")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
@@ -1256,7 +1260,7 @@ class JsonScenarioPackTest {
             assertRolefulTarget(result, "index.html", "MUST_MUTATE");
             assertRolefulTarget(result, "scripts.js", "MUST_MUTATE");
             assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
-            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_UNVERIFIED");
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -1280,6 +1284,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("no task-specific static verifier was applicable")
                     .assertAnswerNotContains("web coherence could not be checked")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileAbsent("script.js")
                     .assertFileContains("index.html", "<div id=\"result\"></div>");
         }
@@ -1480,7 +1485,7 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(3, 3, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("[Checks passed - Static web coherence checks passed")
                     .assertAnswerNotContains("unable to create or modify files")
                     .assertAnswerNotContains("underlying file system")
                     .assertFileContains("index.html", "bmiForm")
@@ -1676,6 +1681,7 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
                     .assertAnswerContains("The requested task is not verified complete.")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("scripts.js", "// Your JavaScript logic here");
         }
@@ -1714,6 +1720,7 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("Static verification failed")
                     .assertAnswerContains("HTML links CSS file more than once: `style.css`")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertAnswerNotContains("[Checks passed - ")
                     .assertFileContains("index.html", "<link rel=\"stylesheet\" href=\"style.css\">\n    <link rel=\"stylesheet\" href=\"style.css\">");
         }
     }

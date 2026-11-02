@@ -685,6 +685,7 @@ class MissingMutationRetryTest {
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
+                .nativeToolSpecs(specsFrom(registry))
                 .build();
     }
 

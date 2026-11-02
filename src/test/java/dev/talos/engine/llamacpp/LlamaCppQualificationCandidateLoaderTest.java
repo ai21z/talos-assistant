@@ -56,12 +56,12 @@ class LlamaCppQualificationCandidateLoaderTest {
 
     @Test
     void protocolV6DeclarationCreatesAV6ProcessScopedCapabilityCeiling() throws Exception {
-        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        Fixture fixture = fixture(Map.of("protocolVersion", 7));
 
         var loaded = loader().load(
                 fixture.settings(), fixture.config(), fixture.talosHome()).orElseThrow();
 
-        assertEquals(6, loaded.profile().qualification().protocolRevision());
+        assertEquals(7, loaded.profile().qualification().protocolRevision());
         assertEquals(LlamaCppModelCatalog.Disposition.LAB_ONLY,
                 loaded.profile().disposition());
         assertFalse(loaded.profile().selectable());
@@ -69,6 +69,33 @@ class LlamaCppQualificationCandidateLoaderTest {
         assertEquals(
                 ProviderProcessLaunchReceipt.digestEffectiveEnvironment(System.getenv()),
                 loaded.effectiveEnvironmentSha256());
+    }
+
+    @Test
+    void currentProtocolDeclarationCreatesTheFrozenProcessLaunchExpectation() throws Exception {
+        Fixture fixture = fixture(Map.of("protocolVersion", 7));
+        var loaded = loader().load(
+                fixture.settings(), fixture.config(), fixture.talosHome()).orElseThrow();
+        var service = new LlamaCppResolvedProfileService(
+                config(fixture.model(), fixture.engine(), false, "detached-v7-candidate"),
+                fixture.talosHome(),
+                (path, alias, expected, home, verify) -> {
+                    throw new AssertionError("launch expectation must not resolve artifacts");
+                },
+                base -> {
+                    throw new AssertionError("launch expectation must not query /props");
+                },
+                (config, declared, observed, verify) -> {
+                    throw new AssertionError("launch expectation must not resolve engine facts");
+                },
+                (config, home) -> Optional.of(loaded));
+
+        assertEquals(7, loaded.protocolVersion());
+        var expectation = service.qualificationLaunchExpectation().orElseThrow();
+        assertEquals(loaded.declarationSha256(), expectation.candidateDeclarationSha256());
+        assertEquals(loaded.engineExecutableSha256(), expectation.engineExecutableSha256());
+        assertEquals(loaded.artifactIdentity().actualSha256(), expectation.modelArtifactSha256());
+        assertEquals(loaded.effectiveEnvironmentSha256(), expectation.effectiveEnvironmentSha256());
     }
 
     @Test
@@ -139,7 +166,7 @@ class LlamaCppQualificationCandidateLoaderTest {
                                 "endpointObserverIdentitySha256", "A".repeat(64))));
 
         for (Mutation mutation : mutations) {
-            Fixture fixture = fixture(Map.of("protocolVersion", 6));
+            Fixture fixture = fixture(Map.of("protocolVersion", 7));
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode rules = (ObjectNode) mapper.readTree(fixture.rules().toFile());
             mutation.apply().accept(rules);
@@ -154,14 +181,18 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     @Test
-    void protocolsOutsideTheV5HistoricalAndV6CurrentContractAreRefused() throws Exception {
-        for (int protocolVersion : List.of(4, 7)) {
+    void protocolsOutsideTheV5HistoricalAndV7CurrentContractAreRefused() throws Exception {
+        // No protocol-6 campaign was published, so its declaration is refused like any unsupported protocol.
+        for (int protocolVersion : List.of(4, 6, 8)) {
             Fixture fixture = fixture(Map.of("protocolVersion", protocolVersion));
 
-            assertThrows(IllegalStateException.class,
+            IllegalStateException refused = assertThrows(IllegalStateException.class,
                     () -> loader().load(
                             fixture.settings(), fixture.config(), fixture.talosHome()),
                     "protocol " + protocolVersion);
+            assertTrue(refused.getMessage().contains(
+                            "qualification protocol is unsupported: " + protocolVersion),
+                    refused.getMessage());
         }
     }
 
@@ -344,7 +375,7 @@ class LlamaCppQualificationCandidateLoaderTest {
 
     @Test
     void protocolV6CannotResolveIdentityBeforeNativeCapabilityPreparation() throws Exception {
-        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        Fixture fixture = fixture(Map.of("protocolVersion", 7));
         LlamaCppConfig nativeDisabled = config(
                 fixture.model(), fixture.engine(), false, "granite-4.1-3b", false);
 
@@ -355,7 +386,7 @@ class LlamaCppQualificationCandidateLoaderTest {
 
     @Test
     void protocolV6RejectsRelativeOrNonnormalizedExecutableInputs() throws Exception {
-        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        Fixture fixture = fixture(Map.of("protocolVersion", 7));
         LlamaCppConfig base = fixture.config();
         List<LlamaCppConfig> invalid = List.of(
                 withV6LaunchInputs(
@@ -400,7 +431,7 @@ class LlamaCppQualificationCandidateLoaderTest {
 
     @Test
     void protocolV6RejectsUnboundTemplatesAndOpenEndedServerArguments() throws Exception {
-        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+        Fixture fixture = fixture(Map.of("protocolVersion", 7));
         LlamaCppConfig base = fixture.config();
         List<LlamaCppConfig> invalid = List.of(
                 withV6LaunchInputs(
@@ -587,7 +618,8 @@ class LlamaCppQualificationCandidateLoaderTest {
         rules.put("contextTokens", 8192);
         rules.putAll(overrides);
         int protocolVersion = ((Number) rules.get("protocolVersion")).intValue();
-        if (protocolVersion == 6) {
+        // Protocols after the legacy 5 use the current launch shape, so a refusal of them is a protocol refusal.
+        if (protocolVersion > 5) {
             rules.put("schemaVersion", 2);
             rules.put("launchEnvironmentContract",
                     ProviderProcessLaunchReceipt.EnvironmentContract

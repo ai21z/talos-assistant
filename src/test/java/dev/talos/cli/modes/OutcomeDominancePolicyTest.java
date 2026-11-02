@@ -148,13 +148,25 @@ class OutcomeDominancePolicyTest {
 
     @Test
     void verifiedMutationCompletesVerified() {
-        var decision = decide(mutationContract(),
+        var decision = decidePassed(mutationContract(), true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, decision.completionStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, decision.taskCompletionStatus());
+    }
+
+    @Test
+    void aChecksPassCompletesUnverified() {
+        var mutation = decidePassed(mutationContract(), false);
+        var readOnly = decidePassed(readOnlyContract(), false);
+        var defaultScope = decide(mutationContract(),
                 false, false, false, false, false,
                 false, false, false, false, false,
                 ExecutionOutcome.VerificationStatus.PASSED);
 
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, decision.completionStatus());
-        assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, decision.taskCompletionStatus());
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, mutation.completionStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, mutation.taskCompletionStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, readOnly.taskCompletionStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, defaultScope.taskCompletionStatus());
     }
 
     @Test
@@ -163,10 +175,7 @@ class OutcomeDominancePolicyTest {
                 false, false, false, false, false,
                 false, false, false, false, false,
                 ExecutionOutcome.VerificationStatus.NOT_RUN);
-        var verified = decide(readOnlyContract(),
-                false, false, false, false, false,
-                false, false, false, false, false,
-                ExecutionOutcome.VerificationStatus.PASSED);
+        var verified = decidePassed(readOnlyContract(), true);
 
         assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, readOnly.taskCompletionStatus());
         assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, verified.taskCompletionStatus());
@@ -245,6 +254,15 @@ class OutcomeDominancePolicyTest {
                 missingEvidence,
                 false,
                 verificationStatus));
+    }
+
+    private static OutcomeDominancePolicy.Decision decidePassed(TaskContract contract, boolean requestBoundProof) {
+        return OutcomeDominancePolicy.decide(new OutcomeDominancePolicy.Facts(
+                contract,
+                false, false, false, false, false, false, false, false, false,
+                false, false, false, false, false, false, false, false,
+                ExecutionOutcome.VerificationStatus.PASSED,
+                requestBoundProof));
     }
 
     private static OutcomeDominancePolicy.Decision decideWithFailedActionObligation(TaskContract contract) {

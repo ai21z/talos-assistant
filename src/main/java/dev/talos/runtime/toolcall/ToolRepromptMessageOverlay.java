@@ -12,12 +12,14 @@ import java.util.Optional;
 
 final class ToolRepromptMessageOverlay implements AutoCloseable {
     private final LoopState state;
+    private final boolean commitOneShots;
     private final List<TemporaryMessage> temporaryMessages = new ArrayList<>();
     private final List<RestoredToolResult> restoredToolResults = new ArrayList<>();
     private boolean closed;
 
-    private ToolRepromptMessageOverlay(LoopState state) {
+    private ToolRepromptMessageOverlay(LoopState state, boolean commitOneShots) {
         this.state = state;
+        this.commitOneShots = commitOneShots;
     }
 
     static ToolRepromptMessageOverlay apply(
@@ -36,7 +38,34 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
             String userTask,
             boolean staticRepairObligationActive
     ) {
-        ToolRepromptMessageOverlay overlay = new ToolRepromptMessageOverlay(state);
+        return apply(state, remainingRepairTargets, remainingExpectedTargets, userTask,
+                staticRepairObligationActive, true);
+    }
+
+    /**
+     * The same messages as {@link #apply}, for sizing a request that is not dispatched. One-shot repair marks,
+     * refused targets and their trace records are left for the overlay whose request is dispatched.
+     */
+    static ToolRepromptMessageOverlay probe(
+            LoopState state,
+            List<String> remainingRepairTargets,
+            List<String> remainingExpectedTargets,
+            String userTask,
+            boolean staticRepairObligationActive
+    ) {
+        return apply(state, remainingRepairTargets, remainingExpectedTargets, userTask,
+                staticRepairObligationActive, false);
+    }
+
+    private static ToolRepromptMessageOverlay apply(
+            LoopState state,
+            List<String> remainingRepairTargets,
+            List<String> remainingExpectedTargets,
+            String userTask,
+            boolean staticRepairObligationActive,
+            boolean commitOneShots
+    ) {
+        ToolRepromptMessageOverlay overlay = new ToolRepromptMessageOverlay(state, commitOneShots);
         overlay.applyReadOnlyEvidence();
         overlay.applyMutationContinuationEvidence();
         overlay.applyStaleEditRepair();
@@ -88,18 +117,22 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
                     ? null
                     : locateReadToolResult(rawBody);
             if (sourceBody == null || rawBody == null || readIndex == null) {
-                state.editRecoveryFullRewriteTargets.remove(path);
-                LocalTurnTraceCapture.recordRepair(
-                        "REFUSED",
-                        "edit-recovery-full-rewrite target=" + path
-                                + " reason=safe-source-no-longer-derivable");
+                if (commitOneShots) {
+                    state.editRecoveryFullRewriteTargets.remove(path);
+                    LocalTurnTraceCapture.recordRepair(
+                            "REFUSED",
+                            "edit-recovery-full-rewrite target=" + path
+                                    + " reason=safe-source-no-longer-derivable");
+                }
                 continue;
             }
             restoreCompactedReadIfNeeded(readIndex, rawBody);
-            state.editRecoveryPromptedPaths.add(path);
-            LocalTurnTraceCapture.recordRepair(
-                    "PROMPTED",
-                    "edit-recovery-full-rewrite target=" + path);
+            if (commitOneShots) {
+                state.editRecoveryPromptedPaths.add(path);
+                LocalTurnTraceCapture.recordRepair(
+                        "PROMPTED",
+                        "edit-recovery-full-rewrite target=" + path);
+            }
             addSystem(
                     "[Edit recovery] talos.edit_file repeatedly failed for `" + path
                             + "` with empty old_string after the file was read. Do not call "
@@ -171,7 +204,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         if (staleRepair.isEmpty()) return;
         RepairInstruction repair = staleRepair.get();
         addSystem(repair.instruction(), "[Stale edit repair required]");
-        state.staleEditRepairPromptedPaths.add(repair.path());
+        if (commitOneShots) state.staleEditRepairPromptedPaths.add(repair.path());
     }
 
     private void applyEmptyEditRepair() {
@@ -179,7 +212,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         if (repair.isEmpty()) return;
         RepairInstruction instruction = repair.get();
         addSystem(instruction.instruction(), "[Edit repair required]");
-        state.emptyEditRepairPromptedPaths.add(instruction.path());
+        if (commitOneShots) state.emptyEditRepairPromptedPaths.add(instruction.path());
     }
 
     private void applyStaticRepairProgress(List<String> remainingRepairTargets) {

@@ -33,7 +33,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 final class QualificationScenarioBank {
-    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5, 6);
+    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5, 6, 7);
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
     private static final String FULL_V5_PATH = "model-qualification/banks/full-v5.json";
@@ -81,7 +81,13 @@ final class QualificationScenarioBank {
             Map.entry("model-qualification/fixtures/basic-workspace-v6.json", new ResourceIdentity("6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473")),
             Map.entry("model-qualification/fixtures/context-workspace-v6.json", new ResourceIdentity("565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da")),
             Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", new ResourceIdentity("6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5")),
-            Map.entry("model-qualification/fixtures/web-workspace-v6.json", new ResourceIdentity("0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337")));
+            Map.entry("model-qualification/fixtures/web-workspace-v6.json", new ResourceIdentity("0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337")),
+            Map.entry("model-qualification/banks/admission-v7.json", new ResourceIdentity("2e2f300a441b74907ab58b350947eda33e23269af8f9f4f3bf3069934ae7fb86", "2e2f300a441b74907ab58b350947eda33e23269af8f9f4f3bf3069934ae7fb86")),
+            Map.entry("model-qualification/banks/full-v7.json", new ResourceIdentity("add2a3486ba8db1a94042cc34d756e1768dc71a34927533d52e4673c95d0cfd3", "add2a3486ba8db1a94042cc34d756e1768dc71a34927533d52e4673c95d0cfd3")),
+            Map.entry("model-qualification/fixtures/basic-workspace-v7.json", new ResourceIdentity("1b4736b64029219931a002f08ef129443eaa7327b5ff527f6915d544eab46653", "1b4736b64029219931a002f08ef129443eaa7327b5ff527f6915d544eab46653")),
+            Map.entry("model-qualification/fixtures/context-workspace-v7.json", new ResourceIdentity("7cbd3dd15cdfda2fe65cde48ce8bb5f23f5bc84df205b6693a032638a3f906a4", "7cbd3dd15cdfda2fe65cde48ce8bb5f23f5bc84df205b6693a032638a3f906a4")),
+            Map.entry("model-qualification/fixtures/privacy-workspace-v7.json", new ResourceIdentity("c745599d1de0f2e88d29fde10a37650e39b03ce8a0114a3d006f452faaec7fe5", "c745599d1de0f2e88d29fde10a37650e39b03ce8a0114a3d006f452faaec7fe5")),
+            Map.entry("model-qualification/fixtures/web-workspace-v7.json", new ResourceIdentity("4f23efb0b49062c0e590fd2d01e33d28bfdfc800dc75d240b37f96446d5a457c", "4f23efb0b49062c0e590fd2d01e33d28bfdfc800dc75d240b37f96446d5a457c")));
 
     private QualificationScenarioBank() {}
 
@@ -144,6 +150,12 @@ final class QualificationScenarioBank {
 
     static Catalog loadDefault() {
         return load(QualificationProtocol.VERSION);
+    }
+
+    /** Loads the frozen banks that a campaign or record declares, which only a readable protocol may do. */
+    static Catalog loadForRecords(int protocolVersion) {
+        QualificationProtocol.requireRecordProtocol(protocolVersion);
+        return load(protocolVersion);
     }
 
     static Catalog load(int protocolVersion) {
@@ -312,8 +324,8 @@ final class QualificationScenarioBank {
         }
 
         // Protocol v6 establishes authenticated LF as its canonical representation; it has no
-        // historical mixed-line-ending identity to reconstruct.
-        if (protocolVersion == 6) return normalizedLf;
+        // historical mixed-line-ending identity to reconstruct. Later causal versions keep it.
+        if (QualificationProtocol.causal(protocolVersion)) return normalizedLf;
 
         byte[] canonical = protocolVersion <= 3
                 ? normalizedLf
@@ -475,7 +487,7 @@ final class QualificationScenarioBank {
         if (bank == null) {
             throw new IllegalArgumentException("scenario bank is required");
         }
-        Set<String> expectedKeys = protocolVersion == 6
+        Set<String> expectedKeys = QualificationProtocol.causal(protocolVersion)
                 ? bank.scenarios().stream()
                         .filter(scenario -> scenario.atomicRequirements().stream()
                                 .anyMatch(requirement ->

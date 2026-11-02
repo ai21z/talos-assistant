@@ -314,7 +314,7 @@ public final class ToolSurfacePlanner {
 
     private static boolean explicitTextFormatRequest(TaskContract contract) {
         return contract != null
-                && "explicit-text-format-request".equals(contract.classificationReason());
+                && contract.hasClassificationReason("explicit-text-format-request");
     }
 
     private static boolean sourceDerivedFileCreateTargets(TaskContract contract) {

@@ -52,6 +52,8 @@ public final class LoopState {
     public int cushionFiresE1Suggestion;
     public final int aliasRescueBaseline;
     public int noProgressIterations;
+    /** The one corrective native re-prompt after a text-form tool call was sent in this turn (MICA D7). */
+    public boolean toolModeCorrectionSent;
     public dev.talos.runtime.failure.FailureDecision failureDecision =
             dev.talos.runtime.failure.FailureDecision.continueLoop();
 

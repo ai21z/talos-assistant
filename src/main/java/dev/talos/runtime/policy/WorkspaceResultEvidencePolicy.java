@@ -46,9 +46,17 @@ public final class WorkspaceResultEvidencePolicy {
         /** A retained identity is used only to validate issuance, never to recover publication choices. */
         public TurnRequestFrame publicationFrame() { return publication.frame(); }
 
+        /**
+         * A controlled frame publishes the location only when its meaning allows it. An ordinary request publishes it
+         * when the bounded grammar recognized the whole request and the location is an active requested result (D8).
+         */
         public boolean admittedRuntimeLocation() {
-            return applicable && publication.controlled() && publication.resolved() && publication.locationPublic()
+            boolean published = publication.controlled()
+                    ? publication.resolved() && publication.locationPublic()
+                    : !unresolvedMeaning;
+            return applicable && published
                     && results.stream().anyMatch(result -> result.requested().kind() == Kind.WORKSPACE_LOCATION
+                        && result.requested().disposition() == RequestedResultInventory.Disposition.ACTIVE
                         && result.evidence().status() == EvidenceObligationVerifier.Status.SATISFIED)
                     && location.equals(ProtectedContentPolicy.sanitizeText(location));
         }
@@ -108,7 +116,8 @@ public final class WorkspaceResultEvidencePolicy {
                 if (text.isEmpty() || parts.contains(text)) continue;
                 if (result.requested().kind() == Kind.WORKSPACE_LOCATION && supported && admittedRuntimeLocation()
                         && locationOffset < 0)
-                    locationOffset = length + LOCATION_PREFIX.length();
+                    // The exact location ends the runtime-built text, after the folder line of an ordinary answer.
+                    locationOffset = length + text.length() - location.length();
                 parts.add(text);
                 length = parts.stream().mapToInt(String::length).sum() + parts.size() * 2;
             }

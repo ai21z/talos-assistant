@@ -47,6 +47,7 @@ import java.util.function.Function;
 /** Thread-local recorder for the current turn's local trace v1 artifact. */
 public final class LocalTurnTraceCapture {
     private static final ObjectMapper NATIVE_ARGUMENT_MAPPER = new ObjectMapper();
+    public static final String CHANGE_OFFER_RENDERED = "CHANGE_OFFER_RENDERED";
 
     private LocalTurnTraceCapture() {}
 
@@ -64,6 +65,7 @@ public final class LocalTurnTraceCapture {
         OutcomeCandidate operationalOutcome;
         DeliveryFacts routedDelivery = DeliveryFacts.unavailable();
         String routedAnswerHash = "";
+        boolean requestCovered;
         final Set<AnswerPresentationLimitation> answerPresentationLimitations =
                 java.util.EnumSet.noneOf(AnswerPresentationLimitation.class);
         dev.talos.runtime.verification.ReadOnlyAnswerComponents answerComponents;
@@ -471,6 +473,21 @@ public final class LocalTurnTraceCapture {
         return HOLDER.get() != null;
     }
 
+    /**
+     * The provider prose inside this answer, when the active answer candidate is exactly this text and its provider
+     * span is still known. Runtime text around it, or a full runtime replacement, is never returned.
+     */
+    public static String providerProseOf(String answer) {
+        Bag bag = HOLDER.get();
+        AnswerCandidate candidate = bag == null ? null : bag.answerCandidate;
+        String text = Objects.toString(answer, "");
+        if (candidate == null || candidate.origin() != ProviderResponseCapture.AnswerOrigin.MODEL_PROVIDER
+                || !candidate.rawAnswer().equals(text)) return "";
+        int start = candidate.delivery().providerStart();
+        int end = candidate.delivery().providerEnd();
+        return start < 0 || end <= start || end > text.length() ? "" : text.substring(start, end);
+    }
+
     public static String currentTraceId() {
         Bag bag = HOLDER.get();
         return bag == null ? "" : bag.traceId;
@@ -646,6 +663,15 @@ public final class LocalTurnTraceCapture {
             MutationIntent.RequestShape shape,
             TaskResolution.Provenance provenance
     ) {
+        recordMutationRequestDecision(shape, provenance, "");
+    }
+
+    /** Also records where carried authority came from, when the turn preparation decided it. */
+    public static void recordMutationRequestDecision(
+            MutationIntent.RequestShape shape,
+            TaskResolution.Provenance provenance,
+            String authorityOrigin
+    ) {
         Bag bag = HOLDER.get();
         if (bag == null || shape == null) return;
         Map<String, Object> data = new LinkedHashMap<>();
@@ -656,6 +682,9 @@ public final class LocalTurnTraceCapture {
                 (provenance == null
                         ? TaskResolution.Provenance.CURRENT_USER_REQUEST
                         : provenance).name());
+        if (authorityOrigin != null && !authorityOrigin.isBlank()) {
+            data.put("authorityOrigin", safe(authorityOrigin));
+        }
         String evidence = safe(shape.evidenceSpan());
         data.put("evidencePresent", !evidence.isBlank());
         if (!evidence.isBlank()) {
@@ -664,6 +693,52 @@ public final class LocalTurnTraceCapture {
             data.put("evidenceBytes", TraceRedactor.bytes(evidence));
         }
         bag.builder.event(TurnTraceEvent.simple("MUTATION_REQUEST_DECIDED", now(), data));
+    }
+
+    /** Records how the operand of a removal request was resolved. The bound path is kept only as a hash. */
+    public static void recordOperationOperandResolution(
+            String operandClass,
+            String outcome,
+            String boundPath,
+            int candidateCount
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("operandClass", safe(operandClass));
+        data.put("outcome", safe(outcome));
+        data.put("candidateCount", Math.max(0, candidateCount));
+        String path = safe(boundPath);
+        data.put("bound", !path.isBlank());
+        if (!path.isBlank()) data.put("boundPathHash", TraceRedactor.hash(path));
+        bag.builder.event(TurnTraceEvent.simple("OPERATION_OPERAND_RESOLVED", now(), data));
+    }
+
+    /**
+     * The verifier issued a positive receipt for one exact complete request obligation. The final status reports the
+     * whole request as covered only when the final classification is verified (MICA invariant I3, decision D5).
+     */
+    public static void recordRequestCoverage() {
+        Bag bag = HOLDER.get();
+        if (bag != null) bag.requestCovered = true;
+    }
+
+    /** The runtime ended a read-only answer with a change offer for these targets (MICA decision D6). */
+    public static void recordChangeOffer(List<String> targets) {
+        Bag bag = HOLDER.get();
+        if (bag == null || targets == null || targets.isEmpty()) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("targetCount", targets.size());
+        data.put("targetsHash", TraceRedactor.hash(String.join("\n", targets)));
+        bag.builder.event(TurnTraceEvent.simple(CHANGE_OFFER_RENDERED, now(), data));
+    }
+
+    /** True when the trace records a change offer for exactly these targets. */
+    public static boolean changeOfferRendered(LocalTurnTrace trace, List<String> targets) {
+        if (trace == null || targets == null || targets.isEmpty()) return false;
+        String expected = TraceRedactor.hash(String.join("\n", targets));
+        return trace.events().stream().anyMatch(event -> CHANGE_OFFER_RENDERED.equals(event.type())
+                && expected.equals(String.valueOf(event.data().get("targetsHash"))));
     }
 
     public static void recordRoutedAnswerCaptured(String assistantText) {
@@ -3207,7 +3282,7 @@ public final class LocalTurnTraceCapture {
         }
         bag.builder.event(FinalAnswerStatus.event(now(), bag.traceId, bag.turnNumber, bag.routedAnswerHash,
                 outcomeSummary(bag.operationalOutcome), outcomeSummary(bag.outcomeCandidate),
-                bag.routedDelivery.associated(), bag.routedDelivery.causes()));
+                bag.routedDelivery.associated(), bag.routedDelivery.causes(), bag.requestCovered));
         OutcomeTraceRecorder.recordRendered(
                 bag.builder,
                 bag.outcomeCandidate.status(),

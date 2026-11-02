@@ -17,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelQualificationMainTest {
+    private static final String CURRENT_PROTOCOL = "\"protocolVersion\" : " + QualificationProtocol.VERSION;
+
     @TempDir
     Path temp;
 
@@ -171,13 +173,31 @@ class ModelQualificationMainTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path campaign = packet.root().resolve("campaign.json");
         String changed = Files.readString(campaign, StandardCharsets.UTF_8)
-                .replace("\"protocolVersion\" : 6", "\"protocolVersion\" : 99");
+                .replace(CURRENT_PROTOCOL, "\"protocolVersion\" : 99");
         Files.writeString(campaign, changed, StandardCharsets.UTF_8);
 
         Capture capture = run("validate", "--root", packet.root().toString());
 
         assertEquals(2, capture.exit());
         assertTrue(capture.err().contains("Unsupported qualification protocol version: 99"), capture.err());
+    }
+
+    @Test
+    void validateRefusesAFrozenProtocolSixCampaignWhoseBanksStayLoadable() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path campaign = packet.root().resolve("campaign.json");
+        Files.writeString(campaign, Files.readString(campaign, StandardCharsets.UTF_8)
+                .replace(CURRENT_PROTOCOL, "\"protocolVersion\" : 6"), StandardCharsets.UTF_8);
+
+        Capture capture = run("validate", "--root", packet.root().toString());
+
+        assertEquals(6, QualificationScenarioBank.load(6).protocolVersion());
+        assertEquals(2, capture.exit());
+        assertTrue(capture.err().contains("Unsupported qualification protocol version: 6"), capture.err());
+        assertTrue(QualificationEvidenceValidator.validate(packet.root(), QualificationScenarioBank.load(6))
+                .findings().stream().anyMatch(finding -> finding.contains(
+                        "Unsupported qualification protocol version: 6")));
     }
 
     @Test
@@ -365,14 +385,15 @@ class ModelQualificationMainTest {
             throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         List<java.util.function.UnaryOperator<String>> invalidCampaigns = List.of(
-                campaign -> campaign.replace("\"protocolVersion\" : 6,", ""),
+                campaign -> campaign.replace(CURRENT_PROTOCOL + ",", ""),
+                campaign -> campaign.replace(CURRENT_PROTOCOL, "\"protocolVersion\" : 6"),
                 campaign -> campaign.replace(
-                        "\"protocolVersion\" : 6", "\"protocolVersion\" : \"6\""),
+                        CURRENT_PROTOCOL, "\"protocolVersion\" : \"" + QualificationProtocol.VERSION + "\""),
                 campaign -> campaign.replace(
-                        "\"protocolVersion\" : 6", "\"protocolVersion\" : 6.5"),
+                        CURRENT_PROTOCOL, CURRENT_PROTOCOL + ".5"),
                 campaign -> campaign.replace(
-                        "\"protocolVersion\" : 6",
-                        "\"protocolVersion\" : 6,\n  \"protocolVersion\" : 6"));
+                        CURRENT_PROTOCOL,
+                        CURRENT_PROTOCOL + ",\n  " + CURRENT_PROTOCOL));
 
         for (int index = 0; index < invalidCampaigns.size(); index++) {
             QualificationTestPacket packet = QualificationTestPacket.create(
@@ -393,11 +414,11 @@ class ModelQualificationMainTest {
     }
 
     @Test
-    void writableCampaignGuardAcceptsTheCanonicalProtocolSixCampaignReadOnly()
+    void writableCampaignGuardAcceptsTheCanonicalCurrentProtocolCampaignReadOnly()
             throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(
-                temp.resolve("writable-v6"), catalog);
+                temp.resolve("writable-current"), catalog);
         Map<String, FileState> before = treeState(packet.root());
 
         Capture capture = run(
@@ -405,7 +426,7 @@ class ModelQualificationMainTest {
                 "--root", packet.root().toString());
 
         assertEquals(0, capture.exit(), capture.err());
-        assertTrue(capture.out().contains("protocol v6"), capture.out());
+        assertTrue(capture.out().contains("protocol v" + QualificationProtocol.VERSION), capture.out());
         assertEquals(before, treeState(packet.root()));
     }
 

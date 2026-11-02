@@ -468,7 +468,7 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("recursivePolicy: NOT_APPLICABLE"), frame);
         assertTrue(frame.contains("parentPolicy: REQUIRE_EXISTING_PARENT"), frame);
         assertTrue(frame.contains("Call the exact tool once with exactly these typed operands"), frame);
-        assertTrue(frame.contains("Do not emulate move, copy, rename, or mkdir"), frame);
+        assertTrue(frame.contains("Do not emulate delete, move, copy, rename, or mkdir"), frame);
         assertFalse(frame.contains("operations_json example:"), frame);
         assertFalse(frame.contains("Available mutating tools: talos.write_file, talos.edit_file"), frame);
         assertFalse(frame.contains("You must write or edit these exact target paths"), frame);

@@ -58,10 +58,13 @@ class InspectCompletenessRetryTest {
             throws Exception {
         beginTrace("cross-loop-read-evidence-" + failRetry);
         Path workspace = lineageWorkspace;
+        // The three first reads exceed the keep budget of the configured 7,500 tokens, so README.md is compacted,
+        // while all four still fit the request and the read evidence cap when they are re-delivered.
         Map<String, String> bodies = Map.of(
-                "README.md", "README_EVIDENCE says script.js is loaded.\n",
-                "index.html", "<button id=\"calculate\">INDEX_EVIDENCE</button><script src=\"script.js\"></script>\n",
-                "script.js", "const SCRIPT_EVIDENCE = document.querySelector('#calc');\n",
+                "README.md", "README_EVIDENCE says script.js is loaded.\n" + padding("#"),
+                "index.html", "<button id=\"calculate\">INDEX_EVIDENCE</button><script src=\"script.js\"></script>\n"
+                        + padding("<!-- "),
+                "script.js", "const SCRIPT_EVIDENCE = document.querySelector('#calc');\n" + padding("// "),
                 "scripts.js", "const SCRIPTS_EVIDENCE = 'not loaded';\n");
         for (var entry : bodies.entrySet()) Files.writeString(workspace.resolve(entry.getKey()), entry.getValue());
         String request = "Read README.md, index.html, script.js and scripts.js. Explain why the Calculate "
@@ -81,7 +84,11 @@ class InspectCompletenessRetryTest {
         String finalAnswer = "README.md identifies script.js as loaded. index.html defines #calculate, "
                 + "not #calc. scripts.js is the unrelated sentinel. BMI is 22.2. No files edited or tests run.\n\n"
                 + "```html\n<button id=\"calculate\">Calculate</button>\n```";
-        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+        var config = new Config();
+        @SuppressWarnings("unchecked")
+        var limits = (Map<String, Object>) config.data.get("limits");
+        limits.put("llm_context_max_tokens", 7_500);
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(config, List.of(
                 new LlmClient.StreamResult("", List.of(firstReads.get(0))),
                 new LlmClient.StreamResult("", List.of(firstReads.get(1))),
                 new LlmClient.StreamResult("", List.of(firstReads.get(2))),
@@ -90,7 +97,7 @@ class InspectCompletenessRetryTest {
                         "missing-scripts", "talos.read_file", Map.of("path", "scripts.js")))),
                 new LlmClient.StreamResult(finalAnswer, List.of())), 16_384);
         try (LlmClient llm = recorded.client()) {
-            Context ctx = providerContext(workspace, llm);
+            Context ctx = providerContext(workspace, llm, 5, config);
             var initial = TurnModelDispatcher.dispatchBuffered(ctx, messages, plan);
             var original = ctx.toolCallLoop().run(initial.text(), initial.toolCalls(), initial.provenance(),
                     messages, workspace, ctx);
@@ -116,7 +123,12 @@ class InspectCompletenessRetryTest {
                 assertNull(result.loopResult());
                 assertEquals(4, recorded.requests().size());
             } else {
-                assertEquals(finalAnswer, result.answer());
+                assertEquals(finalAnswer, result.answer(), () -> "retry loop: " + (result.loopResult() == null ? "none"
+                        : result.loopResult().failureDecision() + " | iterLimit=" + result.loopResult().hitIterLimit()
+                        + " | " + result.loopResult().finalAnswer()) + " | requests=" + recorded.requests().size()
+                        + " | last=" + recorded.requests().getLast().messages.stream()
+                                .map(m -> m.role() + ":" + (m.content() == null ? 0 : m.content().length())
+                                        + (m.toolCallId() == null ? "" : "/" + m.toolCallId())).toList());
                 assertEquals(4, result.loopResult().toolsInvoked(), "prior reads are imported, never rerun or double-counted");
                 assertEquals(4, result.loopResult().toolOutcomes().size());
                 assertEquals(bodies.keySet(), java.util.Set.copyOf(result.loopResult().readPaths()));
@@ -627,16 +639,24 @@ class InspectCompletenessRetryTest {
     }
 
     private static Context providerContext(Path workspace, LlmClient llm, int maxIterations) {
+        return providerContext(workspace, llm, maxIterations, new Config());
+    }
+
+    private static Context providerContext(Path workspace, LlmClient llm, int maxIterations, Config config) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
-        return Context.builder(new Config())
+        return Context.builder(config)
                 .llm(llm)
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(new ToolCallLoop(processor, maxIterations))
                 .nativeToolSpecs(specsFrom(registry))
                 .build();
+    }
+
+    private static String padding(String commentPrefix) {
+        return (commentPrefix + "x".repeat(100) + "\n").repeat(46);
     }
 
     private static List<ToolSpec> specsFrom(ToolRegistry registry) {

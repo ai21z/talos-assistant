@@ -426,15 +426,17 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
-    void contextualBroadExistingStaticWebRewriteUsesWriteFileOnlySurface() {
+    void contextualBroadExistingStaticWebRewriteUsesWriteFileOnlySurface(@TempDir Path workspace) throws Exception {
+        writeExistingSite(workspace);
         var messages = List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create a synthwave band website."),
                 ChatMessage.assistant("Created index.html, style.css, and script.js, but verification was incomplete."),
                 ChatMessage.user("Rewrite the existing site to look better and make it feel more like the band."));
 
+        // P2 D-c: the site is bound from the files on disk, not invented by convention.
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromMessages(messages),
+                WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromMessages(messages), workspace),
                 ExecutionPhase.APPLY,
                 registry());
 
@@ -450,15 +452,17 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
-    void vagueStaticWebRedesignFollowUpUsesWriteFileOnlySurface() {
+    void vagueStaticWebRedesignFollowUpUsesWriteFileOnlySurface(@TempDir Path workspace) throws Exception {
+        writeExistingSite(workspace);
         var messages = List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create a synthwave band website with CSS styling and JavaScript interaction."),
                 ChatMessage.assistant("Created index.html, style.css, and script.js."),
                 ChatMessage.user("ok just edit the site to look better"));
 
+        // P2 D-c: the site is bound from the files on disk, not invented by convention.
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
-                TaskContractResolver.fromMessages(messages),
+                WorkspaceTargetReconciler.reconcile(TaskContractResolver.fromMessages(messages), workspace),
                 ExecutionPhase.APPLY,
                 registry());
 
@@ -1037,5 +1041,13 @@ class ToolSurfacePlannerTest {
                             "METADATA_DELETED",
                             "PATH_ABSENT"));
         }
+    }
+
+    private static void writeExistingSite(Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<!doctype html><html><head>"
+                + "<link rel=\"stylesheet\" href=\"style.css\"></head><body>"
+                + "<script src=\"script.js\"></script></body></html>");
+        Files.writeString(workspace.resolve("style.css"), "body { color: #eee; }");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');");
     }
 }
