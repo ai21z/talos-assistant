@@ -1,7 +1,9 @@
 package dev.talos.runtime.task;
 
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.intent.WorkspaceOperationObligation;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
@@ -1631,6 +1633,43 @@ class TaskContractResolverTest {
         assertFalse(contract.mutationAllowed());
         assertFalse(contract.verificationRequired());
         assertFalse("contextual-static-web-follow-up".equals(contract.classificationReason()));
+    }
+
+    // R1: a listing request is classified apart from a sentence that only prohibits mutation, which stays in the
+    // request and keeps mutation disallowed.
+    @Test
+    void mutationOnlyProhibitionLeavesTheRequestedListingAsClassified() {
+        for (String bare : List.of("Which files are in this workspace?", "What files are in this folder?",
+                "List the files here.")) {
+            TaskContract unrestricted = TaskContractResolver.fromUserRequest(bare);
+            assertEquals(TaskType.DIRECTORY_LISTING, unrestricted.type(), bare);
+            for (String request : List.of(bare + " Don't change any files.", "Do not modify anything. " + bare,
+                    bare + " Do not change files.")) {
+                TaskContract restricted = TaskContractResolver.fromUserRequest(request);
+                assertEquals(unrestricted.type(), restricted.type(), request);
+                assertEquals(EvidenceObligationPolicy.derive(unrestricted, ExecutionPhase.INSPECT, null),
+                        EvidenceObligationPolicy.derive(restricted, ExecutionPhase.INSPECT, null), request);
+                assertEquals(request, restricted.originalUserRequest());
+                assertFalse(restricted.mutationRequested(), request);
+                assertFalse(restricted.mutationAllowed(), request);
+                assertEquals("global-read-only-negation", MutationIntent.classifyShape(request).reason(), request);
+            }
+        }
+        TaskContract scoped = TaskContractResolver.fromUserRequest("Edit notes.md. Don't change any other files.");
+        assertEquals(TaskType.FILE_EDIT, scoped.type());
+        assertTrue(scoped.mutationAllowed(), scoped.toString());
+    }
+
+    // R1 is confined to the listing result. Other requests with a prohibition keep their present contract,
+    // including the existing "do not change" diagnose marker.
+    @Test
+    void mutationOnlyProhibitionKeepsOtherRequestsAsClassifiedBefore() {
+        assertEquals(TaskType.WORKSPACE_EXPLAIN,
+                TaskContractResolver.fromUserRequest("Explain this project. Don't change any files.").type());
+        TaskContract diagnose = TaskContractResolver.fromUserRequest(
+                "Read settings.json and explain the current retry configuration. Do not change files.");
+        assertEquals(TaskType.DIAGNOSE_ONLY, diagnose.type(), diagnose.toString());
+        assertEquals(java.util.Set.of("settings.json"), diagnose.expectedTargets());
     }
 
     @Test

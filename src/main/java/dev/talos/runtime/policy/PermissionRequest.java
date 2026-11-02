@@ -7,13 +7,19 @@ import dev.talos.tools.ToolRiskLevel;
 
 import java.nio.file.Path;
 
-/** Inputs needed to decide whether one tool call may run. */
+/**
+ * Inputs needed to decide whether one tool call may run.
+ *
+ * <p>{@code targetNamedByRequest} is true only when the current request named the target of the call as a file
+ * to change. A remembered session approval is bound to such targets.
+ */
 public record PermissionRequest(
         Path workspace,
         Config config,
         ToolCall call,
         ToolRiskLevel risk,
-        ExecutionPhase phase
+        ExecutionPhase phase,
+        boolean targetNamedByRequest
 ) {
     public ToolRiskLevel effectiveRisk() {
         return risk == null ? ToolRiskLevel.READ_ONLY : risk;

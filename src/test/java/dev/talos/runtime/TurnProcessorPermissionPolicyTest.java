@@ -220,7 +220,9 @@ class TurnProcessorPermissionPolicyTest {
         Session session = new Session(workspace, config);
         Context ctx = context(workspace, config);
 
-        TurnUserRequestCapture.set("write files");
+        // A remembered approval covers only files the current request names (L5). The request names .env too,
+        // so the protected path is refused by the permission policy and not by the expected-target guard.
+        TurnUserRequestCapture.set("write a.txt, b.txt and .env");
         ToolResult first = processor.executeTool(session,
                 new ToolCall("talos.write_file", Map.of("path", "a.txt", "content", "a")), ctx);
         ToolResult second = processor.executeTool(session,

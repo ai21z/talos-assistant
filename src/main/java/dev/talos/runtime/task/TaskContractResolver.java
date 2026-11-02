@@ -1483,7 +1483,10 @@ public final class TaskContractResolver {
                 || looksAssistantIdentityQuestion(lower)) {
             return TaskType.SMALL_TALK;
         }
-        if (looksSimpleDirectoryListingRequest(lower)) {
+        // A sentence that only prohibits mutation restricts the work and is not the requested result, so a
+        // listing request stays a listing with it. Mutation stays disallowed by the complete request.
+        if (looksSimpleDirectoryListingRequest(
+                dev.talos.runtime.intent.OutputRestrictionCue.withoutMutationProhibitions(lower))) {
             return TaskType.DIRECTORY_LISTING;
         }
         if (lower.contains("verify") || lower.contains("confirm")) {

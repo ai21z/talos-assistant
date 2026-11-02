@@ -37,8 +37,8 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
         }
     }
 
-    // Ordinary paraphrases are recognized only as whole results. A foreign subject, another directory or a
-    // restriction anywhere in the request still leaves unresolved text, so the request stays unbounded.
+    // Ordinary paraphrases are recognized only as whole results. A foreign subject, another directory or an
+    // output restriction anywhere in the request still leaves unresolved text, so the request stays unbounded.
     private static final String SCOPE = "(?:(?:this|the|our|current|active)\\s+)*(?:workspace|directory|folder)\\b";
     private static final String OBJECT = "(?:in\\s+(?:it\\b|" + SCOPE + ")|here\\b)";
     private static final Pattern LOCATION = Pattern.compile(
@@ -137,6 +137,13 @@ public record RequestedResultInventory(String originalRequest, List<RequestedRes
         if (greeting.find()) java.util.Arrays.fill(remaining, greeting.start(), greeting.end(), ' ');
         var restriction = INSPECTION_RESTRICTION.matcher(masked);
         while (restriction.find()) java.util.Arrays.fill(remaining, restriction.start(), restriction.end(), ' ');
+        // A sentence that only prohibits mutation is framing as well. It withholds mutation, not a result.
+        if (masked.length() == request.length()) {
+            for (var sentence : CurrentRequestClauses.sentences(request)) {
+                if (OutputRestrictionCue.mutationProhibitionOnly(sentence.text()))
+                    java.util.Arrays.fill(remaining, sentence.start(), sentence.end(), ' ');
+            }
+        }
         String scoped = new String(remaining);
         collect(results, remaining, masked, LOCATION, Kind.WORKSPACE_LOCATION, EvidenceBasis.TURN_WORKSPACE);
         collect(results, remaining, masked, CONTENTS, Kind.DIRECTORY_CONTENTS, EvidenceBasis.SCOPED_DIRECTORY_OBSERVATION);
