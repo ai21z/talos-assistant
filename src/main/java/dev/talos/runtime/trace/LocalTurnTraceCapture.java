@@ -537,6 +537,54 @@ public final class LocalTurnTraceCapture {
         VERIFICATION_FAILED
     }
 
+    /**
+     * Records the typed state of each requested workspace operation and the planner's reason for the surface (RC2-I).
+     * Operand paths are recorded as SHA-256 values, so no request or path prose enters the trace.
+     */
+    public static void recordWorkspaceOperationDispositions(
+            dev.talos.runtime.workspace.WorkspaceOperationDispositions dispositions,
+            String toolSurfaceReason
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || dispositions == null || dispositions.isEmpty()) return;
+        List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        int ordinal = 0;
+        for (var disposition : dispositions.dispositions()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("ordinal", ordinal++);
+            row.put("state", disposition.state().name());
+            row.put("kind", disposition.kind() == null ? "" : disposition.kind().name());
+            row.put("operationId", disposition.operationId());
+            row.put("reason", disposition.reason());
+            row.put("sourceStartOffset", disposition.sourceStartOffset());
+            row.put("sourceEndOffset", disposition.sourceEndOffset());
+            row.put("operands", disposition.operands().stream()
+                    .map(operand -> Map.<String, Object>of(
+                            "role", operand.role().name(),
+                            "pathSha256", sha256Hex(operand.path())))
+                    .toList());
+            rows.add(Map.copyOf(row));
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("toolSurfaceReason", safe(toolSurfaceReason));
+        data.put("answeredByRuntime", dispositions.answeredByRuntime());
+        data.put("dispositions", List.copyOf(rows));
+        bag.builder.event(TurnTraceEvent.simple(
+                "WORKSPACE_OPERATION_DISPOSITIONS_RECORDED",
+                now(),
+                data));
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(Objects.toString(value, "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
     /** Records only stable IDs and a typed decision; no request/path prose. */
     public static void recordWorkspaceOperationAuthorityDecision(
             WorkspaceOperationAuthorityPlan plan,

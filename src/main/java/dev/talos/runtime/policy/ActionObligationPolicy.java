@@ -9,7 +9,7 @@ public final class ActionObligationPolicy {
     private ActionObligationPolicy() {}
 
     public static ActionObligation derive(TaskContract contract, ExecutionPhase phase) {
-        return derive(contract, phase, false);
+        return contractObligation(contract, phase);
     }
 
     public static ActionObligation derive(
@@ -28,16 +28,14 @@ public final class ActionObligationPolicy {
                 && phase == ExecutionPhase.APPLY) {
             return ActionObligation.WORKSPACE_OPERATION_REQUIRED;
         }
-        return derive(
-                resolution.contract(),
-                phase,
-                resolution.blocksWorkspaceOperations());
+        // A withheld workspace operation leaves the content obligation as it is. It is stated by the runtime
+        // from the turn's dispositions, never by a changed obligation.
+        return contractObligation(resolution.contract(), phase);
     }
 
-    private static ActionObligation derive(
+    private static ActionObligation contractObligation(
             TaskContract contract,
-            ExecutionPhase phase,
-            boolean workspaceOperationBlocked
+            ExecutionPhase phase
     ) {
         if (contract == null || contract.type() == null) return ActionObligation.UNKNOWN;
         return switch (contract.type()) {
@@ -46,11 +44,7 @@ public final class ActionObligationPolicy {
             case WORKSPACE_EXPLAIN, DIAGNOSE_ONLY -> ActionObligation.INSPECT_REQUIRED;
             case VERIFY_ONLY -> ActionObligation.VERIFY_FROM_EVIDENCE;
             case CHECKPOINT_RESTORE -> ActionObligation.DIRECT_ANSWER_ONLY;
-            case FILE_CREATE, FILE_EDIT ->
-                    fileMutationObligation(
-                            contract,
-                            phase,
-                            workspaceOperationBlocked);
+            case FILE_CREATE, FILE_EDIT -> fileMutationObligation(contract, phase);
             case READ_ONLY_QA -> ActionObligation.NONE;
             case UNKNOWN -> ActionObligation.UNKNOWN;
         };
@@ -58,8 +52,7 @@ public final class ActionObligationPolicy {
 
     private static ActionObligation fileMutationObligation(
             TaskContract contract,
-            ExecutionPhase phase,
-            boolean workspaceOperationBlocked
+            ExecutionPhase phase
     ) {
         if (!contract.mutationAllowed() || phase != ExecutionPhase.APPLY) {
             return ActionObligation.INSPECT_REQUIRED;

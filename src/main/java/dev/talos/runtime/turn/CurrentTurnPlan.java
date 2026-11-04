@@ -16,6 +16,7 @@ import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskResolution;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationDispositions;
 import dev.talos.core.Config;
 
 import java.nio.file.Path;
@@ -42,7 +43,8 @@ public record CurrentTurnPlan(
         WorkspaceOperationAuthorityPlan workspaceOperationPlan,
         List<String> contentMutationPredecessorPaths,
         RequestedResultInventory requestedResults,
-        ContentSaveRequest contentSaveRequest
+        ContentSaveRequest contentSaveRequest,
+        WorkspaceOperationDispositions workspaceOperationDispositions
 ) {
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
     public static final String NOT_DERIVED = "NOT_DERIVED";
@@ -105,6 +107,14 @@ public record CurrentTurnPlan(
             throw new IllegalArgumentException(
                     "Supplied workspace operation plan differs from the current request");
         }
+        workspaceOperationDispositions = workspaceOperationDispositions == null
+                ? WorkspaceOperationDispositions.none()
+                : workspaceOperationDispositions;
+        if (!workspaceOperationDispositions.bindsRequest(originalUserRequest)
+                || !dispositionsFollowPlan(workspaceOperationDispositions, workspaceOperationPlan)) {
+            throw new IllegalArgumentException(
+                    "Supplied workspace operation dispositions differ from the workspace operation plan");
+        }
         contentMutationPredecessorPaths = contentMutationPredecessorPaths == null
                 ? List.of()
                 : contentMutationPredecessorPaths.stream()
@@ -121,6 +131,21 @@ public record CurrentTurnPlan(
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
         artifactGoal = artifactGoal == null ? NONE_OR_NOT_DERIVED : artifactGoal;
         verifierProfile = verifierProfile == null ? NONE_OR_NOT_DERIVED : verifierProfile;
+    }
+
+    /** Callers that do not derive dispositions leave them empty, which states nothing about any operation. */
+    public CurrentTurnPlan(TaskContract taskContract, String originalUserRequest, ExecutionPhase phaseInitial,
+                           ExecutionPhase phaseFinal, ActionObligation actionObligation,
+                           List<TaskExpectation> taskExpectations, List<String> nativeTools, List<String> promptTools,
+                           List<String> blockedTools, String evidenceObligation, String outputObligation,
+                           String activeTaskContext, String artifactGoal, String verifierProfile,
+                           RequestObligation requestObligation, WorkspaceOperationAuthorityPlan workspaceOperationPlan,
+                           List<String> contentMutationPredecessorPaths, RequestedResultInventory requestedResults,
+                           ContentSaveRequest contentSaveRequest) {
+        this(taskContract, originalUserRequest, phaseInitial, phaseFinal, actionObligation, taskExpectations,
+                nativeTools, promptTools, blockedTools, evidenceObligation, outputObligation, activeTaskContext,
+                artifactGoal, verifierProfile, requestObligation, workspaceOperationPlan,
+                contentMutationPredecessorPaths, requestedResults, contentSaveRequest, null);
     }
 
     public CurrentTurnPlan(TaskContract taskContract, String originalUserRequest, ExecutionPhase phaseInitial,
@@ -449,7 +474,8 @@ public record CurrentTurnPlan(
                 safeResolution.workspaceOperationPlan(),
                 safeResolution.contentMutationPredecessorPaths(),
                 null,
-                safeResolution.intent().contentSaveRequest());
+                safeResolution.intent().contentSaveRequest(),
+                safeResolution.workspaceOperationDispositions());
     }
 
     public static CurrentTurnPlan create(
@@ -498,6 +524,22 @@ public record CurrentTurnPlan(
         if (contract.mutationAllowed()) return ExecutionPhase.APPLY;
         if (contract.verificationRequired()) return ExecutionPhase.VERIFY;
         return ExecutionPhase.INSPECT;
+    }
+
+    /** Empty dispositions are not derived. Derived ones admit exactly what the authority plan authorized. */
+    private static boolean dispositionsFollowPlan(
+            WorkspaceOperationDispositions dispositions,
+            WorkspaceOperationAuthorityPlan plan
+    ) {
+        if (dispositions.isEmpty()) return true;
+        return switch (plan.state()) {
+            case NONE -> false;
+            case BLOCKED -> dispositions.admitted().isEmpty();
+            case AUTHORIZED_SINGLE -> dispositions.withheld().isEmpty()
+                    && dispositions.admitted().size() == 1
+                    && dispositions.admitted().getFirst().operationId()
+                            .equals(plan.authorizedOperations().getFirst().operationId());
+        };
     }
 
     private static String normalizePath(String value) {

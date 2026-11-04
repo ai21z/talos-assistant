@@ -274,6 +274,36 @@ public record TaskResolution(
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
+    /**
+     * The typed state of every requested workspace operation (RC2-I). The runtime answers alone only for the current
+     * user request in a turn that allows changes, when every requested operation is withheld, the block leaves no
+     * tool, and no read, source, verification or content change target was requested. A confirmed replay and a
+     * read-only posture, such as a plan, keep their model turn.
+     */
+    public dev.talos.runtime.workspace.WorkspaceOperationDispositions workspaceOperationDispositions() {
+        boolean mutationAllowed = contract.mutationAllowed() && intent.mutationAllowed();
+        boolean nothingElseRequested = provenance == Provenance.CURRENT_USER_REQUEST
+                && mutationAllowed
+                && blocksWorkspaceOperations()
+                && blocksUnscopedMutation()
+                && contract.sourceEvidenceTargets().isEmpty()
+                && intent.targets().targets().stream().noneMatch(target ->
+                        target.role() == TargetRole.MUST_READ
+                                || target.role() == TargetRole.SOURCE_EVIDENCE
+                                || target.role() == TargetRole.VERIFY_ONLY
+                                || target.role() == TargetRole.MUST_MUTATE
+                                || target.role() == TargetRole.MUST_MUTATE_AFTER_SOURCE_EVIDENCE
+                                || target.role() == TargetRole.OUTPUT_DESTINATION
+                                || target.role() == TargetRole.MAY_MUTATE);
+        return dev.talos.runtime.workspace.WorkspaceOperationDispositions.derive(
+                workspaceOperationPlan,
+                mutationTailPlan,
+                sequentialMutationPlan,
+                intent.targets().pathsByRole(TargetRole.FORBIDDEN),
+                mutationAllowed,
+                nothingElseRequested);
+    }
+
     /** Content paths that must complete before the one executable operation. */
     public List<String> contentMutationPredecessorPaths() {
         return contentMutationPredecessorPaths(

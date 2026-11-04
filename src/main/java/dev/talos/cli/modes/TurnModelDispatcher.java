@@ -376,7 +376,8 @@ final class TurnModelDispatcher {
                 plan.workspaceOperationPlan(),
                 plan.contentMutationPredecessorPaths(),
                 plan.requestedResults(),
-                plan.contentSaveRequest());
+                plan.contentSaveRequest(),
+                plan.workspaceOperationDispositions());
     }
 
     private static ChatRequestControls withDebugTag(

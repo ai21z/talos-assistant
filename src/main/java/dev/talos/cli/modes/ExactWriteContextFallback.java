@@ -127,7 +127,8 @@ final class ExactWriteContextFallback {
                 plan.workspaceOperationPlan(),
                 plan.contentMutationPredecessorPaths(),
                 plan.requestedResults(),
-                plan.contentSaveRequest());
+                plan.contentSaveRequest(),
+                plan.workspaceOperationDispositions());
     }
 
     private static List<ChatMessage> compactMessages(CurrentTurnPlan plan) {

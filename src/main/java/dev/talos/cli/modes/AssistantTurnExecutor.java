@@ -319,6 +319,11 @@ public final class AssistantTurnExecutor {
                 ctx.memory().setPendingContentDraft(null);
                 return directTurnOutput("The complete draft could not be presented safely. No draft was retained and no write was attempted.", ctx, opts);
             }
+            if (preparedTurn.withheldOperationsAnswer()) {
+                // Nothing ran. The requested operations were withheld by policy, which is the turn's outcome.
+                LocalTurnTraceCapture.recordOutcome(
+                        "BLOCKED", "NOT_RUN", "NONE", "NOT_ATTEMPTED", "BLOCKED_BY_POLICY");
+            }
             return directTurnOutput(preparedTurn.directAnswer(), ctx, opts,
                     runtimeIdentity, composeRuntimeIdentity);
         }

@@ -726,6 +726,15 @@ record ExecutionOutcome(
                     dev.talos.runtime.outcome.TaskCompletionStatus.ADVISORY_ONLY, finalDecision.blockedByPolicy());
             completionStatus = finalDecision.completionStatus();
         }
+        // Like the request coverage notice above, a withheld operation concerns the request, not the executed
+        // operations, so the operational status recorded before it stays (RC2-I).
+        String withheldStatements = withheldOperationStatements(safePlan, loopResult, workspace);
+        if (!withheldStatements.isEmpty()) {
+            current = current.isBlank() ? withheldStatements : withheldStatements + "\n\n" + current;
+            finalDecision = OutcomeDominancePolicy.withWithheldOperations(finalDecision, true,
+                    loopResult != null && loopResult.mutatingToolSuccesses() > 0 || extraMutationSuccesses > 0);
+            completionStatus = finalDecision.completionStatus();
+        }
         LocalTurnTraceCapture.recordAnswerDeliverySelected(current, outputLimitRelevant, false);
         current = Objects.toString(presentation.apply(current, webDiagnostic.components()), "");
         if (webDiagnostic.components().active() && !webDiagnostic.components().deliveredIntact(current)
@@ -990,6 +999,12 @@ record ExecutionOutcome(
                 EmbeddedStaticVerificationResultParser.removePositivePassMarkers(shaped);
         boolean embeddedPositiveVerificationSanitized = !Objects.equals(shaped, noToolPositiveVerificationSanitized);
         shaped = noToolPositiveVerificationSanitized;
+        String withheldStatements = withheldOperationStatements(safePlan, null, null);
+        if (!withheldStatements.isEmpty()) {
+            shaped = shaped.isBlank() ? withheldStatements : withheldStatements + "\n\n" + shaped;
+            decision = OutcomeDominancePolicy.withWithheldOperations(decision, true, false);
+            completionStatus = decision.completionStatus();
+        }
         advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         VerificationReport verificationReport = VerificationReport.empty();
@@ -1049,6 +1064,29 @@ record ExecutionOutcome(
                         || mutationCapabilityCorrected || negativeWorkspaceResultCorrected || commandRequiredButNotRun
                         || unsupportedCommandNotAvailable || missingEvidenceReplaced ? AnswerOutputLimit.CLEAR : outputLimit
         );
+    }
+
+    /**
+     * One runtime line per requested workspace operation that was withheld (RC2-I), placed before the answer as the
+     * other runtime notices are. A withheld folder creation is settled when a path that any tool call of this turn
+     * applied or may have applied, successful or not, is that folder or lies inside it.
+     */
+    static String withheldOperationStatements(CurrentTurnPlan plan, ToolCallLoop.LoopResult loopResult,
+                                              Path workspace) {
+        if (plan == null) return "";
+        var withheld = plan.workspaceOperationDispositions().withheld();
+        if (withheld.isEmpty()) return "";
+        List<String> affected = loopResult == null ? List.of() : loopResult.toolOutcomes().stream()
+                .flatMap(outcome -> outcome.mutationEffects().affectedPaths().stream())
+                .toList();
+        StringBuilder statements = new StringBuilder();
+        for (var disposition : withheld) {
+            if (dev.talos.runtime.workspace.WorkspaceOperationDispositions
+                    .settledByEffects(disposition, affected, workspace)) continue;
+            if (!statements.isEmpty()) statements.append('\n');
+            statements.append('[').append(disposition.notPerformedStatement()).append(']');
+        }
+        return statements.toString();
     }
 
     private static CurrentTurnPlan compatibilityPlan(List<ChatMessage> messages) {

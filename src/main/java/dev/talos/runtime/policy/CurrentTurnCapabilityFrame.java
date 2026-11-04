@@ -9,6 +9,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationAuthorityPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationDispositions;
 
 import java.util.Comparator;
 import java.util.List;
@@ -34,7 +35,8 @@ public final class CurrentTurnCapabilityFrame {
                 plan.taskExpectations(),
                 plan.actionObligation(),
                 plan.workspaceOperationPlan(),
-                plan.contentMutationPredecessorPaths());
+                plan.contentMutationPredecessorPaths(),
+                plan.workspaceOperationDispositions());
         var binding = plan.contentSaveRequest().clarificationBinding();
         if (binding != null) {
             frame += "\n[OperandClarification]\nOriginal task turn: " + binding.originTurn()
@@ -61,7 +63,8 @@ public final class CurrentTurnCapabilityFrame {
                 List.of(),
                 null,
                 null,
-                List.of());
+                List.of(),
+                WorkspaceOperationDispositions.none());
     }
 
     private static String render(
@@ -74,7 +77,8 @@ public final class CurrentTurnCapabilityFrame {
             List<TaskExpectation> taskExpectations,
             ActionObligation suppliedActionObligation,
             WorkspaceOperationAuthorityPlan workspaceOperationPlan,
-            List<String> contentMutationPredecessorPaths
+            List<String> contentMutationPredecessorPaths,
+            WorkspaceOperationDispositions workspaceOperationDispositions
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
@@ -108,6 +112,7 @@ public final class CurrentTurnCapabilityFrame {
                 workspaceOperationPlan,
                 contentMutationPredecessorPaths,
                 mutationAllowed);
+        appendWithheldWorkspaceOperations(frame, workspaceOperationDispositions);
         appendTextFormatChangeGuidance(frame, contract, mutationAllowed, visibleTools);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendStaticWebRequirements(frame, contract, mutationAllowed);
@@ -376,6 +381,21 @@ public final class CurrentTurnCapabilityFrame {
                 .append('\n')
                 .append("First complete every content predecessor with the visible file tools. Then call the exact workspace operation tool once.\n")
                 .append("Do not call the workspace operation before every predecessor succeeds.\n");
+    }
+
+    /** A withheld operation is named as unavailable, so its absent tool is never read as an oversight (RC2-I). */
+    private static void appendWithheldWorkspaceOperations(
+            StringBuilder frame,
+            WorkspaceOperationDispositions dispositions
+    ) {
+        if (dispositions == null || dispositions.withheld().isEmpty()) return;
+        frame.append("[WithheldWorkspaceOperations]\n")
+                .append("These requested operations are not available in this turn, and their tools are not listed:\n");
+        for (var disposition : dispositions.withheld()) {
+            frame.append("- ").append(disposition.description()).append('\n');
+        }
+        frame.append("Do not emulate them by writing, editing or emptying files. ")
+                .append("Do not claim them as done. The runtime reports each one as not performed.\n");
     }
 
     private static List<String> orderedExpectedTargets(TaskContract contract) {

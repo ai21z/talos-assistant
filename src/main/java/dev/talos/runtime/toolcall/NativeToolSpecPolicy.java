@@ -41,11 +41,21 @@ public final class NativeToolSpecPolicy {
             ToolRegistry registry,
             Config cfg
     ) {
+        return selectPlan(resolution, phase, registry, cfg).nativeToolSpecs();
+    }
+
+    /** The planned surface with the planner's own reason, for callers that record why it was selected. */
+    public static ToolSurfacePlanner.Plan selectPlan(
+            TaskResolution resolution,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            Config cfg
+    ) {
         return ToolSurfacePlanner.plan(
                 resolution,
                 phase,
                 registry,
-                ToolCapabilityAvailability.fromConfig(cfg)).nativeToolSpecs();
+                ToolCapabilityAvailability.fromConfig(cfg));
     }
 
     public static List<String> names(List<ToolSpec> specs) {

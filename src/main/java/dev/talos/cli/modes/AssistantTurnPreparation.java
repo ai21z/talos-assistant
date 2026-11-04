@@ -55,10 +55,11 @@ final class AssistantTurnPreparation {
             CurrentTurnPlan plan,
             TaskResolution taskResolution,
             String directAnswer,
-            PendingContentDraft draftGeneration
+            PendingContentDraft draftGeneration,
+            boolean withheldOperationsAnswer
     ) {
         PreparedTurn(Context ctx, CurrentTurnPlan plan, TaskResolution taskResolution) {
-            this(ctx, plan, taskResolution, null, null);
+            this(ctx, plan, taskResolution, null, null, false);
         }
         PreparedTurn {
             Objects.requireNonNull(plan, "plan");
@@ -66,6 +67,12 @@ final class AssistantTurnPreparation {
             if (!plan.taskContract().equals(taskResolution.contract())) {
                 throw new IllegalArgumentException(
                         "prepared turn plan and task resolution must share one contract");
+            }
+            // The origin is typed, so the executor never infers it from the answer text (RC2-I).
+            if (withheldOperationsAnswer && (!plan.workspaceOperationDispositions().answeredByRuntime()
+                    || !plan.workspaceOperationDispositions().runtimeAnswer().equals(directAnswer))) {
+                throw new IllegalArgumentException(
+                        "a withheld-operations answer must be the plan's runtime answer");
             }
         }
     }
@@ -230,13 +237,14 @@ final class AssistantTurnPreparation {
         boolean pinLacksAuthorizedOperationTools = ctx != null
                 && ctx.hasNativeToolSpecOverride()
                 && !carriesAuthorizedOperationTools(ctx.nativeToolSpecs(), effectiveResolution);
-        Context turnContext = withNativeToolSurface(
+        SurfaceSelection surface = withNativeToolSurface(
                 ctx,
                 effectiveResolution,
                 activeDecisionUpdatesTurnSurface
                         || requestReplaced
                         || saveContinuation.consumed()
                         || effectiveTurn.forceNativeSurfaceRecompute());
+        Context turnContext = surface.context();
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(
                 effectiveResolution,
                 turnContext,
@@ -246,6 +254,9 @@ final class AssistantTurnPreparation {
                 currentTurnPlan,
                 effectiveResolution,
                 turnContext);
+        LocalTurnTraceCapture.recordWorkspaceOperationDispositions(
+                currentTurnPlan.workspaceOperationDispositions(),
+                surface.reason());
         LocalTurnTraceCapture.recordMutationRequestDecision(
                 MutationIntent.classifyShape(
                         AssistantTurnExecutor.latestUserRequest(messages)),
@@ -278,7 +289,15 @@ final class AssistantTurnPreparation {
         String directAnswer = saveContinuation.directAnswer() != null
                 ? saveContinuation.directAnswer()
                 : referent.directAnswer();
-        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution, directAnswer, draft.generate());
+        // Every requested operation was withheld and the block left no tool, so the runtime states the
+        // dispositions instead of a model answering without tools (RC2-I).
+        boolean withheldOperationsAnswer = directAnswer == null && draft.generate() == null
+                && currentTurnPlan.workspaceOperationDispositions().answeredByRuntime();
+        if (withheldOperationsAnswer) {
+            directAnswer = currentTurnPlan.workspaceOperationDispositions().runtimeAnswer();
+        }
+        return new PreparedTurn(turnContext, currentTurnPlan, effectiveResolution, directAnswer, draft.generate(),
+                withheldOperationsAnswer);
     }
 
     private static void initializeExecutionPhaseForTurn(ExecutionPhase phase, Context ctx) {
@@ -287,7 +306,11 @@ final class AssistantTurnPreparation {
         ctx.executionPhaseState().moveTo(initial);
     }
 
-    private static Context withNativeToolSurface(
+    /** The turn's context with its tool surface, and why that surface was selected. */
+    private record SurfaceSelection(Context context, String reason) {
+    }
+
+    private static SurfaceSelection withNativeToolSurface(
             Context ctx,
             TaskResolution resolution,
             boolean forceRecompute
@@ -301,7 +324,7 @@ final class AssistantTurnPreparation {
         boolean blocksUnscopedMutation =
                 resolution != null && resolution.blocksUnscopedMutation();
         if (ctx == null) {
-            return ctx;
+            return new SurfaceSelection(ctx, "no turn context");
         }
         if (ctx.hasNativeToolSpecOverride()
                 && !forceRecompute
@@ -309,17 +332,17 @@ final class AssistantTurnPreparation {
                 && !blocksWorkspaceOperations
                 && !blocksUnscopedMutation
                 && carriesAuthorizedOperationTools(ctx.nativeToolSpecs(), resolution)) {
-            return ctx;
+            return new SurfaceSelection(ctx, "mode-pinned surface kept");
         }
         ExecutionPhase phase = ctx.executionPhaseState() == null
                 ? ExecutionPhase.APPLY
                 : ctx.executionPhaseState().phase();
-        return ctx.withNativeToolSpecs(
-                NativeToolSpecPolicy.select(
-                        resolution,
-                        phase,
-                        ctx.toolRegistry(),
-                        ctx.cfg()));
+        var plan = NativeToolSpecPolicy.selectPlan(
+                resolution,
+                phase,
+                ctx.toolRegistry(),
+                ctx.cfg());
+        return new SurfaceSelection(ctx.withNativeToolSpecs(plan.nativeToolSpecs()), plan.reason());
     }
 
     /** A kept surface must carry the exact tool of every authorized workspace operation (P3d). */

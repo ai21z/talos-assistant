@@ -158,6 +158,23 @@ final class OutcomeDominancePolicy {
                 : advisory();
     }
 
+    /**
+     * A requested workspace operation that the runtime withheld keeps a COMPLETE turn from completing (RC2-I). A turn
+     * that changed files becomes PARTIAL, and one that changed nothing, such as a read-only answer or a plan, becomes
+     * ADVISORY_ONLY, as an incomplete answer does in the trace. Every other status already states that the turn did
+     * not complete.
+     */
+    static Decision withWithheldOperations(Decision decision, boolean withheld, boolean changedFiles) {
+        if (!withheld || decision == null
+                || decision.completionStatus() != ExecutionOutcome.CompletionStatus.COMPLETE) return decision;
+        if (!changedFiles) {
+            return new Decision(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, TaskCompletionStatus.ADVISORY_ONLY,
+                    decision.blockedByPolicy());
+        }
+        return new Decision(ExecutionOutcome.CompletionStatus.PARTIAL, TaskCompletionStatus.PARTIAL,
+                decision.blockedByPolicy());
+    }
+
     static Decision decide(Facts facts) {
         if (facts == null) {
             facts = new Facts(
