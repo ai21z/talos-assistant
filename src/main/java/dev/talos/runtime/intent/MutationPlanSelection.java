@@ -336,7 +336,7 @@ public final class MutationPlanSelection {
                     : sequentialPlan.ownedRegions()) {
                 regions.add(new SelectedRegion(
                         Owner.SEQUENTIAL_MUTATION_CLAUSE,
-                        region.kind().name(),
+                        SequentialMutationClausePlan.durableKindName(region.kind()),
                         "",
                         "",
                         region.startOffset(),

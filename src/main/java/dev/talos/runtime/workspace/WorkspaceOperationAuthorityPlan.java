@@ -138,11 +138,17 @@ public final class WorkspaceOperationAuthorityPlan {
                     "workspace authority merge requires one canonical request");
         }
         int tailClauses = tail.workspaceOperationClauseObservations().size();
+        // A prohibited workspace operation still counts. Its polarity comes
+        // from lexical recognition, which may narrow authority but must never
+        // let another operation become the single authorized one.
         long sequentialClauses = sequential.ownedRegions().stream()
                 .filter(region ->
                         region.kind()
-                                == SequentialMutationClausePlan.RegionKind
-                                        .WORKSPACE_OPERATION)
+                                        == SequentialMutationClausePlan.RegionKind
+                                                .WORKSPACE_OPERATION
+                                || region.kind()
+                                        == SequentialMutationClausePlan.RegionKind
+                                                .PROHIBITED_WORKSPACE_OPERATION)
                 .count();
         long observedClauses = tailClauses + sequentialClauses;
         List<WorkspaceOperationObligation> typed = java.util.stream.Stream

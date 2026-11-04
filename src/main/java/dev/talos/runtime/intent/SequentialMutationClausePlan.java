@@ -57,6 +57,17 @@ public record SequentialMutationClausePlan(
     public enum RegionKind {
         CONTENT_MUTATION,
         WORKSPACE_OPERATION,
+        /**
+         * A content-mutation clause that only prohibits. It masks the legacy
+         * mutation scan and narrows authority like its family region.
+         */
+        PROHIBITED_CONTENT_MUTATION,
+        /**
+         * A workspace-operation clause that only prohibits. It still counts and
+         * blocks like a workspace-operation region, because its polarity comes
+         * from lexical recognition, which may narrow but never widen authority.
+         */
+        PROHIBITED_WORKSPACE_OPERATION,
         PROVIDER_REMOVED_CONTROL_CLAUSE,
         TARGET_OUTPUT_LIMIT_QUARANTINE,
         TARGET_OCCURRENCE_LIMIT_QUARANTINE,
@@ -115,6 +126,7 @@ public record SequentialMutationClausePlan(
         public boolean masksLegacyMutationScan() {
             return kind == RegionKind.CONTENT_MUTATION
                     || kind == RegionKind.WORKSPACE_OPERATION
+                    || isProhibitionKind(kind)
                     || kind == RegionKind.PROVIDER_REMOVED_CONTROL_CLAUSE
                     || kind == RegionKind.TARGET_OUTPUT_LIMIT_QUARANTINE
                     || kind == RegionKind.TARGET_OCCURRENCE_LIMIT_QUARANTINE
@@ -440,7 +452,18 @@ public record SequentialMutationClausePlan(
                             == ActionFamily.WORKSPACE_OPERATION
                     ? RegionKind.WORKSPACE_OPERATION
                     : RegionKind.CONTENT_MUTATION;
-            if (maximumRegionEnd.getOrDefault(expectedKind, -1)
+            // A prohibition sits in its family's prohibition clause, or in its
+            // family region when bounded authority analysis failed closed.
+            RegionKind prohibitedKind = decision.actionFamily()
+                            == ActionFamily.WORKSPACE_OPERATION
+                    ? RegionKind.PROHIBITED_WORKSPACE_OPERATION
+                    : RegionKind.PROHIBITED_CONTENT_MUTATION;
+            boolean prohibitionContained = decision.authority()
+                            == Authority.FORBIDDEN
+                    && maximumRegionEnd.getOrDefault(prohibitedKind, -1)
+                            >= decision.endOffset();
+            if (!prohibitionContained
+                    && maximumRegionEnd.getOrDefault(expectedKind, -1)
                     < decision.endOffset()) {
                 throw new IllegalArgumentException(
                         "decision evidence must have one containing typed region: "
@@ -899,10 +922,66 @@ public record SequentialMutationClausePlan(
 
     public boolean blocksWorkspaceOperations() {
         return ownedRegions.stream().anyMatch(region ->
-                        region.kind() == RegionKind.WORKSPACE_OPERATION)
+                        region.kind() == RegionKind.WORKSPACE_OPERATION
+                                || region.kind()
+                                        == RegionKind.PROHIBITED_WORKSPACE_OPERATION)
                 || occurrenceDecisions.stream().anyMatch(decision ->
                         decision.actionFamily()
                                 == ActionFamily.WORKSPACE_OPERATION);
+    }
+
+    /** True for a region that only prohibits, whatever its action family. */
+    public static boolean isProhibitionKind(RegionKind kind) {
+        return kind == RegionKind.PROHIBITED_CONTENT_MUTATION
+                || kind == RegionKind.PROHIBITED_WORKSPACE_OPERATION;
+    }
+
+    /** The family region of a prohibition kind, and any other kind itself. */
+    public static RegionKind familyKind(RegionKind kind) {
+        if (kind == RegionKind.PROHIBITED_CONTENT_MUTATION) {
+            return RegionKind.CONTENT_MUTATION;
+        }
+        if (kind == RegionKind.PROHIBITED_WORKSPACE_OPERATION) {
+            return RegionKind.WORKSPACE_OPERATION;
+        }
+        return kind;
+    }
+
+    /** The prohibition kind of a family region, or null for any other kind. */
+    public static RegionKind prohibitedKind(RegionKind kind) {
+        if (kind == RegionKind.CONTENT_MUTATION) {
+            return RegionKind.PROHIBITED_CONTENT_MUTATION;
+        }
+        if (kind == RegionKind.WORKSPACE_OPERATION) {
+            return RegionKind.PROHIBITED_WORKSPACE_OPERATION;
+        }
+        return null;
+    }
+
+    /**
+     * The durable name of a region kind. A prohibition clause is persisted
+     * under its family's name, so durable evidence stays identical to the
+     * evidence written before polarity was typed and earlier sessions still
+     * match their parser manifest when they are restored.
+     */
+    public static String durableKindName(RegionKind kind) {
+        return familyKind(kind).name();
+    }
+
+    /**
+     * True when every owned region is a prohibition clause and every decision
+     * is a prohibition. Such a plan only narrows authority, so it may keep a
+     * read-only request's own surface and targets. It still blocks workspace
+     * operations. A plan whose prohibition analysis failed closed keeps its
+     * family regions and is not prohibition-only.
+     */
+    public boolean onlyProhibits() {
+        return authorityLimit == null
+                && !ownedRegions.isEmpty()
+                && ownedRegions.stream().allMatch(region ->
+                        isProhibitionKind(region.kind()))
+                && occurrenceDecisions.stream().allMatch(decision ->
+                        decision.authority() == Authority.FORBIDDEN);
     }
 
     public Map<String, IntentDerivation> requiredDerivations() {

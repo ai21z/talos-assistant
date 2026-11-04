@@ -240,6 +240,21 @@ public final class ToolSurfacePlanner {
                 registry,
                 availability,
                 safeResolution.blocksWorkspaceOperations());
+        if (safeResolution.relievesReadOnlyProhibition()) {
+            // A prohibition never adds a tool to a read-only request. Tools
+            // that change files stay out, and a command stays only where the
+            // request's own surface offers it, behind approval.
+            List<String> nonMutating = select(
+                    registry,
+                    descriptor -> !mutatesOrDestroys(descriptor),
+                    availability,
+                    base.reason()).nativeToolNames();
+            base = new Plan(
+                    base.nativeToolSpecs().stream()
+                            .filter(spec -> nonMutating.contains(spec.name()))
+                            .toList(),
+                    base.reason());
+        }
         if (!safeResolution.blocksWorkspaceOperations()) return base;
         return new Plan(
                 base.nativeToolSpecs().stream()
@@ -364,6 +379,14 @@ public final class ToolSurfacePlanner {
                 .map(ToolSurfacePlanner::toSpec)
                 .toList();
         return new Plan(specs, reason);
+    }
+
+    private static boolean mutatesOrDestroys(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        return metadata == null
+                || metadata.mutatesWorkspace()
+                || metadata.destructive()
+                || metadata.requiresCheckpoint();
     }
 
     private static boolean isReadOnlyOperation(ToolDescriptor descriptor) {

@@ -247,12 +247,18 @@ public final class SequentialMutationClauseParser {
                         .filter(occurrence -> view.isTopLevel(
                                 occurrence.start()))
                 .toList();
-        List<CanonicalMutationClauseMatcher.Action> indexedActions =
+        CanonicalMutationClauseMatcher.IndexedActions indexed =
                 CanonicalMutationClauseMatcher.indexedActions(
                         authorityView,
                         0,
                         request.length(),
-                        targetEnvelopes).actions().stream()
+                        targetEnvelopes);
+        // A fail-closed budget classification looks like a prohibition, so
+        // prohibition clauses are typed only when every action was classified.
+        boolean typedPolarity =
+                indexed.work().fallbackFailClosedClassifications() == 0;
+        List<CanonicalMutationClauseMatcher.Action> indexedActions =
+                indexed.actions().stream()
                         .filter(action -> !intersectsExcluded(
                                 excluded,
                                 action.start(),
@@ -365,7 +371,8 @@ public final class SequentialMutationClauseParser {
                             decisions,
                             regionIdentities,
                             evidence,
-                            work);
+                            work,
+                            typedPolarity);
                     preAnchorBoundEnd = bound.outputEnd();
                     continue;
                 }
@@ -402,17 +409,6 @@ public final class SequentialMutationClauseParser {
                                         rejectedSpan.end())) {
                             String sourceText = evidence.materialize(
                                     rejectedSpan);
-                            work.regionDedupLookups++;
-                            addRegion(
-                                    regions,
-                                    regionIdentities,
-                                    new SequentialMutationClausePlan.OwnedRegion(
-                                            SequentialMutationClausePlan
-                                                    .RegionKind.CONTENT_MUTATION,
-                                            rejectedSpan.start(),
-                                            rejectedSpan.end(),
-                                            sourceText),
-                                    evidence);
                             SequentialMutationClausePlan.Authority
                                     rejectedAuthority = authority
                                             == SequentialMutationClausePlan
@@ -420,6 +416,20 @@ public final class SequentialMutationClauseParser {
                                             ? authority
                                             : SequentialMutationClausePlan
                                                     .Authority.NON_AUTHORITATIVE;
+                            work.regionDedupLookups++;
+                            addRegion(
+                                    regions,
+                                    regionIdentities,
+                                    new SequentialMutationClausePlan.OwnedRegion(
+                                            regionKind(
+                                                    CanonicalMutationClauseMatcher
+                                                            .Family.CONTENT_MUTATION,
+                                                    rejectedAuthority,
+                                                    typedPolarity),
+                                            rejectedSpan.start(),
+                                            rejectedSpan.end(),
+                                            sourceText),
+                                    evidence);
                             for (CoordinatedMutationTailParser.TargetOccurrence
                                     target : bound.targets()) {
                                 addDecisionIfContained(
@@ -459,7 +469,8 @@ public final class SequentialMutationClauseParser {
                                 decisions,
                                 regionIdentities,
                                 evidence,
-                                work);
+                                work,
+                                typedPolarity);
                         preAnchorBoundEnd = bound.outputEnd();
                         continue;
                     }
@@ -483,17 +494,6 @@ public final class SequentialMutationClauseParser {
                                         restrictiveSpan.end())) {
                             String sourceText = evidence.materialize(
                                     restrictiveSpan);
-                            work.regionDedupLookups++;
-                            addRegion(
-                                    regions,
-                                    regionIdentities,
-                                    new SequentialMutationClausePlan.OwnedRegion(
-                                            SequentialMutationClausePlan.RegionKind
-                                                    .CONTENT_MUTATION,
-                                            restrictiveSpan.start(),
-                                            restrictiveSpan.end(),
-                                            sourceText),
-                                    evidence);
                             SequentialMutationClausePlan.Authority
                                     restrictiveAuthority = preAnchorAuthority
                                             == SequentialMutationClausePlan
@@ -501,6 +501,20 @@ public final class SequentialMutationClauseParser {
                                             ? SequentialMutationClausePlan
                                                     .Authority.NON_AUTHORITATIVE
                                             : preAnchorAuthority;
+                            work.regionDedupLookups++;
+                            addRegion(
+                                    regions,
+                                    regionIdentities,
+                                    new SequentialMutationClausePlan.OwnedRegion(
+                                            regionKind(
+                                                    CanonicalMutationClauseMatcher
+                                                            .Family.CONTENT_MUTATION,
+                                                    restrictiveAuthority,
+                                                    typedPolarity),
+                                            restrictiveSpan.start(),
+                                            restrictiveSpan.end(),
+                                            sourceText),
+                                    evidence);
                             for (CoordinatedMutationTailParser.TargetOccurrence
                                     target : bound.targets()) {
                                 addDecisionIfContained(
@@ -548,25 +562,6 @@ public final class SequentialMutationClauseParser {
                                     rejectedSpan.start(),
                                     rejectedSpan.end())) {
                         String sourceText = evidence.materialize(rejectedSpan);
-                        SequentialMutationClausePlan.RegionKind regionKind =
-                                bound.family()
-                                                == CanonicalMutationClauseMatcher
-                                                        .Family
-                                                        .WORKSPACE_OPERATION
-                                        ? SequentialMutationClausePlan
-                                                .RegionKind.WORKSPACE_OPERATION
-                                        : SequentialMutationClausePlan
-                                                .RegionKind.CONTENT_MUTATION;
-                        work.regionDedupLookups++;
-                        addRegion(
-                                regions,
-                                regionIdentities,
-                                new SequentialMutationClausePlan.OwnedRegion(
-                                        regionKind,
-                                        rejectedSpan.start(),
-                                        rejectedSpan.end(),
-                                        sourceText),
-                                evidence);
                         SequentialMutationClausePlan.Authority rejectedAuthority =
                                 authority
                                                 == SequentialMutationClausePlan
@@ -574,6 +569,19 @@ public final class SequentialMutationClauseParser {
                                         ? authority
                                         : SequentialMutationClausePlan
                                                 .Authority.NON_AUTHORITATIVE;
+                        work.regionDedupLookups++;
+                        addRegion(
+                                regions,
+                                regionIdentities,
+                                new SequentialMutationClausePlan.OwnedRegion(
+                                        regionKind(
+                                                bound.family(),
+                                                rejectedAuthority,
+                                                typedPolarity),
+                                        rejectedSpan.start(),
+                                        rejectedSpan.end(),
+                                        sourceText),
+                                evidence);
                         for (CoordinatedMutationTailParser.TargetOccurrence target
                                 : bound.targets()) {
                             addDecisionIfContained(
@@ -609,24 +617,7 @@ public final class SequentialMutationClauseParser {
                             regionSpan.end())) {
                 continue;
             }
-            SequentialMutationClausePlan.RegionKind regionKind =
-                    bound.family()
-                                    == CanonicalMutationClauseMatcher.Family
-                                            .WORKSPACE_OPERATION
-                            ? SequentialMutationClausePlan.RegionKind
-                                    .WORKSPACE_OPERATION
-                            : SequentialMutationClausePlan.RegionKind
-                                    .CONTENT_MUTATION;
             String sourceText = evidence.materialize(regionSpan);
-            work.regionDedupLookups++;
-            addRegion(regions, regionIdentities,
-                    new SequentialMutationClausePlan.OwnedRegion(
-                    regionKind,
-                    regionSpan.start(),
-                    regionSpan.end(),
-                            sourceText),
-                    evidence);
-
             boolean recognizedActionLead = SEQUENTIAL_ACTION_LEAD.matcher(
                     view.maskedLower().substring(
                             boundary.clauseStart(),
@@ -646,6 +637,14 @@ public final class SequentialMutationClauseParser {
                     ? authority
                     : SequentialMutationClausePlan.Authority
                             .NON_AUTHORITATIVE;
+            work.regionDedupLookups++;
+            addRegion(regions, regionIdentities,
+                    new SequentialMutationClausePlan.OwnedRegion(
+                    regionKind(bound.family(), boundedAuthority, typedPolarity),
+                    regionSpan.start(),
+                    regionSpan.end(),
+                            sourceText),
+                    evidence);
 
             for (CoordinatedMutationTailParser.TargetOccurrence target
                     : bound.targets()) {
@@ -694,7 +693,8 @@ public final class SequentialMutationClauseParser {
                 regionIdentities,
                 boundActions,
                 evidence,
-                work);
+                work,
+                typedPolarity);
         addDirectPassiveMutationQuarantines(
                 view,
                 occurrences,
@@ -903,7 +903,8 @@ public final class SequentialMutationClauseParser {
             List<SequentialMutationClausePlan.ClauseDecision> decisions,
             Set<RegionIdentity> regionIdentities,
             EvidenceBudget evidence,
-            MutableParseWork work
+            MutableParseWork work,
+            boolean typedPolarity
     ) {
         if (view == null || bound == null || directAuthority == null) return;
         RequestLexicalView.Span span = view.trimmedSpan(
@@ -922,11 +923,8 @@ public final class SequentialMutationClauseParser {
                             .WORKSPACE_OPERATION_BLOCKED
                     : SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE;
         }
-        SequentialMutationClausePlan.RegionKind kind = bound.family()
-                        == CanonicalMutationClauseMatcher.Family
-                                .WORKSPACE_OPERATION
-                ? SequentialMutationClausePlan.RegionKind.WORKSPACE_OPERATION
-                : SequentialMutationClausePlan.RegionKind.CONTENT_MUTATION;
+        SequentialMutationClausePlan.RegionKind kind =
+                regionKind(bound.family(), safeAuthority, typedPolarity);
         String sourceText = evidence.materialize(span);
         work.regionDedupLookups++;
         addRegion(
@@ -2042,7 +2040,8 @@ public final class SequentialMutationClauseParser {
             Set<RegionIdentity> regionIdentities,
             List<BoundAction> boundActions,
             EvidenceBudget evidence,
-            MutableParseWork work
+            MutableParseWork work,
+            boolean typedPolarity
     ) {
         if (view == null || actions == null || actions.isEmpty()) return;
         Map<Integer, BoundAction> boundByStart = boundActions.stream()
@@ -2096,10 +2095,14 @@ public final class SequentialMutationClauseParser {
                             span.start(),
                             span.end())
                     || regions.stream().anyMatch(region ->
-                            region.kind()
-                                            == SequentialMutationClausePlan
-                                                    .RegionKind
-                                                    .WORKSPACE_OPERATION
+                            (region.kind()
+                                                    == SequentialMutationClausePlan
+                                                            .RegionKind
+                                                            .WORKSPACE_OPERATION
+                                            || region.kind()
+                                                    == SequentialMutationClausePlan
+                                                            .RegionKind
+                                                            .PROHIBITED_WORKSPACE_OPERATION)
                                     && region.startOffset() <= action.start()
                                     && region.endOffset() >= action.end())) {
                 continue;
@@ -2110,8 +2113,14 @@ public final class SequentialMutationClauseParser {
                     regions,
                     regionIdentities,
                     new SequentialMutationClausePlan.OwnedRegion(
-                            SequentialMutationClausePlan.RegionKind
-                                    .WORKSPACE_OPERATION,
+                            typedPolarity
+                                            && action.scopeKind()
+                                                    == CanonicalMutationClauseMatcher
+                                                            .ScopeKind.PROHIBITED
+                                    ? SequentialMutationClausePlan.RegionKind
+                                            .PROHIBITED_WORKSPACE_OPERATION
+                                    : SequentialMutationClausePlan.RegionKind
+                                            .WORKSPACE_OPERATION,
                             span.start(),
                             span.end(),
                             sourceText),
@@ -2194,9 +2203,12 @@ public final class SequentialMutationClauseParser {
                 continue;
             }
             boolean alreadyQuarantined = regions.stream().anyMatch(region ->
-                    region.kind()
-                                    == SequentialMutationClausePlan.RegionKind
-                                            .WORKSPACE_OPERATION
+                    (region.kind()
+                                            == SequentialMutationClausePlan.RegionKind
+                                                    .WORKSPACE_OPERATION
+                                    || region.kind()
+                                            == SequentialMutationClausePlan.RegionKind
+                                                    .PROHIBITED_WORKSPACE_OPERATION)
                             && region.startOffset() <= occurrence.envelopeStart()
                             && region.endOffset() >= passiveEnd);
             if (alreadyQuarantined) continue;
@@ -2298,12 +2310,72 @@ public final class SequentialMutationClauseParser {
             SequentialMutationClausePlan.OwnedRegion candidate,
             EvidenceBudget evidence
     ) {
+        // A prohibition clause and its family region over one exact span are
+        // the one region of that span, and the family region outranks it. Any
+        // other pair on one span is kept, so the plan still rejects it.
+        SequentialMutationClausePlan.RegionKind family =
+                SequentialMutationClausePlan.familyKind(candidate.kind());
+        if (SequentialMutationClausePlan.isProhibitionKind(candidate.kind())) {
+            if (identities.contains(new RegionIdentity(
+                    family,
+                    candidate.startOffset(),
+                    candidate.endOffset()))) {
+                return;
+            }
+        } else {
+            SequentialMutationClausePlan.RegionKind prohibited =
+                    SequentialMutationClausePlan.prohibitedKind(candidate.kind());
+            if (prohibited != null && identities.remove(new RegionIdentity(
+                    prohibited,
+                    candidate.startOffset(),
+                    candidate.endOffset()))) {
+                for (int index = 0; index < regions.size(); index++) {
+                    SequentialMutationClausePlan.OwnedRegion existing =
+                            regions.get(index);
+                    if (existing.kind() == prohibited
+                            && existing.startOffset() == candidate.startOffset()
+                            && existing.endOffset() == candidate.endOffset()) {
+                        regions.set(index, candidate);
+                        identities.add(new RegionIdentity(
+                                candidate.kind(),
+                                candidate.startOffset(),
+                                candidate.endOffset()));
+                        return;
+                    }
+                }
+            }
+        }
         if (identities.add(new RegionIdentity(
                 candidate.kind(),
                 candidate.startOffset(),
                 candidate.endOffset()))) {
             evidence.addRegion(regions, candidate);
         }
+    }
+
+    /**
+     * The kind of the region that owns one bound action. A prohibition forms
+     * its family's prohibition clause unless bounded authority analysis failed
+     * closed for the request, in which case it keeps its family region.
+     */
+    private static SequentialMutationClausePlan.RegionKind regionKind(
+            CanonicalMutationClauseMatcher.Family family,
+            SequentialMutationClausePlan.Authority authority,
+            boolean typedPolarity
+    ) {
+        boolean workspace =
+                family == CanonicalMutationClauseMatcher.Family.WORKSPACE_OPERATION;
+        if (typedPolarity
+                && authority == SequentialMutationClausePlan.Authority.FORBIDDEN) {
+            return workspace
+                    ? SequentialMutationClausePlan.RegionKind
+                            .PROHIBITED_WORKSPACE_OPERATION
+                    : SequentialMutationClausePlan.RegionKind
+                            .PROHIBITED_CONTENT_MUTATION;
+        }
+        return workspace
+                ? SequentialMutationClausePlan.RegionKind.WORKSPACE_OPERATION
+                : SequentialMutationClausePlan.RegionKind.CONTENT_MUTATION;
     }
 
     private record RegionIdentity(

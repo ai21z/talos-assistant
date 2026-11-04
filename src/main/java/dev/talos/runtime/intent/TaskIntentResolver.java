@@ -297,8 +297,20 @@ public final class TaskIntentResolver {
                 SequentialMutationClausePlan.Authority.NON_AUTHORITATIVE));
         mentionedOnlyTargets.addAll(sequentialMutationPlan.pathsWithAuthority(
                 SequentialMutationClausePlan.Authority.WORKSPACE_OPERATION_BLOCKED));
+        // A plan that only prohibits narrows authority. It never forces a typed
+        // projection that would drop the requested targets of the request.
+        boolean prohibitionOnly = sequentialMutationPlan.onlyProhibits()
+                && mutationTailPlan.decisions().isEmpty()
+                && mutationTailPlan.workspaceOperationObservations().isEmpty()
+                && mutationTailPlan.workspaceOperationClauseObservations().isEmpty()
+                && mutationTailPlan.workspaceOperationObligations().isEmpty();
+        boolean sequentialRequiresProjection = sequentialMutationPlan.present()
+                && !(prohibitionOnly
+                        && sequentialMutationPlan.decisions().isEmpty()
+                        && !legacyContract.mutationAllowed()
+                        && !legacyContract.mutationRequested());
         boolean requiresTypedProjection = !mutationTailPlan.decisions().isEmpty()
-                || sequentialMutationPlan.present()
+                || sequentialRequiresProjection
                 || hasNonLiteralQuotedExpectedTarget(
                         canonicalRequest,
                         normalizedPaths(legacyContract.expectedTargets()));
@@ -310,10 +322,25 @@ public final class TaskIntentResolver {
                 || mutationTargets.equals(normalizedPaths(
                         authorityContract.expectedTargets())))
                 && mutationTailPlan.decisions().isEmpty()
-                && !sequentialMutationPlan.present()) {
+                && !sequentialRequiresProjection) {
             return measured(new IntentResolution(
                     fromLegacyContract(legacyContract, work),
                     mutationTailPlan,
+                    sequentialMutationPlan), work);
+        }
+        if (prohibitionOnly
+                && !authorityContract.mutationAllowed()
+                && !authorityContract.mutationRequested()) {
+            TaskIntent intent = readOnlyIntentWithProhibitions(
+                    authorityContract,
+                    sequentialMutationPlan,
+                    work);
+            return measured(new IntentResolution(
+                    intent,
+                    projectSupersededNonAuthorityDecisions(
+                            mutationTailPlan,
+                            sequentialMutationPlan,
+                            intent),
                     sequentialMutationPlan), work);
         }
         TaskIntent intent = rolefulIntent(
@@ -1197,6 +1224,39 @@ public final class TaskIntentResolver {
                 new ArtifactTargetSet(targets),
                 contract.originalUserRequest(),
                 contract.classificationReason());
+    }
+
+    /**
+     * A read-only request keeps its own targets when its typed plan only
+     * prohibits. Each prohibition is added with the derivation of its exact
+     * decision, so the plan still binds the intent.
+     */
+    private static TaskIntent readOnlyIntentWithProhibitions(
+            TaskContract authorityContract,
+            SequentialMutationClausePlan sequentialMutationPlan,
+            MutableResolverWork work
+    ) {
+        TaskIntent legacy = fromLegacyContract(authorityContract, work);
+        LinkedHashMap<String, TargetRef> targets = new LinkedHashMap<>();
+        for (TargetRef target : legacy.targets().targets()) {
+            targets.put(target.path(), target);
+        }
+        for (SequentialMutationClausePlan.ClauseDecision decision
+                : sequentialMutationPlan.effectiveDecisions()) {
+            targets.put(decision.path(), new TargetRef(
+                    decision.path(),
+                    TargetRole.FORBIDDEN,
+                    decision.derivation()));
+            recordTargetAccumulatorWrite(work);
+        }
+        return new TaskIntent(
+                legacy.type(),
+                legacy.mutationRequested(),
+                legacy.mutationAllowed(),
+                legacy.verificationRequired(),
+                new ArtifactTargetSet(List.copyOf(targets.values())),
+                legacy.originalUserRequest(),
+                legacy.classificationReason());
     }
 
     private static TaskIntent rolefulIntent(

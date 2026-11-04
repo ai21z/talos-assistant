@@ -308,6 +308,11 @@ public record TaskResolution(
     }
 
     public boolean limitsMutationAuthority() {
+        // A read-only request has no mutation authority to limit, so a plan
+        // that only prohibits leaves its own read or listing surface intact.
+        boolean readOnlyProhibition = !intent.mutationAllowed()
+                && !intent.mutationRequested()
+                && sequentialMutationPlan.onlyProhibits();
         return mutationTailPlan.present()
                 && (!mutationTailPlan.decisions().isEmpty()
                         || !mutationTailPlan
@@ -317,14 +322,33 @@ public record TaskResolution(
                                 .workspaceOperationClauseObservations()
                                 .isEmpty())
                 || sequentialMutationPlan.present()
+                        && !readOnlyProhibition
                         && (!sequentialMutationPlan.decisions().isEmpty()
                                 || sequentialMutationPlan
                                         .blocksWorkspaceOperations()
                                 || sequentialMutationPlan
                                         .authorityLimitExceeded())
-                || !intent.targets().pathsByRole(
-                                TargetRole.FORBIDDEN)
-                        .isEmpty();
+                || !readOnlyProhibition
+                        && !intent.targets().pathsByRole(
+                                        TargetRole.FORBIDDEN)
+                                .isEmpty();
+    }
+
+    /**
+     * True when a read-only request's plan only prohibits and that plan would
+     * otherwise have limited mutation authority. The request then keeps its
+     * own surface, from which the planner removes every tool that changes or
+     * destroys files.
+     */
+    public boolean relievesReadOnlyProhibition() {
+        if (intent.mutationAllowed()
+                || intent.mutationRequested()
+                || !sequentialMutationPlan.onlyProhibits()) {
+            return false;
+        }
+        return !sequentialMutationPlan.decisions().isEmpty()
+                || sequentialMutationPlan.blocksWorkspaceOperations()
+                || !intent.targets().pathsByRole(TargetRole.FORBIDDEN).isEmpty();
     }
 
     public boolean blocksUnscopedMutation() {
