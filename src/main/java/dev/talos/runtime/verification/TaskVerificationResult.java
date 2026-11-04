@@ -7,13 +7,17 @@ import java.util.List;
  *
  * <p>A pass states the scope of its proof (MICA invariant I3, decision D5). Only a pass whose checks were derived
  * from the request is request-bound, and only that pass can complete a task as verified.
+ *
+ * <p>{@code replacementNotAsserted} marks a result whose request named a replacement that the evidence could neither
+ * prove nor refute (P17), so its rendering does not claim that no task-specific verifier applied.
  */
 public record TaskVerificationResult(
         TaskVerificationStatus status,
         String summary,
         List<String> facts,
         List<String> problems,
-        ProofScope proofScope
+        ProofScope proofScope,
+        boolean replacementNotAsserted
 ) {
     /** What a pass proves. */
     public enum ProofScope {
@@ -37,6 +41,16 @@ public record TaskVerificationResult(
     public TaskVerificationResult(
             TaskVerificationStatus status, String summary, List<String> facts, List<String> problems) {
         this(status, summary, facts, problems, ProofScope.NONE);
+    }
+
+    public TaskVerificationResult(
+            TaskVerificationStatus status,
+            String summary,
+            List<String> facts,
+            List<String> problems,
+            ProofScope proofScope
+    ) {
+        this(status, summary, facts, problems, proofScope, false);
     }
 
     public static TaskVerificationResult notRun(String summary) {

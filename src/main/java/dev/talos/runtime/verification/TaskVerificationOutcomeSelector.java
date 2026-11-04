@@ -45,11 +45,77 @@ final class TaskVerificationOutcomeSelector {
             VerificationReport verificationReport,
             Collection<String> changedFiles
     ) {
-        List<String> safeFacts = facts == null ? List.of() : facts;
-        List<String> safeProblems = problems == null ? List.of() : problems;
         TaskExpectationStaticVerifier.Result expectation = expectationVerification == null
                 ? TaskExpectationStaticVerifier.Result.empty()
                 : expectationVerification;
+        TaskVerificationResult selected = selectAsserted(
+                facts,
+                problems,
+                mutatedTargetCount,
+                webCoherenceRequired,
+                expectation,
+                exactEditVerification,
+                sourceDerivedVerification,
+                verificationReport,
+                changedFiles);
+        return withNotAssertedReplacements(selected, expectation.notAssertedReplacements());
+    }
+
+    /**
+     * A replacement that was not asserted is stated with its counts on a result that did not fail, and the result is
+     * not request-bound, because part of the request was not verified (P17, D11 option A). A failed result keeps its
+     * summary, so its problem selection and repair offer are unchanged. The production caller applies this after the
+     * command upgrade, so the statement survives a summary that the upgrade replaces.
+     */
+    static TaskVerificationResult withNotAssertedReplacements(
+            TaskVerificationResult selected,
+            List<ReplacementOccurrenceScope.NotAsserted> notAsserted
+    ) {
+        if (selected == null || notAsserted == null || notAsserted.isEmpty()
+                || selected.status() == TaskVerificationStatus.FAILED) {
+            return selected;
+        }
+        StringBuilder summary = new StringBuilder(selected.summary());
+        for (ReplacementOccurrenceScope.NotAsserted item : notAsserted) {
+            if (!summary.isEmpty()) summary.append(' ');
+            summary.append(notAssertedSentence(item));
+        }
+        return new TaskVerificationResult(
+                selected.status(),
+                summary.toString(),
+                selected.facts(),
+                selected.problems(),
+                selected.proofScope() == TaskVerificationResult.ProofScope.REQUEST_BOUND
+                        ? TaskVerificationResult.ProofScope.CHECKS
+                        : selected.proofScope(),
+                true);
+    }
+
+    /** Built only from the typed record, so no request prose enters the answer. */
+    static String notAssertedSentence(ReplacementOccurrenceScope.NotAsserted item) {
+        int remaining = item.remainingOccurrences();
+        return "Requested replacement not verified: " + item.pathHint()
+                + " held the old text " + item.priorOccurrences() + " times before the change and "
+                + (remaining == 0 ? "none remain." : remaining == 1 ? "1 remains." : remaining + " remain.");
+    }
+
+    /** The selection without the statement of replacements that were not asserted. */
+    static TaskVerificationResult selectAsserted(
+            List<String> facts,
+            List<String> problems,
+            int mutatedTargetCount,
+            boolean webCoherenceRequired,
+            TaskExpectationStaticVerifier.Result expectationVerification,
+            ExactEditReplacementVerifier.Result exactEditVerification,
+            SourceDerivedArtifactVerifier.Result sourceDerivedVerification,
+            VerificationReport verificationReport,
+            Collection<String> changedFiles
+    ) {
+        TaskExpectationStaticVerifier.Result expectation = expectationVerification == null
+                ? TaskExpectationStaticVerifier.Result.empty()
+                : expectationVerification;
+        List<String> safeFacts = facts == null ? List.of() : facts;
+        List<String> safeProblems = problems == null ? List.of() : problems;
         ExactEditReplacementVerifier.Result exactEdit = exactEditVerification == null
                 ? new ExactEditReplacementVerifier.Result(false, false, false, List.of(), List.of())
                 : exactEditVerification;
@@ -143,9 +209,13 @@ final class TaskVerificationOutcomeSelector {
                     ? TaskVerificationResult.passedForRequest(summary, safeFacts)
                     : TaskVerificationResult.passed(summary, safeFacts);
         }
+        // A replacement verifier that applied but asserted nothing is stated by the caller, so the summary does not
+        // claim that no verifier applied.
         return TaskVerificationResult.readbackOnly(
-                "Target/readback checks passed for " + mutatedTargetCount
-                        + " mutated target(s); no task-specific static verifier was applicable.",
+                expectation.notAssertedReplacements().isEmpty()
+                        ? "Target/readback checks passed for " + mutatedTargetCount
+                                + " mutated target(s); no task-specific static verifier was applicable."
+                        : "Target/readback checks passed for " + mutatedTargetCount + " mutated target(s).",
                 safeFacts);
     }
 

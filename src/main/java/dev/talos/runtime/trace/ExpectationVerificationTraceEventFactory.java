@@ -37,6 +37,27 @@ final class ExpectationVerificationTraceEventFactory {
         return TurnTraceEvent.simple("EXPECTATION_VERIFIED", Instant.now().toString(), data);
     }
 
+    /** Counts and kinds only. Neither the request nor the replacement texts enter the event. */
+    static TurnTraceEvent replacementOccurrenceScope(
+            String pathHint,
+            String sourcePattern,
+            String scopeKind,
+            int priorOccurrences,
+            int remainingOccurrences,
+            boolean landed,
+            String substitution
+    ) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("pathHint", TraceRedactor.pathHint(pathHint));
+        data.put("sourcePattern", safe(sourcePattern));
+        data.put("scopeKind", safe(scopeKind));
+        data.put("priorOccurrences", Math.max(0, priorOccurrences));
+        data.put("remainingOccurrences", Math.max(0, remainingOccurrences));
+        data.put("landed", landed);
+        data.put("substitution", safe(substitution));
+        return TurnTraceEvent.simple("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED", Instant.now().toString(), data);
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value.strip();
     }

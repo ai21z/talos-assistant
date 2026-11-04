@@ -338,7 +338,7 @@ public final class StaticTaskVerifier {
                 taskSpecificVerification.sourceDerivedVerification();
         VerificationReport claimReport = taskSpecificVerification.report();
 
-        TaskVerificationResult compatibilityResult = TaskVerificationOutcomeSelector.select(
+        TaskVerificationResult compatibilityResult = TaskVerificationOutcomeSelector.selectAsserted(
                 facts,
                 problems,
                 mutatedPaths.size(),
@@ -349,6 +349,9 @@ public final class StaticTaskVerifier {
                 claimReport,
                 mutatedPaths);
         compatibilityResult = withCommandVerificationUpgrade(compatibilityResult, outcomes);
+        compatibilityResult = TaskVerificationOutcomeSelector.withNotAssertedReplacements(
+                compatibilityResult,
+                expectationVerification.notAssertedReplacements());
         return TaskVerificationEvidence.postApply(
                 compatibilityResult,
                 claimReport,

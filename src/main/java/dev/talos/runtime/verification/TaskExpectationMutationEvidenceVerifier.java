@@ -15,11 +15,46 @@ final class TaskExpectationMutationEvidenceVerifier {
 
     private TaskExpectationMutationEvidenceVerifier() {}
 
+    /**
+     * The target's content before the turn, or null when the mutation evidence does not establish it. It requires
+     * exactly one successful mutation of the target, then reverses exact edit evidence against the final content or
+     * takes the prior content of complete full write evidence whose new content matches the final readback. No other
+     * evidence is read.
+     */
+    static String replacementPriorContent(
+            Path root,
+            String pathHint,
+            String finalContent,
+            List<ToolCallLoop.ToolOutcome> successfulMutations
+    ) {
+        if (finalContent == null || successfulMutations == null || successfulMutations.isEmpty()) return null;
+        List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
+                .filter(outcome -> outcome != null
+                        && outcome.success()
+                        && sameTarget(root, pathHint, outcome.pathHint()))
+                .toList();
+        if (relevant.size() != 1) return null;
+        ToolCallLoop.ToolOutcome outcome = relevant.getFirst();
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+        ToolMutationEvidence evidence = outcome.mutationEvidence();
+        if (evidence == null) return null;
+        if ("edit_file".equals(canonicalTool) && evidence.exactEditReplacement()) {
+            return reconstructExactEditBefore(finalContent, evidence.oldString(), evidence.newString());
+        }
+        if ("write_file".equals(canonicalTool)
+                && evidence.fullWriteReplacement()
+                && sameNormalizedContent(evidence.newString(), finalContent)) {
+            return evidence.oldString();
+        }
+        return null;
+    }
+
     static boolean verifyReplacementPreservation(
             Path root,
             ReplacementExpectation expectation,
             String pathHint,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
+            ReplacementOccurrenceScope scope,
             List<String> facts,
             List<String> problems
     ) {
@@ -43,16 +78,15 @@ final class TaskExpectationMutationEvidenceVerifier {
                             + "without exact edit evidence.");
                     return false;
                 }
-                if (!replacementOnlyChangesRequestedText(
-                        evidence.oldString(),
-                        evidence.newString(),
-                        expectation.oldText(),
-                        expectation.newText())) {
+                Preservation preservation = preservation(scope, evidence, expectation);
+                if (preservation == Preservation.CHANGED) {
                     problems.add(pathHint
                             + ": replacement preservation exact edit changed content beyond the requested text.");
                     return false;
                 }
-                facts.add(pathHint + ": exact edit evidence preserved content beyond requested replacement.");
+                if (preservation == Preservation.PRESERVED) {
+                    facts.add(pathHint + ": exact edit evidence preserved content beyond requested replacement.");
+                }
                 continue;
             }
             if ("write_file".equals(canonicalTool)) {
@@ -61,15 +95,14 @@ final class TaskExpectationMutationEvidenceVerifier {
                             + "without complete same-turn read evidence.");
                     return false;
                 }
-                if (!replacementOnlyChangesRequestedText(
-                        evidence.oldString(),
-                        evidence.newString(),
-                        expectation.oldText(),
-                        expectation.newText())) {
+                Preservation preservation = preservation(scope, evidence, expectation);
+                if (preservation == Preservation.CHANGED) {
                     problems.add(pathHint + ": replacement preservation changed content beyond the requested text.");
                     return false;
                 }
-                facts.add(pathHint + ": replacement preservation matched prior content.");
+                if (preservation == Preservation.PRESERVED) {
+                    facts.add(pathHint + ": replacement preservation matched prior content.");
+                }
                 continue;
             }
             problems.add(pathHint + ": mutation tool cannot prove preserve-rest replacement.");
@@ -88,6 +121,7 @@ final class TaskExpectationMutationEvidenceVerifier {
             String pathHint,
             String finalContent,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
+            ReplacementOccurrenceScope scope,
             List<String> facts,
             List<String> problems
     ) {
@@ -116,11 +150,8 @@ final class TaskExpectationMutationEvidenceVerifier {
                         + "without exact edit evidence.");
                 return FinalStateEvidence.failed();
             }
-            if (!replacementOnlyChangesRequestedText(
-                    evidence.oldString(),
-                    evidence.newString(),
-                    expectation.oldText(),
-                    expectation.newText())) {
+            Preservation preservation = preservation(scope, evidence, expectation);
+            if (preservation == Preservation.CHANGED) {
                 problems.add(pathHint
                         + ": replacement preservation exact edit changed content beyond the requested text.");
                 return FinalStateEvidence.failed();
@@ -134,19 +165,18 @@ final class TaskExpectationMutationEvidenceVerifier {
                         + ": exact edit evidence could not reconstruct the prior file.");
                 return FinalStateEvidence.failed();
             }
-            facts.add(pathHint
-                    + ": exact edit evidence preserved content beyond requested replacement.");
+            if (preservation == Preservation.PRESERVED) {
+                facts.add(pathHint
+                        + ": exact edit evidence preserved content beyond requested replacement.");
+            }
         } else if ("write_file".equals(canonicalTool)) {
             if (evidence == null || !evidence.fullWriteReplacement()) {
                 problems.add(pathHint + ": talos.write_file cannot prove preserve-rest replacement "
                         + "without complete same-turn read evidence.");
                 return FinalStateEvidence.failed();
             }
-            if (!replacementOnlyChangesRequestedText(
-                    evidence.oldString(),
-                    evidence.newString(),
-                    expectation.oldText(),
-                    expectation.newText())) {
+            Preservation preservation = preservation(scope, evidence, expectation);
+            if (preservation == Preservation.CHANGED) {
                 problems.add(pathHint
                         + ": replacement preservation changed content beyond the requested text.");
                 return FinalStateEvidence.failed();
@@ -157,7 +187,9 @@ final class TaskExpectationMutationEvidenceVerifier {
                 return FinalStateEvidence.failed();
             }
             beforeContent = evidence.oldString();
-            facts.add(pathHint + ": replacement preservation matched prior content.");
+            if (preservation == Preservation.PRESERVED) {
+                facts.add(pathHint + ": replacement preservation matched prior content.");
+            }
         } else {
             problems.add(pathHint + ": mutation tool cannot prove preserve-rest replacement.");
             return FinalStateEvidence.failed();
@@ -456,6 +488,34 @@ final class TaskExpectationMutationEvidenceVerifier {
         return finalContent.substring(0, reverse.startRaw())
                 + reverse.replacement()
                 + finalContent.substring(reverse.endRaw());
+    }
+
+    private enum Preservation { PRESERVED, CHANGED, UNDECIDED }
+
+    /**
+     * A repeated old text is preserved when the file change is a pure substitution of its occurrences, and undecided
+     * when the bounded search stopped, which neither proves nor refutes preservation. Every other scope keeps the
+     * one-occurrence rule on the mutation's own strings.
+     */
+    private static Preservation preservation(
+            ReplacementOccurrenceScope scope,
+            ToolMutationEvidence evidence,
+            ReplacementExpectation expectation
+    ) {
+        if (scope != null && scope.repeated()) {
+            return switch (scope.substitution()) {
+                case YES -> Preservation.PRESERVED;
+                case UNDECIDED -> Preservation.UNDECIDED;
+                case NO, NOT_EVALUATED -> Preservation.CHANGED;
+            };
+        }
+        return replacementOnlyChangesRequestedText(
+                evidence.oldString(),
+                evidence.newString(),
+                expectation.oldText(),
+                expectation.newText())
+                ? Preservation.PRESERVED
+                : Preservation.CHANGED;
     }
 
     private static boolean replacementOnlyChangesRequestedText(

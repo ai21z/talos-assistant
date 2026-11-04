@@ -3225,6 +3225,28 @@ public final class LocalTurnTraceCapture {
                 observedLines));
     }
 
+    /** Records how a replacement's old text occurred before the change, with counts and kinds only (P17). */
+    public static void recordReplacementOccurrenceScope(
+            String pathHint,
+            String sourcePattern,
+            String scopeKind,
+            int priorOccurrences,
+            int remainingOccurrences,
+            boolean landed,
+            String substitution
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(ExpectationVerificationTraceEventFactory.replacementOccurrenceScope(
+                pathHint,
+                sourcePattern,
+                scopeKind,
+                priorOccurrences,
+                remainingOccurrences,
+                landed,
+                substitution));
+    }
+
     public static void recordOutcome(
             String status,
             String verificationStatus,

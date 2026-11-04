@@ -73,6 +73,33 @@ public final class TextReplacement {
         return false;
     }
 
+    /**
+     * Counts the occurrences of the old text that no occurrence of the new text covers, by the range rule of
+     * {@link #oldTextRemainsOutsideReplacement}. With an empty new text every occurrence counts.
+     */
+    public static int occurrencesOutsideReplacement(String content, String oldText, String newText) {
+        if (content == null || oldText == null || oldText.isEmpty()) return 0;
+        String normalizedContent = normalizeLineEndings(content);
+        String normalizedOld = normalizeLineEndings(oldText);
+        String normalizedNew = newText == null ? "" : normalizeLineEndings(newText);
+        List<Range> oldRanges = rangesOf(normalizedContent, normalizedOld);
+        if (normalizedNew.isEmpty()) return oldRanges.size();
+        List<Range> replacementRanges = rangesOf(normalizedContent, normalizedNew);
+        // Both range lists are ordered and each is free of overlaps, so the only range that can cover an old range is
+        // the first replacement range ending at or after it. One forward pass decides every old range.
+        int outside = 0;
+        int candidate = 0;
+        for (Range oldRange : oldRanges) {
+            while (candidate < replacementRanges.size() && replacementRanges.get(candidate).end() < oldRange.end()) {
+                candidate++;
+            }
+            boolean covered = candidate < replacementRanges.size()
+                    && replacementRanges.get(candidate).start() <= oldRange.start();
+            if (!covered) outside++;
+        }
+        return outside;
+    }
+
     public static String normalizeLineEndings(String text) {
         return text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n');
     }

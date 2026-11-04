@@ -74,6 +74,8 @@ public final class StaticVerificationAnswerRenderer {
                 : "File write/readback";
         String verifierReason = hasParserExtractionEvidence(report)
                 ? "Parser extraction evidence was gathered, but requested summary/analysis semantics were not verified, "
+                : result != null && result.replacementNotAsserted()
+                ? "A requested replacement could not be assessed, "
                 : hasUnsatisfiedTaskSpecificVerification(result)
                 ? "Task-specific verification did not satisfy the requested claim, "
                 : "No task-specific verifier was applicable, ";

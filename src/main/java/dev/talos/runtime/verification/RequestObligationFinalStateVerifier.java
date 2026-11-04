@@ -81,15 +81,23 @@ public final class RequestObligationFinalStateVerifier {
         }
     }
 
+    /**
+     * A final-state result. An undecidable postcondition is one the evidence can neither prove nor refute, such as a
+     * request to replace text that occurred more than once before the change (P17). A result with one is not passed.
+     */
     public record Result(
             boolean passed,
             List<String> failedPostconditions,
-            String obligationSha256
+            String obligationSha256,
+            List<String> undecidablePostconditions
     ) {
         public Result {
             failedPostconditions = failedPostconditions == null
                     ? List.of()
                     : List.copyOf(failedPostconditions);
+            undecidablePostconditions = undecidablePostconditions == null
+                    ? List.of()
+                    : List.copyOf(undecidablePostconditions);
             obligationSha256 = obligationSha256 == null
                     ? ""
                     : obligationSha256.strip();
@@ -102,11 +110,24 @@ public final class RequestObligationFinalStateVerifier {
                 throw new IllegalArgumentException(
                         "A passed final-state result requires an obligation identity");
             }
+            if (passed && !undecidablePostconditions.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "A passed final-state result cannot hold an undecidable postcondition");
+            }
+        }
+
+        public Result(boolean passed, List<String> failedPostconditions, String obligationSha256) {
+            this(passed, failedPostconditions, obligationSha256, List.of());
         }
 
         /** Compatibility shape for an unavailable or not-evaluated result. */
         public Result(boolean passed, List<String> failedPostconditions) {
             this(passed, failedPostconditions, "");
+        }
+
+        /** Nothing failed, and at least one postcondition could not be decided. */
+        public boolean undecidedWithoutFailure() {
+            return !passed && failedPostconditions.isEmpty() && !undecidablePostconditions.isEmpty();
         }
 
         public boolean passedFor(RequestObligation obligation) {
@@ -148,11 +169,29 @@ public final class RequestObligationFinalStateVerifier {
             failures.add("OUTPUT_TARGET_NOT_UTF8_FILE");
             return new Result(false, List.copyOf(failures), obligationSha256);
         }
+        // A replacement whose old text occurred more than once before the change does not identify one region, so the
+        // postconditions that assume one region are decided only where every reading agrees (P17, D11 option A).
+        ReplacementOccurrenceScope repeatedScope = output.kind() == RequestObligation.OutputKind.REPLACE_TEXT
+                ? ReplacementOccurrenceScope.of(outputBefore, outputAfter, output.label(), output.statement())
+                : null;
+        if (repeatedScope != null && !repeatedScope.repeated()) repeatedScope = null;
+        List<String> undecidable = new ArrayList<>();
 
         for (RequestObligation.PreservationConstraint constraint
                 : obligation.preservationConstraints()) {
             String before = utf8(evidence.beforeFiles.get(constraint.target()));
             String after = utf8(evidence.afterFiles.get(constraint.target()));
+            if (repeatedScope != null
+                    && constraint.kind()
+                            == RequestObligation.PreservationKind.UNCHANGED_CONTENT_AROUND_REPLACEMENT
+                    && constraint.target().equals(output.target())) {
+                switch (repeatedScope.substitution()) {
+                    case YES -> { }
+                    case UNDECIDED -> undecidable.add(constraint.kind().name() + ":" + constraint.target());
+                    case NO, NOT_EVALUATED -> failures.add(constraint.kind().name() + ":" + constraint.target());
+                }
+                continue;
+            }
             boolean passed = switch (constraint.kind()) {
                 case NORMALIZED_PRIOR_CONTENT ->
                         before != null
@@ -189,6 +228,18 @@ public final class RequestObligationFinalStateVerifier {
         for (RequestObligation.VerificationPostcondition postcondition
                 : obligation.verificationPostconditions()) {
             String content = utf8(evidence.afterFiles.get(postcondition.target()));
+            if (repeatedScope != null && postcondition.target().equals(output.target())) {
+                Decision decision = repeatedReplacementDecision(postcondition.kind(), repeatedScope);
+                if (decision == Decision.FAILED) {
+                    failures.add(postcondition.kind().name() + ":" + postcondition.target());
+                    continue;
+                }
+                if (decision == Decision.UNDECIDABLE) {
+                    undecidable.add(postcondition.kind().name() + ":" + postcondition.target());
+                    continue;
+                }
+                if (decision == Decision.PASSED) continue;
+            }
             boolean passed = switch (postcondition.kind()) {
                 case MATCHING_STATEMENT_PRESENT_ONCE ->
                         content != null
@@ -239,9 +290,40 @@ public final class RequestObligationFinalStateVerifier {
             if (!passed) failures.add(postcondition.kind().name() + ":" + postcondition.target());
         }
         return new Result(
-                failures.isEmpty(),
+                failures.isEmpty() && undecidable.isEmpty(),
                 List.copyOf(failures),
-                obligationSha256);
+                obligationSha256,
+                List.copyOf(undecidable));
+    }
+
+    private enum Decision { PASSED, FAILED, UNDECIDABLE, UNCHANGED }
+
+    /**
+     * For a repeated old text, the postconditions that assume one region hold or fail only where every reading of the
+     * request agrees. A change that did not land on a prior occurrence, or that is not a pure substitution, fails under
+     * every reading. A file with no old text left meets the absence postcondition literally. Any other state is
+     * undecidable. Postconditions that do not depend on the region keep their checks.
+     */
+    private static Decision repeatedReplacementDecision(
+            RequestObligation.VerificationKind kind,
+            ReplacementOccurrenceScope scope
+    ) {
+        return switch (kind) {
+            case REQUESTED_REPLACEMENT_EXACTLY_ONCE ->
+                    !scope.landed() || scope.substitution() == ReplacementOccurrenceScope.Substitution.NO
+                            ? Decision.FAILED
+                            : Decision.UNDECIDABLE;
+            case OLD_TEXT_ABSENT ->
+                    !scope.landed() ? Decision.FAILED
+                            : scope.remainingOccurrences() == 0 ? Decision.PASSED
+                            : Decision.UNDECIDABLE;
+            case MATCHING_STATEMENT_PRESENT_ONCE,
+                 MATCHING_STATEMENT_FINAL_LOGICAL_LINE,
+                 MATCHING_SECTION_PRESENT_ONCE,
+                 MATCHING_SECTION_FINAL_DOCUMENT_SECTION,
+                 NEW_TEXT_PRESENT,
+                 STRUCTURED_MUTATION_EVIDENCE -> Decision.UNCHANGED;
+        };
     }
 
     static boolean appendsOnlyRequestedStatement(

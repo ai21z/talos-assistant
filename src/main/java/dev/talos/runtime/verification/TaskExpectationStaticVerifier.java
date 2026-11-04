@@ -66,6 +66,7 @@ final class TaskExpectationStaticVerifier {
 
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
+        List<ReplacementOccurrenceScope.NotAsserted> notAsserted = new ArrayList<>();
         boolean verifiedAny = false;
         boolean replacementRequired = false;
         boolean appendLineRequired = false;
@@ -80,16 +81,21 @@ final class TaskExpectationStaticVerifier {
                 addExpectationTarget(verifiedTargets, literal);
                 verifyLiteralContentExpectation(root, literal, facts, problems, recordExpectationTrace);
             } else if (expectation instanceof ReplacementExpectation replacement) {
-                verifiedAny = true;
-                replacementRequired = true;
-                addExpectationTarget(verifiedTargets, replacement);
-                verifyReplacementExpectation(
+                ExpectationVerificationStatus status = verifyReplacementExpectation(
                         root,
                         replacement,
                         successfulMutations,
                         facts,
                         problems,
+                        notAsserted,
                         recordExpectationTrace);
+                // An expectation that was not asserted verifies nothing, so it neither counts, nor covers its target,
+                // nor selects the replacement summary.
+                if (status != ExpectationVerificationStatus.NOT_ASSERTED) {
+                    verifiedAny = true;
+                    replacementRequired = true;
+                    addExpectationTarget(verifiedTargets, replacement);
+                }
             } else if (expectation instanceof AppendLineExpectation appendLine) {
                 verifiedAny = true;
                 appendLineRequired = true;
@@ -140,7 +146,9 @@ final class TaskExpectationStaticVerifier {
                 bulletCountRequired,
                 coversAllSuccessfulMutations(root, verifiedTargets, successfulMutations),
                 facts,
-                problems);
+                problems,
+                RequestObligationVerificationReceipt.none(),
+                notAsserted);
     }
 
     private static Result verifyCompleteRequestObligation(
@@ -163,7 +171,8 @@ final class TaskExpectationStaticVerifier {
             recordCompleteObligationTrace(
                     obligation,
                     "",
-                    false,
+                    ExpectationVerificationStatus.FAILED,
+                    null,
                     recordExpectationTrace);
             return completeObligationResult(
                     root,
@@ -173,11 +182,13 @@ final class TaskExpectationStaticVerifier {
                     Set.of(output.target()),
                     successfulMutations,
                     facts,
-                    problems);
+                    problems,
+                    List.of());
         }
 
         boolean mutationEvidencePassed = false;
         String beforeContent = "";
+        ReplacementOccurrenceScope replacementScope = null;
         switch (obligation.actionKind()) {
             case APPEND_STATEMENT -> {
                 TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence evidence =
@@ -214,6 +225,15 @@ final class TaskExpectationStaticVerifier {
                         output.statement(),
                         "request-obligation-v" + obligation.schemaVersion(),
                         true);
+                replacementScope = ReplacementOccurrenceScope.of(
+                        TaskExpectationMutationEvidenceVerifier.replacementPriorContent(
+                                root,
+                                target.pathHint(),
+                                target.content(),
+                                successfulMutations),
+                        target.content(),
+                        output.label(),
+                        output.statement());
                 TaskExpectationMutationEvidenceVerifier.FinalStateEvidence evidence =
                         TaskExpectationMutationEvidenceVerifier.collectReplacementFinalStateEvidence(
                                 root,
@@ -221,6 +241,7 @@ final class TaskExpectationStaticVerifier {
                                 target.pathHint(),
                                 target.content(),
                                 successfulMutations,
+                                replacementScope,
                                 facts,
                                 problems);
                 mutationEvidencePassed = evidence.passed();
@@ -248,11 +269,25 @@ final class TaskExpectationStaticVerifier {
                                 false,
                                 List.of("STRUCTURED_MUTATION_EVIDENCE_UNAVAILABLE"));
         boolean passed = mutationEvidencePassed && finalState.passed();
+        // A repeated old text leaves the one-region postconditions undecidable. Without a failure the obligation is not
+        // asserted, which gives neither a problem nor a receipt (P17, D11 option A).
+        boolean notAsserted = mutationEvidencePassed && finalState.undecidedWithoutFailure();
+        ExpectationVerificationStatus status = passed
+                ? ExpectationVerificationStatus.PASSED
+                : notAsserted
+                ? ExpectationVerificationStatus.NOT_ASSERTED
+                : ExpectationVerificationStatus.FAILED;
         recordCompleteObligationTrace(
                 obligation,
                 target.content(),
-                passed,
+                status,
+                replacementScope,
                 recordExpectationTrace);
+        List<ReplacementOccurrenceScope.NotAsserted> notAssertedReplacements =
+                notAsserted && replacementScope != null
+                        ? List.of(replacementScope.notAsserted(target.pathHint()))
+                        : List.of();
+        // A replacement that was not asserted adds neither a fact nor a problem. The selector states its counts.
         if (passed) {
             facts.add(switch (obligation.actionKind()) {
                 case APPEND_STATEMENT -> target.pathHint()
@@ -264,11 +299,12 @@ final class TaskExpectationStaticVerifier {
                 case NONE -> target.pathHint()
                         + ": unsupported request obligation unexpectedly passed.";
             });
-        } else {
+        } else if (!notAsserted) {
             addCompleteObligationProblems(
                     obligation,
                     target.pathHint(),
                     target.content(),
+                    replacementScope,
                     finalState.failedPostconditions(),
                     problems);
         }
@@ -280,7 +316,8 @@ final class TaskExpectationStaticVerifier {
                 Set.of(output.target()),
                 successfulMutations,
                 facts,
-                problems);
+                problems,
+                notAssertedReplacements);
     }
 
     private static Result completeObligationResult(
@@ -291,7 +328,8 @@ final class TaskExpectationStaticVerifier {
             Set<String> verifiedTargets,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            List<ReplacementOccurrenceScope.NotAsserted> notAssertedReplacements
     ) {
         boolean coversAllMutations = coversAllSuccessfulMutations(
                 root,
@@ -309,9 +347,11 @@ final class TaskExpectationStaticVerifier {
                         successfulMutations,
                         root);
         RequestObligation.ActionKind actionKind = obligation.actionKind();
+        // A replacement that was not asserted verifies nothing, as on the expectation path.
+        boolean asserted = notAssertedReplacements == null || notAssertedReplacements.isEmpty();
         return new Result(
-                true,
-                actionKind == RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST,
+                asserted,
+                asserted && actionKind == RequestObligation.ActionKind.REPLACE_TEXT_PRESERVE_REST,
                 false,
                 actionKind == RequestObligation.ActionKind.APPEND_SECTION,
                 actionKind == RequestObligation.ActionKind.APPEND_STATEMENT,
@@ -319,20 +359,19 @@ final class TaskExpectationStaticVerifier {
                 passed && coversAllMutations,
                 facts,
                 problems,
-                receipt);
+                receipt,
+                notAssertedReplacements);
     }
 
     private static void recordCompleteObligationTrace(
             RequestObligation obligation,
             String observed,
-            boolean passed,
+            ExpectationVerificationStatus status,
+            ReplacementOccurrenceScope replacementScope,
             boolean recordExpectationTrace
     ) {
         if (!recordExpectationTrace) return;
         RequestObligation.OutputShape output = obligation.outputShape();
-        ExpectationVerificationStatus status = passed
-                ? ExpectationVerificationStatus.PASSED
-                : ExpectationVerificationStatus.FAILED;
         switch (obligation.actionKind()) {
             case APPEND_STATEMENT -> {
                 String finalLine = RequestObligationFinalStateVerifier.finalLogicalLine(
@@ -360,22 +399,25 @@ final class TaskExpectationStaticVerifier {
                         status,
                         observation.observedBlock());
             }
-            case REPLACE_TEXT_PRESERVE_REST ->
-                    TaskExpectationTraceRecorder.recordReplacementExpectation(
-                            new ReplacementExpectation(
-                                    output.target(),
-                                    output.label(),
-                                    output.statement(),
-                                    "request-obligation-v" + obligation.schemaVersion(),
-                                    true),
-                            status,
-                            ReplacementTextPresence.oldTextRemainsOutsideReplacement(
-                                    observed,
-                                    output.label(),
-                                    output.statement()),
-                            ReplacementTextPresence.replacementTextObserved(
-                                    observed,
-                                    output.statement()));
+            case REPLACE_TEXT_PRESERVE_REST -> {
+                ReplacementExpectation replacement = new ReplacementExpectation(
+                        output.target(),
+                        output.label(),
+                        output.statement(),
+                        "request-obligation-v" + obligation.schemaVersion(),
+                        true);
+                TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(replacement, replacementScope);
+                TaskExpectationTraceRecorder.recordReplacementExpectation(
+                        replacement,
+                        status,
+                        ReplacementTextPresence.oldTextRemainsOutsideReplacement(
+                                observed,
+                                output.label(),
+                                output.statement()),
+                        ReplacementTextPresence.replacementTextObserved(
+                                observed,
+                                output.statement()));
+            }
             case NONE -> {
                 // A COMPLETE obligation cannot carry NONE; constructor validation owns this.
             }
@@ -386,6 +428,7 @@ final class TaskExpectationStaticVerifier {
             RequestObligation obligation,
             String pathHint,
             String observed,
+            ReplacementOccurrenceScope replacementScope,
             List<String> failedPostconditions,
             List<String> problems
     ) {
@@ -421,14 +464,7 @@ final class TaskExpectationStaticVerifier {
                 boolean newPresent = ReplacementTextPresence.replacementTextObserved(
                         observed,
                         output.statement());
-                if (!newPresent) {
-                    problems.add(pathHint
-                            + ": replacement new text was not observed after apply.");
-                }
-                if (oldPresent) {
-                    problems.add(pathHint
-                            + ": replacement old text remained after apply.");
-                }
+                addReplacementPresenceProblems(pathHint, replacementScope, oldPresent, newPresent, problems);
             }
             case APPEND_STATEMENT, NONE -> {
                 // The typed postcondition details below are the precise diagnostic.
@@ -533,12 +569,13 @@ final class TaskExpectationStaticVerifier {
         }
     }
 
-    private static void verifyReplacementExpectation(
+    private static ExpectationVerificationStatus verifyReplacementExpectation(
             Path root,
             ReplacementExpectation expectation,
             List<ToolCallLoop.ToolOutcome> successfulMutations,
             List<String> facts,
             List<String> problems,
+            List<ReplacementOccurrenceScope.NotAsserted> notAsserted,
             boolean recordExpectationTrace
     ) {
         TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
@@ -555,7 +592,7 @@ final class TaskExpectationStaticVerifier {
                     ExpectationVerificationStatus.FAILED,
                     false,
                     false);
-            return;
+            return ExpectationVerificationStatus.FAILED;
         }
 
         String observed = target.content();
@@ -565,32 +602,92 @@ final class TaskExpectationStaticVerifier {
                 expectation.newText());
         boolean newPresent = !expectation.newText().isEmpty()
                 && ReplacementTextPresence.replacementTextObserved(observed, expectation.newText());
-        boolean matched = !oldPresent && newPresent;
-        if (matched && expectation.preserveRest()) {
-            matched = TaskExpectationMutationEvidenceVerifier.verifyReplacementPreservation(
-                    root,
-                    expectation,
-                    pathHint,
-                    successfulMutations,
-                    facts,
-                    problems);
+        ReplacementOccurrenceScope scope = ReplacementOccurrenceScope.of(
+                TaskExpectationMutationEvidenceVerifier.replacementPriorContent(
+                        root,
+                        pathHint,
+                        observed,
+                        successfulMutations),
+                observed,
+                expectation.oldText(),
+                expectation.newText());
+        ExpectationVerificationStatus status;
+        if (scope.repeated()) {
+            // The old text named more than one region, so global absence is not a request postcondition (P17, D11
+            // option A). A change that did not land on a prior occurrence, or that is not a pure substitution under
+            // preserve-rest, still fails. Anything else is not asserted.
+            if (!newPresent || !scope.landed()) {
+                status = ExpectationVerificationStatus.FAILED;
+            } else if (expectation.preserveRest()
+                    && !TaskExpectationMutationEvidenceVerifier.verifyReplacementPreservation(
+                            root,
+                            expectation,
+                            pathHint,
+                            successfulMutations,
+                            scope,
+                            facts,
+                            problems)) {
+                status = ExpectationVerificationStatus.FAILED;
+            } else {
+                status = ExpectationVerificationStatus.NOT_ASSERTED;
+            }
+        } else {
+            boolean matched = !oldPresent && newPresent;
+            if (matched && expectation.preserveRest()) {
+                matched = TaskExpectationMutationEvidenceVerifier.verifyReplacementPreservation(
+                        root,
+                        expectation,
+                        pathHint,
+                        successfulMutations,
+                        scope,
+                        facts,
+                        problems);
+            }
+            status = matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED;
         }
         if (recordExpectationTrace) {
+            TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(expectation, scope);
             TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
-                    matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                    status,
                     oldPresent,
                     newPresent);
         }
-        if (matched) {
+        if (status == ExpectationVerificationStatus.PASSED) {
             facts.add(pathHint + ": replacement text observed and old text absent.");
+        } else if (status == ExpectationVerificationStatus.FAILED) {
+            addReplacementPresenceProblems(pathHint, scope, oldPresent, newPresent, problems);
         } else {
+            notAsserted.add(scope.notAsserted(pathHint));
+        }
+        return status;
+    }
+
+    /**
+     * For a repeated old text a remaining occurrence is not a failure cause, so it is not stated, and a repair is not
+     * steered toward replacing every occurrence. The change that did not land is stated instead. Every other scope keeps
+     * its problem sentences.
+     */
+    private static void addReplacementPresenceProblems(
+            String pathHint,
+            ReplacementOccurrenceScope scope,
+            boolean oldPresent,
+            boolean newPresent,
+            List<String> problems
+    ) {
+        if (scope != null && scope.repeated()) {
             if (!newPresent) {
                 problems.add(pathHint + ": replacement new text was not observed after apply.");
+            } else if (!scope.landed()) {
+                problems.add(pathHint + ": replacement new text did not replace a prior occurrence of the old text.");
             }
-            if (oldPresent) {
-                problems.add(pathHint + ": replacement old text remained after apply.");
-            }
+            return;
+        }
+        if (!newPresent) {
+            problems.add(pathHint + ": replacement new text was not observed after apply.");
+        }
+        if (oldPresent) {
+            problems.add(pathHint + ": replacement old text remained after apply.");
         }
     }
 
@@ -895,7 +992,8 @@ final class TaskExpectationStaticVerifier {
             boolean coversAllSuccessfulMutations,
             List<String> facts,
             List<String> problems,
-            RequestObligationVerificationReceipt requestObligationReceipt
+            RequestObligationVerificationReceipt requestObligationReceipt,
+            List<ReplacementOccurrenceScope.NotAsserted> notAssertedReplacements
     ) {
         Result {
             facts = facts == null ? List.of() : List.copyOf(facts);
@@ -903,6 +1001,35 @@ final class TaskExpectationStaticVerifier {
             requestObligationReceipt = requestObligationReceipt == null
                     ? RequestObligationVerificationReceipt.none()
                     : requestObligationReceipt;
+            notAssertedReplacements = notAssertedReplacements == null
+                    ? List.of()
+                    : List.copyOf(notAssertedReplacements);
+        }
+
+        Result(
+                boolean verifiedAny,
+                boolean replacementRequired,
+                boolean appendLineRequired,
+                boolean appendSectionRequired,
+                boolean appendStatementRequired,
+                boolean bulletCountRequired,
+                boolean coversAllSuccessfulMutations,
+                List<String> facts,
+                List<String> problems,
+                RequestObligationVerificationReceipt requestObligationReceipt
+        ) {
+            this(
+                    verifiedAny,
+                    replacementRequired,
+                    appendLineRequired,
+                    appendSectionRequired,
+                    appendStatementRequired,
+                    bulletCountRequired,
+                    coversAllSuccessfulMutations,
+                    facts,
+                    problems,
+                    requestObligationReceipt,
+                    List.of());
         }
 
         Result(
