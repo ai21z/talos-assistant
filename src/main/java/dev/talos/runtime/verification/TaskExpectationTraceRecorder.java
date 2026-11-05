@@ -59,7 +59,8 @@ final class TaskExpectationTraceRecorder {
     /** Recorded only for a repeated old text, so the events of the other scopes are unchanged. */
     static void recordReplacementOccurrenceScope(
             ReplacementExpectation expectation,
-            ReplacementOccurrenceScope scope
+            ReplacementOccurrenceScope scope,
+            TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource priorSource
     ) {
         if (scope == null || !scope.repeated()) return;
         LocalTurnTraceCapture.recordReplacementOccurrenceScope(
@@ -69,7 +70,10 @@ final class TaskExpectationTraceRecorder {
                 scope.priorOccurrences(),
                 scope.remainingOccurrences(),
                 scope.landed(),
-                scope.substitution().name());
+                scope.substitution().name(),
+                priorSource == null
+                        ? TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource.NONE.name()
+                        : priorSource.name());
     }
 
     static void recordAppendLineExpectation(

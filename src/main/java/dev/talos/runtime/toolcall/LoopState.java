@@ -93,6 +93,8 @@ public final class LoopState {
     /** Message indices of runtime notices (such as a suppressed duplicate), which are not tool evidence. */
     public final java.util.Set<Integer> noticeMessageIndices = new java.util.HashSet<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
+    /** Workspace-relative paths that a mutation effect, applied or uncertain, has touched in this loop. */
+    final Set<String> mutationEffectPaths = new HashSet<>();
     /**
      * T1013: typed, ordered read evidence bound to the effective execution
      * path. Replaces the flattened-signature maps (successfulReadCalls /

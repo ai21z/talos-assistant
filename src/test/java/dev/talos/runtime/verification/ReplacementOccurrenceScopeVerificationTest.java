@@ -79,7 +79,8 @@ class ReplacementOccurrenceScopeVerificationTest {
         assertFalse(verified.receiptProves());
         assertEquals(List.of(expectationEvent("config.ini", "NOT_ASSERTED", "replacement-scoped-prefix-change-to",
                 R1_EXPECTED_HASH, 4, OLD_PRESENT_NEW_PRESENT)), verified.events("EXPECTATION_VERIFIED"));
-        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 1, true, "YES")),
+        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 1, true, "YES",
+                        "EXACT_EDIT_EVIDENCE")),
                 verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
     }
 
@@ -96,7 +97,8 @@ class ReplacementOccurrenceScopeVerificationTest {
         assertEquals(TaskVerificationStatus.PASSED, edited.result().status(), edited.result().toString());
         assertEquals(TaskVerificationResult.ProofScope.CHECKS, edited.result().proofScope());
         assertEquals("Exact edit replacement checks passed. " + NONE_REMAIN, edited.result().summary());
-        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 0, true, "YES")),
+        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 0, true, "YES",
+                        "FULL_WRITE_EVIDENCE")),
                 written.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
     }
 
@@ -127,7 +129,8 @@ class ReplacementOccurrenceScopeVerificationTest {
         assertFalse(verified.receiptProves());
         assertEquals(List.of(expectationEvent("config.ini", "NOT_ASSERTED", "request-obligation-v1",
                 R1_EXPECTED_HASH, 4, OLD_PRESENT_NEW_PRESENT)), verified.events("EXPECTATION_VERIFIED"));
-        assertEquals(List.of(scopeEvent("config.ini", "request-obligation-v1", 2, 1, true, "YES")),
+        assertEquals(List.of(scopeEvent("config.ini", "request-obligation-v1", 2, 1, true, "YES",
+                        "EXACT_EDIT_EVIDENCE")),
                 verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
     }
 
@@ -146,7 +149,8 @@ class ReplacementOccurrenceScopeVerificationTest {
                         "config.ini: request-obligation postcondition failed: "
                                 + "STRUCTURED_MUTATION_EVIDENCE_UNAVAILABLE."),
                 verified.result().problems());
-        assertEquals(List.of(scopeEvent("config.ini", "request-obligation-v1", 2, 1, true, "NO")),
+        assertEquals(List.of(scopeEvent("config.ini", "request-obligation-v1", 2, 1, true, "NO",
+                        "FULL_WRITE_EVIDENCE")),
                 verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
         assertEquals(List.of(expectationEvent("config.ini", "FAILED", "request-obligation-v1",
                 R1_EXPECTED_HASH, 4, OLD_PRESENT_NEW_PRESENT)), verified.events("EXPECTATION_VERIFIED"));
@@ -173,7 +177,8 @@ class ReplacementOccurrenceScopeVerificationTest {
         assertEquals(TaskVerificationStatus.PASSED, verified.result().status(), verified.result().toString());
         assertEquals("Exact edit replacement checks passed. Requested replacement not verified: src/App.java "
                 + "held the old text 2 times before the change and 1 remains.", verified.result().summary());
-        assertEquals(List.of(scopeEvent("src/App.java", "replacement-scoped-prefix-change-to", 2, 1, true, "YES")),
+        assertEquals(List.of(scopeEvent("src/App.java", "replacement-scoped-prefix-change-to", 2, 1, true, "YES",
+                        "EXACT_EDIT_EVIDENCE")),
                 verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
     }
 
@@ -218,7 +223,8 @@ class ReplacementOccurrenceScopeVerificationTest {
         assertEquals("Replacement verification failed.", verified.result().summary());
         assertEquals(List.of("config.ini: replacement new text did not replace a prior occurrence of the old text."),
                 verified.result().problems());
-        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 1, false, "NO")),
+        assertEquals(List.of(scopeEvent("config.ini", "replacement-scoped-prefix-change-to", 2, 1, false, "NO",
+                        "EXACT_EDIT_EVIDENCE")),
                 verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
     }
 
@@ -324,7 +330,10 @@ class ReplacementOccurrenceScopeVerificationTest {
                 NOTES_EXPECTED_HASH, 4, OLD_PRESENT_NEW_ABSENT)), absentNew.events("EXPECTATION_VERIFIED"));
         // ABSENT_BEFORE is recorded, not changed: the new text appeared, so it passes as on 8a90ab8e.
         assertTrue(absentBefore.result().requestBound(), absentBefore.result().toString());
-        // A write without full read evidence has no established prior and keeps the global absence check.
+        // These outcomes are constructed without a producer preimage. A write without full read evidence then has no
+        // established prior and keeps the global absence check. Since P18 the real write tool attaches a preimage, so
+        // in production this control holds only where none is captured, for example over 2 MiB, invalid UTF-8, a
+        // protected path or a write that also creates its directory.
         assertEquals(TaskVerificationStatus.FAILED, unknown.result().status());
         assertEquals("Replacement verification failed.", unknown.result().summary());
         assertTrue(unknownBoth.result().requestBound(), unknownBoth.result().toString());
@@ -410,7 +419,8 @@ class ReplacementOccurrenceScopeVerificationTest {
     }
 
     private static Map<String, Object> scopeEvent(
-            String path, String sourcePattern, int prior, int remaining, boolean landed, String substitution) {
+            String path, String sourcePattern, int prior, int remaining, boolean landed, String substitution,
+            String priorSource) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("pathHint", path);
         data.put("sourcePattern", sourcePattern);
@@ -419,6 +429,7 @@ class ReplacementOccurrenceScopeVerificationTest {
         data.put("remainingOccurrences", remaining);
         data.put("landed", landed);
         data.put("substitution", substitution);
+        data.put("priorSource", priorSource);
         return data;
     }
 

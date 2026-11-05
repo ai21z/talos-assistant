@@ -4,6 +4,7 @@ import dev.talos.core.util.TextReplacement;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
+import dev.talos.tools.MutationPreimage;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.WorkspacePathIdentity;
 
@@ -15,38 +16,100 @@ final class TaskExpectationMutationEvidenceVerifier {
 
     private TaskExpectationMutationEvidenceVerifier() {}
 
+    /** The evidence that established the content of a replacement target before the turn. */
+    enum ReplacementPriorSource {
+        NONE,
+        PRODUCER_PREIMAGE,
+        EXACT_EDIT_EVIDENCE,
+        FULL_WRITE_EVIDENCE
+    }
+
+    /** The target's content before the turn, null when it is unknown, and the evidence that established it. */
+    record ReplacementPrior(String content, ReplacementPriorSource source) {
+        static final ReplacementPrior UNKNOWN = new ReplacementPrior(null, ReplacementPriorSource.NONE);
+
+        ReplacementPrior {
+            source = content == null || source == null ? ReplacementPriorSource.NONE : source;
+        }
+
+        @Override
+        public String toString() {
+            return "ReplacementPrior[known=" + (content != null) + ", source=" + source + "]";
+        }
+    }
+
     /**
-     * The target's content before the turn, or null when the mutation evidence does not establish it. It requires
-     * exactly one successful mutation of the target, then reverses exact edit evidence against the final content or
-     * takes the prior content of complete full write evidence whose new content matches the final readback. No other
-     * evidence is read.
+     * The target's content before the turn. The producer preimage of the earliest successful mutation whose path or
+     * mutation effects touch the target is taken first, because the producer observed those exact bytes at the change
+     * (P18, D12 option B). Without it the P17 rule applies unchanged: exactly one successful mutation of the target,
+     * then exact edit evidence reversed against the final content, or the prior content of complete full write evidence
+     * whose new content matches the final readback. A failed outcome with mutation effects does not reach this point,
+     * because static verification stops on it first.
      */
-    static String replacementPriorContent(
+    static ReplacementPrior replacementPrior(
             Path root,
             String pathHint,
             String finalContent,
             List<ToolCallLoop.ToolOutcome> successfulMutations
     ) {
-        if (finalContent == null || successfulMutations == null || successfulMutations.isEmpty()) return null;
+        if (finalContent == null || successfulMutations == null || successfulMutations.isEmpty()) {
+            return ReplacementPrior.UNKNOWN;
+        }
+        ToolCallLoop.ToolOutcome earliest = successfulMutations.stream()
+                .filter(outcome -> outcome != null && outcome.success() && touchesTarget(root, pathHint, outcome))
+                .findFirst()
+                .orElse(null);
+        if (earliest == null) return ReplacementPrior.UNKNOWN;
+        MutationPreimage preimage = earliest.mutationPreimage();
+        if (preimage.available() && sameTarget(root, pathHint, preimage.target())) {
+            return new ReplacementPrior(preimage.text(), ReplacementPriorSource.PRODUCER_PREIMAGE);
+        }
+        return evidencePrior(root, pathHint, finalContent, successfulMutations);
+    }
+
+    /**
+     * The P17 rule alone: the prior that the turn's structured mutation evidence establishes, without the producer
+     * preimage. The complete request obligation uses only this prior, so its occurrence scope and its final-state
+     * decision rest on the same before content, and the preimage proves no preserve-rest postcondition (D12 option B).
+     */
+    static ReplacementPrior evidencePrior(
+            Path root,
+            String pathHint,
+            String finalContent,
+            List<ToolCallLoop.ToolOutcome> successfulMutations
+    ) {
+        if (finalContent == null || successfulMutations == null || successfulMutations.isEmpty()) {
+            return ReplacementPrior.UNKNOWN;
+        }
         List<ToolCallLoop.ToolOutcome> relevant = successfulMutations.stream()
                 .filter(outcome -> outcome != null
                         && outcome.success()
                         && sameTarget(root, pathHint, outcome.pathHint()))
                 .toList();
-        if (relevant.size() != 1) return null;
+        if (relevant.size() != 1) return ReplacementPrior.UNKNOWN;
         ToolCallLoop.ToolOutcome outcome = relevant.getFirst();
         String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
         ToolMutationEvidence evidence = outcome.mutationEvidence();
-        if (evidence == null) return null;
+        if (evidence == null) return ReplacementPrior.UNKNOWN;
         if ("edit_file".equals(canonicalTool) && evidence.exactEditReplacement()) {
-            return reconstructExactEditBefore(finalContent, evidence.oldString(), evidence.newString());
+            return new ReplacementPrior(
+                    reconstructExactEditBefore(finalContent, evidence.oldString(), evidence.newString()),
+                    ReplacementPriorSource.EXACT_EDIT_EVIDENCE);
         }
         if ("write_file".equals(canonicalTool)
                 && evidence.fullWriteReplacement()
                 && sameNormalizedContent(evidence.newString(), finalContent)) {
-            return evidence.oldString();
+            return new ReplacementPrior(evidence.oldString(), ReplacementPriorSource.FULL_WRITE_EVIDENCE);
         }
-        return null;
+        return ReplacementPrior.UNKNOWN;
+    }
+
+    private static boolean touchesTarget(Path root, String pathHint, ToolCallLoop.ToolOutcome outcome) {
+        if (sameTarget(root, pathHint, outcome.pathHint())) return true;
+        for (String affected : outcome.mutationEffects().affectedPaths()) {
+            if (sameTarget(root, pathHint, affected)) return true;
+        }
+        return false;
     }
 
     static boolean verifyReplacementPreservation(

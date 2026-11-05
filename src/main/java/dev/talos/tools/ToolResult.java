@@ -17,13 +17,24 @@ public record ToolResult(
         VerificationStatus verification,
         ToolContentMetadata contentMetadata,
         ToolMutationEffects mutationEffects,
-        @JsonIgnore ExecutedEditDetail executedEditDetail) {
+        @JsonIgnore ExecutedEditDetail executedEditDetail,
+        @JsonIgnore MutationPreimage mutationPreimage) {
 
     public ToolResult {
         contentMetadata = contentMetadata == null ? ToolContentMetadata.normal() : contentMetadata;
         mutationEffects = mutationEffects == null ? ToolMutationEffects.none() : mutationEffects;
         executedEditDetail = executedEditDetail != null && executedEditDetail.associatedWith(mutationEffects)
                 ? executedEditDetail : ExecutedEditDetail.none();
+        mutationPreimage = mutationPreimage != null && mutationPreimage.associatedWith(mutationEffects)
+                ? mutationPreimage : MutationPreimage.none();
+    }
+
+    /** Results without producer preimage evidence. */
+    public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification,
+                      ToolContentMetadata contentMetadata, ToolMutationEffects mutationEffects,
+                      ExecutedEditDetail executedEditDetail) {
+        this(success, output, error, verification, contentMetadata, mutationEffects, executedEditDetail,
+                MutationPreimage.none());
     }
 
     public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification,
@@ -37,11 +48,19 @@ public record ToolResult(
     }
 
     public ToolResult withMutationEffects(ToolMutationEffects effects) {
-        return new ToolResult(success, output, error, verification, contentMetadata, effects, executedEditDetail);
+        return new ToolResult(success, output, error, verification, contentMetadata, effects, executedEditDetail,
+                mutationPreimage);
     }
 
     public ToolResult withExecutedEditDetail(ExecutedEditDetail detail) {
-        return new ToolResult(success, output, error, verification, contentMetadata, mutationEffects, detail);
+        return new ToolResult(success, output, error, verification, contentMetadata, mutationEffects, detail,
+                mutationPreimage);
+    }
+
+    /** Attaches producer preimage evidence, which is kept only when it is associated with the mutation effects. */
+    public ToolResult withMutationPreimage(MutationPreimage preimage) {
+        return new ToolResult(success, output, error, verification, contentMetadata, mutationEffects,
+                executedEditDetail, preimage);
     }
 
     public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification) {

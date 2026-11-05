@@ -125,6 +125,7 @@ class ReplacementScopeReplEntryTest {
         assertEquals(1, ((Number) scope.get("remainingOccurrences")).intValue(), scope.toString());
         assertEquals(true, scope.get("landed"), scope.toString());
         assertEquals("YES", scope.get("substitution"), scope.toString());
+        assertEquals("PRODUCER_PREIMAGE", scope.get("priorSource"), scope.toString());
         assertFalse(scope.containsValue("8080"), scope.toString());
         assertFalse(scope.containsValue("9000"), scope.toString());
         assertFalse(String.valueOf(run.trace().outcome().classification()).contains("FAIL"),
@@ -147,6 +148,91 @@ class ReplacementScopeReplEntryTest {
         assertEquals(0, run.onlyRow().approvalsGranted(), run.transcript());
         assertTrue(run.trace().events().stream().noneMatch(event -> "EXPECTATION_VERIFIED".equals(event.type())),
                 run.transcript());
+    }
+
+    @Test
+    void aWriteWithoutAReadIsStatedWithItsCountsAndOffersNoRepair() throws Exception {
+        // P18, D12 option B: the write tool's preimage is the prior, so the repeated old text is recognized.
+        Run run = run(List.of(REQUEST), List.of(
+                nativeCall("talos.write_file", Map.of("path", "config.ini", "content", SERVER_ONLY)),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", PRIOR));
+
+        assertEquals(SERVER_ONLY, Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("[File write/readback passed. A requested replacement could not be assessed, so "
+                + "task completion was not verified. Target/readback checks passed for 1 mutated target(s). "
+                + "Requested replacement not verified: config.ini held the old text 2 times before the change and "
+                + "1 remains.]"), answer);
+        assertFalse(answer.contains(RepairOffer.LINE), answer);
+        assertFalse(answer.contains("Replacement verification"), answer);
+        assertEquals("NOT_ASSERTED", onlyEvent(run, "EXPECTATION_VERIFIED").get("status"));
+        Map<String, Object> scope = onlyEvent(run, "REPLACEMENT_OCCURRENCE_SCOPE_RECORDED");
+        assertEquals("PRODUCER_PREIMAGE", scope.get("priorSource"), scope.toString());
+        assertEquals(1, ((Number) scope.get("remainingOccurrences")).intValue(), scope.toString());
+    }
+
+    @Test
+    void twoEditsInOneResponseThatChangeBothPortsAreNotARequestBoundPass() throws Exception {
+        Run run = run(List.of(REQUEST), List.of(
+                nativeCall("talos.read_file", Map.of("path", "config.ini")),
+                together(
+                        editCall("[SERVER]\nport=8080", "[SERVER]\nport=9000"),
+                        editCall("[CLIENT]\nport=8080", "[CLIENT]\nport=9000")),
+                text("Changed both ports."),
+                text("Changed both ports.")), "y", Set.of(),
+                Map.of("config.ini", PRIOR));
+
+        assertEquals("[SERVER]\nport=9000\n[CLIENT]\nport=9000\n",
+                Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("[Checks passed - Exact edit replacement checks passed. Requested replacement not "
+                + "verified: config.ini held the old text 2 times before the change and none remain.]"), answer);
+        assertFalse(answer.contains("Static verification: passed"), answer);
+        Map<String, Object> scope = onlyEvent(run, "REPLACEMENT_OCCURRENCE_SCOPE_RECORDED");
+        assertEquals("PRODUCER_PREIMAGE", scope.get("priorSource"), scope.toString());
+        assertEquals(0, ((Number) scope.get("remainingOccurrences")).intValue(), scope.toString());
+    }
+
+    @Test
+    void thePriorTextReachesNoPersistedArtifact() throws Exception {
+        // The canary is only in the prior file, and the write removes it. The governed checkpoint store keeps the
+        // prior bytes for undo by design, before approval and independently of the preimage, so only its blobs may
+        // hold the canary. No session, turn or trace file may.
+        String canary = "p18-canary-7f3a";
+        Run run = run(List.of(REQUEST), List.of(
+                nativeCall("talos.write_file", Map.of("path", "config.ini", "content", SERVER_ONLY)),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", PRIOR + "# " + canary + "\n"));
+
+        assertEquals(SERVER_ONLY, Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        assertEquals("PRODUCER_PREIMAGE", onlyEvent(run, "REPLACEMENT_OCCURRENCE_SCOPE_RECORDED").get("priorSource"));
+        Path home = run.workspace().getParent().resolve("home");
+        List<Path> carriers;
+        try (var files = Files.walk(home)) {
+            carriers = files.filter(Files::isRegularFile).filter(file -> {
+                try {
+                    return new String(Files.readAllBytes(file), StandardCharsets.UTF_8).contains(canary);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }).toList();
+        }
+        Path checkpoints = home.resolve(".talos").resolve("checkpoints");
+        assertEquals(List.of(), carriers.stream().filter(file -> !file.startsWith(checkpoints)).toList());
+        assertTrue(carriers.stream().allMatch(file -> file.getParent().getFileName().toString().equals("blobs")),
+                carriers.toString());
+        try (var files = Files.walk(home.resolve(".talos").resolve("sessions"))) {
+            assertTrue(files.anyMatch(Files::isRegularFile), "The session store must hold the turn files.");
+        }
+        assertFalse(run.onlyRow().assistantText().contains(canary));
+        assertFalse(run.trace().events().toString().contains(canary));
+        assertTrue(run.requests().stream().flatMap(request -> request.messages.stream())
+                        .noneMatch(message -> String.valueOf(message.content()).contains(canary)),
+                "The prior text must not reach the model context.");
     }
 
     private static Map<String, Object> onlyEvent(Run run, String type) {
@@ -311,6 +397,15 @@ class ReplacementScopeReplEntryTest {
     private static LlmClient.StreamResult nativeCall(String tool, Map<String, Object> arguments) {
         return new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall("call-" + tool, tool, arguments)),
                 "tool_calls");
+    }
+
+    private static ChatMessage.NativeToolCall editCall(String oldString, String newString) {
+        return new ChatMessage.NativeToolCall("call-edit-" + Math.abs(oldString.hashCode()), "talos.edit_file",
+                Map.of("path", "config.ini", "old_string", oldString, "new_string", newString));
+    }
+
+    private static LlmClient.StreamResult together(ChatMessage.NativeToolCall... calls) {
+        return new LlmClient.StreamResult("", List.of(calls), "tool_calls");
     }
 
     private static LlmClient.StreamResult text(String content) {

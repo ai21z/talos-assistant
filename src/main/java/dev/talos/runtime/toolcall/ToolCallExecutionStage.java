@@ -356,6 +356,7 @@ public final class ToolCallExecutionStage {
             if (failureSignals.approvalDenied()) {
                 approvalDeniedThisIter = true;
             }
+            // The preimage comes from the raw producer result, because the model-facing result is rebuilt without it.
             var outcome = ToolOutcomeFactory.executed(
                     effective,
                     pathHint,
@@ -363,7 +364,8 @@ public final class ToolCallExecutionStage {
                     failureClassification,
                     workspaceOperationPlan,
                     mutationEvidence,
-                    parsedPermit);
+                    parsedPermit,
+                    ToolMutationStateAccounting.firstMutationPreimage(state, rawResult));
             state.addClassifiedToolOutcome(outcome);
 
             if (!result.success()) {

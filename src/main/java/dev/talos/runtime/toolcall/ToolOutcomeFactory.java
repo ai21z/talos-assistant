@@ -187,6 +187,21 @@ final class ToolOutcomeFactory {
             ToolMutationEvidence mutationEvidence,
             LocalTurnTraceCapture.ParsedToolCallPermit permit
     ) {
+        return executed(call, pathHint, result, classification, workspaceOperationPlan, mutationEvidence, permit,
+                dev.talos.tools.MutationPreimage.none());
+    }
+
+    /** An executed outcome that carries the producer preimage the execution stage kept for it. */
+    static ToolCallLoop.ToolOutcome executed(
+            ToolCall call,
+            String pathHint,
+            ToolResult result,
+            ToolExecutionFailureClassifier.Classification classification,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolMutationEvidence mutationEvidence,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            dev.talos.tools.MutationPreimage mutationPreimage
+    ) {
         boolean success = result != null && result.success();
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
@@ -206,7 +221,8 @@ final class ToolOutcomeFactory {
                 evidenceSourcePaths(call, pathHint, result),
                 toolCallId(permit),
                 result == null ? null : result.mutationEffects(),
-                result == null ? null : result.contentMetadata().directoryObservation());
+                result == null ? null : result.contentMetadata().directoryObservation(),
+                mutationPreimage);
     }
 
     private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {

@@ -202,7 +202,9 @@ public final class FileEditTool implements TalosTool {
             return FileVerificationToolResult.from(base, vr)
                     .withMutationEffects(effects)
                     .withExecutedEditDetail(ExecutedEditDetail.capture(
-                            ctx.workspace(), effectPath, content, updated, match, vr, effects));
+                            ctx.workspace(), effectPath, content, updated, match, vr, effects))
+                    .withMutationPreimage(MutationPreimageCapture.existing(
+                            ctx.workspace(), effectPath, sourceBytes, snapshot.preimage().sha256()));
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()))
                     .withMutationEffects(effects.plus(FileVerificationToolResult.failedWriteEffects(e, effectPath)));

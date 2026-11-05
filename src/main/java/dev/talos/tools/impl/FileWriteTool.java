@@ -134,6 +134,8 @@ public final class FileWriteTool implements TalosTool {
 
             AtomicFileWriter.Preimage preimage = atomicFileWriter.capture(resolved);
             boolean existed = preimage.existed();
+            MutationPreimage prior = MutationPreimageCapture.beforeWrite(
+                    ctx.workspace(), effectPath, resolved, preimage);
 
             // Undo snapshots moved to the governed checkpoint machinery
             // (T795/T796) - captured pre-approval by the runtime, not here.
@@ -149,7 +151,7 @@ public final class FileWriteTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, content);
-            return FileVerificationToolResult.from(base, vr).withMutationEffects(effects);
+            return FileVerificationToolResult.from(base, vr).withMutationEffects(effects).withMutationPreimage(prior);
         } catch (IOException e) {
             effects = FileVerificationToolResult.failedWriteEffects(e, effectPath).plus(effects);
             if (parentCreationAttempt != null) {

@@ -89,7 +89,7 @@ public final class ExecutedEditDetail {
         }
     }
 
-    private static boolean safeTarget(Path workspace, String target) {
+    static boolean safeTarget(Path workspace, String target) {
         if (target.isBlank() || target.length() > 1024 || !target.equals(target.strip())
                 || target.startsWith("/") || target.contains(":") || !safeUnicode(target, false)) return false;
         for (String segment : target.split("/", -1)) {

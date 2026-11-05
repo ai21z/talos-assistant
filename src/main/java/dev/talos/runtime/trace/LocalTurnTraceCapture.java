@@ -3233,7 +3233,8 @@ public final class LocalTurnTraceCapture {
             int priorOccurrences,
             int remainingOccurrences,
             boolean landed,
-            String substitution
+            String substitution,
+            String priorSource
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
@@ -3244,7 +3245,8 @@ public final class LocalTurnTraceCapture {
                 priorOccurrences,
                 remainingOccurrences,
                 landed,
-                substitution));
+                substitution,
+                priorSource));
     }
 
     public static void recordOutcome(

@@ -284,7 +284,8 @@ public final class ToolCallLoop {
             List<String> sourcePaths,
             String toolCallId,
             dev.talos.tools.ToolMutationEffects mutationEffects,
-            dev.talos.tools.DirectoryObservation directoryObservation
+            dev.talos.tools.DirectoryObservation directoryObservation,
+            @com.fasterxml.jackson.annotation.JsonIgnore dev.talos.tools.MutationPreimage mutationPreimage
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -297,6 +298,21 @@ public final class ToolCallLoop {
             sourcePaths = normalizeSourcePaths(sourcePaths);
             toolCallId = toolCallId == null ? "" : toolCallId.strip();
             mutationEffects = mutationEffects == null ? dev.talos.tools.ToolMutationEffects.none() : mutationEffects;
+            mutationPreimage = mutationPreimage == null ? dev.talos.tools.MutationPreimage.none() : mutationPreimage;
+        }
+
+        /** Observations without producer preimage evidence. */
+        public ToolOutcome(String toolName, String pathHint, boolean success, boolean mutating,
+                           boolean denied, String summary, String errorMessage,
+                           dev.talos.tools.VerificationStatus fileVerificationStatus, String errorCode,
+                           WorkspaceOperationPlan workspaceOperationPlan, ToolMutationEvidence mutationEvidence,
+                           dev.talos.tools.ToolFailureReason failureReason, List<String> sourcePaths, String toolCallId,
+                           dev.talos.tools.ToolMutationEffects mutationEffects,
+                           dev.talos.tools.DirectoryObservation directoryObservation) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, sourcePaths, toolCallId, mutationEffects, directoryObservation,
+                    dev.talos.tools.MutationPreimage.none());
         }
 
         /** Older observations have no directory completeness metadata. */
@@ -325,7 +341,8 @@ public final class ToolCallLoop {
         public ToolOutcome withMutationEffects(dev.talos.tools.ToolMutationEffects effects) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, failureReason, sourcePaths, toolCallId, effects, directoryObservation);
+                    mutationEvidence, failureReason, sourcePaths, toolCallId, effects, directoryObservation,
+                    mutationPreimage);
         }
 
         /** Pre-T1154 canonical shape: exact parsed-call identity was not retained. */
@@ -459,7 +476,8 @@ public final class ToolCallLoop {
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects, directoryObservation);
+                    mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects, directoryObservation,
+                    mutationPreimage);
         }
 
         private static List<String> normalizeSourcePaths(List<String> values) {

@@ -173,6 +173,7 @@ final class TaskExpectationStaticVerifier {
                     "",
                     ExpectationVerificationStatus.FAILED,
                     null,
+                    TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource.NONE,
                     recordExpectationTrace);
             return completeObligationResult(
                     root,
@@ -189,6 +190,8 @@ final class TaskExpectationStaticVerifier {
         boolean mutationEvidencePassed = false;
         String beforeContent = "";
         ReplacementOccurrenceScope replacementScope = null;
+        TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource replacementPriorSource =
+                TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource.NONE;
         switch (obligation.actionKind()) {
             case APPEND_STATEMENT -> {
                 TaskExpectationMutationEvidenceVerifier.AppendStatementEvidence evidence =
@@ -225,12 +228,16 @@ final class TaskExpectationStaticVerifier {
                         output.statement(),
                         "request-obligation-v" + obligation.schemaVersion(),
                         true);
-                replacementScope = ReplacementOccurrenceScope.of(
-                        TaskExpectationMutationEvidenceVerifier.replacementPriorContent(
+                // The complete obligation keeps the evidence prior, which is also its final-state before content.
+                TaskExpectationMutationEvidenceVerifier.ReplacementPrior replacementPrior =
+                        TaskExpectationMutationEvidenceVerifier.evidencePrior(
                                 root,
                                 target.pathHint(),
                                 target.content(),
-                                successfulMutations),
+                                successfulMutations);
+                replacementPriorSource = replacementPrior.source();
+                replacementScope = ReplacementOccurrenceScope.of(
+                        replacementPrior.content(),
                         target.content(),
                         output.label(),
                         output.statement());
@@ -282,6 +289,7 @@ final class TaskExpectationStaticVerifier {
                 target.content(),
                 status,
                 replacementScope,
+                replacementPriorSource,
                 recordExpectationTrace);
         List<ReplacementOccurrenceScope.NotAsserted> notAssertedReplacements =
                 notAsserted && replacementScope != null
@@ -368,6 +376,7 @@ final class TaskExpectationStaticVerifier {
             String observed,
             ExpectationVerificationStatus status,
             ReplacementOccurrenceScope replacementScope,
+            TaskExpectationMutationEvidenceVerifier.ReplacementPriorSource replacementPriorSource,
             boolean recordExpectationTrace
     ) {
         if (!recordExpectationTrace) return;
@@ -406,7 +415,8 @@ final class TaskExpectationStaticVerifier {
                         output.statement(),
                         "request-obligation-v" + obligation.schemaVersion(),
                         true);
-                TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(replacement, replacementScope);
+                TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(
+                        replacement, replacementScope, replacementPriorSource);
                 TaskExpectationTraceRecorder.recordReplacementExpectation(
                         replacement,
                         status,
@@ -602,12 +612,14 @@ final class TaskExpectationStaticVerifier {
                 expectation.newText());
         boolean newPresent = !expectation.newText().isEmpty()
                 && ReplacementTextPresence.replacementTextObserved(observed, expectation.newText());
-        ReplacementOccurrenceScope scope = ReplacementOccurrenceScope.of(
-                TaskExpectationMutationEvidenceVerifier.replacementPriorContent(
+        TaskExpectationMutationEvidenceVerifier.ReplacementPrior replacementPrior =
+                TaskExpectationMutationEvidenceVerifier.replacementPrior(
                         root,
                         pathHint,
                         observed,
-                        successfulMutations),
+                        successfulMutations);
+        ReplacementOccurrenceScope scope = ReplacementOccurrenceScope.of(
+                replacementPrior.content(),
                 observed,
                 expectation.oldText(),
                 expectation.newText());
@@ -646,7 +658,8 @@ final class TaskExpectationStaticVerifier {
             status = matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED;
         }
         if (recordExpectationTrace) {
-            TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(expectation, scope);
+            TaskExpectationTraceRecorder.recordReplacementOccurrenceScope(
+                    expectation, scope, replacementPrior.source());
             TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     status,

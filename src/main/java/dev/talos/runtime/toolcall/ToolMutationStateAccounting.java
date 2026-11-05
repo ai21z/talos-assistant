@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.util.UiChrome;
+import dev.talos.tools.MutationPreimage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 
@@ -56,6 +57,20 @@ final class ToolMutationStateAccounting {
         }
         ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
         return new Result(true, formattedSummary);
+    }
+
+    /**
+     * The producer preimage of a successful result, kept only when no earlier mutation effect in this loop touched any
+     * of the result's paths, so the loop holds at most one preimage per target. Every result's affected paths are
+     * recorded, whether or not it succeeded.
+     */
+    static MutationPreimage firstMutationPreimage(LoopState state, ToolResult rawResult) {
+        if (state == null || rawResult == null) return MutationPreimage.none();
+        java.util.List<String> touched = rawResult.mutationEffects().affectedPaths();
+        boolean first = touched.stream().noneMatch(state.mutationEffectPaths::contains);
+        state.mutationEffectPaths.addAll(touched);
+        MutationPreimage preimage = rawResult.mutationPreimage();
+        return first && rawResult.success() && preimage.available() ? preimage : MutationPreimage.none();
     }
 
     private static void recordMutationSuccess(LoopState state, String pathHint) {

@@ -45,7 +45,8 @@ final class ExpectationVerificationTraceEventFactory {
             int priorOccurrences,
             int remainingOccurrences,
             boolean landed,
-            String substitution
+            String substitution,
+            String priorSource
     ) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("pathHint", TraceRedactor.pathHint(pathHint));
@@ -55,6 +56,7 @@ final class ExpectationVerificationTraceEventFactory {
         data.put("remainingOccurrences", Math.max(0, remainingOccurrences));
         data.put("landed", landed);
         data.put("substitution", safe(substitution));
+        data.put("priorSource", safe(priorSource));
         return TurnTraceEvent.simple("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED", Instant.now().toString(), data);
     }
 
