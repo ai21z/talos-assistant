@@ -6,7 +6,6 @@ import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.MutationPreimage;
 import dev.talos.tools.ToolAliasPolicy;
-import dev.talos.tools.WorkspacePathIdentity;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -105,11 +104,7 @@ final class TaskExpectationMutationEvidenceVerifier {
     }
 
     private static boolean touchesTarget(Path root, String pathHint, ToolCallLoop.ToolOutcome outcome) {
-        if (sameTarget(root, pathHint, outcome.pathHint())) return true;
-        for (String affected : outcome.mutationEffects().affectedPaths()) {
-            if (sameTarget(root, pathHint, affected)) return true;
-        }
-        return false;
+        return MutationTouches.touchesTarget(root, pathHint, outcome);
     }
 
     static boolean verifyReplacementPreservation(
@@ -683,16 +678,7 @@ final class TaskExpectationMutationEvidenceVerifier {
 
     /** The mutation names the target as text, or names the same workspace file under another spelling. */
     private static boolean sameTarget(Path root, String pathHint, String mutatedPath) {
-        return normalizePath(mutatedPath).equals(pathHint)
-                || WorkspacePathIdentity.matches(root, pathHint, mutatedPath);
-    }
-
-    private static String normalizePath(String path) {
-        String normalized = path == null ? "" : path.strip().replace('\\', '/');
-        while (normalized.startsWith("./")) {
-            normalized = normalized.substring(2);
-        }
-        return normalized;
+        return MutationTouches.sameTarget(root, pathHint, mutatedPath);
     }
 
     record AppendStatementEvidence(boolean passed, String beforeContent) {

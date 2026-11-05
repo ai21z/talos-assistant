@@ -159,6 +159,62 @@ class TaskVerificationOutcomeSelectorTest {
     }
 
     @Test
+    void aReplacedExactEditGivesAReadbackSummaryThatDoesNotClaimNoVerifierApplied() {
+        // P19, D13 option A: the exact edit verifier applied and left an edit unasserted, so the readback summary does
+        // not claim that no task-specific verifier was applicable. An edit that is only uncovered keeps the clause.
+        List<String> facts = List.of(
+                "notes.md: exact edit replacement observed before a later change of the same file altered it.",
+                "notes.md: exact edit replacement observed in post-apply file.");
+        TaskVerificationResult replaced = TaskVerificationOutcomeSelector.select(
+                facts, List.of(), 1, false,
+                expectationResult(false, false, false, false),
+                new ExactEditReplacementVerifier.Result(true, false, false, facts, List.of(), List.of(
+                        ExactEditReplacementVerifier.Standing.REPLACED_LATER,
+                        ExactEditReplacementVerifier.Standing.KEPT)),
+                sourceDerivedResult(false));
+        TaskVerificationResult unobserved = TaskVerificationOutcomeSelector.select(
+                List.of(), List.of(), 1, false,
+                expectationResult(false, false, false, false),
+                new ExactEditReplacementVerifier.Result(true, false, false, List.of(), List.of(), List.of(
+                        ExactEditReplacementVerifier.Standing.UNOBSERVED)),
+                sourceDerivedResult(false));
+        TaskVerificationResult uncovered = TaskVerificationOutcomeSelector.select(
+                List.of(), List.of(), 2, false,
+                expectationResult(false, false, false, false),
+                new ExactEditReplacementVerifier.Result(true, false, false, List.of(), List.of(), List.of(
+                        ExactEditReplacementVerifier.Standing.KEPT)),
+                sourceDerivedResult(false));
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, replaced.status());
+        assertEquals("Target/readback checks passed for 1 mutated target(s).", replaced.summary());
+        assertEquals(facts, replaced.facts());
+        assertTrue(replaced.exactEditNotAsserted());
+        assertEquals("Target/readback checks passed for 1 mutated target(s).", unobserved.summary());
+        assertTrue(unobserved.exactEditNotAsserted());
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, uncovered.status());
+        assertEquals(false, uncovered.exactEditNotAsserted());
+        assertEquals("Target/readback checks passed for 2 mutated target(s); no task-specific static verifier was "
+                + "applicable.", uncovered.summary());
+    }
+
+    @Test
+    void aReplacedExactEditOnAWebTurnLeavesTheCoherenceChecksPass() {
+        // Review finding F1: a replaced edit no longer fails the turn, so the verifier that owns the turn decides it.
+        // On a web turn that is the static web coherence checks pass, which is not request-bound.
+        TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
+                List.of("HTML/CSS/JS selector coherence passed."), List.of(), 1, true,
+                expectationResult(false, false, false, false),
+                new ExactEditReplacementVerifier.Result(true, false, false, List.of(), List.of(), List.of(
+                        ExactEditReplacementVerifier.Standing.REPLACED_LATER,
+                        ExactEditReplacementVerifier.Standing.KEPT)),
+                sourceDerivedResult(false));
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertEquals(TaskVerificationResult.ProofScope.CHECKS, result.proofScope());
+        assertEquals("Static web coherence checks passed for 1 mutated target(s).", result.summary());
+    }
+
+    @Test
     void genericFailureFallbackPreservesFirstThreeProblemSummary() {
         TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
                 List.of("readback fact"),

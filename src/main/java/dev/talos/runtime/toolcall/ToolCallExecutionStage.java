@@ -365,7 +365,7 @@ public final class ToolCallExecutionStage {
                     workspaceOperationPlan,
                     mutationEvidence,
                     parsedPermit,
-                    ToolMutationStateAccounting.firstMutationPreimage(state, rawResult));
+                    ToolMutationStateAccounting.retainedMutationPreimage(state, rawResult));
             state.addClassifiedToolOutcome(outcome);
 
             if (!result.success()) {

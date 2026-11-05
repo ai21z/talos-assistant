@@ -110,12 +110,12 @@ class ReplacementPriorPreimageVerificationTest {
 
         assertEquals("NOT_ASSERTED", onlyExpectation(verified).get("status"));
         assertEquals(scope(2, 1, true, "YES"), verified.events("REPLACEMENT_OCCURRENCE_SCOPE_RECORDED"));
-        // F12, open: the exact edit verifier checks the first edit's new text against the final file, which the second
-        // edit superseded. That verifier is outside P18, so this sequence still fails, but no longer for the
-        // replacement.
-        assertEquals(TaskVerificationStatus.FAILED, verified.result().status(), verified.result().toString());
-        assertEquals(List.of("config.ini: exact edit replacement text was not observed after apply."),
-                verified.result().problems());
+        // F12, fixed by P19 (D13 option A): the second edit carries no preimage here, so the first edit, which the
+        // second one changed, is not observed and not asserted instead of failing the turn.
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, verified.result().status(), verified.result().toString());
+        assertEquals("Target/readback checks passed for 1 mutated target(s). " + ONE_REMAINS,
+                verified.result().summary());
+        assertEquals(List.of(), verified.result().problems());
     }
 
     @Test

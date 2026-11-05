@@ -14,23 +14,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * ToolMutationStateAccounting.firstMutationPreimage, which ToolCallExecutionStage calls for every executed outcome,
- * keeps a producer preimage only on the first result of a loop run that touches its target (P18). The results here are
- * constructed. The stage itself is driven by the REPL entry tests in ReplacementScopeReplEntryTest.
+ * ToolMutationStateAccounting.retainedMutationPreimage, which ToolCallExecutionStage calls for every executed outcome,
+ * keeps a producer preimage on every successful result, so the next change of a target observes the state that the
+ * earlier change left (P19, D13 option A). It withholds it after a failed result with mutation effects on the same path
+ * in the loop run, as P18 did. The results here are constructed. The stage itself is driven by the REPL entry tests in
+ * ReplacementScopeReplEntryTest.
  */
-class FirstMutationPreimageTest {
+class RetainedMutationPreimageTest {
     private static final String PRIOR = "[SERVER]\nport=8080\n[CLIENT]\nport=8080\n";
 
     @Test
-    void onlyTheFirstResultThatTouchesATargetKeepsItsPreimage() {
+    void everySuccessfulResultKeepsItsPreimage() {
         LoopState state = loopState();
         MutationPreimage first = preimage("config.ini", PRIOR);
-
-        assertEquals(first, ToolMutationStateAccounting.firstMutationPreimage(state, applied("config.ini", first)));
-        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.firstMutationPreimage(
-                state, applied("config.ini", preimage("config.ini", "[SERVER]\nport=9001\n"))));
+        MutationPreimage second = preimage("config.ini", "[SERVER]\nport=9001\n[CLIENT]\nport=8080\n");
         MutationPreimage other = preimage("notes.md", "a\n");
-        assertEquals(other, ToolMutationStateAccounting.firstMutationPreimage(state, applied("notes.md", other)));
+
+        assertEquals(first, ToolMutationStateAccounting.retainedMutationPreimage(state, applied("config.ini", first)));
+        assertEquals(second, ToolMutationStateAccounting.retainedMutationPreimage(state, applied("config.ini", second)));
+        assertEquals(other, ToolMutationStateAccounting.retainedMutationPreimage(state, applied("notes.md", other)));
     }
 
     @Test
@@ -39,21 +41,35 @@ class FirstMutationPreimageTest {
         ToolResult failed = ToolResult.fail(ToolError.internal("Failed to write file"))
                 .withMutationEffects(ToolMutationEffects.uncertain("config.ini"));
 
-        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.firstMutationPreimage(state, failed));
-        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.firstMutationPreimage(
+        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.retainedMutationPreimage(state, failed));
+        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.retainedMutationPreimage(
                 state, applied("config.ini", preimage("config.ini", PRIOR))));
+        MutationPreimage other = preimage("notes.md", "a\n");
+        assertEquals(other, ToolMutationStateAccounting.retainedMutationPreimage(state, applied("notes.md", other)));
+    }
+
+    @Test
+    void aFailedResultWithoutEffectsWithholdsNothing() {
+        LoopState state = loopState();
+        ToolResult failed = ToolResult.fail(ToolError.internal("old_string was not found"));
+
+        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.retainedMutationPreimage(state, failed));
+        MutationPreimage preimage = preimage("config.ini", PRIOR);
+        assertEquals(preimage,
+                ToolMutationStateAccounting.retainedMutationPreimage(state, applied("config.ini", preimage)));
     }
 
     @Test
     void anEffectOnAnotherPathAndANullResultChangeNothing() {
         LoopState state = loopState();
-        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.firstMutationPreimage(state, null));
-        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.firstMutationPreimage(null, null));
-        ToolMutationStateAccounting.firstMutationPreimage(state, ToolResult.ok("made")
+        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.retainedMutationPreimage(state, null));
+        assertSame(MutationPreimage.none(), ToolMutationStateAccounting.retainedMutationPreimage(null, null));
+        ToolMutationStateAccounting.retainedMutationPreimage(state, ToolResult.ok("made")
                 .withMutationEffects(ToolMutationEffects.applied("docs")));
 
         MutationPreimage preimage = preimage("config.ini", PRIOR);
-        assertEquals(preimage, ToolMutationStateAccounting.firstMutationPreimage(state, applied("config.ini", preimage)));
+        assertEquals(preimage,
+                ToolMutationStateAccounting.retainedMutationPreimage(state, applied("config.ini", preimage)));
     }
 
     @Test

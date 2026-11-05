@@ -60,17 +60,21 @@ final class ToolMutationStateAccounting {
     }
 
     /**
-     * The producer preimage of a successful result, kept only when no earlier mutation effect in this loop touched any
-     * of the result's paths, so the loop holds at most one preimage per target. Every result's affected paths are
-     * recorded, whether or not it succeeded.
+     * The producer preimage of a successful result. It is kept on every successful result, so the state that an earlier
+     * change of a target left is observed by the next change of it (P19, D13 option A). It is withheld after a failed
+     * result with applied or uncertain effects on one of the result's paths in this loop, as in P18. The turn holds at
+     * most one preimage per successful file mutation, each within the preimage bound.
      */
-    static MutationPreimage firstMutationPreimage(LoopState state, ToolResult rawResult) {
+    static MutationPreimage retainedMutationPreimage(LoopState state, ToolResult rawResult) {
         if (state == null || rawResult == null) return MutationPreimage.none();
         java.util.List<String> touched = rawResult.mutationEffects().affectedPaths();
-        boolean first = touched.stream().noneMatch(state.mutationEffectPaths::contains);
-        state.mutationEffectPaths.addAll(touched);
+        if (!rawResult.success()) {
+            state.failedEffectPaths.addAll(touched);
+            return MutationPreimage.none();
+        }
+        boolean afterFailedEffect = touched.stream().anyMatch(state.failedEffectPaths::contains);
         MutationPreimage preimage = rawResult.mutationPreimage();
-        return first && rawResult.success() && preimage.available() ? preimage : MutationPreimage.none();
+        return !afterFailedEffect && preimage.available() ? preimage : MutationPreimage.none();
     }
 
     private static void recordMutationSuccess(LoopState state, String pathHint) {

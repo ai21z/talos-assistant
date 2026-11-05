@@ -59,6 +59,29 @@ class StaticVerificationAnswerRendererTest {
     }
 
     @Test
+    void readbackOnlyAnnotationStatesAnExactEditThatALaterChangeReplaced() {
+        // P19, D13 option A: the exact edit verifier applied, so the rendering does not claim that none applied. A
+        // replacement that was not asserted keeps its P17 wording.
+        TaskVerificationResult replaced = new TaskVerificationResult(
+                dev.talos.runtime.verification.TaskVerificationStatus.READBACK_ONLY,
+                "Target/readback checks passed for 1 mutated target(s).", List.of("readback"), List.of(),
+                TaskVerificationResult.ProofScope.NONE, false, true);
+        TaskVerificationResult both = new TaskVerificationResult(
+                dev.talos.runtime.verification.TaskVerificationStatus.READBACK_ONLY,
+                "Target/readback checks passed for 1 mutated target(s).", List.of("readback"), List.of(),
+                TaskVerificationResult.ProofScope.NONE, true, true);
+        ToolCallLoop.LoopResult loop = loopResult(mutatingOutcome("talos.edit_file", "notes.md", "Edited notes.md"));
+
+        assertEquals(
+                "[File write/readback passed. An exact edit could not be confirmed in the final file after a later "
+                        + "change of the same file, so task completion was not verified. "
+                        + "Target/readback checks passed for 1 mutated target(s).]\n\n",
+                StaticVerificationAnswerRenderer.readbackOnlyAnnotation(replaced, loop));
+        assertTrue(StaticVerificationAnswerRenderer.readbackOnlyAnnotation(both, loop)
+                .startsWith("[File write/readback passed. A requested replacement could not be assessed, "));
+    }
+
+    @Test
     void readbackOnlyAnnotationSelectsWorkspaceOperationLabelWhenWorkspaceOperationSucceeded() {
         TaskVerificationResult result = TaskVerificationResult.readbackOnly(
                 "Target/readback checks passed for 1 mutated target(s).",

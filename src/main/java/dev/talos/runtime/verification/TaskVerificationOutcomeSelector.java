@@ -88,7 +88,8 @@ final class TaskVerificationOutcomeSelector {
                 selected.proofScope() == TaskVerificationResult.ProofScope.REQUEST_BOUND
                         ? TaskVerificationResult.ProofScope.CHECKS
                         : selected.proofScope(),
-                true);
+                true,
+                selected.exactEditNotAsserted());
     }
 
     /** Built only from the typed record, so no request prose enters the answer. */
@@ -209,14 +210,21 @@ final class TaskVerificationOutcomeSelector {
                     ? TaskVerificationResult.passedForRequest(summary, safeFacts)
                     : TaskVerificationResult.passed(summary, safeFacts);
         }
-        // A replacement verifier that applied but asserted nothing is stated by the caller, so the summary does not
-        // claim that no verifier applied.
-        return TaskVerificationResult.readbackOnly(
-                expectation.notAssertedReplacements().isEmpty()
-                        ? "Target/readback checks passed for " + mutatedTargetCount
-                                + " mutated target(s); no task-specific static verifier was applicable."
-                        : "Target/readback checks passed for " + mutatedTargetCount + " mutated target(s).",
-                safeFacts);
+        // A replacement verifier that applied but asserted nothing is stated by the caller, and an exact edit that a
+        // later change of its target replaced is not asserted (P19), so in both cases the summary does not claim that
+        // no verifier applied.
+        String readbackSummary = expectation.notAssertedReplacements().isEmpty() && !exactEdit.leftEditUnasserted()
+                ? "Target/readback checks passed for " + mutatedTargetCount
+                        + " mutated target(s); no task-specific static verifier was applicable."
+                : "Target/readback checks passed for " + mutatedTargetCount + " mutated target(s).";
+        return new TaskVerificationResult(
+                TaskVerificationStatus.READBACK_ONLY,
+                readbackSummary,
+                safeFacts,
+                List.of(),
+                TaskVerificationResult.ProofScope.NONE,
+                false,
+                exactEdit.leftEditUnasserted());
     }
 
     private static boolean isExactContentProblem(String problem) {

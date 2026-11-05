@@ -78,6 +78,8 @@ public final class StaticVerificationAnswerRenderer {
                 ? "A requested replacement could not be assessed, "
                 : hasUnsatisfiedTaskSpecificVerification(result)
                 ? "Task-specific verification did not satisfy the requested claim, "
+                : result != null && result.exactEditNotAsserted()
+                ? "An exact edit could not be confirmed in the final file after a later change of the same file, "
                 : "No task-specific verifier was applicable, ";
         StringBuilder out = new StringBuilder();
         out.append("[").append(readbackKind).append(" passed. ").append(verifierReason)

@@ -99,6 +99,11 @@ class ReplacementScopeReplEntryTest {
     @TempDir
     Path temp;
 
+    /** Called with the number of approval prompts so far, before each answer. A change made here is out of band. */
+    private java.util.function.IntConsumer approvalHook = number -> { };
+    /** Called with the workspace after its files are written and before the turn runs. */
+    private java.util.function.Consumer<Path> workspaceHook = workspace -> { };
+
     @Test
     void theSessionEditIsStatedWithItsCountsAndOffersNoRepair() throws Exception {
         Run run = run(List.of(REQUEST), List.of(
@@ -235,6 +240,190 @@ class ReplacementScopeReplEntryTest {
                 "The prior text must not reach the model context.");
     }
 
+    // P19, D13 option A: an exact edit that a later change of the same file follows is observed where that change found
+    // the file, so a replaced edit no longer fails the turn and never contributes to a pass.
+    private static final String NOT_ASSESSED_ONE_REMAINS = "[File write/readback passed. A requested replacement could "
+            + "not be assessed, so task completion was not verified. Target/readback checks passed for 1 mutated "
+            + "target(s). Requested replacement not verified: config.ini held the old text 2 times before the change "
+            + "and 1 remains.]";
+
+    @Test
+    void twoEditsInOneResponseThatFixAWrongValueAreStatedWithoutARepair() throws Exception {
+        Run run = run(List.of(REQUEST), List.of(
+                nativeCall("talos.read_file", Map.of("path", "config.ini")),
+                together(
+                        editCall("[SERVER]\nport=8080", "[SERVER]\nport=9001"),
+                        editCall("[SERVER]\nport=9001", "[SERVER]\nport=9000")),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", PRIOR));
+
+        assertEquals(SERVER_ONLY, Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains(NOT_ASSESSED_ONE_REMAINS), answer);
+        assertFalse(answer.contains(RepairOffer.LINE), answer);
+        assertFalse(answer.contains("Static verification failed"), answer);
+        assertEquals("READBACK_ONLY", onlyEvent(run, "VERIFICATION_COMPLETED").get("status"));
+        assertEquals("PRODUCER_PREIMAGE", onlyEvent(run, "REPLACEMENT_OCCURRENCE_SCOPE_RECORDED").get("priorSource"));
+        assertFalse(String.valueOf(run.trace().outcome().classification()).contains("FAIL"),
+                run.trace().outcome() + run.transcript());
+    }
+
+    @Test
+    void aWrongValueFixedOnAUniquePriorIsTheRequestBoundReplacementPass() throws Exception {
+        Run run = run(List.of("In config.ini, change the SERVER port from 8080 to 9000."), List.of(
+                nativeCall("talos.read_file", Map.of("path", "config.ini")),
+                together(
+                        editCall("[SERVER]\nport=8080", "[SERVER]\nport=9001"),
+                        editCall("[SERVER]\nport=9001", "[SERVER]\nport=9000")),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", "[SERVER]\nport=8080\n[CLIENT]\nport=7070\n"));
+
+        assertEquals("[SERVER]\nport=9000\n[CLIENT]\nport=7070\n",
+                Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("[Static verification: passed - Replacement verification passed.]"), answer);
+        assertFalse(answer.contains(RepairOffer.LINE), answer);
+        assertEquals("PASSED", onlyEvent(run, "EXPECTATION_VERIFIED").get("status"));
+        assertEquals("COMPLETED_VERIFIED", String.valueOf(run.trace().outcome().classification()), run.transcript());
+    }
+
+    @Test
+    void anEditFollowedByAWriteOfTheSameFileIsNotFailedByTheEdit() throws Exception {
+        Run run = run(List.of(REQUEST), List.of(
+                nativeCall("talos.read_file", Map.of("path", "config.ini")),
+                together(
+                        editCall("[SERVER]\nport=8080", "[SERVER]\nport=9001"),
+                        writeCall("config.ini", SERVER_ONLY)),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", PRIOR));
+
+        assertEquals(SERVER_ONLY, Files.readString(run.workspace().resolve("config.ini")), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains(NOT_ASSESSED_ONE_REMAINS), answer);
+        assertFalse(answer.contains(RepairOffer.LINE), answer);
+    }
+
+    @Test
+    void anUndoChainIsStatedAndIsNeitherFailedNorPassed() throws Exception {
+        Run run = run(List.of("Update notes.md."), List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                together(
+                        editCallOn("notes.md", "status=old", "status=new"),
+                        editCallOn("notes.md", "status=new", "status=old")),
+                text("Updated notes.md."),
+                text("Updated notes.md.")), "y", Set.of(),
+                Map.of("notes.md", "status=old\n"));
+
+        assertEquals("status=old\n", Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("[File write/readback passed. An exact edit could not be confirmed in the final "
+                + "file after a later change of the same file, so task completion was not verified. Target/readback "
+                + "checks passed for 1 mutated target(s).]"), answer);
+        assertFalse(answer.contains("No task-specific verifier was applicable"), answer);
+        assertFalse(answer.contains("Checks passed"), answer);
+        assertFalse(answer.contains(RepairOffer.LINE), answer);
+        assertEquals("READBACK_ONLY", onlyEvent(run, "VERIFICATION_COMPLETED").get("status"));
+    }
+
+    @Test
+    void twoEditsOfSeparateRegionsKeepTheChecksPass() throws Exception {
+        Run run = run(List.of("Update notes.md."), List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                together(
+                        editCallOn("notes.md", "title: Draft", "title: Final"),
+                        editCallOn("notes.md", "status=old", "status=new")),
+                text("Updated notes.md."),
+                text("Updated notes.md.")), "y", Set.of(),
+                Map.of("notes.md", "title: Draft\nstatus=old\n"));
+
+        assertEquals("title: Final\nstatus=new\n", Files.readString(run.workspace().resolve("notes.md")),
+                run.transcript());
+        assertTrue(run.onlyRow().assistantText().contains("[Checks passed - Exact edit replacement checks passed.]"),
+                run.onlyRow().assistantText());
+    }
+
+    @Test
+    void anOutOfBandRevertBetweenTwoEditsFailsThroughTheRetainedPreimage() throws Exception {
+        // Review finding F4: only the second edit's retained preimage shows that the first edit's text was gone before
+        // the second edit ran. The test reverts the first edit while the second approval is pending, as an outside
+        // process would. Without the retained preimage the first edit could not be observed and the turn would not
+        // fail. On 1c86a428 it failed through the final file.
+        Path[] notes = new Path[1];
+        approvalHook = number -> {
+            if (number != 2 || notes[0] == null) return;
+            try {
+                String current = Files.readString(notes[0]);
+                assertTrue(current.contains("title: Final"), "The first edit must have applied: " + current);
+                Files.writeString(notes[0], current.replace("title: Final", "title: Draft"));
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        };
+        workspaceHook = ws -> notes[0] = ws.resolve("notes.md");
+        Run run = run(List.of("Update notes.md."), List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                together(
+                        editCallOn("notes.md", "title: Draft", "title: Final"),
+                        editCallOn("notes.md", "status=old", "status=new")),
+                text("Updated notes.md."),
+                text("Updated notes.md.")), "y", Set.of(),
+                Map.of("notes.md", "title: Draft\nstatus=old\n"));
+
+        assertEquals("title: Draft\nstatus=new\n", Files.readString(run.workspace().resolve("notes.md")),
+                run.transcript());
+        assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("Exact edit replacement verification failed."), answer);
+        assertTrue(answer.contains("notes.md: exact edit replacement text was not observed after apply."), answer);
+        assertEquals("FAILED", onlyEvent(run, "VERIFICATION_COMPLETED").get("status"));
+    }
+
+    @Test
+    void aLaterChangePreimageReachesNoPersistedArtifact() throws Exception {
+        // The canary sits in an untouched part of the prior file, away from the edited lines, and no read shows the
+        // file to the model. Both edits carry a preimage that holds the canary. Only the governed checkpoint blobs may
+        // hold it, as in P18.
+        String canary = "p19-canary-4c1e";
+        StringBuilder prior = new StringBuilder(PRIOR);
+        for (int line = 0; line < 12; line++) prior.append("# filler ").append(line).append('\n');
+        prior.append("# ").append(canary).append('\n');
+        Run run = run(List.of(REQUEST), List.of(
+                together(
+                        editCall("[SERVER]\nport=8080", "[SERVER]\nport=9001"),
+                        editCall("[SERVER]\nport=9001", "[SERVER]\nport=9000")),
+                text("Changed the SERVER port to 9000."),
+                text("Changed the SERVER port to 9000.")), "y", Set.of(),
+                Map.of("config.ini", prior.toString()));
+
+        assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
+        assertTrue(Files.readString(run.workspace().resolve("config.ini")).startsWith(SERVER_ONLY), run.transcript());
+        Path home = run.workspace().getParent().resolve("home");
+        List<Path> carriers;
+        try (var files = Files.walk(home)) {
+            carriers = files.filter(Files::isRegularFile).filter(file -> {
+                try {
+                    return new String(Files.readAllBytes(file), StandardCharsets.UTF_8).contains(canary);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }).toList();
+        }
+        Path checkpoints = home.resolve(".talos").resolve("checkpoints");
+        assertEquals(List.of(), carriers.stream().filter(file -> !file.startsWith(checkpoints)).toList());
+        assertTrue(carriers.stream().allMatch(file -> file.getParent().getFileName().toString().equals("blobs")),
+                carriers.toString());
+        assertFalse(run.onlyRow().assistantText().contains(canary));
+        assertFalse(run.trace().events().toString().contains(canary));
+        assertTrue(run.requests().stream().flatMap(request -> request.messages.stream())
+                        .noneMatch(message -> String.valueOf(message.content()).contains(canary)),
+                "The prior text must not reach the model context.");
+    }
+
     private static Map<String, Object> onlyEvent(Run run, String type) {
         List<Map<String, Object>> events = run.trace().events().stream()
                 .filter(event -> type.equals(event.type()))
@@ -272,6 +461,7 @@ class ReplacementScopeReplEntryTest {
         for (Map.Entry<String, String> file : files.entrySet()) {
             Files.writeString(ws.resolve(file.getKey()), file.getValue());
         }
+        workspaceHook.accept(ws);
         String previousHome = System.getProperty("user.home");
         System.setProperty("user.home", home.toString());
         Path sessions = home.resolve(".talos").resolve("sessions");
@@ -307,6 +497,7 @@ class ReplacementScopeReplEntryTest {
             List<String> prompts = new ArrayList<>();
             CliApprovalGate gate = new CliApprovalGate(prompt -> {
                 prompts.add(prompt);
+                approvalHook.accept(prompts.size());
                 return approval;
             }, out, renderRef::stopSpinner);
             TurnProcessor processor = new TurnProcessor(modes, gate, registry, new SessionApprovalPolicy(),
@@ -402,6 +593,16 @@ class ReplacementScopeReplEntryTest {
     private static ChatMessage.NativeToolCall editCall(String oldString, String newString) {
         return new ChatMessage.NativeToolCall("call-edit-" + Math.abs(oldString.hashCode()), "talos.edit_file",
                 Map.of("path", "config.ini", "old_string", oldString, "new_string", newString));
+    }
+
+    private static ChatMessage.NativeToolCall editCallOn(String path, String oldString, String newString) {
+        return new ChatMessage.NativeToolCall("call-edit-" + Math.abs(oldString.hashCode()), "talos.edit_file",
+                Map.of("path", path, "old_string", oldString, "new_string", newString));
+    }
+
+    private static ChatMessage.NativeToolCall writeCall(String path, String content) {
+        return new ChatMessage.NativeToolCall("call-write-" + Math.abs(content.hashCode()), "talos.write_file",
+                Map.of("path", path, "content", content));
     }
 
     private static LlmClient.StreamResult together(ChatMessage.NativeToolCall... calls) {

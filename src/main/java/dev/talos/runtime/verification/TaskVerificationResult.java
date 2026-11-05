@@ -10,6 +10,10 @@ import java.util.List;
  *
  * <p>{@code replacementNotAsserted} marks a result whose request named a replacement that the evidence could neither
  * prove nor refute (P17), so its rendering does not claim that no task-specific verifier applied.
+ *
+ * <p>{@code exactEditNotAsserted} marks a result in which an exact edit could not be confirmed in the final file after
+ * a later change of the same file in the turn and was therefore not asserted (P19), with the same effect on its
+ * rendering.
  */
 public record TaskVerificationResult(
         TaskVerificationStatus status,
@@ -17,7 +21,8 @@ public record TaskVerificationResult(
         List<String> facts,
         List<String> problems,
         ProofScope proofScope,
-        boolean replacementNotAsserted
+        boolean replacementNotAsserted,
+        boolean exactEditNotAsserted
 ) {
     /** What a pass proves. */
     public enum ProofScope {
@@ -51,6 +56,17 @@ public record TaskVerificationResult(
             ProofScope proofScope
     ) {
         this(status, summary, facts, problems, proofScope, false);
+    }
+
+    public TaskVerificationResult(
+            TaskVerificationStatus status,
+            String summary,
+            List<String> facts,
+            List<String> problems,
+            ProofScope proofScope,
+            boolean replacementNotAsserted
+    ) {
+        this(status, summary, facts, problems, proofScope, replacementNotAsserted, false);
     }
 
     public static TaskVerificationResult notRun(String summary) {
