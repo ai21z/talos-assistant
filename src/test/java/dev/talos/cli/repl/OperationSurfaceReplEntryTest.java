@@ -318,7 +318,9 @@ class OperationSurfaceReplEntryTest {
                         "call-1", "talos.write_file", Map.of("path", "notes.txt", "content", "hello"))), "tool_calls"),
                 text("Created notes.txt.")), "y", true);
 
-        assertEquals(1, run.requests().size(), "Only the replayed request reaches the provider: " + run.transcript());
+        // P20 (D14 option A): the write has no request-bound proof, so one continuation follows it in the same turn.
+        assertEquals(2, run.requests().size(), "Only the replayed request reaches the provider, followed by one "
+                + "continuation after its write: " + run.transcript());
         ChatRequest replayed = run.requests().getFirst();
         assertTrue(toolNames(replayed).contains("talos.write_file"), toolNames(replayed).toString());
         String system = systemText(replayed);

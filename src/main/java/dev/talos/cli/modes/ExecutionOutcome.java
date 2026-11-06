@@ -650,7 +650,10 @@ record ExecutionOutcome(
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                verificationPresentation = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification, verificationReport)
+                boolean changedFiles = loopResult != null
+                        && loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
+                verificationPresentation = StaticVerificationAnswerRenderer.passedAnnotation(
+                        taskVerification, verificationReport, changedFiles)
                         + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult);
                 current = verificationPresentation + current;
             }

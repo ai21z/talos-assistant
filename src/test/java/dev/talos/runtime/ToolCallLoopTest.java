@@ -2559,6 +2559,8 @@ class ToolCallLoopTest {
                                     "bad_summary",
                                     "talos.write_file",
                                     Map.of("path", "office-summary.md", "content", badSummary)))),
+                    // P20: the reply to the continuation that follows the write without request-bound proof.
+                    new LlmClient.StreamResult("Wrote office-summary.md.", List.of()),
                     new LlmClient.StreamResult("", List.of(
                             new ChatMessage.NativeToolCall(
                                     "repaired_summary",
@@ -2630,8 +2632,13 @@ class ToolCallLoopTest {
             assertTrue(written.contains("Client note marker: NEON-RESPONSE-44."), written);
             assertTrue(written.contains("Revenue marker: LASER-LEDGER-19"), written);
             assertFalse(written.contains("Southeast Asia"));
-            assertEquals(1, recorded.requests().size(),
-                    "runtime repair should avoid a second model retry for exact source evidence coverage");
+            assertEquals(2, recorded.requests().size(),
+                    "runtime repair should avoid a second model retry for exact source evidence coverage, "
+                            + "and the one further request is the P20 continuation after the write");
+            assertEquals(List.of("CONTINUED"), trace.events().stream()
+                    .filter(event -> "MUTATION_CONTINUATION_DECIDED".equals(event.type()))
+                    .map(event -> String.valueOf(event.data().get("decision")))
+                    .toList());
             var transformed = trace.events().stream()
                     .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
                     .filter(event -> "SOURCE_EVIDENCE_EXACT_REPAIR".equals(
@@ -2762,7 +2769,9 @@ class ToolCallLoopTest {
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
         var ctx = Context.builder(new Config())
                 .llm(textProvider(registry, List.of(
-                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log('ok');\"}}")))
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log('ok');\"}}",
+                        // P20: the reply to the continuation after the three writes without request-bound proof.
+                        "Created index.html, styles.css and scripts.js.")))
                 .build();
         String llmResponse = jsonToolFences(
                 """

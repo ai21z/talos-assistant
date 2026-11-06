@@ -6769,8 +6769,17 @@ class AssistantTurnExecutorTest {
                     List.of("talos.write_file"),
                     List.of());
 
-            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
-                    "original answer", messages, retryPlan, loopResult, workspace, ctx);
+            // P20: the turn's resolution is captured as in production, so the continuation after the retry write
+            // can be assembled and is answered by the scripted text.
+            dev.talos.runtime.TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromMessages(messages), messages);
+            MissingMutationRetry.Result result;
+            try {
+                result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                        "original answer", messages, retryPlan, loopResult, workspace, ctx);
+            } finally {
+                dev.talos.runtime.TurnTaskContractCapture.clear();
+            }
 
             assertEquals("updated\n", Files.readString(workspace.resolve("result.txt")));
             assertEquals(1, result.mutationsInRetry());

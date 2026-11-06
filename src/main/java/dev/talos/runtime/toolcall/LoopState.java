@@ -105,6 +105,8 @@ public final class LoopState {
     public boolean contentWithheldFromModelContext;
     public final List<String> userVisiblePrivacyNotices = new ArrayList<>();
     public final List<String> pendingMutationSummaries = new ArrayList<>();
+    /** Rounds after which the model was asked again without request-bound proof (P20, MutationContinuationDecision). */
+    public int mutationContinuations;
     private PendingActionObligation pendingActionObligation;
 
     public LoopState(String initialText, List<NativeToolCall> initialNativeCalls,

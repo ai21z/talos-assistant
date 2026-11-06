@@ -94,7 +94,7 @@ class ReplacementScopeReplEntryTest {
     private static final String SERVER_ONLY = "[SERVER]\nport=9000\n[CLIENT]\nport=8080\n";
     private static final String STATED =
             "[Checks passed - Exact edit replacement checks passed. Requested replacement not verified: config.ini "
-                    + "held the old text 2 times before the change and 1 remains.]";
+                    + "held the old text 2 times before the change and 1 remains. Task completion was not verified.]";
 
     @TempDir
     Path temp;
@@ -194,7 +194,8 @@ class ReplacementScopeReplEntryTest {
         assertEquals(2, run.onlyRow().approvalsGranted(), run.transcript());
         String answer = run.onlyRow().assistantText();
         assertTrue(answer.contains("[Checks passed - Exact edit replacement checks passed. Requested replacement not "
-                + "verified: config.ini held the old text 2 times before the change and none remain.]"), answer);
+                + "verified: config.ini held the old text 2 times before the change and none remain. Task completion "
+                + "was not verified.]"), answer);
         assertFalse(answer.contains("Static verification: passed"), answer);
         Map<String, Object> scope = onlyEvent(run, "REPLACEMENT_OCCURRENCE_SCOPE_RECORDED");
         assertEquals("PRODUCER_PREIMAGE", scope.get("priorSource"), scope.toString());
@@ -343,7 +344,8 @@ class ReplacementScopeReplEntryTest {
 
         assertEquals("title: Final\nstatus=new\n", Files.readString(run.workspace().resolve("notes.md")),
                 run.transcript());
-        assertTrue(run.onlyRow().assistantText().contains("[Checks passed - Exact edit replacement checks passed.]"),
+        assertTrue(run.onlyRow().assistantText().contains(
+                        "[Checks passed - Exact edit replacement checks passed. Task completion was not verified.]"),
                 run.onlyRow().assistantText());
     }
 

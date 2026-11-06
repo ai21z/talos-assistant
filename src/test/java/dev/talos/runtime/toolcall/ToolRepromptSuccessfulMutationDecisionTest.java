@@ -27,7 +27,66 @@ class ToolRepromptSuccessfulMutationDecisionTest {
     }
 
     @Test
+    void allSuccessfulMutationWithoutRemainingTargetsContinuesWithoutRequestBoundProofWhileARoundRemains() {
+        // P20 (D14 option A): the change has no request-bound proof here, so the model is asked again.
+        LoopState state = state();
+        state.toolOutcomes.add(successfulMutation("talos.write_file", "README.md"));
+        var outcome = new ToolCallExecutionStage.IterationOutcome(
+                1,
+                List.of("Updated README.md"),
+                0,
+                false,
+                false,
+                false,
+                1);
+
+        dev.talos.runtime.TurnTaskContractCapture.set(
+                dev.talos.runtime.task.TaskContractResolver.resolveFromMessages(state.messages), state.messages);
+        Optional<Boolean> decision;
+        try {
+            decision = ToolRepromptSuccessfulMutationDecision.tryHandle(state, outcome);
+        } finally {
+            dev.talos.runtime.TurnTaskContractCapture.clear();
+        }
+
+        assertTrue(decision.isEmpty());
+        assertEquals(1, state.mutationContinuations);
+    }
+
+    @Test
+    void withACapturedRequestTheStopHoldsOnceNoFurtherRoundCanRun() {
+        // P20: without request-bound proof the stop holds at the iteration limit.
+        LoopState state = state();
+        state.iterations = state.maxIterations;
+        state.toolOutcomes.add(successfulMutation("talos.write_file", "README.md"));
+        var outcome = new ToolCallExecutionStage.IterationOutcome(
+                1,
+                List.of("Updated README.md"),
+                0,
+                false,
+                false,
+                false,
+                1);
+
+        dev.talos.runtime.TurnTaskContractCapture.set(
+                dev.talos.runtime.task.TaskContractResolver.resolveFromMessages(state.messages), state.messages);
+        Optional<Boolean> decision;
+        try {
+            decision = ToolRepromptSuccessfulMutationDecision.tryHandle(state, outcome);
+        } finally {
+            dev.talos.runtime.TurnTaskContractCapture.clear();
+        }
+
+        assertTrue(decision.isPresent());
+        assertFalse(decision.get());
+        assertEquals("Updated README.md", state.currentText);
+        assertEquals(0, state.mutationContinuations);
+    }
+
+    @Test
     void allSuccessfulMutationWithoutRemainingTargetsStopsWithMutationSummaries() {
+        // Without a captured request resolution (a compatibility caller) the stop holds as before P20
+        // (REQUEST_NOT_CAPTURED). Captured turns are covered by the two tests above.
         LoopState state = state();
         state.toolOutcomes.add(successfulMutation("talos.write_file", "README.md"));
         var outcome = new ToolCallExecutionStage.IterationOutcome(

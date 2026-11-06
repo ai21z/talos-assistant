@@ -20,6 +20,7 @@
   ],
   "userPrompt": "nothing changed, try one more time",
   "scriptedResponses": [
-    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"const result = 'BMI repaired';\"}}"
+    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"const result = 'BMI repaired';\"}}",
+    "Done."
   ]
 }

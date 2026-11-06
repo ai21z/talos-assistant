@@ -13,6 +13,7 @@
     "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
     "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
     "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n      </div>\",\"new_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n        <a class=\\\"cta-button\\\" href=\\\"#tickets\\\">Listen now</a>\\r\\n      </div>\"}}\n```",
+    "Done.",
     "This response should not be reached."
   ]
 }

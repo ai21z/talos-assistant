@@ -613,6 +613,49 @@ public final class LocalTurnTraceCapture {
                 data));
     }
 
+    /**
+     * Records whether a round in which every call succeeded ended the turn, with kinds and counts only (P20). The
+     * decision is PROOF_HELD, OPERATION_COMPLETE, CONTINUED, LIMIT_REACHED or REQUEST_NOT_CAPTURED, and the proof
+     * status is that of the verification it read, or NOT_EVALUATED.
+     */
+    public static void recordMutationContinuationDecided(
+            String decision,
+            int iteration,
+            int maxIterations,
+            String proofStatus,
+            boolean requestBound
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("decision", safe(decision));
+        data.put("iteration", iteration);
+        data.put("maxIterations", maxIterations);
+        data.put("proofStatus", safe(proofStatus));
+        data.put("requestBound", requestBound);
+        bag.builder.event(TurnTraceEvent.simple(
+                "MUTATION_CONTINUATION_DECIDED",
+                now(),
+                data));
+    }
+
+    /**
+     * Records that a request or reply after a continuation was unusable, so the turn ended with the summaries of its
+     * changes (P20). The reason is CONTEXT_BUDGET, PROVIDER_FAILURE, REQUEST_FAILED, GENERATION_ABORTED or
+     * INCOMPLETE_REPLY, and the failure type is the exception's simple class name, the abort origin or the completion.
+     */
+    public static void recordMutationContinuationUnanswered(String reason, String failureType) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("reason", safe(reason));
+        data.put("failureType", safe(failureType));
+        bag.builder.event(TurnTraceEvent.simple(
+                "MUTATION_CONTINUATION_UNANSWERED",
+                now(),
+                data));
+    }
+
     public static void recordWorkspaceOperationConsumed(
             WorkspaceOperationAuthorityPlan plan
     ) {

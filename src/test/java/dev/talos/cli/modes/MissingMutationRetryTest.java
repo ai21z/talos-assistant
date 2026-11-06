@@ -508,9 +508,13 @@ class MissingMutationRetryTest {
                 "call_write_notes",
                 "talos.write_file",
                 Map.of("path", "notes.md", "content", "hello\n"));
-        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+        // P20: the turn's resolution is captured as in production, and the continuation after the write without
+        // request-bound proof gets a provider failure, so the retry ends with the blank tool summary under test.
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
+        var provider = ScriptedNativeLlmClient.recordingThenFailureWithContextWindow(
                 List.of(new LlmClient.StreamResult("", List.of(writeCall))),
-                16_384);
+                16_384,
+                new dev.talos.spi.EngineException.ConnectionFailed("127.0.0.1", null));
         Context ctx = testContext(provider.client(), blankOutputWrite);
 
         MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
@@ -835,6 +839,8 @@ class MissingMutationRetryTest {
                 "call_write_absolute",
                 "talos.write_file",
                 Map.of("path", root.resolve("docs").resolve("a.md").toString(), "content", "x\n"));
+        // P20: captured as in production, so the continuation after the write can be assembled and is answered.
+        TurnTaskContractCapture.set(TaskContractResolver.resolveFromMessages(messages), messages);
         var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(
                         new LlmClient.StreamResult("", List.of(writeCall)),

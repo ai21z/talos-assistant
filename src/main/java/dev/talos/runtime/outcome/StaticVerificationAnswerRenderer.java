@@ -15,6 +15,9 @@ import java.util.Objects;
  * Runtime-owned final-answer fragments for post-apply static verification.
  */
 public final class StaticVerificationAnswerRenderer {
+    /** Stated in a checks pass on a turn that changed files (P20, D15 option A), as the readback-only path states it. */
+    public static final String COMPLETION_NOT_VERIFIED = "Task completion was not verified.";
+
     private StaticVerificationAnswerRenderer() {}
 
     public static String passedAnnotation(TaskVerificationResult result) {
@@ -25,11 +28,27 @@ public final class StaticVerificationAnswerRenderer {
             TaskVerificationResult result,
             VerificationReport report
     ) {
+        return passedAnnotation(result, report, false);
+    }
+
+    /**
+     * A pass bound to the request is verification. Any other pass keeps its own checks wording (MICA I3, D5), and on
+     * a turn that changed files it also states that task completion was not verified (P20, D15 option A), because
+     * its checks do not show that every requested change was made.
+     */
+    public static String passedAnnotation(
+            TaskVerificationResult result,
+            VerificationReport report,
+            boolean changedFiles
+    ) {
         StringBuilder out = new StringBuilder();
-        // A pass bound to the request is verification. Any other pass keeps its own checks wording (MICA I3, D5).
-        out.append(result != null && result.requestBound() ? "[Static verification: passed - " : "[Checks passed - ")
-                .append(verificationSummary(result))
-                .append("]\n\n");
+        boolean requestBound = result != null && result.requestBound();
+        String summary = verificationSummary(result);
+        out.append(requestBound ? "[Static verification: passed - " : "[Checks passed - ").append(summary);
+        if (!requestBound && changedFiles) {
+            out.append(endsSentence(summary) ? " " : ". ").append(COMPLETION_NOT_VERIFIED);
+        }
+        out.append("]\n\n");
         List<String> limitations = generalLimitations(report);
         if (!limitations.isEmpty()) {
             out.append("Static verification limitations:");
@@ -292,6 +311,12 @@ public final class StaticVerificationAnswerRenderer {
         }
         String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
         return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
+    }
+
+    private static boolean endsSentence(String text) {
+        if (text == null || text.isEmpty()) return false;
+        char last = text.charAt(text.length() - 1);
+        return last == '.' || last == '!' || last == '?';
     }
 
     private static boolean hasUnsatisfiedTaskSpecificVerification(TaskVerificationResult result) {

@@ -45,6 +45,34 @@ class StaticVerificationAnswerRendererTest {
     }
 
     @Test
+    void aChecksPassOnATurnThatChangedFilesStatesThatCompletionWasNotVerified() {
+        TaskVerificationResult result = TaskVerificationResult.passed(
+                "Exact edit replacement checks passed.", List.of());
+
+        assertEquals(
+                "[Checks passed - Exact edit replacement checks passed. Task completion was not verified.]\n\n",
+                StaticVerificationAnswerRenderer.passedAnnotation(result, VerificationReport.empty(), true));
+        assertEquals(
+                "[Checks passed - no additional detail. Task completion was not verified.]\n\n",
+                StaticVerificationAnswerRenderer.passedAnnotation(
+                        TaskVerificationResult.passed("", List.of()), VerificationReport.empty(), true));
+    }
+
+    @Test
+    void aRequestBoundPassAndAPassWithoutAChangeDoNotStateMissingVerification() {
+        assertEquals(
+                "[Static verification: passed - Replacement verification passed.]\n\n",
+                StaticVerificationAnswerRenderer.passedAnnotation(
+                        TaskVerificationResult.passedForRequest("Replacement verification passed.", List.of()),
+                        VerificationReport.empty(), true));
+        assertEquals(
+                "[Checks passed - Exact edit replacement checks passed.]\n\n",
+                StaticVerificationAnswerRenderer.passedAnnotation(
+                        TaskVerificationResult.passed("Exact edit replacement checks passed.", List.of()),
+                        VerificationReport.empty(), false));
+    }
+
+    @Test
     void readbackOnlyAnnotationSelectsFileWriteLabelWhenNoWorkspaceOperationSucceeded() {
         TaskVerificationResult result = TaskVerificationResult.readbackOnly(
                 "Target/readback checks passed for 1 mutated target(s).",

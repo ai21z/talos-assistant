@@ -29,20 +29,32 @@ final class ToolRepromptSuccessfulMutationDecision {
         // is a workspace-integrity bug: one file gets edited while another
         // silently stays stale, and the loop terminates without retrying.
         //
-        // The original P0 skip (see ToolCallLoopP0Test) is preserved intact
-        // for all-success iterations; that path still avoids the 5-15
-        // minute post-mutation bloviation observed on local 31B Q4 models.
-        if (StaticWebContinuationPlanner.staticWebVerificationAlreadyPasses(state)) {
-            state.finishWithToolAnswer(String.join("\n", outcome.mutationSummaries()));
-            state.clearPendingActionObligation();
-            LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
-            return Optional.of(false);
-        }
+        // The P0 skip (see ToolCallLoopP0Test) avoids the 5-15 minute
+        // post-mutation reply observed on local 31B Q4 models. Since P20 it
+        // ends an all-success round with nothing left only when request-bound
+        // proof holds or no further round can run (MutationContinuationDecision).
         List<String> remainingRepairTargets =
                 StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
         List<String> remainingExpectedTargets =
                 ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
-        if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
+        boolean nothingRemains = remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty();
+        if (StaticWebContinuationPlanner.staticWebVerificationAlreadyPasses(state)) {
+            // P20 (D16 option A): a passed verification still stops before target progress while a target remains.
+            // With nothing left it takes the D14 decision, because a pass that is not bound to the request does not
+            // show that every requested change was made.
+            if (nothingRemains) {
+                MutationContinuationDecision.Decision continuation = MutationContinuationDecision.decide(state);
+                if (continuation.continues()) {
+                    LOG.debug("Continuing after a verifier-passed mutation without request-bound proof");
+                    return Optional.empty();
+                }
+            }
+            state.finishWithToolAnswer(String.join("\n", summaries(state, outcome)));
+            state.clearPendingActionObligation();
+            LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
+            return Optional.of(false);
+        }
+        if (nothingRemains) {
             Optional<StaticWebContinuationPlanner.Plan> staticWebPlan =
                     StaticWebContinuationPlanner.nextPlan(
                             state,
@@ -60,11 +72,19 @@ final class ToolRepromptSuccessfulMutationDecision {
                         state, plan.messages(), plan.tools(), plan.controls(), plan.retryName()));
             }
         }
-        if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
-            state.finishWithToolAnswer(String.join("\n", outcome.mutationSummaries()));
-            LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
+        if (nothingRemains) {
+            // P20 (D14 option A): target progress alone does not end the turn. The summaries are the answer only
+            // when request-bound proof holds or no further round can run.
+            MutationContinuationDecision.Decision continuation = MutationContinuationDecision.decide(state);
+            if (!continuation.continues()) {
+                state.finishWithToolAnswer(String.join("\n", summaries(state, outcome)));
+                LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration ({})",
+                        outcome.mutationsThisIteration(), continuation.kind());
+                return Optional.of(false);
+            }
+            LOG.debug("Continuing after {} successful mutation(s) without request-bound proof",
                     outcome.mutationsThisIteration());
-            return Optional.of(false);
+            return Optional.empty();
         }
         if (!remainingRepairTargets.isEmpty()) {
             LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
@@ -75,5 +95,10 @@ final class ToolRepromptSuccessfulMutationDecision {
                     outcome.mutationsThisIteration(), dev.talos.safety.SafeLogFormatter.value(remainingExpectedTargets));
         }
         return Optional.empty();
+    }
+
+    /** After a continuation the answer lists every change of the turn, not only the last round's (P20). */
+    private static List<String> summaries(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        return state.mutationContinuations > 0 ? state.pendingMutationSummaries : outcome.mutationSummaries();
     }
 }

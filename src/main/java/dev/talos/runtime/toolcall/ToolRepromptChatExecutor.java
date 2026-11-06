@@ -47,17 +47,28 @@ final class ToolRepromptChatExecutor {
                     NO_ANSWER_AFTER_TOOL_EXECUTION);
         } catch (EngineException.ContextBudgetExceeded budget) {
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            // P20: after a continuation, a request that cannot be sent leaves the turn as its completed changes left it.
+            if (MutationContinuationDecision.endUnanswered(state, "CONTEXT_BUDGET", budget)) return false;
             return ToolRepromptContextBudgetHandler.handle(state, budget, retryName);
         } catch (RuntimeException failure) {
             if (TurnFailureClassifier.isCancellation(failure)
                     || TurnFailureClassifier.isInterruption(failure)) {
                 throw TurnFailureClassifier.propagateControlFlow(failure);
             }
+            if (MutationContinuationDecision.endUnanswered(
+                    state, MutationContinuationDecision.failureReason(failure), failure)) {
+                LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                return false;
+            }
             throw failure;
         } catch (Exception e) {
             if (TurnFailureClassifier.isCancellation(e)
                     || TurnFailureClassifier.isInterruption(e)) {
                 throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            if (MutationContinuationDecision.endUnanswered(state, "REQUEST_FAILED", e)) {
+                LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                return false;
             }
             throw new RuntimeException(e);
         }
@@ -161,6 +172,8 @@ final class ToolRepromptChatExecutor {
             String noAnswerFallback,
             boolean failPendingObligationOnEmptyResult
     ) {
+        // P20: after a continuation, an aborted or incomplete reply leaves the turn as its completed changes left it.
+        if (MutationContinuationDecision.endIfReplyUnusable(state, repromptResult)) return false;
         state.applyProviderResult(repromptResult);
         if (dev.talos.runtime.IncompleteGenerationPresentation.required(repromptResult)) {
             return false;

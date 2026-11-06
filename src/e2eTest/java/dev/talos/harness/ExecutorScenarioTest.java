@@ -179,7 +179,8 @@ class ExecutorScenarioTest {
                 scenario,
                 history,
                 "Make this page better with a complete redesign, modern styling, and interaction.",
-                List.of(readIndex, writeIndexOnly))) {
+                // P20 (D14 option A): the reply to the continuation after the write without request-bound proof.
+                List.of(readIndex, writeIndexOnly, "Done."))) {
             result.assertApprovalCounts(1, 1, 0, 0)
                     .assertAnswerNotContains("Action obligation failed")
                     .assertAnswerNotContains("BLOCKED_BY_POLICY")

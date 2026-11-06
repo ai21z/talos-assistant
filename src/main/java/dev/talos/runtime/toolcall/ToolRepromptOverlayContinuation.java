@@ -56,6 +56,8 @@ final class ToolRepromptOverlayContinuation {
                     "(no answer from model after tool execution)");
         } catch (EngineException.ContextBudgetExceeded budget) {
             LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            // P20: after a continuation, a request that cannot be sent leaves the turn as its completed changes left it.
+            if (MutationContinuationDecision.endUnanswered(state, "CONTEXT_BUDGET", budget)) return false;
             return ToolRepromptContextBudgetHandler.handle(state, budget, "tool-call loop continuation");
         } catch (EngineException.Transient tr) {
             try {
@@ -74,11 +76,17 @@ final class ToolRepromptOverlayContinuation {
             } catch (Exception retryEx) {
                 if (retryEx instanceof EngineException.ContextBudgetExceeded budget) {
                     LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                    if (MutationContinuationDecision.endUnanswered(state, "CONTEXT_BUDGET", budget)) return false;
                     return ToolRepromptContextBudgetHandler.handle(state, budget, "transient retry continuation");
                 }
                 if (TurnFailureClassifier.isCancellation(retryEx)
                         || TurnFailureClassifier.isInterruption(retryEx)) {
                     throw TurnFailureClassifier.propagateControlFlow(retryEx);
+                }
+                if (MutationContinuationDecision.endUnanswered(
+                        state, MutationContinuationDecision.failureReason(retryEx), retryEx)) {
+                    LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                    return false;
                 }
                 if (retryEx instanceof RuntimeException runtime) throw runtime;
                 throw new RuntimeException(retryEx);
@@ -88,11 +96,21 @@ final class ToolRepromptOverlayContinuation {
                     || TurnFailureClassifier.isInterruption(failure)) {
                 throw TurnFailureClassifier.propagateControlFlow(failure);
             }
+            // P20: after a continuation, a failed request leaves the turn as its completed changes left it.
+            if (MutationContinuationDecision.endUnanswered(
+                    state, MutationContinuationDecision.failureReason(failure), failure)) {
+                LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                return false;
+            }
             throw failure;
         } catch (Exception e) {
             if (TurnFailureClassifier.isCancellation(e)
                     || TurnFailureClassifier.isInterruption(e)) {
                 throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            if (MutationContinuationDecision.endUnanswered(state, "REQUEST_FAILED", e)) {
+                LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                return false;
             }
             throw new RuntimeException(e);
         }

@@ -53,9 +53,11 @@ class ToolModeCorrectionBoundaryTest {
                 new LlmClient.StreamResult(textCall(read("read-1", "README.md")), List.of()),
                 nativeResponse(read("read-1", "README.md"), read("read-2", "NOTES.md")),
                 nativeResponse(edit("edit-1", "README.md", "old title", "new title"),
-                        edit("edit-2", "NOTES.md", "old note", "new note"))));
+                        edit("edit-2", "NOTES.md", "old note", "new note")),
+                new LlmClient.StreamResult("Updated both files.", List.of())));
 
-        assertEquals(3, run.requests().size());
+        // P20 (D14 option A): one continuation follows the completed mutations without request-bound proof.
+        assertEquals(4, run.requests().size());
         assertTrue(hasNotice(run.requests().get(1)), "The second request carries the runtime correction.");
         assertFalse(hasNotice(run.requests().getFirst()));
         assertEquals(1, run.result().toolOutcomes().stream()

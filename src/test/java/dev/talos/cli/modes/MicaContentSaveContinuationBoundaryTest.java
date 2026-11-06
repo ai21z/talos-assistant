@@ -188,7 +188,8 @@ class MicaContentSaveContinuationBoundaryTest {
             var first = conversation.run(request);
             assertEquals(0, first.providerRequests());
             assertNotNull(conversation.memory.pendingContentSave());
-            var saved = conversation.run("story.txt", WRITE);
+            // P20 (D14 option A): the save has no request-bound proof, so one continuation follows it, answered here.
+            var saved = conversation.run("story.txt", WRITE, "Saved story.txt.");
             assertEquals(STORY, Files.readString(workspace.resolve("story.txt")));
             assertEquals(1, conversation.approvals.get());
             assertTrue(saved.messages().stream().anyMatch(message -> "user".equals(message.role())
@@ -197,7 +198,7 @@ class MicaContentSaveContinuationBoundaryTest {
             assertTrue(saved.messages().stream().anyMatch(message -> "system".equals(message.role())
                     && message.content().contains("[OperandClarification]")));
             assertTrue(saved.answer().contains("[Request coverage unassessed]"), saved.answer());
-            assertEquals(1, saved.providerRequests());
+            assertEquals(2, saved.providerRequests());
             assertTrue(saved.answer().contains("Selected answer text, quoted"), saved.answer());
             assertEquals(MemoryUpdateListener.assistantTextForPersistence(saved.answer(), "story.txt"),
                     conversation.memory.getTurns().getLast().content());

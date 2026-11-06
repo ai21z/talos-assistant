@@ -40,6 +40,12 @@ import static org.junit.jupiter.api.Assertions.*;
      * {@code llm()} is an unavailable scripted client. If the loop tries to re-prompt,
      * that provider failure propagates instead of being converted into assistant text.
  * Therefore a passing test is direct evidence that the re-prompt was skipped.
+ *
+ * <p>Since P20 (D14 option A) a production turn, whose request resolution is always captured, skips the
+ * re-prompt only with request-bound proof, after its single authorized operation, or at the iteration limit.
+ * The skip tests here capture no resolution, so they run as compatibility callers and the skip holds as before
+ * (REQUEST_NOT_CAPTURED). A captured turn without proof continues, see anUnprovenWriteRepromptsWhileARoundRemains
+ * and UnprovenMutationContinuationReplEntryTest.
  */
 class ToolCallLoopP0Test {
 
@@ -105,6 +111,46 @@ class ToolCallLoopP0Test {
             assertEquals(1, result.mutatingToolSuccesses());
             assertTrue(result.finalAnswer().contains("✓ "),
                     "answer should carry the mutation summary, got: " + result.finalAnswer());
+        }
+
+        @Test
+        void anUnprovenWriteRepromptsWhileARoundRemains() {
+            // P20 (D14 option A): a write without request-bound proof is not the answer while a
+            // further round can run. The unavailable scripted LLM fails the re-prompt, the recorded
+            // decision proves it is the continuation, and the failed continuation leaves the turn with
+            // the summary of the write. A non-web file keeps the static web continuation planner out.
+            var loop = createLoop(fakeWriteFileTool());
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("create notes.txt for me")));
+
+            String llmResponse = """
+                    <tool_call>
+                    {"name": "talos.write_file", "parameters": {"path": "notes.txt", "content": "notes"}}
+                    </tool_call>""";
+
+            LocalTurnTraceCapture.begin("p0-continuation", "tests", 1, "2026-11-06T00:00:00Z",
+                    "workspace", "auto", "llama_cpp", "fixture", "create notes.txt for me");
+            TurnTaskContractCapture.set(
+                    TaskContractResolver.resolveFromMessages(messages),
+                    messages);
+            try {
+                var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm(fakeWriteFileTool()));
+                assertTrue(result.finalAnswer().startsWith("✓ "), result.finalAnswer());
+                assertEquals(1, result.mutatingToolSuccesses());
+                var events = LocalTurnTraceCapture.complete().events();
+                assertEquals(List.of("CONTINUED"), events.stream()
+                        .filter(event -> "MUTATION_CONTINUATION_DECIDED".equals(event.type()))
+                        .map(event -> String.valueOf(event.data().get("decision")))
+                        .toList());
+                assertEquals(List.of("REQUEST_FAILED:IllegalStateException"), events.stream()
+                        .filter(event -> "MUTATION_CONTINUATION_UNANSWERED".equals(event.type()))
+                        .map(event -> event.data().get("reason") + ":" + event.data().get("failureType"))
+                        .toList());
+            } finally {
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
         }
 
         @Test

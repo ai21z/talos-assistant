@@ -53,10 +53,14 @@ class NativeMutationContinuationBoundaryTest {
                 nativeResponse(read("read-1", "README.md")),
                 nativeResponse(read("read-2", "NOTES.md")),
                 nativeResponse(edit("edit-1", "README.md", "old title", "new title"),
-                        edit("edit-2", "NOTES.md", "old note", "new note"))));
+                        edit("edit-2", "NOTES.md", "old note", "new note")),
+                new LlmClient.StreamResult("Updated both files.", List.of())));
 
-        assertEquals(3, run.requests().size(), "Completed mutations must not trigger another generation.");
-        for (int i = 1; i < run.requests().size(); i++) {
+        // P20 (D14 option A): completed mutations without request-bound proof get one continuation, which the
+        // model answers here with text. The continuation requires no tool.
+        assertEquals(4, run.requests().size(), "One continuation follows the completed mutations.");
+        assertEquals(ToolChoiceMode.AUTO, run.requests().get(3).controls.toolChoice());
+        for (int i = 1; i < 3; i++) {
             ChatRequest request = run.requests().get(i);
             assertEquals(ToolChoiceMode.REQUIRED, request.controls.toolChoice());
             assertEquals(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
@@ -156,9 +160,11 @@ class NativeMutationContinuationBoundaryTest {
                 new LlmClient.StreamResult(textCall(read("read-1", "README.md")) + "\n"
                         + textCall(read("read-2", "NOTES.md")), List.of()),
                 new LlmClient.StreamResult(textCall(edit("edit-1", "README.md", "old title", "new title")) + "\n"
-                        + textCall(edit("edit-2", "NOTES.md", "old note", "new note")), List.of())));
+                        + textCall(edit("edit-2", "NOTES.md", "old note", "new note")), List.of()),
+                new LlmClient.StreamResult("Updated both files.", List.of())));
 
-        assertEquals(2, run.requests().size());
+        // P20: one continuation after the completed mutations, answered with text.
+        assertEquals(3, run.requests().size());
         assertEquals(ToolChoiceMode.AUTO, run.requests().get(1).controls.toolChoice());
         assertEquals(ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
                 run.requests().get(1).controls.toolAuthorityMode());

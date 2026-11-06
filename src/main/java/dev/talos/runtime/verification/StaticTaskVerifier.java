@@ -184,6 +184,30 @@ public final class StaticTaskVerifier {
                 noWorkspaceAuthority(contract)).compatibilityResult();
     }
 
+    /**
+     * The production post-apply inputs without trace events, for a decision taken during the loop (P20). The
+     * captured workspace-operation plan is used as the post-loop verification uses it, so a typed operation is not
+     * reported as unauthorized here.
+     */
+    public static TaskVerificationResult verifyWithoutTraceEvents(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            WorkspaceOperationAuthorityPlan workspaceOperationPlan
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                RequestObligationCompiler.compile(contract),
+                loopResult,
+                extraMutationSuccesses,
+                false,
+                StaticWebRenderVerifier.unavailableRunner(),
+                workspaceOperationPlan == null ? noWorkspaceAuthority(contract) : workspaceOperationPlan)
+                .compatibilityResult();
+    }
+
     private static TaskVerificationEvidence verifyInternal(
             Path workspace,
             TaskContract contract,
