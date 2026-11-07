@@ -29,6 +29,9 @@ public final class ToolCallRepromptStage {
                 && outcome.executionAuthorityRejectedThisIteration()) {
             Optional<Boolean> corrected = ToolModeCorrectionReprompt.tryHandle(state, outcome);
             if (corrected.isPresent()) return corrected.get();
+            // P21 (D17 option A): after a continuation that followed completed changes, a reply whose calls were all
+            // refused ends the turn with the changes, as a failed continuation request does.
+            if (MutationContinuationDecision.endIfEveryCallRefused(state, outcome)) return false;
             FailureDecision decision = FailureDecision.stop(
                     FailureAction.ASK_USER,
                     AUTHORITY_REJECTED_REASON);

@@ -64,7 +64,15 @@ final class ToolModeCorrectionReprompt {
         var receipt = state.currentResponseReceipt;
         if (receipt == null || receipt.toolAuthorityMode()
                 != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE) return false;
-        // Every failure of this iteration is an authority rejection, so no call of the iteration was dispatched.
+        return everyFailureRefused(state, outcome);
+    }
+
+    /**
+     * Every failure of this iteration is an authority rejection, so no call of the iteration was dispatched. Shared
+     * with the P21 end of a continuation whose calls were all refused.
+     */
+    static boolean everyFailureRefused(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (state == null || outcome == null) return false;
         int rejected = 0;
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             if (state.toolOutcomes.get(i).failureReason() != ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID) break;

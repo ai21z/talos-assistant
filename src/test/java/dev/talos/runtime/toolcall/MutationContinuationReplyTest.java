@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.trace.LocalTurnTraceCapture.ToolCallAuthorityRejectionReason;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * After a continuation that followed completed changes, an unusable reply leaves the turn as its completed changes
  * left it (P20 and its second review): a reply ended by a watchdog, a stream close or the transport and an incomplete
- * reply end the turn with the summaries of every change. An operator cancellation and a thread interruption keep their
+ * reply end the turn with the summaries of every change, and so does a reply whose calls were all refused before
+ * execution (P21, D17 option A). An operator cancellation and a thread interruption keep their
  * own handling, and without a continuation every reply is handled as before. Real LoopState and reply application.
  */
 class MutationContinuationReplyTest {
@@ -78,6 +80,63 @@ class MutationContinuationReplyTest {
 
         assertTrue(continues);
         assertEquals("Changed the heading.", state.currentText);
+    }
+
+    @Test
+    void aReplyWhoseCallsWereAllRefusedAfterAContinuationEndsWithTheChanges() {
+        // P21 (finding LP-F1, D17 option A). A refused call never ran, so the reply is unusable.
+        LoopState state = continued();
+        state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(null, "blocked"));
+
+        assertTrue(MutationContinuationDecision.endIfEveryCallRefused(state, refused(1, 0)));
+        assertEquals(SUMMARY, state.currentText);
+        assertTrue(state.currentNativeCalls.isEmpty());
+        assertFalse(state.failureDecision.shouldStop(), "No failure stop is set for an unusable continuation reply.");
+    }
+
+    @Test
+    void aRefusedCallKeepsItsOwnHandlingWithoutAContinuationOrWhenAnotherCallOfTheIterationWasDispatched() {
+        LoopState without = state();
+        without.mutatingToolSuccesses = 1;
+        without.pendingMutationSummaries.add(SUMMARY);
+        without.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(null, "blocked"));
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(without, refused(1, 0)),
+                "Without a continuation the existing stop holds.");
+
+        LoopState continued = continued();
+        continued.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(null, "blocked"));
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(continued, refused(1, 1)),
+                "A call that ran in the same iteration keeps the existing handling.");
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(continued, refused(2, 0)),
+                "A failure other than the refusal means a call was dispatched.");
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(continued, null));
+        assertEquals("", continued.currentText);
+    }
+
+    @Test
+    void anAuthorityRejectionOtherThanATextCallKeepsItsHardStopAfterAContinuation() {
+        // P21 review: as in D7, only a call written as text is a reply form. A stale generation, a lineage mismatch or
+        // a rejection without a recorded reason keeps the existing stop, so it stays visible.
+        LoopState state = continued();
+        state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(null, "blocked"));
+
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(state, refused(1, 0,
+                List.of(ToolCallAuthorityRejectionReason.PROVIDER_GENERATION_STALE))));
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(state, refused(1, 0,
+                List.of(ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH,
+                        ToolCallAuthorityRejectionReason.LINEAGE_CALL_MISMATCH))));
+        assertFalse(MutationContinuationDecision.endIfEveryCallRefused(state, refused(1, 0, List.of())));
+        assertEquals("", state.currentText);
+    }
+
+    private static ToolCallExecutionStage.IterationOutcome refused(int failures, int successes) {
+        return refused(failures, successes, List.of(ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH));
+    }
+
+    private static ToolCallExecutionStage.IterationOutcome refused(
+            int failures, int successes, List<ToolCallAuthorityRejectionReason> reasons) {
+        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), failures, false, false, false, successes,
+                List.of(), true, 0, reasons);
     }
 
     private static LlmClient.StreamResult aborted(ProviderResponseCapture.AbortOrigin origin) {

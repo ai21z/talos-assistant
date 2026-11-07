@@ -146,6 +146,69 @@ class ToolLoopResultSummaryFormatterTest {
     }
 
     @Test
+    void showsCallsRefusedBeforeExecutionAsNotRunInsteadOfFailed() {
+        // P21 (D18 option A): a call refused for its executable authority never ran, so it is shown as not run.
+        var refused = ToolOutcomeFactory.failedAuthority(null, "blocked");
+        var failedEdit = new ToolCallLoop.ToolOutcome(
+                "talos.edit_file",
+                "notes.md",
+                false,
+                true,
+                false,
+                "",
+                "old_string not found",
+                null,
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
+        var result = new ToolCallLoop.LoopResult(
+                "answer",
+                2,
+                2,
+                List.of("talos.edit_file"),
+                List.of(),
+                2,
+                0,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.continueLoop(),
+                List.of(refused, failedEdit));
+
+        assertEquals(
+                "[Used 2 tool(s): talos.edit_file | 2 iteration(s)] [1 failed] [1 not run]",
+                ToolLoopResultSummaryFormatter.format(result));
+    }
+
+    @Test
+    void aRefusedCallAloneIsNotShownAsFailed() {
+        var result = new ToolCallLoop.LoopResult(
+                "answer",
+                2,
+                1,
+                List.of("talos.edit_file"),
+                List.of(),
+                1,
+                0,
+                false,
+                1,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.continueLoop(),
+                List.of(ToolOutcomeFactory.failedAuthority(null, "blocked")));
+
+        assertEquals(
+                "[Used 1 tool(s): talos.edit_file | 2 iteration(s)] [1 not run]",
+                ToolLoopResultSummaryFormatter.format(result));
+    }
+
+    @Test
     void loopResultSummaryDelegatesToFormatterOwner() throws Exception {
         String loopSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/ToolCallLoop.java"));
@@ -158,7 +221,7 @@ class ToolLoopResultSummaryFormatterTest {
         assertEquals(0, count(formatterSource, "private static String normalizeSummaryPath"), formatterSource);
         assertTrue(
                 formatterSource.contains(
-                        "int displayFailedCalls = Math.max(0, result.failedCalls())"),
+                        "int displayFailedCalls = Math.max(0, result.failedCalls() - notRunCalls)"),
                 formatterSource);
     }
 

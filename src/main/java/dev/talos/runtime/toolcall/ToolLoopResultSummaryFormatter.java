@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.tools.ToolFailureReason;
 
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
@@ -36,9 +37,14 @@ public final class ToolLoopResultSummaryFormatter {
                 + readSetSuffix(result)
                 + workspaceCandidateSuffix(disclosure)
                 + "]";
-        int displayFailedCalls = Math.max(0, result.failedCalls());
+        // P21 (D18 option A): a call refused for its executable authority never ran, so it is shown as not run.
+        int notRunCalls = refusedBeforeExecution(result.toolOutcomes());
+        int displayFailedCalls = Math.max(0, result.failedCalls() - notRunCalls);
         if (displayFailedCalls > 0) {
             base += " [" + displayFailedCalls + " failed]";
+        }
+        if (notRunCalls > 0) {
+            base += " [" + notRunCalls + " not run]";
         }
         if (result.hitIterLimit()) {
             base += " " + UiChrome.ITERATION_LIMIT_PREFIX + " reached]";
@@ -47,6 +53,14 @@ public final class ToolLoopResultSummaryFormatter {
             base += " [failure policy stopped]";
         }
         return base;
+    }
+
+    private static int refusedBeforeExecution(List<ToolCallLoop.ToolOutcome> outcomes) {
+        if (outcomes == null) return 0;
+        return (int) outcomes.stream()
+                .filter(outcome -> outcome != null
+                        && outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)
+                .count();
     }
 
     private static String readSetSuffix(ToolCallLoop.LoopResult result) {

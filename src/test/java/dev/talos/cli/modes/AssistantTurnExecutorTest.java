@@ -3068,7 +3068,9 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("Directory entries:"), out.text());
             assertTrue(out.text().contains("README.md"), out.text());
             assertFalse(out.text().contains("ALPHA-742"), out.text());
-            assertTrue(out.text().contains("[1 failed]"), out.text());
+            // P21 (D18 option A): the read outside the exact surface is refused before execution and never runs.
+            assertTrue(out.text().contains("[1 not run]"), out.text());
+            assertFalse(out.text().contains(" failed]"), out.text());
         }
 
         @Test

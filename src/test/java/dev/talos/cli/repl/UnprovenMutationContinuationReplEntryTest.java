@@ -263,6 +263,96 @@ class UnprovenMutationContinuationReplEntryTest {
     }
 
     @Test
+    void aContinuationReplyWhoseCallWasRefusedEndsWithTheChangeAsBeforeTheContinuation() throws Exception {
+        // P21 (finding LP-F1, D17 option A, D18 option A): the reply to the continuation writes its call as text in
+        // native tool mode, as qwen did in every live D1 sample. The refused call never runs, and the turn ends as its
+        // completed change left it, without a failure stop and without a further request.
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                edit("notes.md", "# Notes", "# Session Notes"),
+                text(textCall("talos.read_file", Map.of("path", "notes.md"))),
+                text("Unused.")), List.of("y"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(HEADING_ONLY, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(3, run.requests().size(), run.transcript());
+        assertEquals(1, run.prompts().size(), run.transcript());
+        assertEquals(List.of("CONTINUED"), decisions(run), run.transcript());
+        List<Map<String, Object>> unanswered = events(run, "MUTATION_CONTINUATION_UNANSWERED");
+        assertEquals(List.of("TOOL_AUTHORITY_REJECTED"), unanswered.stream()
+                .map(data -> String.valueOf(data.get("reason"))).toList(), run.transcript());
+        assertEquals("PROVIDER_TOOL_MODE_MISMATCH", String.valueOf(unanswered.getFirst().get("failureType")),
+                unanswered.toString());
+        assertFalse(events(run, "TOOL_CALL_AUTHORITY_REJECTED").isEmpty(), run.transcript());
+        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        String answerBox = answerBox(run);
+        assertTrue(answerBox.contains("Edited notes.md"), answerBox);
+        assertTrue(answerBox.contains("[1 not run]"), answerBox);
+        assertFalse(answerBox.contains(" failed]"), answerBox);
+        assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
+        assertFalse(answerBox.contains("PROVIDER_TOOL_MODE_MISMATCH"), answerBox);
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains(NOT_VERIFIED), answer);
+        assertFalse(answer.contains("PROVIDER_TOOL_MODE_MISMATCH"), answer);
+    }
+
+    @Test
+    void aRefusedTextFormEditAfterTheContinuationNeverRuns() throws Exception {
+        // P21 review: the refused call is an edit, so its never running is visible in the file. The turn is PARTIAL
+        // and lists the refused proposal as failed, the LA-F7 class that P21 does not change (finding P21-F1).
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                edit("notes.md", "# Notes", "# Session Notes"),
+                text(textCall("talos.edit_file", Map.of("path", "notes.md",
+                        "old_string", "- Record the second take.\n",
+                        "new_string", "- Record the second take.\n- Mix the drums.\n"))),
+                text("Unused.")), List.of("y", "y"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(HEADING_ONLY, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(1, run.prompts().size(), run.transcript());
+        assertEquals(3, run.requests().size(), run.transcript());
+        assertEquals(List.of("TOOL_AUTHORITY_REJECTED"), unansweredReasons(run), run.transcript());
+        String answerBox = answerBox(run);
+        assertTrue(answerBox.contains("[1 not run]"), answerBox);
+        assertFalse(answerBox.contains(" failed]"), answerBox);
+        assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
+    }
+
+    @Test
+    void aRefusedReplyAfterAContinuationAndAFailedEditEndsWithTheChange() throws Exception {
+        // P21 review: the continuation stays issued for the rest of the loop, as P20's rule states. After it, an edit
+        // fails before approval, the ordinary re-prompt follows, and its reply writes the call as text.
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                edit("notes.md", "# Notes", "# Session Notes"),
+                edit("notes.md", "- Record the third take.\n", "- Record the third take.\n- Mix the drums.\n"),
+                text(textCall("talos.read_file", Map.of("path", "notes.md"))),
+                text("Unused.")), List.of("y", "y"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(HEADING_ONLY, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(4, run.requests().size(), run.transcript());
+        assertEquals(List.of("CONTINUED"), decisions(run), run.transcript());
+        assertEquals(List.of("TOOL_AUTHORITY_REJECTED"), unansweredReasons(run), run.transcript());
+        String answerBox = answerBox(run);
+        assertTrue(answerBox.contains("[1 failed] [1 not run]"), answerBox);
+        assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
+        assertFalse(answerBox.contains("PROVIDER_TOOL_MODE_MISMATCH"), answerBox);
+    }
+
+    /** The last answer box of the transcript, read with the box's line wrapping joined. */
+    private static String answerBox(Run run) {
+        return run.transcript().substring(run.transcript().lastIndexOf("+- answer -"))
+                .replaceAll("\\s*\\R\\s*\\|\\s*", " ");
+    }
+
+    private static List<String> unansweredReasons(Run run) {
+        return events(run, "MUTATION_CONTINUATION_UNANSWERED").stream()
+                .map(data -> String.valueOf(data.get("reason"))).toList();
+    }
+
+    @Test
     void aRequestOfOneAuthorizedOperationEndsOnceThatOperationSucceeds() throws Exception {
         Run run = run("Rename a.md to b.md.", List.of(
                 nativeCall("talos.rename_path", Map.of("path", "a.md", "new_name", "b.md"))), List.of("y"),
@@ -484,5 +574,11 @@ class UnprovenMutationContinuationReplEntryTest {
 
     private static LlmClient.StreamResult text(String content) {
         return new LlmClient.StreamResult(content, List.of(), "stop");
+    }
+
+    /** A tool call written as text, the form ToolModeCorrectionBoundaryTest uses, which native tool mode refuses. */
+    private static String textCall(String tool, Map<String, Object> arguments) throws Exception {
+        return "```json\n" + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                Map.of("name", tool, "arguments", arguments)) + "\n```";
     }
 }

@@ -25,9 +25,10 @@ import java.util.List;
  * Otherwise the model is asked again with the tool results, under the same tool surface and approval gates.
  *
  * <p>The continuation is optional work after completed changes. Once one was issued, a later request that fails, a
- * reply that a watchdog, a stream close or the transport ended, and an incomplete reply leave the turn as it stood
- * after its last completed change: it ends with the summaries of every change. Operator cancellation and thread
- * interruption keep their own handling. Only typed state decides, and no request text is read here.
+ * reply that a watchdog, a stream close or the transport ended, an incomplete reply and a reply whose calls were all
+ * written as text and refused before execution (P21) leave the turn as it stood after its last completed change: it
+ * ends with the summaries of every change. Operator cancellation and thread interruption keep their own handling.
+ * Only typed state decides, and no request text is read here.
  */
 final class MutationContinuationDecision {
     private static final Logger LOG = LoggerFactory.getLogger(MutationContinuationDecision.class);
@@ -107,6 +108,32 @@ final class MutationContinuationDecision {
             return endUnanswered(state, "INCOMPLETE_REPLY", result.completion().name());
         }
         return false;
+    }
+
+    /**
+     * Ends the turn with the summaries of every change when, after a continuation, every call of the reply was written
+     * as text in native tool mode and refused before execution, and no call of that iteration was dispatched (P21,
+     * finding LP-F1, D17 option A). A refused call never runs, and D7 sends no correction once a tool ran in the turn,
+     * so the reply is as unusable as a failed request. The refused calls stay recorded as refused. Every other
+     * authority rejection keeps its hard stop, as in D7, so a stale generation or a lineage mismatch stays visible
+     * (P21 review). Returns false otherwise, so the caller's own handling applies.
+     */
+    static boolean endIfEveryCallRefused(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (!continuationIssued(state) || outcome == null || !outcome.executionAuthorityRejectedThisIteration()) {
+            return false;
+        }
+        if (!outcome.authorityRejections().equals(
+                List.of(LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH))) {
+            return false;
+        }
+        if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0
+                || outcome.approvalDeniedThisIteration() || outcome.mutatingDeniedThisIteration()
+                || outcome.pathPolicyBlockedThisIteration()
+                || !ToolModeCorrectionReprompt.everyFailureRefused(state, outcome)) {
+            return false;
+        }
+        return endUnanswered(state, "TOOL_AUTHORITY_REJECTED",
+                LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH.name());
     }
 
     /** PROVIDER_FAILURE for an engine failure, REQUEST_FAILED for any other failure of the request. */

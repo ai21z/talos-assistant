@@ -641,8 +641,9 @@ public final class LocalTurnTraceCapture {
 
     /**
      * Records that a request or reply after a continuation was unusable, so the turn ended with the summaries of its
-     * changes (P20). The reason is CONTEXT_BUDGET, PROVIDER_FAILURE, REQUEST_FAILED, GENERATION_ABORTED or
-     * INCOMPLETE_REPLY, and the failure type is the exception's simple class name, the abort origin or the completion.
+     * changes (P20). The reason is CONTEXT_BUDGET, PROVIDER_FAILURE, REQUEST_FAILED, GENERATION_ABORTED,
+     * INCOMPLETE_REPLY or TOOL_AUTHORITY_REJECTED (P21), and the failure type is the exception's simple class name, the
+     * abort origin, the completion or the authority rejection reasons.
      */
     public static void recordMutationContinuationUnanswered(String reason, String failureType) {
         Bag bag = HOLDER.get();
