@@ -17,6 +17,16 @@ public final class ToolCallRepromptStage {
     /** The runtime refused a tool call's executable authority and stopped the loop. */
     public static final String AUTHORITY_REJECTED_REASON = "tool-call execution authority was rejected";
 
+    /**
+     * P24 (D23 option A): after a continuation that followed completed changes, a reply in which no call was parsed
+     * ends the turn with the summaries of every change instead of becoming the answer. {@code callTextPresent} is true
+     * when the reply held call text from which no call was parsed. Returns true when it ended the turn, and false when
+     * the reply's own handling applies.
+     */
+    public boolean endIfContinuationReplyHoldsNoCall(LoopState state, boolean callTextPresent) {
+        return MutationContinuationDecision.endIfReplyWithoutCall(state, callTextPresent);
+    }
+
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (state.toolOutcomes.stream().anyMatch(result -> result.mutating() && !result.success()
                 && result.mutationEffects().hasEffects())) {

@@ -4,6 +4,8 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.IncompleteGenerationPresentation;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.intent.RequestedResultInventory;
+import dev.talos.runtime.task.AnswerRequirements;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -27,8 +29,10 @@ import java.util.List;
  * <p>The continuation is optional work after completed changes. Once one was issued, a later request that fails, a
  * reply that a watchdog, a stream close or the transport ended, an incomplete reply and a reply whose calls were all
  * written as text and refused before execution (P21) leave the turn as it stood after its last completed change: it
- * ends with the summaries of every change. Operator cancellation and thread interruption keep their own handling.
- * Only typed state decides, and no request text is read here.
+ * ends with the summaries of every change. A reply that holds no call ends the same way, because the records of the
+ * completed changes, not the model's account, state what the turn did (P24), unless the request carries a typed answer
+ * obligation besides the changes. Operator cancellation and thread interruption keep their own handling. Only typed
+ * state decides, and no request text is read here.
  */
 final class MutationContinuationDecision {
     private static final Logger LOG = LoggerFactory.getLogger(MutationContinuationDecision.class);
@@ -134,6 +138,45 @@ final class MutationContinuationDecision {
         }
         return endUnanswered(state, "TOOL_AUTHORITY_REJECTED",
                 LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH.name());
+    }
+
+    /**
+     * Ends the turn with the summaries of every change when, after a continuation, the reply holds no parsed call
+     * (P24, findings LR-F1 and LR-F2, D23 option A). The reply text is not shown, so neither an imitated tool result
+     * nor a claim that the lexical guards cannot resolve becomes the account of the turn, and the trace records the
+     * reply's length with the reason TEXT_REPLY, or UNPARSED_CALL_TEXT when the reply held call text from which no call
+     * was parsed. The reply is kept, under the existing guards, when the task contract carries a typed answer
+     * obligation besides the changes (D24 option A), and when no change summary was recorded. Returns false
+     * otherwise, so the caller's own handling applies.
+     */
+    static boolean endIfReplyWithoutCall(LoopState state, boolean callTextPresent) {
+        if (!continuationIssued(state) || state.pendingMutationSummaries.isEmpty() || typedAnswerObligation()) {
+            return false;
+        }
+        int replyChars = state.currentText == null ? 0 : state.currentText.length();
+        LOG.debug("A reply without a call after a continuation ({} chars) ends the turn with the changes.", replyChars);
+        state.finishWithToolAnswer(String.join("\n", state.pendingMutationSummaries));
+        LocalTurnTraceCapture.recordMutationContinuationUnanswered(
+                callTextPresent ? "UNPARSED_CALL_TEXT" : "TEXT_REPLY", "", replyChars);
+        return true;
+    }
+
+    /**
+     * An answer requirement of a recognized kind or an active requested result of the turn's task contract. A request's
+     * unclassified text is carried as an answer requirement of kind UNKNOWN, so that kind is no obligation. A request
+     * that allows or requests a change compiles no requested result today, so only the first carrier can apply after a
+     * continuation, and the second keeps the rule of D24 option A if that changes.
+     */
+    private static boolean typedAnswerObligation() {
+        TaskContract contract = TurnTaskContractCapture.get();
+        if (contract != null && contract.answerRequirements() != null
+                && contract.answerRequirements().requirements().stream()
+                        .anyMatch(requirement -> requirement.kind() != AnswerRequirements.Kind.UNKNOWN)) {
+            return true;
+        }
+        RequestedResultInventory requested = TurnTaskContractCapture.requestedResults();
+        return requested != null && requested.results().stream()
+                .anyMatch(result -> result.disposition() == RequestedResultInventory.Disposition.ACTIVE);
     }
 
     /** PROVIDER_FAILURE for an engine failure, REQUEST_FAILED for any other failure of the request. */

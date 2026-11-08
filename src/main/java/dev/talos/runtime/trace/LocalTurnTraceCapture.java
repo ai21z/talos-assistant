@@ -642,15 +642,25 @@ public final class LocalTurnTraceCapture {
     /**
      * Records that a request or reply after a continuation was unusable, so the turn ended with the summaries of its
      * changes (P20). The reason is CONTEXT_BUDGET, PROVIDER_FAILURE, REQUEST_FAILED, GENERATION_ABORTED,
-     * INCOMPLETE_REPLY or TOOL_AUTHORITY_REJECTED (P21), and the failure type is the exception's simple class name, the
-     * abort origin, the completion or the authority rejection reasons.
+     * INCOMPLETE_REPLY, TOOL_AUTHORITY_REJECTED (P21), or TEXT_REPLY or UNPARSED_CALL_TEXT for a reply without a call
+     * (P24), and the failure type is the exception's simple class name, the abort origin, the completion or the
+     * authority rejection reasons, empty for P24.
      */
     public static void recordMutationContinuationUnanswered(String reason, String failureType) {
+        recordMutationContinuationUnanswered(reason, failureType, -1);
+    }
+
+    /**
+     * Records the ending of a continuation without a usable reply. A non-negative {@code replyChars} is the length of
+     * a reply that was received and not shown (P24), so the trace keeps that a reply came without keeping its text.
+     */
+    public static void recordMutationContinuationUnanswered(String reason, String failureType, int replyChars) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("reason", safe(reason));
         data.put("failureType", safe(failureType));
+        if (replyChars >= 0) data.put("replyChars", replyChars);
         bag.builder.event(TurnTraceEvent.simple(
                 "MUTATION_CONTINUATION_UNANSWERED",
                 now(),

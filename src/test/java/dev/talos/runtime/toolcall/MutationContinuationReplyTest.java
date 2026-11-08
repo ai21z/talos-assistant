@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.LocalTurnTraceCapture.ToolCallAuthorityRejectionReason;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
@@ -22,8 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * After a continuation that followed completed changes, an unusable reply leaves the turn as its completed changes
  * left it (P20 and its second review): a reply ended by a watchdog, a stream close or the transport and an incomplete
  * reply end the turn with the summaries of every change, and so does a reply whose calls were all refused before
- * execution (P21, D17 option A). An operator cancellation and a thread interruption keep their
- * own handling, and without a continuation every reply is handled as before. Real LoopState and reply application.
+ * execution (P21, D17 option A). A reply without a parsed call ends the same way (P24, D23 option A). An operator
+ * cancellation and a thread interruption keep their own handling, and without a continuation every reply is handled
+ * as before. Real LoopState and reply application.
  */
 class MutationContinuationReplyTest {
     private static final String SUMMARY = "✓ Edited notes.md: replaced 1 line(s) with 1 line(s)";
@@ -127,6 +130,52 @@ class MutationContinuationReplyTest {
                         ToolCallAuthorityRejectionReason.LINEAGE_CALL_MISMATCH))));
         assertFalse(MutationContinuationDecision.endIfEveryCallRefused(state, refused(1, 0, List.of())));
         assertEquals("", state.currentText);
+    }
+
+    @Test
+    void callTextFromWhichNoCallIsParsedAfterAContinuationEndsWithTheChanges() {
+        // P24 review finding 5: raw call text that names a Talos tool and does not decode meets the precondition of the
+        // engine's text path without a parsed call. The provider text projection removes such text before the loop in
+        // the observed cases, so the recorded reason is pinned here on the real state and parse stage.
+        String callText = "<tool_call>\n{\"name\": \"talos.edit_file\", \"arguments\": {\"path\": \"notes.md\"\n</tool_call>";
+        TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.begin("continuation-reply", "tests", 1, "2026-11-08T00:00:00Z",
+                "workspace", "agent", "fixture", "fixture", "Update notes.md.");
+        try {
+            LoopState state = continued();
+            assertTrue(ToolRepromptChatExecutor.applyResult(state,
+                    new LlmClient.StreamResult(callText, List.of(), "stop"), "fallback"));
+            ToolCallParseStage.ParsedCalls parsed = new ToolCallParseStage().parse(state, 2);
+            assertTrue(parsed.useTextPath());
+            assertTrue(parsed.calls().isEmpty());
+
+            assertTrue(new ToolCallRepromptStage().endIfContinuationReplyHoldsNoCall(state, true));
+            assertEquals(SUMMARY, state.currentText);
+            assertEquals(List.of("UNPARSED_CALL_TEXT:" + callText.length()),
+                    LocalTurnTraceCapture.complete().events().stream()
+                            .filter(event -> "MUTATION_CONTINUATION_UNANSWERED".equals(event.type()))
+                            .map(event -> event.data().get("reason") + ":" + event.data().get("replyChars"))
+                            .toList());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void aReplyWithoutACallKeepsItsHandlingWithoutAContinuationOrAChangeSummary() {
+        TurnTaskContractCapture.clear();
+        LoopState without = state();
+        without.mutatingToolSuccesses = 1;
+        without.pendingMutationSummaries.add(SUMMARY);
+        without.currentText = "Changed the heading.";
+        assertFalse(MutationContinuationDecision.endIfReplyWithoutCall(without, false));
+        assertEquals("Changed the heading.", without.currentText);
+
+        LoopState withoutSummary = continued();
+        withoutSummary.pendingMutationSummaries.clear();
+        withoutSummary.currentText = "Changed the heading.";
+        assertFalse(MutationContinuationDecision.endIfReplyWithoutCall(withoutSummary, false));
+        assertEquals("Changed the heading.", withoutSummary.currentText);
     }
 
     private static ToolCallExecutionStage.IterationOutcome refused(int failures, int successes) {

@@ -145,18 +145,27 @@ final class ToolCallLoopEngine {
         ToolCallExecutionStage executionStage = new ToolCallExecutionStage(turnProcessor, progressSink, strict);
         ToolCallRepromptStage repromptStage = new ToolCallRepromptStage();
 
+        // True while the reply of the last re-prompt has not been parsed, which holds after the loop when that reply
+        // arrived after the last iteration.
+        boolean replyUnparsed = false;
         while (state.iterations < state.maxIterations) {
             ToolCallParseStage.ParsedCalls parsed =
                     parseStage.parse(state, state.iterations + 1);
+            replyUnparsed = false;
             if (!parsed.useNativePath() && !parsed.useTextPath()) {
                 if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                     break;
                 }
+                // P24 (D23 option A): after a continuation, a reply without a call ends with the changes.
+                repromptStage.endIfContinuationReplyHoldsNoCall(state, false);
                 break;
             }
             state.iterations++;
             if (parsed.calls().isEmpty()) {
                 if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
+                    break;
+                }
+                if (repromptStage.endIfContinuationReplyHoldsNoCall(state, true)) {
                     break;
                 }
                 if (ToolLoopFinalAnswerFinalizer.shouldSuppressUnfinishedToolContinuation(
@@ -189,6 +198,14 @@ final class ToolCallLoopEngine {
             if (!repromptStage.reprompt(state, outcome)) {
                 break;
             }
+            replyUnparsed = true;
+        }
+
+        // P24 (review finding 1): a reply that arrived after the last iteration was never parsed in the loop. Without
+        // a call it ends with the changes after a continuation, as it does inside the loop.
+        if (replyUnparsed && state.currentNativeCalls.isEmpty()
+                && !ToolCallParser.containsToolCalls(state.currentText)) {
+            repromptStage.endIfContinuationReplyHoldsNoCall(state, false);
         }
 
         boolean hitIterLimit = runtimeReason != LocalTurnTraceCapture.RuntimeToolAuthorityReason.SELECTED_CONTENT_DRAFT
