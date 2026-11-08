@@ -577,24 +577,38 @@ public final class TurnProcessor {
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires current deterministic runtime authority"));
         }
-        return executeTool(session, call, ctx, permit);
+        return executeTool(session, call, ctx, permit, false);
     }
 
-    /** Executes a call whose one-use parse permit was minted by the tool-loop stage. */
+    /** Executes a call whose one-use parse permit was minted by the tool-loop stage, with no continuation issued. */
     public ToolResult executeToolAfterParsed(
             Session session,
             ToolCall call,
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+        return executeToolAfterParsed(session, call, ctx, parsedPermit, false);
+    }
+
+    /**
+     * Executes a call whose one-use parse permit was minted by the tool-loop stage. {@code proposedAfterContinuation}
+     * is the loop state's fact that this turn asked the model to continue after completed changes (P23).
+     */
+    public ToolResult executeToolAfterParsed(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
+            boolean proposedAfterContinuation) {
         return executeToolWithinStage(() -> executeToolAfterParsedWithinStage(
-                session, call, ctx, parsedPermit));
+                session, call, ctx, parsedPermit, proposedAfterContinuation));
     }
 
     private ToolResult executeToolAfterParsedWithinStage(
             Session session,
             ToolCall call,
             RuntimeTurnContext ctx,
-            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
+            boolean proposedAfterContinuation
     ) {
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
             TurnAuditCapture.recordAuthorityRejectedToolCall(call,
@@ -603,14 +617,15 @@ public final class TurnProcessor {
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires the current exact parsed-call authority"));
         }
-        return executeTool(session, call, ctx, parsedPermit);
+        return executeTool(session, call, ctx, parsedPermit, proposedAfterContinuation);
     }
 
     private ToolResult executeTool(
             Session session,
             ToolCall call,
             RuntimeTurnContext ctx,
-            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
+            boolean proposedAfterContinuation) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
@@ -986,7 +1001,8 @@ public final class TurnProcessor {
                 call,
                 risk,
                 ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase(),
-                targetNamedByRequest));
+                targetNamedByRequest,
+                proposedAfterContinuation));
         // Raising the risk may only add a prompt. A rule that refuses the call at its original risk
         // keeps refusing it, so an erasing effect can never turn a configured deny into an ask.
         if (emptyingWarning != null && permissionDecision.action() != PermissionAction.DENY) {
@@ -996,7 +1012,8 @@ public final class TurnProcessor {
                     call,
                     descriptorEffectRisk,
                     ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase(),
-                    targetNamedByRequest));
+                    targetNamedByRequest,
+                    proposedAfterContinuation));
             if (atOriginalRisk.action() == PermissionAction.DENY) permissionDecision = atOriginalRisk;
         }
 

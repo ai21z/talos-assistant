@@ -14,6 +14,11 @@ import java.util.Objects;
 /** Config-backed allow/ask/deny permission policy with session-approval compatibility. */
 public final class DeclarativePermissionPolicy implements PermissionPolicy {
 
+    /** Shown in the approval prompt of a change that a remembered approval would otherwise have covered (P23). */
+    public static final String CONTINUATION_WRITE_MESSAGE =
+            "This change was proposed after Talos asked the model to continue, so the session approval does not "
+                    + "cover it.";
+
     private final ApprovalPolicy sessionApprovalPolicy;
 
     public DeclarativePermissionPolicy(ApprovalPolicy sessionApprovalPolicy) {
@@ -87,6 +92,13 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                 && sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
             sessionDecision = ApprovalPolicy.Decision.ASK;
         }
+        // A change proposed after the tool loop asked the model to continue is work the runtime asked for, not the
+        // change the operator approved, so it is shown once before it runs and grants no remembered approval
+        // (P23, finding LQ-F1, D20 option A).
+        boolean proposedAfterContinuation = request.proposedAfterContinuation();
+        if (proposedAfterContinuation && sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
+            return PermissionDecision.ask("CONTINUATION_WRITE_ASK", CONTINUATION_WRITE_MESSAGE, resource, false);
+        }
         if (sessionDecision == ApprovalPolicy.Decision.AUTO_APPROVE) {
             return PermissionDecision.allow("SESSION_REMEMBER_ALLOW", resource);
         }
@@ -94,6 +106,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         boolean rememberEligible = risk == ToolRiskLevel.WRITE
                 && !typedWorkspaceOperation
                 && !commandExecution
+                && !proposedAfterContinuation
                 && request.targetNamedByRequest()
                 && resource.hasPath()
                 && resource.insideWorkspace()

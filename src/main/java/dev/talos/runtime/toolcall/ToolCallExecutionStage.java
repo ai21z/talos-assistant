@@ -299,8 +299,10 @@ public final class ToolCallExecutionStage {
                 }
             }
 
+            // P23 (D20 option A): the loop state is the only owner of whether this turn asked the model to continue.
             ToolResult rawResult = turnProcessor.executeToolAfterParsed(
-                    state.toolSession, effective, state.ctx, parsedPermit);
+                    state.toolSession, effective, state.ctx, parsedPermit,
+                    MutationContinuationDecision.continuationIssued(state));
             ToolResultModelContextHandoff.Decision handoffDecision =
                     ToolResultModelContextHandoff.decide(
                             effective,

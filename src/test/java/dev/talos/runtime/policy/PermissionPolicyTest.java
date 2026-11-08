@@ -405,7 +405,63 @@ class PermissionPolicyTest {
 
     private PermissionRequest request(Config cfg, ToolCall call, ToolRiskLevel risk, ExecutionPhase phase,
                                       boolean targetNamedByRequest) {
-        return new PermissionRequest(workspace, cfg, call, risk, phase, targetNamedByRequest);
+        return new PermissionRequest(workspace, cfg, call, risk, phase, targetNamedByRequest, false);
+    }
+
+    @Test
+    void aChangeProposedAfterAContinuationIsAskedOnceDespiteARememberedApproval() {
+        // P23 (finding LQ-F1, D20 option A).
+        SessionApprovalPolicy sessionPolicy = new SessionApprovalPolicy();
+        sessionPolicy.rememberApproval(workspace,
+                new ToolCall("talos.write_file", Map.of("path", "src/first.txt", "content", "x")),
+                ToolRiskLevel.WRITE);
+        PermissionPolicy policy = new DeclarativePermissionPolicy(sessionPolicy);
+        ToolCall write = new ToolCall("talos.write_file", Map.of("path", "src/second.txt", "content", "x"));
+
+        PermissionDecision before = policy.decide(
+                new PermissionRequest(workspace, new Config(), write, ToolRiskLevel.WRITE, ExecutionPhase.APPLY,
+                        true, false));
+        PermissionDecision after = policy.decide(
+                new PermissionRequest(workspace, new Config(), write, ToolRiskLevel.WRITE, ExecutionPhase.APPLY,
+                        true, true));
+        PermissionDecision afterUnnamed = policy.decide(
+                new PermissionRequest(workspace, new Config(), write, ToolRiskLevel.WRITE, ExecutionPhase.APPLY,
+                        false, true));
+
+        assertEquals("SESSION_REMEMBER_ALLOW", before.reasonCode());
+        assertEquals(PermissionAction.ASK, after.action());
+        assertEquals("CONTINUATION_WRITE_ASK", after.reasonCode());
+        assertEquals(DeclarativePermissionPolicy.CONTINUATION_WRITE_MESSAGE, after.userMessage());
+        assertFalse(after.rememberEligible());
+        assertEquals("DEFAULT_WRITE_ASK", afterUnnamed.reasonCode());
+        assertFalse(afterUnnamed.rememberEligible());
+    }
+
+    @Test
+    void noRememberedApprovalCanBeGrantedForAChangeProposedAfterAContinuation() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(new SessionApprovalPolicy());
+        ToolCall write = new ToolCall("talos.write_file", Map.of("path", "src/app.js", "content", "x"));
+
+        PermissionDecision decision = policy.decide(
+                new PermissionRequest(workspace, new Config(), write, ToolRiskLevel.WRITE, ExecutionPhase.APPLY,
+                        true, true));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("DEFAULT_WRITE_ASK", decision.reasonCode());
+        assertFalse(decision.rememberEligible());
+    }
+
+    @Test
+    void aConfiguredAllowRuleKeepsCoveringAChangeProposedAfterAContinuation() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.write_file"), List.of("WRITE"), List.of("APPLY"), List.of("src/**"))));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+        ToolCall write = new ToolCall("talos.write_file", Map.of("path", "src/app.js", "content", "x"));
+
+        PermissionDecision decision = policy.decide(
+                new PermissionRequest(workspace, cfg, write, ToolRiskLevel.WRITE, ExecutionPhase.APPLY, true, true));
+
+        assertEquals("CONFIG_ALLOW", decision.reasonCode());
     }
 
     @Test

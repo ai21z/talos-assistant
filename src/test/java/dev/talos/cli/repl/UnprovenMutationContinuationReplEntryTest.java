@@ -341,6 +341,150 @@ class UnprovenMutationContinuationReplEntryTest {
         assertFalse(answerBox.contains("PROVIDER_TOOL_MODE_MISMATCH"), answerBox);
     }
 
+    @Test
+    void aContinuationChangeIsAskedOnceWithoutTheSessionOptionAfterASessionApproval() throws Exception {
+        // P23 (finding LQ-F1, D20 option A): the first change is approved for the session, and the change that the
+        // model proposes after the continuation is asked once, without the session option and with the reason.
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                edit("notes.md", "# Notes", "# Session Notes"),
+                edit("notes.md", "- Record the second take.\n", "- Record the second take.\n- Mix the drums.\n"),
+                text("Changed the heading and added the item.")), List.of("a", "y"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(BOTH_PARTS, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(2, run.prompts().size(), run.transcript());
+        assertTrue(run.prompts().getFirst().contains("a=yes for session"), run.prompts().toString());
+        assertFalse(run.prompts().get(1).contains("a=yes for session"), run.prompts().toString());
+        assertTrue(joinedTranscript(run).contains(CONTINUATION_WRITE_REASON), run.transcript());
+        assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK"), writeReasons(run), run.transcript());
+        assertEquals(List.of(Boolean.TRUE, Boolean.FALSE), writeRememberEligible(run), run.transcript());
+        assertEquals(List.of("CONTINUED", "CONTINUED"), decisions(run), run.transcript());
+    }
+
+    @Test
+    void theDuplicatingFooterEditOfFindingLqF1IsAskedBeforeItRuns() throws Exception {
+        // P23 check 1, the LQ-F1 shape of gpt-oss D1 sample 3 in mica-p21-live-20261107-001: the approved first edit
+        // places the footer after the body, and the edit that the model proposes after the continuation adds a
+        // second footer inside the body. It is now asked once, without the session option and with the reason.
+        String footer = "<footer>Thanks for visiting</footer>\n";
+        Run run = run("add a footer that says Thanks for visiting to index.html", List.of(
+                nativeCall("talos.read_file", Map.of("path", "index.html")),
+                edit("index.html", "</body>\n", "</body>\n" + footer),
+                edit("index.html", "<h1>Dead Synth</h1>\n", "<h1>Dead Synth</h1>\n" + footer),
+                text("Added the footer.")), List.of("a", "n"),
+                Map.of("index.html", PAGE, "style.css", STYLE));
+
+        assertEquals(PAGE.replace("</body>\n", "</body>\n" + footer),
+                Files.readString(run.workspace().resolve("index.html")), run.transcript());
+        assertEquals(2, run.prompts().size(), run.transcript());
+        assertTrue(run.prompts().getFirst().contains("a=yes for session"), run.prompts().toString());
+        assertFalse(run.prompts().get(1).contains("a=yes for session"), run.prompts().toString());
+        assertTrue(joinedTranscript(run).contains(CONTINUATION_WRITE_REASON), run.transcript());
+        assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK"), writeReasons(run), run.transcript());
+        assertEquals(List.of("CONTINUED"), decisions(run), run.transcript());
+    }
+
+    @Test
+    void aDeniedContinuationChangeEndsWithTheCompletedChange() throws Exception {
+        // P23 (D20 option A): a denial of the change after the continuation leaves the file as its completed change
+        // left it and sends no further request. The partial success answer lists the denial under "Failed", as it
+        // did before P23 for a denial after a continuation (probe mica-p23-probe001), and D22 option B keeps that
+        // composer for the P20-F1 and LA-F7 batch.
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                edit("notes.md", "# Notes", "# Session Notes"),
+                edit("notes.md", "- Record the second take.\n", "- Record the second take.\n- Mix the drums.\n"),
+                text("Unused.")), List.of("a", "n"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(HEADING_ONLY, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(2, run.prompts().size(), run.transcript());
+        assertFalse(run.prompts().get(1).contains("a=yes for session"), run.prompts().toString());
+        assertEquals(3, run.requests().size(), run.transcript());
+        assertEquals(List.of("CONTINUED"), decisions(run), run.transcript());
+        assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK"), writeReasons(run), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
+        String answerBox = answerBox(run);
+        assertTrue(answerBox.contains("Edited notes.md"), answerBox);
+        assertTrue(answerBox.contains("User did not approve the talos.edit_file call."), answerBox);
+        assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
+        assertFalse(answerBox.contains("Tool loop stopped"), answerBox);
+    }
+
+    @Test
+    void twoChangesInTheFirstResponseKeepTheSessionApproval() throws Exception {
+        // P23: before any continuation, a remembered approval keeps covering the named target, as in P11 L5.
+        Run run = run(TWO_PART, List.of(
+                nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                new LlmClient.StreamResult("", List.of(
+                        new ChatMessage.NativeToolCall("call-heading", "talos.edit_file", Map.of("path", "notes.md",
+                                "old_string", "# Notes", "new_string", "# Session Notes")),
+                        new ChatMessage.NativeToolCall("call-item", "talos.edit_file", Map.of("path", "notes.md",
+                                "old_string", "- Record the second take.\n",
+                                "new_string", "- Record the second take.\n- Mix the drums.\n"))), "tool_calls"),
+                text("Changed the heading and added the item.")), List.of("a"),
+                Map.of("notes.md", NOTES));
+
+        assertEquals(BOTH_PARTS, Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(1, run.prompts().size(), run.transcript());
+        assertEquals(List.of("DEFAULT_WRITE_ASK", "SESSION_REMEMBER_ALLOW"), writeReasons(run), run.transcript());
+    }
+
+    @Test
+    void aSessionApprovalFromAnEarlierTurnCoversTheFirstChangeOfALaterTurn() throws Exception {
+        // P23: the first turn issues a continuation and asks its later change without the session option. The
+        // continuation of that turn does not reach the next, so the later turn's first change of a named target runs
+        // under the remembered approval without a prompt. A third prompt would be denied and fail the file check.
+        Run run = runTurns(List.of(
+                        TWO_PART,
+                        "In notes.md, change bass line to drum line."),
+                List.of(
+                        nativeCall("talos.read_file", Map.of("path", "notes.md")),
+                        edit("notes.md", "# Notes", "# Session Notes"),
+                        edit("notes.md", "- Record the second take.\n",
+                                "- Record the second take.\n- Mix the drums.\n"),
+                        text("Changed the heading and added the item."),
+                        edit("notes.md", "bass line", "drum line"),
+                        text("Unused.")),
+                List.of("a", "y"),
+                Map.of("notes.md", NOTES), null);
+
+        assertEquals("# Session Notes\n\n- Tune the drum line.\n- Record the second take.\n- Mix the drums.\n",
+                Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals(2, run.prompts().size(), run.transcript());
+        assertTrue(run.prompts().getFirst().contains("a=yes for session"), run.prompts().toString());
+        assertFalse(run.prompts().get(1).contains("a=yes for session"), run.prompts().toString());
+        assertTrue(joinedTranscript(run).contains(CONTINUATION_WRITE_REASON), run.transcript());
+        assertEquals(5, run.requests().size(), run.transcript());
+        assertEquals(List.of("SESSION_REMEMBER_ALLOW"), writeReasons(run), run.transcript());
+        assertEquals(List.of("PROOF_HELD"), decisions(run), run.transcript());
+    }
+
+    private static final String CONTINUATION_WRITE_REASON =
+            "This change was proposed after Talos asked the model to continue, so the session approval does not "
+                    + "cover it.";
+
+    /** The permission reasons of the writes of the last turn, in order. */
+    private static List<String> writeReasons(Run run) {
+        return writePermissionDecisions(run).stream().map(data -> String.valueOf(data.get("reasonCode"))).toList();
+    }
+
+    private static List<Object> writeRememberEligible(Run run) {
+        return writePermissionDecisions(run).stream().map(data -> data.get("rememberEligible")).toList();
+    }
+
+    private static List<Map<String, Object>> writePermissionDecisions(Run run) {
+        return events(run, "PERMISSION_DECISION").stream()
+                .filter(data -> !"DEFAULT_READ_ALLOW".equals(data.get("reasonCode")))
+                .toList();
+    }
+
+    /** The transcript with the approval window's line wrapping and borders joined. */
+    private static String joinedTranscript(Run run) {
+        return run.transcript().replaceAll("\\s*\\R\\s*[|│]\\s*", " ");
+    }
+
     /** The last answer box of the transcript, read with the box's line wrapping joined. */
     private static String answerBox(Run run) {
         return run.transcript().substring(run.transcript().lastIndexOf("+- answer -"))
@@ -434,6 +578,16 @@ class UnprovenMutationContinuationReplEntryTest {
      */
     private Run run(String request, List<LlmClient.StreamResult> responses, List<String> answers,
                     Map<String, String> files, RuntimeException terminalFailure) throws Exception {
+        return runTurns(List.of(request), responses, answers, files, terminalFailure);
+    }
+
+    /**
+     * Runs one turn per request in one session, with one provider script, one approval policy and one answer list
+     * across the turns. The trace is the last turn's.
+     */
+    private Run runTurns(List<String> turnRequests, List<LlmClient.StreamResult> responses, List<String> answers,
+                         Map<String, String> files, RuntimeException terminalFailure) throws Exception {
+        String request = String.join("\n", turnRequests);
         Path dir = Files.createDirectories(temp.resolve("run-" + Math.abs(request.hashCode())
                 + "-" + responses.size() + "-" + String.join("", answers)
                 + (terminalFailure == null ? "" : "-" + terminalFailure.getClass().getSimpleName())));
@@ -520,7 +674,9 @@ class UnprovenMutationContinuationReplEntryTest {
             ReplRouter router = new ReplRouter(modes, processor, runtimeSession, ctx, render,
                     new CommandRegistry(), ws, new AtomicBoolean(false), "", WorkspaceCommandTemplates.none());
 
-            assertTrue(router.tryHandlePrompt(request));
+            for (String turnRequest : turnRequests) {
+                assertTrue(router.tryHandlePrompt(turnRequest));
+            }
             render.shutdown();
             render = null;
             String transcript = bytes.toString(StandardCharsets.UTF_8).replaceAll("\u001B\\[[0-9;]*m", "");
