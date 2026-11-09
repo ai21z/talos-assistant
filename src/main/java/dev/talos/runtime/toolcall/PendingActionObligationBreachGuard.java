@@ -62,7 +62,8 @@ final class PendingActionObligationBreachGuard {
             List<ToolCall> calls,
             Path workspace
     ) {
-        String detail = invalidExpectedTargetMutationDetail(calls, obligation.targets(), workspace);
+        String detail = invalidExpectedTargetMutationDetail(
+                calls, obligation.targets(), obligation.changedTargets(), workspace);
         if (detail == null) {
             return Decision.none();
         }
@@ -110,12 +111,14 @@ final class PendingActionObligationBreachGuard {
     private static String invalidExpectedTargetMutationDetail(
             List<ToolCall> calls,
             List<String> targets,
+            List<String> changedTargets,
             Path workspace
     ) {
         Set<String> normalizedTargets = normalizedExpectedProgressTargets(targets);
         if (normalizedTargets.isEmpty() || calls == null || calls.isEmpty()) {
             return null;
         }
+        Set<String> normalizedChangedTargets = normalizedExpectedProgressTargets(changedTargets);
         List<String> rejectedMutations = new ArrayList<>();
         for (ToolCall call : calls) {
             if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) continue;
@@ -124,7 +127,9 @@ final class PendingActionObligationBreachGuard {
             if (!path.isBlank() && (matchesPendingExpectedTarget(call.toolName(), path, normalizedTargets)
                     || sameWorkspaceFileAsTarget(workspace, targets, rawPath)
                     || caseVariantOfMissingTarget(workspace, targets, rawPath)
-                    || mkdirOfTargetParent(call.toolName(), workspace, targets, rawPath))) {
+                    || mkdirOfTargetParent(call.toolName(), workspace, targets, rawPath)
+                    || exactEditOfChangedTarget(call, path, rawPath, normalizedChangedTargets,
+                            changedTargets, workspace))) {
                 continue;
             }
             String name = call.toolName() == null || call.toolName().isBlank()
@@ -177,6 +182,32 @@ final class PendingActionObligationBreachGuard {
             }
         }
         return false;
+    }
+
+    /**
+     * HC-F6: an exact edit of a request target that this turn already changed is in scope, because an exact
+     * edit replaces one occurrence and a file can need several. The call still passes every pre-approval
+     * check, so it stays inside the request targets and applies only where its old_string occurs exactly
+     * once in the named file. An edit meant for another target whose old_string also occurs once in the
+     * changed file is not told apart, and it is approved as any edit is, without a prompt under a
+     * remembered approval. An edit with empty arguments, a full write and every other mutation of a changed
+     * target are not admitted, so the edit-recovery full rewrite is never reached for a changed target.
+     */
+    private static boolean exactEditOfChangedTarget(
+            ToolCall call,
+            String path,
+            String rawPath,
+            Set<String> normalizedChangedTargets,
+            List<String> changedTargets,
+            Path workspace
+    ) {
+        if (normalizedChangedTargets.isEmpty()
+                || !"talos.edit_file".equals(call.canonicalToolName())
+                || ToolCallSupport.hasEmptyEditArguments(call)) {
+            return false;
+        }
+        return normalizedChangedTargets.contains(normalizeScopedTargetPreservingCase(path))
+                || sameWorkspaceFileAsTarget(workspace, changedTargets, rawPath);
     }
 
     private static boolean sameWorkspaceFileAsTarget(Path workspace, List<String> targets, String path) {

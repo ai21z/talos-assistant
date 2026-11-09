@@ -24,8 +24,9 @@ final class ToolRepromptObligationSelector {
     ) {
         List<String> remainingRepairTargets =
                 StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
-        List<String> remainingExpectedTargets =
-                ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+        ExpectedTargetProgressAccounting.Progress expectedProgress =
+                ExpectedTargetProgressAccounting.expectedMutationProgress(state);
+        List<String> remainingExpectedTargets = expectedProgress.remaining();
         // T1003: unprompted invalid-edit recovery targets carry a bounded
         // full-rewrite obligation of their own and narrow the retry surface
         // to talos.write_file, like the static repair flow.
@@ -68,8 +69,11 @@ final class ToolRepromptObligationSelector {
                                     + "talos.write_file call. The requested edit was not applied to "
                                     + "this target."));
         } else if (expectedTargetObligationActive) {
+            // HC-F6: the targets already changed stay open to a further exact edit.
             state.setPendingActionObligation(
-                    PendingActionObligation.expectedTargets(remainingExpectedTargets));
+                    PendingActionObligation.expectedTargetProgress(
+                            remainingExpectedTargets,
+                            expectedProgress.changed()));
         } else {
             state.clearPendingActionObligation();
         }

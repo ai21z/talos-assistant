@@ -3161,12 +3161,24 @@ public final class LocalTurnTraceCapture {
             List<String> targets,
             String reason
     ) {
+        recordPendingActionObligation(status, kind, targets, List.of(), reason);
+    }
+
+    /** {@code changedTargets} are the expected targets the turn already changed, recorded only when present (HC-F6). */
+    public static void recordPendingActionObligation(
+            String status,
+            String kind,
+            List<String> targets,
+            List<String> changedTargets,
+            String reason
+    ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         bag.builder.event(PendingActionObligationTraceEventFactory.evaluated(
                 status,
                 kind,
                 targets,
+                changedTargets,
                 reason));
     }
 

@@ -67,6 +67,30 @@ class LocalTurnTracePendingActionObligationTest {
         assertEquals("", fallback.data().get("reason"));
     }
 
+    /** HC-F6: a raised expected-target obligation records the targets already changed, and only when present. */
+    @Test
+    void raisedEventRecordsChangedTargetsOnlyWhenPresent() {
+        beginTrace();
+
+        LocalTurnTraceCapture.recordPendingActionObligation(
+                "RAISED", "EXPECTED_TARGETS_REMAINING", List.of("report.py"),
+                List.of("inventory.py", "orders.py"), "pending expected target progress");
+        LocalTurnTraceCapture.recordPendingActionObligation(
+                "RAISED", "EXPECTED_TARGETS_REMAINING", List.of("report.py"), List.of(), "pending");
+        LocalTurnTraceCapture.recordPendingActionObligation(
+                "RAISED", "EXPECTED_TARGETS_REMAINING", List.of("report.py"), null, "pending");
+
+        List<TurnTraceEvent> raised = LocalTurnTraceCapture.complete().events().stream()
+                .filter(event -> "PENDING_ACTION_OBLIGATION_RAISED".equals(event.type()))
+                .toList();
+
+        assertEquals(3, raised.size());
+        assertEquals(List.of("report.py"), raised.get(0).data().get("targets"));
+        assertEquals(List.of("inventory.py", "orders.py"), raised.get(0).data().get("changedTargets"));
+        assertFalse(raised.get(1).data().containsKey("changedTargets"), raised.get(1).data().toString());
+        assertFalse(raised.get(2).data().containsKey("changedTargets"), raised.get(2).data().toString());
+    }
+
     @Test
     void pendingActionObligationEventShapeHasDedicatedFactoryOwner() throws Exception {
         Path capturePath = Path.of("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java");

@@ -10,6 +10,7 @@ import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -40,13 +41,14 @@ class ToolRepromptObligationSelectorTest {
         assertTrue(stage.contains("ToolRepromptObligationSelector.select("), stage);
         assertFalse(stage.contains("StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets"), stage);
         assertFalse(stage.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"), stage);
+        assertFalse(stage.contains("ExpectedTargetProgressAccounting.expectedMutationProgress"), stage);
         assertFalse(stage.contains("PendingActionObligation.staticRepairTargets"), stage);
         assertFalse(stage.contains("PendingActionObligation.expectedTargets"), stage);
         assertFalse(stage.contains("ToolRepromptRequestBuilder.toolSpecs("), stage);
 
         assertTrue(selector.contains("StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets"),
                 selector);
-        assertTrue(selector.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
+        assertTrue(selector.contains("ExpectedTargetProgressAccounting.expectedMutationProgress"),
                 selector);
         assertTrue(selector.contains("PendingActionObligation.staticRepairTargets"), selector);
         assertTrue(selector.contains("PendingActionObligation.expectedTargets"), selector);
@@ -93,6 +95,42 @@ class ToolRepromptObligationSelectorTest {
         assertFalse(selection.staticRepairObligationActive());
         assertEquals(List.of("talos.write_file", "talos.edit_file"), toolNames(selection.repromptToolSpecs()));
         assertTrue(state.hasPendingActionObligation());
+    }
+
+    /** HC-F6: the changed target stays open to a further exact edit, not to a full write or an unrelated path. */
+    @Test
+    void expectedTargetObligationKeepsAChangedTargetOpenToAFurtherExactEditOnly() {
+        LoopState state = loopState(
+                List.of(ChatMessage.system("sys"), ChatMessage.user("Create README.md and notes.md.")),
+                broadTools());
+        state.toolOutcomes.add(outcome("talos.write_file", "README.md", true, true));
+
+        ToolRepromptObligationSelector.Selection selection =
+                ToolRepromptObligationSelector.select(state, outcome(1, 0));
+
+        assertEquals(List.of("notes.md"), selection.remainingExpectedTargets());
+        assertFalse(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
+                edit("README.md"))));
+        assertTrue(state.hasPendingActionObligation());
+        assertTrue(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
+                new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "x\n")))));
+        assertFalse(state.hasPendingActionObligation());
+    }
+
+    @Test
+    void expectedTargetObligationStillRejectsAnExactEditOutsideTheRequestTargets() {
+        LoopState state = loopState(
+                List.of(ChatMessage.system("sys"), ChatMessage.user("Create README.md and notes.md.")),
+                broadTools());
+        state.toolOutcomes.add(outcome("talos.write_file", "README.md", true, true));
+
+        ToolRepromptObligationSelector.select(state, outcome(1, 0));
+
+        assertTrue(state.failPendingActionObligationAfterInvalidToolCalls(List.of(edit("todo.md"))));
+    }
+
+    private static ToolCall edit(String path) {
+        return new ToolCall("talos.edit_file", Map.of("path", path, "old_string", "a", "new_string", "b"));
     }
 
     @Test

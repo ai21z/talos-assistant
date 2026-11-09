@@ -22,19 +22,39 @@ final class ExpectedTargetProgressAccounting {
 
     private ExpectedTargetProgressAccounting() {}
 
+    /**
+     * The request-bound expected targets of the turn, split by whether the existing satisfaction rules count
+     * a successful mutation of this turn as having changed them: the exact path, the file name of a mutated
+     * path, or another spelling of the same workspace file. Both lists are sorted and disjoint.
+     */
+    record Progress(List<String> remaining, List<String> changed) {
+        Progress {
+            remaining = remaining == null ? List.of() : List.copyOf(remaining);
+            changed = changed == null ? List.of() : List.copyOf(changed);
+        }
+
+        static Progress none() {
+            return new Progress(List.of(), List.of());
+        }
+    }
+
     static List<String> remainingExpectedMutationTargets(LoopState state) {
-        if (state == null || state.messages == null) return List.of();
+        return expectedMutationProgress(state).remaining();
+    }
+
+    static Progress expectedMutationProgress(LoopState state) {
+        if (state == null || state.messages == null) return Progress.none();
         boolean capturedAuthority =
                 TurnTaskContractCapture.getResolution() != null;
         TaskContract contract = WorkspaceTargetReconciler.reconcile(
                 TurnTaskContractCapture.currentOrResolve(state.messages),
                 state.workspace);
         if (contract == null || !contract.mutationAllowed()) {
-            return List.of();
+            return Progress.none();
         }
         if (!RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty()
                 || !state.staticWebFullRewriteRequiredTargets.isEmpty()) {
-            return List.of();
+            return Progress.none();
         }
         String authorityRequest = capturedAuthority
                 ? contract.originalUserRequest()
@@ -45,7 +65,7 @@ final class ExpectedTargetProgressAccounting {
                 ? TaskContractResolver.extractExpectedTargets(authorityRequest)
                 : contract.expectedTargets();
         if (expectedTargets.isEmpty()) {
-            return List.of();
+            return Progress.none();
         }
         Set<String> satisfiedTargets = new java.util.HashSet<>();
         Set<String> satisfiedExactTargets = new java.util.HashSet<>();
@@ -70,12 +90,19 @@ final class ExpectedTargetProgressAccounting {
                 expectedDisplayByKey.putIfAbsent(key, display);
             }
         }
-        return expectedDisplayByKey.entrySet().stream()
-                .filter(entry -> !satisfiedExactTargets.contains(entry.getValue()))
-                .filter(entry -> !mutatedUnderAnotherSpelling(state.workspace, entry.getValue(), mutatedPaths))
-                .map(java.util.Map.Entry::getValue)
-                .sorted()
-                .toList();
+        List<String> remaining = new java.util.ArrayList<>();
+        List<String> changed = new java.util.ArrayList<>();
+        for (String display : expectedDisplayByKey.values()) {
+            if (satisfiedExactTargets.contains(display)
+                    || mutatedUnderAnotherSpelling(state.workspace, display, mutatedPaths)) {
+                changed.add(display);
+            } else {
+                remaining.add(display);
+            }
+        }
+        remaining.sort(null);
+        changed.sort(null);
+        return new Progress(remaining, changed);
     }
 
     /**

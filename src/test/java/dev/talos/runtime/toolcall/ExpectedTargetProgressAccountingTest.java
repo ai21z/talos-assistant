@@ -48,6 +48,32 @@ class ExpectedTargetProgressAccountingTest {
     }
 
     @Test
+    void progressSplitsExpectedTargetsIntoRemainingAndChanged() {
+        LoopState state = state("Create README.md and notes.md.");
+        state.toolOutcomes.add(outcome("talos.write_file", "./README.md"));
+
+        ExpectedTargetProgressAccounting.Progress progress =
+                ExpectedTargetProgressAccounting.expectedMutationProgress(state);
+
+        assertEquals(List.of("notes.md"), progress.remaining());
+        assertEquals(List.of("README.md"), progress.changed());
+        assertEquals(progress.remaining(), ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state));
+    }
+
+    @Test
+    void failedMutationDoesNotMakeAnExpectedTargetChanged() {
+        LoopState state = state("Create README.md and notes.md.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.edit_file", "README.md", false, true, false, "", "old_string not found"));
+
+        ExpectedTargetProgressAccounting.Progress progress =
+                ExpectedTargetProgressAccounting.expectedMutationProgress(state);
+
+        assertEquals(List.of("README.md", "notes.md"), progress.remaining());
+        assertEquals(List.of(), progress.changed());
+    }
+
+    @Test
     void verifyOnlyConstraintTargetDoesNotRemainAsMutationProgressTarget() {
         LoopState state = state("Rewrite styles.css so index.html still works.");
         state.toolOutcomes.add(outcome("talos.write_file", "styles.css"));
@@ -296,7 +322,7 @@ class ExpectedTargetProgressAccountingTest {
         String targetPlanner = java.nio.file.Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/TargetReadbackCompactRepairPlanner.java"));
 
-        assertTrue(selector.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
+        assertTrue(selector.contains("ExpectedTargetProgressAccounting.expectedMutationProgress"),
                 selector);
         assertTrue(sourcePlanner.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
                 sourcePlanner);

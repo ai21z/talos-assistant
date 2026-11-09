@@ -4175,6 +4175,14 @@ class ToolCallLoopTest {
         }
     }
 
+    /**
+     * A misaddressed edit of the changed target never executes under a remembered approval. Until HC-F6
+     * (2026-11-09) the obligation guard stopped the turn at the call. Since then a changed expected target
+     * takes a further exact edit, and the pre-approval exact-match check refuses this one because its
+     * old_string is not in notes.md. The turn then ends when the reply holds no call for more.md. The test
+     * runs on the captured current-turn surface, because without it the first reprompt failed for a missing
+     * retry tool and the misaddressed edit was never assessed.
+     */
     @Test
     void pendingExpectedTargetObligationRejectsWrongRememberedMutationBeforeExecution() throws Exception {
         Path ws = Files.createTempDirectory("talos-pending-expected-remember-");
@@ -4218,7 +4226,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(textProvider(registry, List.of(wrongSecondEdit, "should not be reached")))
+                    .llm(textProvider(registry, List.of(wrongSecondEdit, "Both files were updated.")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -4228,7 +4236,8 @@ class ToolCallLoopTest {
             ToolCallLoop.LoopResult result;
             LocalTurnTrace trace;
             try {
-                result = loop.run(firstEdit, messages, ws, ctx);
+                result = runCapturedProviderText(loop, firstEdit,
+                        List.of("talos.read_file", "talos.edit_file"), messages, ws, ctx);
                 trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
@@ -4249,9 +4258,17 @@ class ToolCallLoopTest {
             assertEquals("status2=old\n", Files.readString(ws.resolve("more.md")));
             assertEquals(1, result.mutatingToolSuccesses());
             assertEquals(1, result.toolOutcomes().stream()
-                            .filter(ToolCallLoop.ToolOutcome::mutating)
+                            .filter(outcome -> outcome.mutationEffects().hasEffects())
                             .count(),
                     "The wrong second mutation must not execute as a remembered approval.");
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "notes.md".equals(outcome.pathHint())
+                                    && !outcome.success()
+                                    && outcome.oldStringNotFoundEditFailure()
+                                    && !outcome.mutationEffects().hasEffects()),
+                    "Since HC-F6 the exact-match check refuses the misaddressed edit before approval: "
+                            + result.toolOutcomes());
+            assertRefusedBeforeApprovalOnly(trace, 1);
             assertTrue(trace.events().stream()
                             .anyMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())
                                     && "EXPECTED_TARGETS_REMAINING".equals(event.data().get("kind"))),
@@ -4259,6 +4276,366 @@ class ToolCallLoopTest {
         } finally {
             deleteRecursive(ws);
         }
+    }
+
+    /**
+     * HC-F6, harder coding lab 2026-11-09: a request target that this turn already changed can take a
+     * further exact edit while another target remains, because an exact edit replaces one occurrence
+     * and a file can need two separate edits. The model answers are scripted.
+     */
+    @Test
+    void changedExpectedTargetTakesASecondExactEditBeforeTheRemainingTargetIsChanged() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-second-edit-");
+        try {
+            Files.writeString(ws.resolve("inventory.py"), """
+                    def get_qty(stock, sku):
+                        return stock.get(sku, 0)
+                    """);
+            Files.writeString(ws.resolve("orders.py"), """
+                    from inventory import get_qty
+
+
+                    def can_fulfil(stock, order):
+                        return all(get_qty(stock, sku) >= qty for sku, qty in order.items())
+                    """);
+            Files.writeString(ws.resolve("report.py"), """
+                    from inventory import get_qty
+
+
+                    def low_stock(stock, skus, threshold=5):
+                        return [sku for sku in skus if get_qty(stock, sku) < threshold]
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            var approvals = new int[]{0};
+            var sessionPolicy = new SessionApprovalPolicy();
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry,
+                    sessionPolicy);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Change the function name get_qty to quantity_on_hand in inventory.py, orders.py "
+                    + "and report.py, including its definition, imports and calls, so that the code works as before.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String definitionEdit = editFileCall("inventory.py", "def get_qty(", "def quantity_on_hand(");
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            editFileCall("orders.py",
+                                    "from inventory import get_qty",
+                                    "from inventory import quantity_on_hand"),
+                            editFileCall("orders.py",
+                                    "get_qty(stock, sku) >= qty",
+                                    "quantity_on_hand(stock, sku) >= qty"),
+                            editFileCall("report.py",
+                                    "from inventory import get_qty",
+                                    "from inventory import quantity_on_hand"),
+                            editFileCall("report.py",
+                                    "get_qty(stock, sku) < threshold",
+                                    "quantity_on_hand(stock, sku) < threshold"),
+                            "Renamed get_qty to quantity_on_hand in the three files.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-second-edit", "session", 1,
+                    "2026-11-09T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, definitionEdit,
+                        List.of("talos.read_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    result.failureDecision().reason());
+            assertEquals(5, result.mutatingToolSuccesses(), result.finalAnswer());
+            assertEquals(5, approvals[0], "Every edit is asked separately.");
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_RAISED".equals(event.type())
+                                    && List.of("report.py").equals(event.data().get("targets"))
+                                    && List.of("inventory.py", "orders.py")
+                                            .equals(event.data().get("changedTargets"))),
+                    "The trace shows the changed targets that admit the second orders.py edit.");
+            for (String file : List.of("inventory.py", "orders.py", "report.py")) {
+                String content = Files.readString(ws.resolve(file));
+                assertFalse(content.contains("get_qty"), file + ":\n" + content);
+                assertTrue(content.contains("quantity_on_hand"), file + ":\n" + content);
+            }
+            assertFalse(result.failureDecision().reason().contains("EXPECTED_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
+     * The audit shape of {@link #pendingExpectedTargetObligationRejectsWrongRememberedMutationBeforeExecution}
+     * with a model that then corrects itself: the misaddressed edit of the changed target is refused before
+     * approval by the exact-match check, changes nothing, and the remaining target is still changed.
+     */
+    @Test
+    void misaddressedEditOfAChangedTargetIsRefusedBeforeApprovalAndTheRemainingTargetIsStillChanged()
+            throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-misaddressed-edit-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=old\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            var approvals = new int[]{0};
+            var sessionPolicy = new SessionApprovalPolicy();
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED_REMEMBER;
+                        }
+                    },
+                    registry,
+                    sessionPolicy);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                    + "Then replace status2=old with status2=new in more.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            editFileCall("notes.md", "status2=old", "status2=new"),
+                            editFileCall("more.md", "status2=old", "status2=new"),
+                            "Both files were updated.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-misaddressed-edit", "session", 1,
+                    "2026-11-09T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, editFileCall("notes.md", "status=old", "status=new"),
+                        List.of("talos.read_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    result.failureDecision().reason());
+            assertEquals(1, approvals[0], "Only the first edit reaches the gate, the rest run under the remembered approval.");
+            assertEquals("status=new\n", Files.readString(ws.resolve("notes.md")));
+            assertEquals("status2=new\n", Files.readString(ws.resolve("more.md")));
+            assertEquals(2, result.mutatingToolSuccesses(), result.finalAnswer());
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "notes.md".equals(outcome.pathHint())
+                                    && !outcome.success()
+                                    && outcome.oldStringNotFoundEditFailure()),
+                    "The misaddressed edit is refused as an old_string miss: " + result.toolOutcomes());
+            assertRefusedBeforeApprovalOnly(trace, 2);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
+     * Exactly one call was blocked by a pre-approval check for a missing old_string, and only the given
+     * number of tool executions reached a tool. A refusal inside the edit tool would be an execution.
+     */
+    private static void assertRefusedBeforeApprovalOnly(LocalTurnTrace trace, int executedTools) {
+        String types = trace.events().stream().map(event -> event.type()).toList().toString();
+        var blocked = trace.events().stream()
+                .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                .toList();
+        assertEquals(1, blocked.size(), types);
+        String reason = String.valueOf(blocked.getFirst().data().get("reason"));
+        assertTrue(reason.contains("old_string not found") && reason.contains("before approval"), reason);
+        assertEquals(executedTools, trace.events().stream()
+                        .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                        .count(),
+                types);
+    }
+
+    /**
+     * HC-F6 on a static-web create turn. The plain expected-target obligation no longer stops the turn at an
+     * exact edit of the page written first, but the static-web progress reprompt offers talos.write_file only,
+     * so the tool-surface authority refuses the edit and it never runs. The model answers are scripted.
+     */
+    @Test
+    void staticWebCreateTurnLeavesAnEditOfTheWrittenPageToTheToolSurfaceAuthority() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-static-web-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            String request = "Create index.html, styles.css and script.js for a counter page.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String indexWrite = "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\",\"content\":\""
+                    + jsonEscape("<!doctype html><html><head><title>Counter</title>"
+                    + "<link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>Counter</h1>"
+                    + "<button id=\"add\">Add</button><p id=\"count\">0</p>"
+                    + "<script src=\"script.js\"></script></body></html>")
+                    + "\"}}";
+            String stylesWrite = "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"styles.css\","
+                    + "\"content\":\"body { margin: 0; }\"}}";
+            String scriptWrite = "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\",\"content\":\""
+                    + jsonEscape("document.querySelector('#add').addEventListener('click', () => {\n"
+                    + "  const c = document.querySelector('#count');\n"
+                    + "  c.textContent = String(Number(c.textContent) + 1);\n});\n")
+                    + "\"}}";
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            editFileCall("index.html", "<h1>Counter</h1>", "<h1>Click counter</h1>"),
+                            stylesWrite,
+                            scriptWrite,
+                            "All files are written.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool(), new FileEditTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-static-web", "session", 1,
+                    "2026-11-09T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, indexWrite,
+                        List.of("talos.read_file", "talos.write_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            String reason = result.failureDecision() == null ? "" : result.failureDecision().reason();
+            String diagnostic = "reason=" + reason + " answer=" + result.finalAnswer()
+                    + " outcomes=" + result.toolOutcomes();
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    diagnostic);
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "talos.edit_file".equals(outcome.toolName())
+                                    && outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID
+                                    && outcome.errorMessage().contains("PROVIDER_TOOL_SURFACE_MISMATCH")
+                                    && !outcome.mutationEffects().hasEffects()),
+                    diagnostic);
+            assertTrue(Files.readString(ws.resolve("index.html")).contains("<h1>Counter</h1>"), diagnostic);
+            assertEquals(1, result.mutatingToolSuccesses(), diagnostic);
+            assertFalse(result.finalAnswer().contains("All files are written."), diagnostic);
+            assertTrue(result.failureDecision().shouldStop(), diagnostic);
+            assertTrue(result.finalAnswer().contains("PROVIDER_TOOL_SURFACE_MISMATCH"), diagnostic);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /** HC-F6 leaves the scope rule intact: an edit of a file outside the request targets still stops the turn. */
+    @Test
+    void editOutsideTheRequestTargetsAfterAChangeStillStopsTheTurn() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-outside-edit-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=old\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+            Files.writeString(ws.resolve("todo.md"), "status=old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                    + "Then replace status2=old with status2=new in more.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            editFileCall("todo.md", "status=old", "status=new"),
+                            editFileCall("more.md", "status2=old", "status2=new"))))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-outside-edit", "session", 1,
+                    "2026-11-09T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, editFileCall("notes.md", "status=old", "status=new"),
+                        List.of("talos.read_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("talos.edit_file(todo.md)"),
+                    result.failureDecision().reason());
+            assertEquals("status=new\n", Files.readString(ws.resolve("notes.md")));
+            assertEquals("status=old\n", Files.readString(ws.resolve("todo.md")));
+            assertEquals("status2=old\n", Files.readString(ws.resolve("more.md")));
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    "The outside-target edit breaches the expected-target obligation.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    private static String editFileCall(String path, String oldString, String newString) {
+        return "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"" + jsonEscape(path)
+                + "\",\"old_string\":\"" + jsonEscape(oldString)
+                + "\",\"new_string\":\"" + jsonEscape(newString) + "\"}}";
     }
 
     /**

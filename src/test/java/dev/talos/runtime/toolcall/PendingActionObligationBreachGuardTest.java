@@ -101,6 +101,152 @@ class PendingActionObligationBreachGuardTest {
         assertFalse(decision.deferToPolicy());
     }
 
+    /** HC-F6: an exact edit of an expected target that this turn already changed is in scope. */
+    @Test
+    void expectedTargetProgressAdmitsAnExactEditOfAChangedTarget() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("inventory.py", "orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision =
+                PendingActionObligationBreachGuard.assess(obligation, List.of(edit("orders.py")));
+
+        assertFalse(decision.breach(), decision.detail());
+        assertFalse(decision.deferToPolicy());
+    }
+
+    @Test
+    void expectedTargetProgressAdmitsAnExactEditOfAChangedTargetBesideTheRemainingTarget() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(edit("orders.py"), edit("report.py")));
+
+        assertFalse(decision.breach(), decision.detail());
+    }
+
+    @Test
+    void expectedTargetProgressStillRejectsAFullWriteOfAChangedTarget() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(new ToolCall("talos.write_file", Map.of("path", "orders.py", "content", "x\n"))));
+
+        assertTrue(decision.breach());
+        assertTrue(decision.detail().contains("talos.write_file(orders.py)"), decision.detail());
+        assertTrue(decision.detail().contains("report.py"), decision.detail());
+    }
+
+    @Test
+    void expectedTargetProgressStillRejectsAnExactEditOutsideTheExpectedTargets() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(edit("orders.py"), edit("notes.py")));
+
+        assertTrue(decision.breach());
+        assertTrue(decision.detail().contains("talos.edit_file(notes.py)"), decision.detail());
+        assertFalse(decision.detail().contains("talos.edit_file(orders.py)"), decision.detail());
+    }
+
+    @Test
+    void expectedTargetsWithoutChangedTargetsKeepRejectingAnEditOfAnotherPath() {
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                PendingActionObligation.expectedTargets(List.of("report.py")), List.of(edit("orders.py")));
+
+        assertTrue(decision.breach());
+        assertTrue(decision.detail().contains("talos.edit_file(orders.py)"), decision.detail());
+    }
+
+    @Test
+    void changedTargetAdmitsAnExactEditUnderItsAbsoluteSpelling() throws IOException {
+        Files.writeString(workspace.resolve("orders.py"), "from inventory import quantity_on_hand\n");
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(edit(workspace.resolve("orders.py").toString())), workspace);
+
+        assertFalse(decision.breach(), decision.detail());
+    }
+
+    @Test
+    void obligationCarriesChangedTargetsOnlyForExpectedTargetProgressAndNeverRepeatsARequiredTarget() {
+        PendingActionObligation progress = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of(" orders.py ", "report.py", "orders.py", ""));
+        PendingActionObligation repair = new PendingActionObligation(
+                PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR,
+                List.of("report.py"), "", List.of("orders.py"));
+
+        assertEquals(List.of("report.py"), progress.targets());
+        assertEquals(List.of("orders.py"), progress.changedTargets());
+        assertEquals(List.of(), repair.changedTargets());
+        assertEquals(List.of(), PendingActionObligation.expectedTargets(List.of("report.py")).changedTargets());
+        assertTrue(progress.failureReason().contains("Remaining target(s): report.py."), progress.failureReason());
+        assertFalse(progress.failureReason().contains("orders.py"), progress.failureReason());
+    }
+
+    /** An empty edit of a changed target could lead to the edit-recovery full rewrite, so it still breaches. */
+    @Test
+    void expectedTargetProgressStillRejectsAnEditOfAChangedTargetWithEmptyArguments() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        for (Map<String, String> arguments : List.<Map<String, String>>of(
+                Map.of("path", "orders.py", "old_string", "", "new_string", "x"),
+                Map.of("path", "orders.py", "old_string", "  ", "new_string", "x"),
+                Map.of("path", "orders.py", "new_string", "x"),
+                Map.of("path", "orders.py", "old_string", "get_qty"))) {
+            PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                    obligation, List.of(new ToolCall("talos.edit_file", arguments)));
+
+            assertTrue(decision.breach(), arguments.toString());
+            assertTrue(decision.detail().contains("talos.edit_file(orders.py)"), decision.detail());
+        }
+    }
+
+    @Test
+    void changedTargetAdmitsAnAcceptedEditAliasWithAliasedArguments() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(new ToolCall("file_utils:edit_file",
+                        Map.of("file_path", "orders.py", "oldString", "get_qty", "newString", "quantity_on_hand"))));
+
+        assertFalse(decision.breach(), decision.detail());
+    }
+
+    @Test
+    void changedTargetDoesNotAdmitAnEditUnderARejectedNamespaceOrAnotherWorkspaceMutation() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        ToolCall foreign = new ToolCall("foo.edit_file",
+                Map.of("path", "orders.py", "old_string", "a", "new_string", "b"));
+        PendingActionObligationBreachGuard.Decision foreignDecision =
+                PendingActionObligationBreachGuard.assess(obligation, List.of(foreign));
+        assertTrue(foreignDecision.breach() || !ToolCallSupport.isMutatingTool(foreign.toolName()),
+                "A mutating foreign namespace must breach: " + foreignDecision.detail());
+
+        for (ToolCall call : List.of(
+                new ToolCall("talos.delete_path", Map.of("path", "orders.py")),
+                new ToolCall("talos.move_path", Map.of("from", "orders.py", "to", "orders_old.py")))) {
+            assertTrue(ToolCallSupport.isMutatingTool(call.toolName()), call.toolName());
+            PendingActionObligationBreachGuard.Decision decision =
+                    PendingActionObligationBreachGuard.assess(obligation, List.of(call));
+
+            assertTrue(decision.breach(), call.toolName() + " " + decision.detail());
+        }
+    }
+
+    private static ToolCall edit(String path) {
+        return new ToolCall("talos.edit_file", Map.of("path", path, "old_string", "get_qty", "new_string",
+                "quantity_on_hand"));
+    }
+
     @Test
     void loopStateDelegatesInvalidToolClassificationToGuard() throws Exception {
         String loopState = Files.readString(Path.of(

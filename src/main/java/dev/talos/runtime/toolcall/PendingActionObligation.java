@@ -5,7 +5,19 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import java.util.List;
 import java.util.Objects;
 
-public record PendingActionObligation(Kind kind, List<String> targets, String failureContext) {
+/**
+ * A pending obligation of the tool loop. {@code targets} are the targets the obligation still requires.
+ * {@code changedTargets} are request-bound expected targets that this turn has already changed. Only
+ * {@link Kind#EXPECTED_TARGETS_REMAINING} carries them, and they never repeat a required target. An exact
+ * edit of a changed target stays in scope while the obligation is pending, because an exact edit
+ * replaces one occurrence and a file can need several (HC-F6).
+ */
+public record PendingActionObligation(
+        Kind kind,
+        List<String> targets,
+        String failureContext,
+        List<String> changedTargets
+) {
 
     /**
      * T1003: marker that opens the failure context of a bounded invalid-edit
@@ -32,15 +44,18 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
 
     public PendingActionObligation {
         kind = kind == null ? Kind.EXPECTED_TARGETS_REMAINING : kind;
-        targets = targets == null
-                ? List.of()
-                : targets.stream()
-                        .filter(Objects::nonNull)
-                        .map(String::strip)
-                        .filter(path -> !path.isBlank())
-                        .distinct()
-                        .toList();
+        targets = normalizedPaths(targets);
         failureContext = failureContext == null ? "" : failureContext.strip();
+        List<String> required = targets;
+        changedTargets = kind == Kind.EXPECTED_TARGETS_REMAINING
+                ? normalizedPaths(changedTargets).stream()
+                        .filter(path -> !required.contains(path))
+                        .toList()
+                : List.of();
+    }
+
+    public PendingActionObligation(Kind kind, List<String> targets, String failureContext) {
+        this(kind, targets, failureContext, List.of());
     }
 
     public PendingActionObligation(Kind kind, List<String> targets) {
@@ -49,6 +64,15 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
 
     public static PendingActionObligation expectedTargets(List<String> targets) {
         return new PendingActionObligation(Kind.EXPECTED_TARGETS_REMAINING, targets);
+    }
+
+    /** Expected-target progress with the remaining targets and the expected targets this turn already changed. */
+    public static PendingActionObligation expectedTargetProgress(
+            List<String> remainingTargets,
+            List<String> changedTargets
+    ) {
+        return new PendingActionObligation(
+                Kind.EXPECTED_TARGETS_REMAINING, remainingTargets, "", changedTargets);
     }
 
     public static PendingActionObligation expectedTargets(List<String> targets, String failureContext) {
@@ -111,6 +135,7 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
                 "RAISED",
                 kind.name(),
                 targets,
+                changedTargets,
                 "pending " + kind.label + " requires executable write/edit tool calls");
     }
 
@@ -130,5 +155,16 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
 
     private String targetList() {
         return targets.isEmpty() ? "(unknown)" : String.join(", ", targets);
+    }
+
+    private static List<String> normalizedPaths(List<String> paths) {
+        return paths == null
+                ? List.of()
+                : paths.stream()
+                        .filter(Objects::nonNull)
+                        .map(String::strip)
+                        .filter(path -> !path.isBlank())
+                        .distinct()
+                        .toList();
     }
 }
