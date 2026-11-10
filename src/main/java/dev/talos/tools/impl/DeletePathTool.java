@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.Map;
 
 public final class DeletePathTool implements TalosTool {
@@ -95,11 +94,37 @@ public final class DeletePathTool implements TalosTool {
         return null;
     }
 
+    /**
+     * Round 8: a symbolic link or a reparse point found in the tree, such as an NTFS junction, is removed as an entry
+     * and never descended into, so the files of the folder it reaches are kept. Files.walk descends into a junction,
+     * because the JDK reports it as a directory and not as a symbolic link.
+     */
     private static void deleteDirectory(Path target) throws IOException {
-        try (var walk = Files.walk(target)) {
-            for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
+        Files.walkFileTree(target, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(
+                    Path directory, java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                if (attributes.isOther() || attributes.isSymbolicLink()) {
+                    Files.deleteIfExists(directory);
+                    return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                }
+                return java.nio.file.FileVisitResult.CONTINUE;
             }
-        }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                    Path file, java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                Files.deleteIfExists(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(Path directory, IOException failure)
+                    throws IOException {
+                if (failure != null) throw failure;
+                Files.deleteIfExists(directory);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
     }
 }

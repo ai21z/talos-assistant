@@ -20,6 +20,7 @@ import java.util.Map;
 public final class Sandbox {
 
     private final Path workspaceReal;
+    private final LinkFreePath.Roots roots;
     private final boolean enabled;
     private final List<String> allow;
     private final List<String> deny;
@@ -41,6 +42,13 @@ public final class Sandbox {
                     .toAbsolutePath().normalize();
         }
         this.workspaceReal = resolvedWorkspace;
+        Path lexicalWorkspace;
+        try {
+            lexicalWorkspace = (workspace == null ? Path.of(".") : workspace).toAbsolutePath().normalize();
+        } catch (Exception e) {
+            lexicalWorkspace = resolvedWorkspace;
+        }
+        this.roots = new LinkFreePath.Roots(lexicalWorkspace, resolvedWorkspace);
 
         Map<String,Object> policy = CfgUtil.map(cfg == null ? null : cfg.get("policy"));
         this.enabled = policy == null || !policy.containsKey("enabled") || Boolean.TRUE.equals(policy.get("enabled"));
@@ -84,6 +92,31 @@ public final class Sandbox {
     private Decision allowedPathInternal(Path p) {
         if (!enabled) return Decision.allow();
         if (p == null) return Decision.deny("null path");
+
+        // Round 8: a path outside the workspace and its real path is refused from its text before any probe, so a
+        // model-supplied UNC path never makes Talos contact the host it names. Each symbolic link on the way is read
+        // before anything follows it, so a link whose target leaves the workspace is refused unfollowed. A junction
+        // keeps the real-path check below, because the JDK cannot read its target unfollowed and a junction can
+        // target only a local volume.
+        Path absolute;
+        try {
+            absolute = p.toAbsolutePath();
+        } catch (Exception e) {
+            return Decision.deny("path cannot be safely resolved");
+        }
+        if (!roots.admits(absolute)) return Decision.deny("path escapes workspace");
+        LinkFreePath.Walk walk = LinkFreePath.resolve(absolute, roots);
+        switch (walk.status()) {
+            case OUTSIDE -> {
+                return Decision.deny("path escapes workspace");
+            }
+            case LINK_LIMIT, UNREADABLE -> {
+                return Decision.deny("path cannot be safely resolved");
+            }
+            case RESOLVED, REPARSE_POINT -> {
+                // The real-path check below decides.
+            }
+        }
 
         Path real;
         try {

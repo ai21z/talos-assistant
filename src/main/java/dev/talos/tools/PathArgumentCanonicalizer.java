@@ -52,14 +52,35 @@ public final class PathArgumentCanonicalizer {
         }
 
         Path trimmedResolved = resolve(workspace, trimmed);
-        // The file system is probed for a model-supplied path only inside the workspace, so a path beside it, on
-        // another drive or on a network share is left as given and no host or volume it names is contacted.
-        boolean rawExists = insideWorkspace(workspace, rawResolved) && Files.exists(rawResolved);
-        boolean trimmedExists = insideWorkspace(workspace, trimmedResolved) && Files.exists(trimmedResolved);
-        if (!rawExists && trimmedExists) {
+        // Rounds 7 and 8: the file system is probed for a model-supplied path only inside the workspace or its real
+        // path, and only through link-free resolution, so no host or volume that the path or a link on it names is
+        // contacted. A padded path whose trimmed form lies outside is trimmed from its text alone, so the sandbox
+        // refuses the trimmed path from its text, as it refused it before round 7.
+        dev.talos.core.security.LinkFreePath.Roots roots = dev.talos.core.security.LinkFreePath.Roots.of(workspace);
+        if (exists(rawResolved, roots)) return new Resolution(raw, raw, rawResolved, false);
+        if (trimmedResolved != null && !roots.admits(trimmedResolved)) {
+            return new Resolution(raw, trimmed, trimmedResolved, true);
+        }
+        if (exists(trimmedResolved, roots)) {
             return new Resolution(raw, trimmed, trimmedResolved, true);
         }
         return new Resolution(raw, raw, rawResolved, false);
+    }
+
+    /**
+     * True when a path inside the workspace or its real path exists, found without following a symbolic link. A
+     * junction is followed as the sandbox follows it, because its target can be only a local volume.
+     */
+    private static boolean exists(Path resolved, dev.talos.core.security.LinkFreePath.Roots roots) {
+        if (resolved == null || !roots.admits(resolved)) return false;
+        var walk = dev.talos.core.security.LinkFreePath.resolve(resolved, roots);
+        try {
+            if (walk.resolved()) return Files.exists(walk.path(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+            return walk.status() == dev.talos.core.security.LinkFreePath.Status.REPARSE_POINT
+                    && Files.exists(resolved);
+        } catch (RuntimeException unreadable) {
+            return false;
+        }
     }
 
     public static ToolCallNormalization canonicalizeToolCall(
@@ -85,16 +106,6 @@ public final class PathArgumentCanonicalizer {
             return new ToolCallNormalization(call, List.of());
         }
         return new ToolCallNormalization(new ToolCall(call.toolName(), updated), changes);
-    }
-
-    /** True when a resolved path lies lexically inside the workspace. */
-    private static boolean insideWorkspace(Path workspace, Path resolved) {
-        if (workspace == null || resolved == null) return false;
-        try {
-            return resolved.toAbsolutePath().normalize().startsWith(workspace.toAbsolutePath().normalize());
-        } catch (RuntimeException unresolvable) {
-            return false;
-        }
     }
 
     private static Path resolve(Path workspace, String value) {

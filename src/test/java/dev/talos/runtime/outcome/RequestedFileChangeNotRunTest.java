@@ -501,18 +501,20 @@ class RequestedFileChangeNotRunTest {
             Files.writeString(workspace.resolve(file), "x\n");
         }
         boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
-        assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, "orders.py"));
-        assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, workspace.resolve("docs/x.md").toString()));
-        // Round 7: only a path inside the workspace is probed, not one beside it on the same root.
-        assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace,
-                workspace.getParent().resolve("x.md").toString()));
-        assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "../x.md"));
+        // Rounds 7 and 8: a path beside the workspace on the same root, or above it, is not placed, decided through
+        // assess() itself rather than a helper that production does not call.
+        for (String outside : List.of(workspace.getParent().resolve("orders.py").toString(), "../orders.py")) {
+            MutationRecoveryAssessment beside = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied(outside, ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+            assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL,
+                    beside.requiredTargetCoverage().gap(), outside);
+        }
         if (windows) {
-            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "//host.invalid/share/x.md"));
-            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "\\\\host.invalid\\share\\x.md"));
             String otherDrive = workspace.getRoot().toString().toUpperCase(java.util.Locale.ROOT).startsWith("Z")
-                    ? "Y:/x.md" : "Z:/x.md";
-            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, otherDrive));
+                    ? "Y:/orders.py" : "Z:/orders.py";
+            MutationRecoveryAssessment drive = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied(otherDrive, ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+            assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL, drive.requiredTargetCoverage().gap());
 
             MutationRecoveryAssessment unc = assess(List.of(edited("inventory.py"), edited("orders.py"),
                     edited("report.py"), denied("//host.invalid/share/orders.py",
@@ -577,8 +579,102 @@ class RequestedFileChangeNotRunTest {
                         ToolFailureReason.USER_APPROVAL_DENIED))), 0, TaskVerificationEvidence.notRun("not run"),
                 workspace);
         assertEquals(MutationOutcomeStatus.SUCCEEDED, deleteLink.mutationOutcome().status());
-        assertEquals(MutationOutcomeStatus.PARTIAL, copyIntoLink.mutationOutcome().status());
-        assertEquals(List.of("docs/guide.md"), copyIntoLink.requiredTargetCoverage().changeNotRunPossible());
+        // Round 8: CopyPathTool refuses a linked destination through NoFollowPathPolicy, so a copy onto the link
+        // would change no file below its target, and the operand is not followed for any kind.
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, copyIntoLink.mutationOutcome().status());
+    }
+
+    /**
+     * Round 8, security: a refused proposal path whose links cannot be resolved without following one is not placed,
+     * so the turn stays partial. A relative chain that leaves the workspace, a link that leaves and comes back, and a
+     * junction are each found by reading the links, never by following them.
+     */
+    @Test
+    void aProposalPathWhoseLinksLeaveTheWorkspaceOrCrossAJunctionIsNotPlaced(@TempDir Path base) throws Exception {
+        Path workspace = Files.createDirectories(base.resolve("ws"));
+        for (String file : List.of("inventory.py", "orders.py", "report.py")) {
+            Files.writeString(workspace.resolve(file), "x\n");
+        }
+        Files.createDirectories(workspace.resolve("a/b"));
+        Files.createDirectories(base.resolve("outside"));
+        Files.writeString(base.resolve("outside/child.txt"), "x\n");
+        dev.talos.testsupport.FileLinks.symbolicLink(workspace.resolve("a/b/up"), Path.of("..", ".."));
+        dev.talos.testsupport.FileLinks.symbolicLink(workspace.resolve("esc"), Path.of("..", "outside"));
+        Path alias = dev.talos.testsupport.FileLinks.directoryAlias(base.resolve("alias"), workspace);
+        dev.talos.testsupport.FileLinks.symbolicLink(workspace.resolve("lnk"), alias);
+
+        for (String path : List.of("a/b/up/esc/child.txt", "lnk/orders.py")) {
+            MutationRecoveryAssessment assessment = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied(path, ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+
+            assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status(), path);
+            assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL,
+                    assessment.requiredTargetCoverage().gap(), path);
+        }
+    }
+
+    /** Round 8: a junction is a reparse point whose target the JDK cannot read unfollowed, so a path across it is not placed. */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aProposalPathAcrossAJunctionIsNotPlaced(@TempDir Path base) throws Exception {
+        Path workspace = Files.createDirectories(base.resolve("ws"));
+        for (String file : List.of("inventory.py", "orders.py", "report.py")) {
+            Files.writeString(workspace.resolve(file), "x\n");
+        }
+        Files.createDirectories(base.resolve("outside"));
+        Files.writeString(base.resolve("outside/x.txt"), "x\n");
+        dev.talos.testsupport.FileLinks.junction(workspace.resolve("jn"), base.resolve("outside"));
+
+        MutationRecoveryAssessment assessment = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                edited("report.py"), denied("jn/x.txt", ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+
+        assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status());
+        assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL, assessment.requiredTargetCoverage().gap());
+    }
+
+    /**
+     * Round 8: MovePathTool moves the entry itself, so a declined move of a link to the workspace does not hold the
+     * requested files below the folder the link reaches.
+     */
+    @Test
+    void aDeclinedMoveOfALinkActsOnTheLinkItself(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/guide.md"), "alpha\n");
+        // A symbolic link, not a junction: a junction to its own ancestor would make the cleanup walk loop.
+        dev.talos.testsupport.FileLinks.symbolicLink(workspace.resolve("home"), workspace);
+        String request = "In docs/guide.md, replace alpha with beta.";
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+        MutationRecoveryAssessment moved = MutationRecoveryAssessment.assess(contract,
+                RequestObligationCompiler.compile(contract), loop(List.of(edited("docs/guide.md"), new ToolCallLoop
+                        .ToolOutcome("talos.move_path", "home", false, true, true, "", "PRODUCER TEXT", null,
+                        ToolError.DENIED, null, ToolMutationEvidence.none(), ToolFailureReason.USER_APPROVAL_DENIED,
+                        List.of(), "call-move-home").withDispatch(ToolCallDispatch.blocked("home",
+                        new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.MOVE,
+                                List.of("home", "old-home"), List.of("home", "old-home"), true))))), 0,
+                TaskVerificationEvidence.notRun("not run"), workspace);
+
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, moved.mutationOutcome().status());
+    }
+
+    /**
+     * Round 8: only the //?/ prefix before a drive or UNC is removed. A volume GUID or GLOBALROOT spelling and an NTFS
+     * stream spelling that the JDK cannot resolve are not placed, so the turn stays partial.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aWin32NamespaceOrStreamSpellingThatCannotBeResolvedIsNotPlaced(@TempDir Path workspace) throws Exception {
+        for (String file : List.of("inventory.py", "orders.py", "report.py")) {
+            Files.writeString(workspace.resolve(file), "x\n");
+        }
+        String tail = workspace.toString().substring(3).replace('\\', '/') + "/orders.py";
+        for (String path : List.of("//?/Volume{00000000-0000-0000-0000-000000000000}/" + tail,
+                "//?/GLOBALROOT/Device/HarddiskVolume3/" + tail, "orders.py::$DATA")) {
+            MutationRecoveryAssessment assessment = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied(path, ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+
+            assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status(), path);
+        }
     }
 
     /**

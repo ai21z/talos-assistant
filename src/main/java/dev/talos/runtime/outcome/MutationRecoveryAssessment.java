@@ -193,24 +193,10 @@ public record MutationRecoveryAssessment(
     }
 
     /**
-     * Rounds 6 and 7: the file system is probed for a proposal path only when it lies lexically inside the workspace.
-     * A path beside it, on another drive, on a UNC share or a device, or under an automount tree is never probed, so
-     * the path of a refused or declined call never makes Talos contact a host or a volume that the model chose. Such
-     * a path is not placed, because an alias into the workspace cannot be ruled out without a probe.
-     */
-    static boolean probesFileSystemFor(Path workspace, String path) {
-        if (workspace == null || path == null || path.isBlank()) return false;
-        try {
-            Path root = workspace.toAbsolutePath().normalize();
-            return root.resolve(placementSpelling(path)).normalize().startsWith(root);
-        } catch (RuntimeException unresolvable) {
-            return false;
-        }
-    }
-
-    /**
-     * Round 7: the spelling a path is placed by. On Windows the Win32 file namespace prefix, which the dispatch
-     * witness keeps as //?/, is removed as the JDK removes it, and //?/UNC/ becomes a UNC spelling.
+     * Rounds 7 and 8: the spelling a path is placed by. On Windows the Win32 file namespace prefix, which the dispatch
+     * witness keeps as //?/, is removed only before a drive letter, as the JDK removes it, and //?/UNC/ becomes a UNC
+     * spelling. Any other Win32 namespace form, such as a volume GUID or GLOBALROOT path, gives null, so it is not
+     * placed.
      */
     private static String placementSpelling(String path) {
         String text = path == null ? "" : path.strip();
@@ -220,7 +206,10 @@ public record MutationRecoveryAssessment(
             if (rest.regionMatches(true, 0, "UNC/", 0, 4) || rest.regionMatches(true, 0, "UNC\\", 0, 4)) {
                 return "//" + rest.substring(4);
             }
-            return rest;
+            char letter = rest.isEmpty() ? ' ' : Character.toUpperCase(rest.charAt(0));
+            boolean drive = rest.length() >= 3 && letter >= 'A' && letter <= 'Z' && rest.charAt(1) == ':'
+                    && (rest.charAt(2) == '/' || rest.charAt(2) == '\\');
+            return drive ? rest : null;
         }
         return text;
     }
@@ -742,14 +731,16 @@ public record MutationRecoveryAssessment(
     }
 
     /**
-     * A delete, move or rename of a folder, or a copy or move into one, may affect every file below it, so a target
-     * inside a folder that such a proposal would change is held by it. A folder that is the workspace root or holds
-     * it holds every target, decided from the text alone. The operation kind is the one its producer recorded, so the
-     * same tool-name resolution decides the roles and this relation. The folder holds the target when resolved
-     * workspace paths contain it, or when its canonical text contains it by path segments without regard to letter
-     * case, because a match that may hold must be assumed for a proposal. Real paths are used only for a folder inside
-     * the workspace whose links stay inside it. A delete or rename acts on the operand itself, so its own link is not
-     * followed, while a copy or move writes below the folder it reaches. A mkdir changes no file below its folder.
+     * A delete, move or rename of a folder, or a copy into one, may affect every file below it, so a target inside a
+     * folder that such a proposal would change is held by it. A folder that is the workspace root or holds it holds
+     * every target, decided from the text alone. The operation kind is the one its producer recorded, so the same
+     * tool-name resolution decides the roles and this relation. Every kind acts on the operand entry itself: a
+     * delete removes a link or junction as an entry, a move or rename moves the entry, and a copy refuses a linked
+     * destination. So the operand's parent is resolved without following a link and its own name is kept (round 8).
+     * The folder holds the target when lexical workspace paths contain it, when those link-free paths contain it, or
+     * when its lexical or link-free canonical text contains it by path segments without regard to letter case,
+     * because a match that may hold must be assumed for a proposal. An admitted operand or a target that cannot be
+     * resolved without following a link may hold it. A mkdir changes no file below its folder.
      */
     private static boolean holdsByFolderOperation(
             ToolCallLoop.ToolOutcome proposal,
@@ -759,13 +750,12 @@ public record MutationRecoveryAssessment(
     ) {
         dev.talos.runtime.ToolCallDispatch.OperationKind kind = proposalKind(proposal);
         if (!kind.folderScoped()) return false;
-        boolean followOperand = kind == dev.talos.runtime.ToolCallDispatch.OperationKind.COPY
-                || kind == dev.talos.runtime.ToolCallDispatch.OperationKind.MOVE;
         Path root = placements.root();
         for (String path : paths) {
             PlacedPath placed = placements.place(path);
             if (placed.root()) return true;
             Path folder = placements.resolve(path);
+            String entryCanonical = "";
             if (root != null && folder != null) {
                 // A folder that is the workspace root or holds it holds every requested file, from its text alone.
                 if (root.startsWith(folder)) return true;
@@ -773,23 +763,29 @@ public record MutationRecoveryAssessment(
                     try {
                         Path file = root.resolve(target).normalize();
                         if (folder.startsWith(root) && file.startsWith(folder) && !file.equals(folder)) return true;
+                        dev.talos.core.security.LinkFreePath.Walk operand = placements.entry(path);
+                        dev.talos.core.security.LinkFreePath.Walk reached = placements.linkFree(target);
+                        if (!operand.resolved() || !reached.resolved()) return true;
                         Path realRoot = placements.realRoot();
-                        if (realRoot != null && placements.linksStayInside(folder)
-                                && placements.linksStayInside(file)) {
-                            Path realFolder = followOperand ? realPath(folder) : realPathOfOperand(folder);
-                            Path realFile = realPath(file);
-                            if (realRoot.startsWith(realFolder)) return true;
-                            if (realFile.startsWith(realFolder) && !realFile.equals(realFolder)) return true;
+                        if (realRoot != null && realRoot.startsWith(operand.path())) return true;
+                        if (reached.path().startsWith(operand.path()) && !reached.path().equals(operand.path())) {
+                            return true;
                         }
-                    } catch (java.io.IOException | RuntimeException unresolvable) {
-                        // A path the workspace cannot resolve is judged on its placed text below.
+                        if (realRoot != null && operand.path().startsWith(realRoot)) {
+                            entryCanonical = canonicalPath(realRoot.relativize(operand.path()).toString());
+                        }
+                    } catch (RuntimeException unresolvable) {
+                        return true;
                     }
                 }
             }
             // A folder spelled in another letter case may be the same folder on a file system that ignores case,
-            // unless both spellings exist as different folders.
-            String ancestor = caseInsensitiveAncestor(placed.canonical(), target);
-            if (!ancestor.isEmpty() && !placements.distinctExisting(ancestor, placed.canonical())) return true;
+            // unless both spellings exist as different folders. The lexical text and the link-free text of the
+            // operand entry, whose own name is not followed, are checked.
+            for (String spelling : List.of(placed.canonical(), entryCanonical)) {
+                String ancestor = caseInsensitiveAncestor(spelling, target);
+                if (!ancestor.isEmpty() && !placements.distinctExisting(ancestor, spelling)) return true;
+            }
         }
         return false;
     }
@@ -810,45 +806,41 @@ public record MutationRecoveryAssessment(
     }
 
     /**
-     * Rounds 5 to 7: where a proposal path lies. {@code canonical} is its canonical workspace-relative text, from its
+     * Rounds 5 to 8: where a proposal path lies. {@code canonical} is its canonical workspace-relative text, from its
      * own text, from proven identity to a required target, or from resolving it inside the workspace lexically.
-     * {@code realCanonical} is the same for its real path inside the workspace, when every link on the way stays
-     * inside it, so a spelling through a link or a file-system alias is read as the file it reaches. {@code root} is
-     * true when it names the workspace root. A path outside the workspace is not placed, because without a probe an
-     * alias into the workspace cannot be ruled out.
+     * {@code realCanonical} is the same for the path that LinkFreePath reaches by reading each link without following
+     * it, so a spelling through a link or the workspace's real path is read as the file it reaches. {@code root} is
+     * true when it names the workspace root. A path outside the workspace, a spelling the JDK cannot resolve and an
+     * admitted path whose links cannot be resolved without following one are not placed, because an alias of a
+     * requested file cannot be ruled out without a probe or a followed link.
      */
     private record PlacedPath(String canonical, String realCanonical, boolean root) {
+        static final PlacedPath UNPLACED = new PlacedPath("", "", false);
+
         boolean placed() {
             return !canonical.isEmpty() || !realCanonical.isEmpty() || root;
         }
     }
 
     /**
-     * Rounds 6 and 7: the placement of each proposal path, computed once per assessment, with the workspace's real
-     * path resolved once. The file system is touched only for a path inside the workspace or its real path, and a
-     * link is followed only after its own target is read without following it and found inside the workspace.
+     * Rounds 6 to 8: the placement of each proposal path, computed once per assessment. The workspace's real path is
+     * resolved once, because it is the operator's path. Every other file-system read goes through LinkFreePath, which
+     * reads only paths inside the workspace or its real path and never follows a link.
      */
     private static final class Placements {
-        private static final int LINK_HOP_LIMIT = 8;
         private final Path workspace;
-        private final Path root;
+        private final dev.talos.core.security.LinkFreePath.Roots roots;
         private final RequestObligation obligation;
         private final java.util.Map<String, PlacedPath> cache = new java.util.HashMap<>();
-        private Path realRoot;
-        private boolean realRootResolved;
+        private final java.util.Map<String, dev.talos.core.security.LinkFreePath.Walk> walks =
+                new java.util.HashMap<>();
+        private final java.util.Map<String, dev.talos.core.security.LinkFreePath.Walk> entries =
+                new java.util.HashMap<>();
 
         Placements(Path workspace, RequestObligation obligation) {
             this.workspace = workspace;
             this.obligation = obligation;
-            Path normalized = null;
-            if (workspace != null) {
-                try {
-                    normalized = workspace.toAbsolutePath().normalize();
-                } catch (RuntimeException unresolvable) {
-                    normalized = null;
-                }
-            }
-            this.root = normalized;
+            this.roots = dev.talos.core.security.LinkFreePath.Roots.of(workspace);
         }
 
         Path workspace() {
@@ -856,27 +848,31 @@ public record MutationRecoveryAssessment(
         }
 
         Path root() {
-            return root;
+            return roots.lexical();
         }
 
-        /** The workspace's own real path. The workspace is the operator's, so resolving it probes no model path. */
         Path realRoot() {
-            if (!realRootResolved) {
-                realRootResolved = true;
-                try {
-                    realRoot = root == null ? null : realPath(root);
-                } catch (java.io.IOException | RuntimeException unresolvable) {
-                    realRoot = null;
-                }
-            }
-            return realRoot;
+            return roots.real();
         }
 
-        /** The path resolved against the workspace in its placement spelling, or null. */
+        /** The path resolved against the workspace in its placement spelling and normalized, or null. */
         Path resolve(String path) {
-            if (root == null || path == null || path.isBlank()) return null;
+            Path given = given(path);
             try {
-                return root.resolve(placementSpelling(path)).normalize();
+                return given == null ? null : given.normalize();
+            } catch (RuntimeException unresolvable) {
+                return null;
+            }
+        }
+
+        /** The path resolved against the workspace as given, with its "..", for a link-free walk. */
+        private Path given(String path) {
+            Path root = root();
+            if (root == null || path == null || path.isBlank()) return null;
+            String spelling = placementSpelling(path);
+            if (spelling == null) return null;
+            try {
+                return root.resolve(spelling);
             } catch (RuntimeException unresolvable) {
                 return null;
             }
@@ -884,54 +880,38 @@ public record MutationRecoveryAssessment(
 
         /** True when a resolved path lies inside the workspace or inside its real path, the only probed places. */
         boolean admits(Path resolved) {
-            if (resolved == null || root == null) return false;
-            if (resolved.startsWith(root)) return true;
-            Path resolvedRoot = realRoot();
-            return resolvedRoot != null && resolved.startsWith(resolvedRoot);
+            return resolved != null && roots.admits(resolved);
         }
 
-        /**
-         * True when every symbolic link on the way to the path, below the workspace, has a target that is admitted,
-         * read without following the link, within a bounded number of hops.
-         */
-        boolean linksStayInside(Path resolved) {
-            return linksStayInside(resolved, 0);
+        /** The link-free walk of every component of the path, computed once. */
+        dev.talos.core.security.LinkFreePath.Walk linkFree(String path) {
+            return walks.computeIfAbsent(path == null ? "" : path, key -> walk(key, false));
         }
 
-        private boolean linksStayInside(Path resolved, int hops) {
-            if (!admits(resolved)) return false;
-            if (hops > LINK_HOP_LIMIT) return false;
-            Path base = resolved.startsWith(root) ? root : realRoot();
-            if (base == null) return false;
-            Path current = base;
-            try {
-                for (Path name : base.relativize(resolved)) {
-                    current = current.resolve(name.toString());
-                    if (java.nio.file.Files.isSymbolicLink(current)) {
-                        Path linked = current.getParent().resolve(java.nio.file.Files.readSymbolicLink(current))
-                                .normalize();
-                        if (!linksStayInside(linked, hops + 1)) return false;
-                    } else if (!java.nio.file.Files.exists(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                        return true;
-                    }
-                }
-                return true;
-            } catch (java.io.IOException | RuntimeException unresolvable) {
-                return false;
+        /** The link-free walk of the path's parent with its own name kept unfollowed, computed once. */
+        dev.talos.core.security.LinkFreePath.Walk entry(String path) {
+            return entries.computeIfAbsent(path == null ? "" : path, key -> walk(key, true));
+        }
+
+        private dev.talos.core.security.LinkFreePath.Walk walk(String path, boolean entry) {
+            Path given = given(path);
+            if (given == null || !admits(given)) {
+                return new dev.talos.core.security.LinkFreePath.Walk(
+                        dev.talos.core.security.LinkFreePath.Status.OUTSIDE, null);
             }
+            return entry ? dev.talos.core.security.LinkFreePath.resolveEntry(given, roots)
+                    : dev.talos.core.security.LinkFreePath.resolve(given, roots);
         }
 
         /** True when both workspace-relative spellings exist as different entries, checked only inside the workspace. */
         boolean distinctExisting(String first, String second) {
-            Path a = resolve(first);
-            Path b = resolve(second);
-            if (a == null || b == null || !admits(a) || !admits(b) || !linksStayInside(a) || !linksStayInside(b)) {
-                return false;
-            }
+            dev.talos.core.security.LinkFreePath.Walk a = linkFree(first);
+            dev.talos.core.security.LinkFreePath.Walk b = linkFree(second);
+            if (!a.resolved() || !b.resolved()) return false;
             try {
-                return java.nio.file.Files.exists(a, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                        && java.nio.file.Files.exists(b, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                        && !java.nio.file.Files.isSameFile(a, b);
+                return java.nio.file.Files.exists(a.path(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        && java.nio.file.Files.exists(b.path(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        && !java.nio.file.Files.isSameFile(a.path(), b.path());
             } catch (java.io.IOException | RuntimeException unresolvable) {
                 return false;
             }
@@ -943,55 +923,28 @@ public record MutationRecoveryAssessment(
 
         private PlacedPath placeOnce(String path) {
             String own = canonicalPath(path, workspace, obligation);
+            // Without a workspace a path is placed by its own text, and no file system is read.
+            if (root() == null) return new PlacedPath(own, "", false);
             Path resolved = resolve(path);
-            if (resolved == null || !admits(resolved)) return new PlacedPath(own, "", false);
+            // Round 8: a spelling the JDK cannot resolve, such as an NTFS stream name, is not placed by its text.
+            if (resolved == null) return PlacedPath.UNPLACED;
+            if (!admits(resolved)) return new PlacedPath(own, "", false);
+            Path root = root();
             boolean lexicalRoot = resolved.equals(root);
             String lexical = lexicalRoot || !resolved.startsWith(root)
                     ? ""
                     : canonicalPath(root.relativize(resolved).toString());
             String canonical = own.isEmpty() ? lexical : own;
-            String real = "";
-            boolean realIsRoot = false;
-            try {
-                Path resolvedRoot = realRoot();
-                if (resolvedRoot != null && linksStayInside(resolved)) {
-                    Path realResolved = realPath(resolved);
-                    realIsRoot = realResolved.equals(resolvedRoot);
-                    if (!realIsRoot && realResolved.startsWith(resolvedRoot)) {
-                        real = canonicalPath(resolvedRoot.relativize(realResolved).toString());
-                    }
-                }
-            } catch (java.io.IOException | RuntimeException unresolvable) {
-                // The lexical placement stands when the real path cannot be read.
-            }
+            dev.talos.core.security.LinkFreePath.Walk walk = linkFree(path);
+            // Round 8: a path whose links cannot be resolved without following one may be an alias of any file.
+            if (!walk.resolved()) return PlacedPath.UNPLACED;
+            Path realRoot = realRoot();
+            boolean realIsRoot = walk.path().equals(realRoot);
+            String real = !realIsRoot && walk.path().startsWith(realRoot)
+                    ? canonicalPath(realRoot.relativize(walk.path()).toString())
+                    : "";
             return new PlacedPath(canonical, real, lexicalRoot || canonical.isEmpty() && realIsRoot);
         }
-    }
-
-    /** The real path of a folder operand's parent followed by the operand's own name, which is not followed. */
-    private static Path realPathOfOperand(Path folder) throws java.io.IOException {
-        Path parent = folder.getParent();
-        if (parent == null || folder.getFileName() == null) return realPath(folder);
-        return realPath(parent).resolve(folder.getFileName().toString()).normalize();
-    }
-
-    /**
-     * The real path of the nearest existing ancestor, followed by the names below it that do not exist. It follows
-     * links, so it is called only for a path that Placements admits and whose links stay inside the workspace, or for
-     * the workspace itself.
-     */
-    private static Path realPath(Path path) throws java.io.IOException {
-        Path current = path;
-        java.util.ArrayDeque<String> missing = new java.util.ArrayDeque<>();
-        while (current != null && !java.nio.file.Files.exists(current)) {
-            if (current.getFileName() == null) return path;
-            missing.push(current.getFileName().toString());
-            current = current.getParent();
-        }
-        if (current == null) return path;
-        Path real = current.toRealPath();
-        while (!missing.isEmpty()) real = real.resolve(missing.pop());
-        return real.normalize();
     }
 
     /**
