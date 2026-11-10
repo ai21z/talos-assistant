@@ -3107,8 +3107,9 @@ class ToolCallLoopTest {
             }
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
-            assertTrue(result.summary().contains("failed"),
-                    "The pre-verification tool summary must retain the failed edit attempt.");
+            // LA-F7: the old_string miss was refused before approval, so the tool line counts it as not run.
+            assertTrue(result.summary().contains(" not run]"),
+                    "The pre-verification tool summary must retain the refused edit attempt: " + result.summary());
             assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
             assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::oldStringNotFoundEditFailure),
                     "The initial old_string miss should be visible in tool outcomes.");

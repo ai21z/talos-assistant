@@ -1311,8 +1311,11 @@ class MutationRecoveryAssessmentTest {
                         "Decision 001: baseline\n"
                                 + "Decision 004: health checks remain read-only\n"));
 
-        assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status());
+        // LA-F7 (D1): the policy denial never ran and the requested file changed, so the change succeeded. The
+        // denial stays unrecovered and listed.
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, assessment.mutationOutcome().status());
         assertEquals(List.of(denial), assessment.mutationOutcome().denied());
+        assertEquals(List.of(denial), assessment.mutationOutcome().notRun());
         assertEquals(
                 MutationRecoveryAssessment.Decision.DENIED_OR_POLICY,
                 assessment.failureAssessments().getFirst().decision());

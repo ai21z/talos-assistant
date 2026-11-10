@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.ToolCallDispatch;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
@@ -46,7 +48,11 @@ final class ToolOutcomeFactory {
                 null,
                 editPreApprovalReason(decision),
                 List.of(),
-                toolCallId(permit));
+                toolCallId(permit),
+                null,
+                null,
+                null,
+                notRun(call));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionMutation(
@@ -87,7 +93,11 @@ final class ToolOutcomeFactory {
                 null,
                 failureReason,
                 List.of(),
-                toolCallId(permit));
+                toolCallId(permit),
+                null,
+                null,
+                null,
+                notRun(call));
     }
 
     static ToolCallLoop.ToolOutcome failedPreExecutionRead(
@@ -118,7 +128,11 @@ final class ToolOutcomeFactory {
                 null,
                 ToolFailureReason.NONE,
                 List.of(),
-                toolCallId(permit));
+                toolCallId(permit),
+                null,
+                null,
+                null,
+                notRun(call));
     }
 
     static ToolCallLoop.ToolOutcome failedAuthority(
@@ -134,7 +148,7 @@ final class ToolOutcomeFactory {
         return new ToolCallLoop.ToolOutcome(toolName(call), "", false,
                 mutating, true, "",
                 blocked.error().message(), null, blocked.error().code(), null, null,
-                blocked.error().reason(), List.of(), toolCallId(permit));
+                blocked.error().reason(), List.of(), toolCallId(permit), null, null, null, notRun(call));
     }
 
     static ToolCallLoop.ToolOutcome failedAuthority(
@@ -157,7 +171,11 @@ final class ToolOutcomeFactory {
                 null,
                 ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                 List.of(),
-                toolCallId(permit));
+                toolCallId(permit),
+                null,
+                null,
+                null,
+                notRun(call));
     }
 
     static ToolCallLoop.ToolOutcome executed(
@@ -202,7 +220,29 @@ final class ToolOutcomeFactory {
             LocalTurnTraceCapture.ParsedToolCallPermit permit,
             dev.talos.tools.MutationPreimage mutationPreimage
     ) {
+        return executed(call, pathHint, result, classification, workspaceOperationPlan, mutationEvidence, permit,
+                mutationPreimage, TurnRecord.ToolCallDisposition.UNKNOWN);
+    }
+
+    /**
+     * An outcome of a call the tool processor handled, with the processor's dispatch witness (LA-F7). Only a call
+     * that never reached the tool registry keeps its proposed target.
+     */
+    static ToolCallLoop.ToolOutcome executed(
+            ToolCall call,
+            String pathHint,
+            ToolResult result,
+            ToolExecutionFailureClassifier.Classification classification,
+            WorkspaceOperationPlan workspaceOperationPlan,
+            ToolMutationEvidence mutationEvidence,
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            dev.talos.tools.MutationPreimage mutationPreimage,
+            TurnRecord.ToolCallDisposition disposition
+    ) {
         boolean success = result != null && result.success();
+        ToolCallDispatch dispatch = result == null
+                ? ToolCallDispatch.unknown()
+                : ToolCallDispatch.of(disposition, proposedTarget(call));
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
                 pathHint,
@@ -222,7 +262,17 @@ final class ToolOutcomeFactory {
                 toolCallId(permit),
                 result == null ? null : result.mutationEffects(),
                 result == null ? null : result.contentMetadata().directoryObservation(),
-                mutationPreimage);
+                mutationPreimage,
+                dispatch);
+    }
+
+    /** LA-F7: an outcome built by a refusal factory precedes dispatch, so its call never reached the registry. */
+    private static ToolCallDispatch notRun(ToolCall call) {
+        return ToolCallDispatch.blocked(proposedTarget(call));
+    }
+
+    private static String proposedTarget(ToolCall call) {
+        return call == null ? "" : ToolCallSupport.resolvePathHint(call);
     }
 
     private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {

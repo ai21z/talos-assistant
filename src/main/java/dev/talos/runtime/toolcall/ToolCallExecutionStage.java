@@ -302,10 +302,12 @@ public final class ToolCallExecutionStage {
             // P23 (D20 option A): the loop state is the only owner of whether this turn asked the model to continue.
             // HC-F6b: an exact edit of a target already changed in this turn answers the expected-target progress
             // request, so it counts as proposed after a continuation.
-            ToolResult rawResult = turnProcessor.executeToolAfterParsed(
+            TurnProcessor.GatedToolResult gated = turnProcessor.executeToolAfterParsedWithDisposition(
                     state.toolSession, effective, state.ctx, parsedPermit,
                     MutationContinuationDecision.continuationIssued(state)
                             || state.editsChangedTargetOfPendingObligation(effective));
+            // LA-F7: the processor witnesses whether the call reached the tool registry.
+            ToolResult rawResult = gated.result();
             ToolResultModelContextHandoff.Decision handoffDecision =
                     ToolResultModelContextHandoff.decide(
                             effective,
@@ -370,7 +372,8 @@ public final class ToolCallExecutionStage {
                     workspaceOperationPlan,
                     mutationEvidence,
                     parsedPermit,
-                    ToolMutationStateAccounting.retainedMutationPreimage(state, rawResult));
+                    ToolMutationStateAccounting.retainedMutationPreimage(state, rawResult),
+                    gated.disposition());
             state.addClassifiedToolOutcome(outcome);
 
             if (!result.success()) {

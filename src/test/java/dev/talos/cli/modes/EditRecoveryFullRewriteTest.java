@@ -108,11 +108,15 @@ class EditRecoveryFullRewriteTest {
                 "the safe stop must be replaced by the bounded recovery: " + out.text());
         assertFalse(out.text().contains("no file was changed"),
                 "the turn must not end with the invalid-edit truth stop: " + out.text());
+        // LA-F7: both empty edits were refused before approval, so they are kept as proposals that did not run.
         assertTrue(
                 out.text().contains(
-                        MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
-                "the bounded rewrite must not erase its earlier unverified failures: "
+                        MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION),
+                "the bounded rewrite must not erase its earlier refused proposals: "
                         + out.text());
+        assertTrue(out.text().contains("- README.md: talos.edit_file not run, refused before approval "
+                        + "(old_string or new_string missing or empty)."),
+                out.text());
     }
 
     @Test
@@ -238,11 +242,17 @@ class EditRecoveryFullRewriteTest {
                 "a post-recovery failure must not deny the approved change: " + out.text());
         assertFalse(out.text().contains("No approval was requested"),
                 "approval was requested and granted: " + out.text());
+        // LA-F7: the later attempt was not accepted as an executable call, so it is listed as not run next to
+        // the approved change instead of as a failure.
         assertTrue(
                 out.text().contains(
-                        MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
-                "the successful write and later failed attempt must remain partial: "
+                        MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION),
+                "the successful write and the later refused attempt must both stay visible: "
                         + out.text());
+        assertTrue(out.text().contains("Succeeded:\n- README.md: "), out.text());
+        assertTrue(out.text().contains(
+                        "- README.md: talos.edit_file not run, it was not accepted as an executable tool call."),
+                out.text());
     }
 
     @Test

@@ -793,6 +793,8 @@ class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
         assertEquals(ToolError.INVALID_PARAMS, result.error().code());
         assertTrue(result.errorMessage().contains("identical"), result.errorMessage());
         assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        // LA-F7: the refusal carries its typed cause, so the outcome renderer never reads the message.
+        assertEquals(dev.talos.tools.ToolFailureReason.EDIT_NO_CHANGE, result.error().reason());
         assertEquals(0, approvals.get());
         assertEquals("alpha\nbeta\n", Files.readString(workspace.resolve("app.css")));
     }

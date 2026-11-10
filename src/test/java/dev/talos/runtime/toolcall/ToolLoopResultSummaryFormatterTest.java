@@ -184,6 +184,24 @@ class ToolLoopResultSummaryFormatterTest {
     }
 
     @Test
+    void aCallWitnessedAsNeverRunIsShownAsNotRunAndACallThatRanAsFailed() {
+        var refused = new ToolCallLoop.ToolOutcome("talos.edit_file", "a.md", false, true, false, "",
+                "refused", null, ToolError.INVALID_PARAMS)
+                .withDispatch(dev.talos.runtime.ToolCallDispatch.blocked("a.md"));
+        var ran = new ToolCallLoop.ToolOutcome("talos.edit_file", "a.md", false, true, false, "",
+                "failed", null, ToolError.TOOL_ERROR)
+                .withDispatch(dev.talos.runtime.ToolCallDispatch.executed());
+        var unwitnessed = new ToolCallLoop.ToolOutcome("talos.edit_file", "a.md", false, true, false, "",
+                "failed", null, ToolError.INVALID_PARAMS);
+        var result = new ToolCallLoop.LoopResult("answer", 2, 3, List.of("talos.edit_file"), List.of(), 3, 0,
+                false, 0, List.of(), 0, 0, 0, 0, FailureDecision.continueLoop(), List.of(refused, ran, unwitnessed));
+
+        assertEquals(
+                "[Used 3 tool(s): talos.edit_file | 2 iteration(s)] [2 failed] [1 not run]",
+                ToolLoopResultSummaryFormatter.format(result));
+    }
+
+    @Test
     void aRefusedCallAloneIsNotShownAsFailed() {
         var result = new ToolCallLoop.LoopResult(
                 "answer",

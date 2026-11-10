@@ -1351,7 +1351,7 @@ class ExecutionOutcomeTest {
                                 false,
                                 "",
                                 "old_string not found in scripts.js.",
-                                null)));
+                                null).withFailureReason(dev.talos.tools.ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND)));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 loopResult.finalAnswer(), messages, loopResult, null, 0);
@@ -1368,7 +1368,9 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.finalAnswer().contains("Remaining target(s): scripts.js."), outcome.finalAnswer());
         assertTrue(outcome.finalAnswer().contains("Succeeded:"), outcome.finalAnswer());
         assertTrue(outcome.finalAnswer().contains("Failed:"), outcome.finalAnswer());
-        assertTrue(outcome.finalAnswer().contains("scripts.js: old_string not found in scripts.js."),
+        // LA-F7: the row names the typed cause, not the producer message.
+        assertTrue(outcome.finalAnswer().contains(
+                        "- scripts.js: talos.edit_file did not complete (old_string not found in the file)."),
                 outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().startsWith(
                         "[Truth check: some requested file changes succeeded and some failed."),
@@ -3730,7 +3732,9 @@ class ExecutionOutcomeTest {
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Succeeded:\n- index.html: wrote index.html"),
                     outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains("Failed:\n- styles.css: write failed before content was applied"),
+            // LA-F7: the row names the typed cause, not the producer message.
+            assertTrue(outcome.finalAnswer().contains(
+                            "Failed:\n- styles.css: talos.write_file did not complete (tool error)."),
                     outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("Updated 2 files:"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("Updated 3 files:"), outcome.finalAnswer());

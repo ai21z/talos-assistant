@@ -285,7 +285,8 @@ public final class ToolCallLoop {
             String toolCallId,
             dev.talos.tools.ToolMutationEffects mutationEffects,
             dev.talos.tools.DirectoryObservation directoryObservation,
-            @com.fasterxml.jackson.annotation.JsonIgnore dev.talos.tools.MutationPreimage mutationPreimage
+            @com.fasterxml.jackson.annotation.JsonIgnore dev.talos.tools.MutationPreimage mutationPreimage,
+            @com.fasterxml.jackson.annotation.JsonIgnore ToolCallDispatch dispatch
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -299,6 +300,26 @@ public final class ToolCallLoop {
             toolCallId = toolCallId == null ? "" : toolCallId.strip();
             mutationEffects = mutationEffects == null ? dev.talos.tools.ToolMutationEffects.none() : mutationEffects;
             mutationPreimage = mutationPreimage == null ? dev.talos.tools.MutationPreimage.none() : mutationPreimage;
+            dispatch = dispatch == null ? ToolCallDispatch.unknown() : dispatch;
+            if (dispatch.neverRan() && (success || mutationEffects.hasEffects())) {
+                throw new IllegalArgumentException(
+                        "A tool call that never reached the tool registry cannot report success or file effects");
+            }
+        }
+
+        /** Observations without a dispatch witness (LA-F7), from older producers. */
+        public ToolOutcome(String toolName, String pathHint, boolean success, boolean mutating,
+                           boolean denied, String summary, String errorMessage,
+                           dev.talos.tools.VerificationStatus fileVerificationStatus, String errorCode,
+                           WorkspaceOperationPlan workspaceOperationPlan, ToolMutationEvidence mutationEvidence,
+                           dev.talos.tools.ToolFailureReason failureReason, List<String> sourcePaths, String toolCallId,
+                           dev.talos.tools.ToolMutationEffects mutationEffects,
+                           dev.talos.tools.DirectoryObservation directoryObservation,
+                           dev.talos.tools.MutationPreimage mutationPreimage) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, sourcePaths, toolCallId, mutationEffects, directoryObservation,
+                    mutationPreimage, ToolCallDispatch.unknown());
         }
 
         /** Observations without producer preimage evidence. */
@@ -342,7 +363,15 @@ public final class ToolCallLoop {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
                     mutationEvidence, failureReason, sourcePaths, toolCallId, effects, directoryObservation,
-                    mutationPreimage);
+                    mutationPreimage, dispatch);
+        }
+
+        /** Copy with the producer's dispatch witness (LA-F7). */
+        public ToolOutcome withDispatch(ToolCallDispatch value) {
+            return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
+                    errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
+                    mutationEvidence, failureReason, sourcePaths, toolCallId, mutationEffects, directoryObservation,
+                    mutationPreimage, value);
         }
 
         /** Pre-T1154 canonical shape: exact parsed-call identity was not retained. */
@@ -477,7 +506,7 @@ public final class ToolCallLoop {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
                     mutationEvidence, reason, sourcePaths, toolCallId, mutationEffects, directoryObservation,
-                    mutationPreimage);
+                    mutationPreimage, dispatch);
         }
 
         private static List<String> normalizeSourcePaths(List<String> values) {

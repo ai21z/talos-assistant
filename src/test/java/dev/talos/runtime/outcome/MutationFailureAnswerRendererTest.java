@@ -408,7 +408,10 @@ class MutationFailureAnswerRendererTest {
 
         assertTrue(out.contains("Succeeded:"));
         assertTrue(out.contains("Failed:"));
-        assertTrue(out.contains("That failed call requested no approval and changed no file."));
+        // LA-F7: without a dispatch witness the refusal cannot be proven not to have run, so it is a typed failure
+        // row, and no producer message text is shown.
+        assertTrue(out.contains(
+                "- README.md: talos.edit_file did not complete (old_string or new_string missing or empty)."), out);
         assertFalse(out.contains("No approval was requested"));
         assertFalse(out.contains("no file was changed"));
     }

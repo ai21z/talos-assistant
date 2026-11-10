@@ -9,6 +9,7 @@ import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
 import dev.talos.runtime.verification.TaskVerificationEvidence;
 import dev.talos.runtime.verification.TaskVerificationEvidenceSource;
 import dev.talos.runtime.verification.TaskVerificationStatus;
+import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.WorkspacePathIdentity;
 
@@ -26,10 +27,16 @@ import java.util.Set;
  * verification prove the requested final state. A narrower compatibility
  * decision may settle one typed retry sequence without claiming recovery
  * proof; qualification must keep that sequence unproven.
+ *
+ * <p>LA-F7: a proposal that never reached the tool registry is not a failed change. The status is PARTIAL only when
+ * a call that ran, or that cannot be proven not to have run, failed unresolved, or when a file the request expects
+ * has no recorded change. Otherwise a turn whose other proposals never ran is SUCCEEDED, and the proposals are kept
+ * as not run.
  */
 public record MutationRecoveryAssessment(
         MutationOutcome mutationOutcome,
-        List<FailureAssessment> failureAssessments
+        List<FailureAssessment> failureAssessments,
+        RequiredTargetCoverage requiredTargetCoverage
 ) {
     public MutationRecoveryAssessment {
         mutationOutcome = mutationOutcome == null
@@ -43,6 +50,96 @@ public record MutationRecoveryAssessment(
         failureAssessments = failureAssessments == null
                 ? List.of()
                 : List.copyOf(failureAssessments);
+        requiredTargetCoverage = requiredTargetCoverage == null
+                ? RequiredTargetCoverage.notEstablished()
+                : requiredTargetCoverage;
+    }
+
+    /** Compatibility shape without request-bound target coverage, which is then not established. */
+    public MutationRecoveryAssessment(
+            MutationOutcome mutationOutcome,
+            List<FailureAssessment> failureAssessments
+    ) {
+        this(mutationOutcome, failureAssessments, RequiredTargetCoverage.notEstablished());
+    }
+
+    /**
+     * How an unsuccessful mutating proposal ended (LA-F7). Every value except FAILED means the proposal never reached
+     * the tool registry and changed no file.
+     */
+    public enum ProposalDisposition {
+        /** The call ran and failed, has file effects, or cannot be proven not to have run. */
+        FAILED,
+        /** A runtime check refused the call before any approval was requested. */
+        REFUSED_BEFORE_APPROVAL,
+        /** The call was not accepted as an executable tool call. */
+        REFUSED_BY_AUTHORITY,
+        /** Permission policy, the request boundary or the mode denied the call. */
+        DENIED_BY_POLICY,
+        /** The user declined the approval. */
+        DENIED_BY_USER;
+
+        public boolean neverRan() {
+            return this != FAILED;
+        }
+
+        public boolean denial() {
+            return this == DENIED_BY_POLICY || this == DENIED_BY_USER;
+        }
+    }
+
+    /**
+     * The disposition of an unsuccessful outcome, from typed producer facts only. File effects and a dispatched call
+     * are failures. A denial, an authority refusal and a pre-approval refusal witnessed as never dispatched did not
+     * run. Every other outcome, including one without a dispatch witness, is a failure.
+     */
+    public static ProposalDisposition dispositionOf(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || outcome.success()) {
+            throw new IllegalArgumentException("Only an unsuccessful outcome has a proposal disposition");
+        }
+        if (outcome.mutationEffects().hasEffects()) return ProposalDisposition.FAILED;
+        if (outcome.dispatch().disposition() == dev.talos.runtime.TurnRecord.ToolCallDisposition.EXECUTED) {
+            return ProposalDisposition.FAILED;
+        }
+        if (outcome.denied()) {
+            return outcome.failureReason() == ToolFailureReason.USER_APPROVAL_DENIED
+                    ? ProposalDisposition.DENIED_BY_USER
+                    : ProposalDisposition.DENIED_BY_POLICY;
+        }
+        if (outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID
+                && ToolError.INVALID_AUTHORITY.equals(outcome.errorCode())) {
+            return ProposalDisposition.REFUSED_BY_AUTHORITY;
+        }
+        if (outcome.dispatch().neverRan()
+                && (ToolError.INVALID_PARAMS.equals(outcome.errorCode())
+                || ToolError.NOT_FOUND.equals(outcome.errorCode())
+                || ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode()))) {
+            return ProposalDisposition.REFUSED_BEFORE_APPROVAL;
+        }
+        return ProposalDisposition.FAILED;
+    }
+
+    /**
+     * Whether every file the request expects to change has a recorded change in this turn (LA-F7, D1). Coverage is
+     * established only for a typed request with at least one required mutation target, no successes outside the tool
+     * loop, and no unmatched target next to a success whose changed path is unknown.
+     *
+     * @param established   whether the coverage could be decided from this turn's records
+     * @param withoutChange the required targets without a recorded change, empty when coverage is not established
+     */
+    public record RequiredTargetCoverage(boolean established, List<String> withoutChange) {
+        public RequiredTargetCoverage {
+            withoutChange = !established || withoutChange == null ? List.of() : List.copyOf(withoutChange);
+        }
+
+        public static RequiredTargetCoverage notEstablished() {
+            return new RequiredTargetCoverage(false, List.of());
+        }
+
+        /** True when coverage is established and every required target changed. */
+        public boolean complete() {
+            return established && withoutChange.isEmpty();
+        }
     }
 
     public enum Decision {
@@ -75,7 +172,8 @@ public record MutationRecoveryAssessment(
             String verifiedObligationSha256,
             TaskVerificationEvidenceSource verificationSource,
             TaskVerificationStatus verificationStatus,
-            List<String> coveredToolCallIds
+            List<String> coveredToolCallIds,
+            ProposalDisposition disposition
     ) {
         public FailureAssessment {
             if (failureOrdinal <= 0) {
@@ -100,6 +198,10 @@ public record MutationRecoveryAssessment(
                     ? TaskVerificationStatus.NOT_RUN
                     : verificationStatus;
             coveredToolCallIds = normalizedUniqueToolCallIds(coveredToolCallIds);
+            disposition = disposition == null ? derivedDisposition(decision, failureReason) : disposition;
+            if ((decision == Decision.DENIED_OR_POLICY) != disposition.denial()) {
+                throw new IllegalArgumentException("A denial is assessed exactly as DENIED_OR_POLICY");
+            }
             boolean resolvedDecision =
                     decision == Decision.RECOVERED_MATCHED_OBLIGATION
                             || decision
@@ -149,6 +251,37 @@ public record MutationRecoveryAssessment(
             }
         }
 
+        /** Compatibility shape without a proposal disposition, which is derived from the decision. */
+        public FailureAssessment(
+                int failureOrdinal,
+                int repairOrdinal,
+                String failureToolCallId,
+                String repairToolCallId,
+                Decision decision,
+                ToolFailureReason failureReason,
+                String target,
+                String obligationSha256,
+                String verifiedObligationSha256,
+                TaskVerificationEvidenceSource verificationSource,
+                TaskVerificationStatus verificationStatus,
+                List<String> coveredToolCallIds
+        ) {
+            this(
+                    failureOrdinal,
+                    repairOrdinal,
+                    failureToolCallId,
+                    repairToolCallId,
+                    decision,
+                    failureReason,
+                    target,
+                    obligationSha256,
+                    verifiedObligationSha256,
+                    verificationSource,
+                    verificationStatus,
+                    coveredToolCallIds,
+                    null);
+        }
+
         /** Compatibility shape for assessments without exact receipt coverage. */
         public FailureAssessment(
                 int failureOrdinal,
@@ -180,6 +313,13 @@ public record MutationRecoveryAssessment(
 
         public boolean recovered() {
             return decision == Decision.RECOVERED_MATCHED_OBLIGATION;
+        }
+
+        private static ProposalDisposition derivedDisposition(Decision decision, ToolFailureReason failureReason) {
+            if (decision != Decision.DENIED_OR_POLICY) return ProposalDisposition.FAILED;
+            return failureReason == ToolFailureReason.USER_APPROVAL_DENIED
+                    ? ProposalDisposition.DENIED_BY_USER
+                    : ProposalDisposition.DENIED_BY_POLICY;
         }
 
         public boolean resolved() {
@@ -241,6 +381,7 @@ public record MutationRecoveryAssessment(
                 .filter(ToolCallLoop.ToolOutcome::denied)
                 .toList();
         List<ToolCallLoop.ToolOutcome> failed = new ArrayList<>();
+        List<ToolCallLoop.ToolOutcome> notRun = new ArrayList<>();
         List<FailureAssessment> assessments = new ArrayList<>();
 
         RequestObligation compiled = RequestObligationCompiler.compile(contract);
@@ -251,14 +392,17 @@ public record MutationRecoveryAssessment(
         for (IndexedOutcome indexed : mutating) {
             ToolCallLoop.ToolOutcome outcome = indexed.outcome();
             if (outcome.success()) continue;
-            if (outcome.denied()) {
+            ProposalDisposition disposition = dispositionOf(outcome);
+            if (disposition.denial()) {
                 assessments.add(assessment(
                         indexed,
                         Match.unrecovered(Decision.DENIED_OR_POLICY),
                         Decision.DENIED_OR_POLICY,
                         requestObligation,
                         evidence,
-                        workspace));
+                        workspace,
+                        disposition));
+                notRun.add(outcome);
                 continue;
             }
 
@@ -273,7 +417,8 @@ public record MutationRecoveryAssessment(
                         Decision.REDUNDANT_ALREADY_APPLIED_OPERATION,
                         requestObligation,
                         evidence,
-                        workspace));
+                        workspace,
+                        disposition));
                 continue;
             }
 
@@ -305,27 +450,42 @@ public record MutationRecoveryAssessment(
                     matched.decision(),
                     requestObligation,
                     evidence,
-                    workspace);
+                    workspace,
+                    disposition);
             assessments.add(failureAssessment);
             if (!failureAssessment.resolved()) {
-                failed.add(outcome);
+                if (disposition == ProposalDisposition.FAILED) {
+                    failed.add(outcome);
+                } else {
+                    notRun.add(outcome);
+                }
             }
         }
 
         int totalSuccesses = successful.size() + Math.max(0, extraMutationSuccesses);
+        RequiredTargetCoverage coverage = requiredTargetCoverage(
+                contract,
+                requestObligation,
+                compiled,
+                successful,
+                extraMutationSuccesses,
+                workspace);
         MutationOutcomeStatus status = classify(
                 contract,
                 mutating.size(),
                 totalSuccesses,
                 failed,
-                denied);
+                notRun,
+                denied,
+                coverage);
         MutationOutcome mutationOutcome = new MutationOutcome(
                 status,
                 successful,
                 failed,
                 denied,
-                extraMutationSuccesses);
-        return new MutationRecoveryAssessment(mutationOutcome, assessments);
+                extraMutationSuccesses,
+                notRun);
+        return new MutationRecoveryAssessment(mutationOutcome, assessments, coverage);
     }
 
     public static MutationRecoveryAssessment provisional(
@@ -357,21 +517,36 @@ public record MutationRecoveryAssessment(
         return mutationOutcome.status() == MutationOutcomeStatus.PARTIAL;
     }
 
+    /** LA-F7: the status is SUCCEEDED and at least one other proposal of this turn never ran. */
+    public boolean completedWithProposalsNotRun() {
+        return mutationOutcome.status() == MutationOutcomeStatus.SUCCEEDED && !mutationOutcome.notRun().isEmpty();
+    }
+
+    /**
+     * At least one change succeeded and another proposal is unresolved, whether it ran or not. This is the partial
+     * status of the classification before LA-F7, kept to decide post-apply verification exactly as before.
+     */
+    public boolean changesWithUnresolvedProposals() {
+        return mutationOutcome.successCount() > 0
+                && (!mutationOutcome.failed().isEmpty() || !mutationOutcome.notRun().isEmpty());
+    }
+
+    /** The unresolved outcomes in turn order: the failed ones and the proposals that never ran, interleaved. */
     public List<ToolCallLoop.ToolOutcome> unresolvedOutcomesInOrder() {
         if (failureAssessments.isEmpty()) {
             List<ToolCallLoop.ToolOutcome> unresolved = new ArrayList<>();
             unresolved.addAll(mutationOutcome.failed());
-            unresolved.addAll(mutationOutcome.denied());
+            unresolved.addAll(mutationOutcome.notRun());
             return List.copyOf(unresolved);
         }
         List<ToolCallLoop.ToolOutcome> unresolved = new ArrayList<>();
         int failedIndex = 0;
-        int deniedIndex = 0;
+        int notRunIndex = 0;
         for (FailureAssessment assessment : failureAssessments) {
             if (assessment.resolved()) continue;
-            if (assessment.decision() == Decision.DENIED_OR_POLICY) {
-                if (deniedIndex < mutationOutcome.denied().size()) {
-                    unresolved.add(mutationOutcome.denied().get(deniedIndex++));
+            if (assessment.disposition().neverRan()) {
+                if (notRunIndex < mutationOutcome.notRun().size()) {
+                    unresolved.add(mutationOutcome.notRun().get(notRunIndex++));
                 }
             } else if (failedIndex < mutationOutcome.failed().size()) {
                 unresolved.add(mutationOutcome.failed().get(failedIndex++));
@@ -380,10 +555,66 @@ public record MutationRecoveryAssessment(
         while (failedIndex < mutationOutcome.failed().size()) {
             unresolved.add(mutationOutcome.failed().get(failedIndex++));
         }
-        while (deniedIndex < mutationOutcome.denied().size()) {
-            unresolved.add(mutationOutcome.denied().get(deniedIndex++));
+        while (notRunIndex < mutationOutcome.notRun().size()) {
+            unresolved.add(mutationOutcome.notRun().get(notRunIndex++));
         }
         return List.copyOf(unresolved);
+    }
+
+    /**
+     * The required mutation targets of the obligation, supplied or else compiled, that no successful mutating outcome
+     * of this turn changed (LA-F7, D1). A target is changed when a success names it by its path or by its workspace
+     * operation's changed paths, as canonical text or as the same workspace file.
+     */
+    private static RequiredTargetCoverage requiredTargetCoverage(
+            TaskContract contract,
+            RequestObligation supplied,
+            RequestObligation compiled,
+            List<ToolCallLoop.ToolOutcome> successful,
+            int extraMutationSuccesses,
+            Path workspace
+    ) {
+        RequestObligation obligation = supplied != null ? supplied : compiled;
+        if (contract == null || extraMutationSuccesses > 0 || obligation == null
+                || obligation.requiredMutationTargets().isEmpty()) {
+            return RequiredTargetCoverage.notEstablished();
+        }
+        boolean unidentifiedSuccess = false;
+        for (ToolCallLoop.ToolOutcome success : successful) {
+            if (changedPaths(success).isEmpty() || !success.mutationEffects().uncertainPaths().isEmpty()) {
+                unidentifiedSuccess = true;
+            }
+        }
+        List<String> withoutChange = new ArrayList<>();
+        for (String target : obligation.requiredMutationTargets()) {
+            boolean changed = false;
+            for (ToolCallLoop.ToolOutcome success : successful) {
+                for (String path : changedPaths(success)) {
+                    if (target.equals(canonicalPath(path, workspace, obligation))
+                            || workspace != null && WorkspacePathIdentity.matches(workspace, target, path)) {
+                        changed = true;
+                        break;
+                    }
+                }
+                if (changed) break;
+            }
+            if (!changed) withoutChange.add(target);
+        }
+        if (!withoutChange.isEmpty() && unidentifiedSuccess) {
+            return RequiredTargetCoverage.notEstablished();
+        }
+        return new RequiredTargetCoverage(true, withoutChange);
+    }
+
+    private static List<String> changedPaths(ToolCallLoop.ToolOutcome success) {
+        List<String> paths = new ArrayList<>();
+        if (!success.pathHint().isBlank()) paths.add(success.pathHint());
+        if (success.workspaceOperationPlan() != null) {
+            for (String path : success.workspaceOperationPlan().changedPaths()) {
+                if (path != null && !path.isBlank()) paths.add(path);
+            }
+        }
+        return paths;
     }
 
     private static Match matchedObligationRepair(
@@ -708,7 +939,8 @@ public record MutationRecoveryAssessment(
             Decision decision,
             RequestObligation obligation,
             TaskVerificationEvidence evidence,
-            Path workspace
+            Path workspace,
+            ProposalDisposition disposition
     ) {
         String target = canonicalPath(failure.outcome().pathHint(), workspace, obligation);
         return new FailureAssessment(
@@ -723,7 +955,8 @@ public record MutationRecoveryAssessment(
                 evidence.requestObligationReceipt().obligationSha256(),
                 evidence.source(),
                 evidence.compatibilityResult().status(),
-                evidence.requestObligationReceipt().coveredToolCallIds());
+                evidence.requestObligationReceipt().coveredToolCallIds(),
+                disposition);
     }
 
     private static List<IndexedOutcome> indexedMutatingOutcomes(
@@ -763,12 +996,19 @@ public record MutationRecoveryAssessment(
         }
     }
 
+    /**
+     * The first matching rule decides. LA-F7 (D1): with a success, an unresolved failure gives PARTIAL, and a
+     * proposal that never ran gives PARTIAL only when a required target has no recorded change or coverage cannot be
+     * established.
+     */
     private static MutationOutcomeStatus classify(
             TaskContract contract,
             int mutatingOutcomeCount,
             int totalSuccesses,
             List<ToolCallLoop.ToolOutcome> failed,
-            List<ToolCallLoop.ToolOutcome> denied
+            List<ToolCallLoop.ToolOutcome> notRun,
+            List<ToolCallLoop.ToolOutcome> denied,
+            RequiredTargetCoverage coverage
     ) {
         boolean mutationRequested = contract != null && contract.mutationRequested();
         if (failed.stream().anyMatch(outcome -> !outcome.mutationEffects().appliedPaths().isEmpty())) {
@@ -782,8 +1022,11 @@ public record MutationRecoveryAssessment(
         if (!denied.isEmpty() && totalSuccesses == 0) {
             return MutationOutcomeStatus.DENIED;
         }
-        if (totalSuccesses > 0 && (!failed.isEmpty() || !denied.isEmpty())) {
+        if (totalSuccesses > 0 && !failed.isEmpty()) {
             return MutationOutcomeStatus.PARTIAL;
+        }
+        if (totalSuccesses > 0 && !notRun.isEmpty()) {
+            return coverage.complete() ? MutationOutcomeStatus.SUCCEEDED : MutationOutcomeStatus.PARTIAL;
         }
         if (totalSuccesses > 0) {
             return MutationOutcomeStatus.SUCCEEDED;

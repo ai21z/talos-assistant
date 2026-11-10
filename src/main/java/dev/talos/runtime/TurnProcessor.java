@@ -47,6 +47,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Processes a single user turn (prompt → result) through the mode system.
@@ -577,7 +578,7 @@ public final class TurnProcessor {
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires current deterministic runtime authority"));
         }
-        return executeTool(session, call, ctx, permit, false);
+        return executeTool(session, call, ctx, permit, false, new AtomicBoolean());
     }
 
     /** Executes a call whose one-use parse permit was minted by the tool-loop stage, with no continuation issued. */
@@ -599,8 +600,49 @@ public final class TurnProcessor {
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
             boolean proposedAfterContinuation) {
-        return executeToolWithinStage(() -> executeToolAfterParsedWithinStage(
-                session, call, ctx, parsedPermit, proposedAfterContinuation));
+        return executeToolAfterParsedWithDisposition(session, call, ctx, parsedPermit, proposedAfterContinuation)
+                .result();
+    }
+
+    /**
+     * Executes a parsed call as {@link #executeToolAfterParsed(Session, ToolCall, RuntimeTurnContext,
+     * LocalTurnTraceCapture.ParsedToolCallPermit, boolean)} does and witnesses whether it reached the tool registry
+     * (LA-F7). The disposition is EXECUTED exactly when the registry was called for the call and BLOCKED for every
+     * earlier return, so a refusal is never reported as a failed execution.
+     */
+    public GatedToolResult executeToolAfterParsedWithDisposition(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
+            boolean proposedAfterContinuation) {
+        AtomicBoolean dispatched = new AtomicBoolean(false);
+        ToolResult result = executeToolWithinStage(() -> executeToolAfterParsedWithinStage(
+                session, call, ctx, parsedPermit, proposedAfterContinuation, dispatched));
+        return new GatedToolResult(result, dispatched.get()
+                ? TurnRecord.ToolCallDisposition.EXECUTED
+                : TurnRecord.ToolCallDisposition.BLOCKED);
+    }
+
+    /**
+     * A tool result with the dispatch witness of the call that produced it (LA-F7).
+     *
+     * @param result      the tool result
+     * @param disposition EXECUTED when the tool registry was called for the call, else BLOCKED
+     */
+    public record GatedToolResult(ToolResult result, TurnRecord.ToolCallDisposition disposition) {
+        public GatedToolResult {
+            Objects.requireNonNull(result, "result");
+            if (disposition != TurnRecord.ToolCallDisposition.EXECUTED
+                    && disposition != TurnRecord.ToolCallDisposition.BLOCKED) {
+                throw new IllegalArgumentException("A gated tool result is EXECUTED or BLOCKED");
+            }
+            if (disposition == TurnRecord.ToolCallDisposition.BLOCKED
+                    && (result.success() || result.mutationEffects().hasEffects())) {
+                throw new IllegalArgumentException(
+                        "A call that never reached the tool registry cannot report success or file effects");
+            }
+        }
     }
 
     private ToolResult executeToolAfterParsedWithinStage(
@@ -608,7 +650,8 @@ public final class TurnProcessor {
             ToolCall call,
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
-            boolean proposedAfterContinuation
+            boolean proposedAfterContinuation,
+            AtomicBoolean dispatched
     ) {
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
             TurnAuditCapture.recordAuthorityRejectedToolCall(call,
@@ -617,7 +660,7 @@ public final class TurnProcessor {
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
                     "Tool execution requires the current exact parsed-call authority"));
         }
-        return executeTool(session, call, ctx, parsedPermit, proposedAfterContinuation);
+        return executeTool(session, call, ctx, parsedPermit, proposedAfterContinuation, dispatched);
     }
 
     private ToolResult executeTool(
@@ -625,7 +668,8 @@ public final class TurnProcessor {
             ToolCall call,
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit,
-            boolean proposedAfterContinuation) {
+            boolean proposedAfterContinuation,
+            AtomicBoolean dispatched) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
@@ -1239,6 +1283,8 @@ public final class TurnProcessor {
 
         ToolResult result;
         try {
+            // LA-F7: the only point where a call reaches the tool registry. Every earlier return never ran it.
+            dispatched.set(true);
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
             if (TurnFailureClassifier.isCancellation(e)
@@ -1576,6 +1622,7 @@ public final class TurnProcessor {
 
         if (oldString.equals(newString)) {
             return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_NO_CHANGE,
                     "Invalid talos.edit_file call: `old_string` and `new_string` are identical, "
                             + "so no edit would be made. No approval was requested and no file was changed."));
         }

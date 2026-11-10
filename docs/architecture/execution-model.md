@@ -81,7 +81,7 @@ flowchart TB
     Verify --> Outcome["Report success, partial, failed, or unsupported"]
 ```
 
-Failure at any step should produce an honest failure or partial result. A denied approval is not a policy failure. A model that fails to call a required tool is not evidence that work was done. A verifier failure is not a success with a warning.
+Failure at any step should produce an honest failure or partial result. A denied approval is not a policy failure. A model that fails to call a required tool is not evidence that work was done. A verifier failure is not a success with a warning. A result is reported as partial only when at least one change succeeded and another call that ran failed, or when a file the request expects stayed unchanged. A proposed call that never ran, such as a refusal before approval or a declined approval, is listed as not run instead of failed.
 
 ## Command Execution
 

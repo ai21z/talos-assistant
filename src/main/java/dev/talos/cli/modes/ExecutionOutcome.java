@@ -322,7 +322,9 @@ record ExecutionOutcome(
                         loopResult,
                         extraMutationSuccesses,
                         workspace);
-        boolean provisionalPartialMutation = provisionalMutationAssessment.partial();
+        // LA-F7: a change with an unresolved proposal is verified exactly as a partial turn was before the split.
+        boolean provisionalPartialMutation = provisionalMutationAssessment.partial()
+                || provisionalMutationAssessment.changesWithUnresolvedProposals();
 
         current = MutationFailureAnswerRenderer.discloseActionObligationBlockedAfterMutationIfNeeded(
                 current, loopResult, extraMutationSuccesses);
@@ -584,6 +586,9 @@ record ExecutionOutcome(
                 taskVerificationEvidence,
                 workspace);
         boolean partialMutation = mutationAssessment.partial();
+        // LA-F7: when every unresolved proposal never ran, the recorded outcome replaces the model prose, so claims
+        // in that prose no longer decide the outcome. Warnings and the outcome fields keep the raw flags.
+        boolean proposalsNotRunOnly = mutationAssessment.completedWithProposalsNotRun();
         OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
                 contract,
                 invalidMutation,
@@ -596,10 +601,10 @@ record ExecutionOutcome(
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
-                falseMutationClaim,
+                falseMutationClaim && !proposalsNotRunOnly,
                 inspectUnderCompleted,
                 readOnlyToolLimitWithoutRuntimeAnswer || readOnlyLimited || limitedWebDiagnosticAnswer
-                        || unsupportedCommandOutputClaim || unresolvedMutationClaim,
+                        || (unsupportedCommandOutputClaim || unresolvedMutationClaim) && !proposalsNotRunOnly,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -634,6 +639,9 @@ record ExecutionOutcome(
             } else {
                 current = StaticVerificationAnswerRenderer.failedReplacement(
                         taskVerification, loopResult, repairOffered(loopResult));
+                // LA-F7: a proposal that never ran stays visible when verification decides that the turn failed.
+                String notRun = MutationFailureAnswerRenderer.notRunSection(mutationAssessment);
+                if (!notRun.isEmpty()) current = current.stripTrailing() + "\n\n" + notRun;
                 outputLimitRelevant = false;
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
@@ -645,7 +653,7 @@ record ExecutionOutcome(
                         taskVerification,
                         loopResult,
                         verificationReport)
-                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult);
+                        + (proposalsNotRunOnly ? "" : StaticVerificationAnswerRenderer.changedFilesSummary(loopResult));
                 current = verificationPresentation + current;
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
@@ -654,7 +662,7 @@ record ExecutionOutcome(
                         && loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
                 verificationPresentation = StaticVerificationAnswerRenderer.passedAnnotation(
                         taskVerification, verificationReport, changedFiles)
-                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult);
+                        + (proposalsNotRunOnly ? "" : StaticVerificationAnswerRenderer.changedFilesSummary(loopResult));
                 current = verificationPresentation + current;
             }
         }

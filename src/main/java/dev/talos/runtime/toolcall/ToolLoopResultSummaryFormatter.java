@@ -38,6 +38,8 @@ public final class ToolLoopResultSummaryFormatter {
                 + workspaceCandidateSuffix(disclosure)
                 + "]";
         // P21 (D18 option A): a call refused for its executable authority never ran, so it is shown as not run.
+        // LA-F7: so is every call whose producer witnessed that it never reached the tool registry, such as a
+        // refusal before approval or a denial.
         int notRunCalls = refusedBeforeExecution(result.toolOutcomes());
         int displayFailedCalls = Math.max(0, result.failedCalls() - notRunCalls);
         if (displayFailedCalls > 0) {
@@ -59,7 +61,8 @@ public final class ToolLoopResultSummaryFormatter {
         if (outcomes == null) return 0;
         return (int) outcomes.stream()
                 .filter(outcome -> outcome != null
-                        && outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID)
+                        && (outcome.dispatch().neverRan()
+                        || outcome.failureReason() == ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID))
                 .count();
     }
 

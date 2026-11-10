@@ -2183,8 +2183,9 @@ class AssistantTurnExecutorTest {
                     "Source evidence must remain input-only for read-then-create-from-it requests.");
             assertFalse(out.text().contains("Updated ideas/summary.md and long-notes.txt."), out.text());
             assertFalse(out.text().contains("Updated long-notes.txt"), out.text());
-            assertTrue(out.text().contains("Target outside expected targets before approval")
-                            || out.text().contains("outside the current expected target set"),
+            // LA-F7: the refused source write is a typed proposal that did not run, not producer text.
+            assertTrue(out.text().contains("- long-notes.txt: talos.write_file not run, refused before approval "
+                            + "(outside the files and operations this request authorizes)."),
                     out.text());
 
             List<String> frames = messages.stream()
@@ -2400,12 +2401,14 @@ class AssistantTurnExecutorTest {
                             || Files.readString(workspace.resolve("test_dijkstra.py")).contains("== 5"),
                     Files.readString(workspace.resolve("test_dijkstra.py")));
             assertFalse(Files.readString(workspace.resolve("dijkstra.py")).contains("placeholder before source read"));
+            // LA-F7: the writes refused before the source read are typed proposals that did not run.
             assertTrue(
                     out.text().contains(
-                            MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION),
+                            MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION),
                     out.text());
             assertTrue(
-                    out.text().contains("Source-derived artifact write blocked before approval"),
+                    out.text().contains(
+                            "- dijkstra.py: talos.write_file not run, refused before approval by runtime checks."),
                     out.text());
             assertEquals(
                     List.of("talos.read_file", "talos.write_file"),
@@ -4393,7 +4396,10 @@ class AssistantTurnExecutorTest {
                                 "The turn remains partial"),
                         out.text());
                 assertTrue(out.text().contains("talos.write_file"), out.text());
-                assertTrue(out.text().contains("PROVIDER_TOOL_SURFACE_MISMATCH"),
+                // LA-F7: the refused edit is a typed proposal that did not run. Its rejection name stays in the
+                // trace and is no longer copied from the producer message into the answer.
+                assertTrue(out.text().contains(
+                                "- scripts.js: talos.edit_file not run, it was not accepted as an executable tool call."),
                         out.text());
                 assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"),
                         out.text());
@@ -7797,7 +7803,8 @@ class AssistantTurnExecutorTest {
                     List.of(
                             new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                                     "talos.edit_file", "index.html", false, true, "",
-                                    "old_string not found in index.html. The exact text was not found in the file."),
+                                    "old_string not found in index.html. The exact text was not found in the file.")
+                                    .withFailureReason(dev.talos.tools.ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND),
                             new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                                     "talos.edit_file", "index.html", true, true,
                                     "Edited index.html: replaced 4 line(s) with 4 line(s)", ""),
@@ -7815,7 +7822,9 @@ class AssistantTurnExecutorTest {
             assertTrue(out.contains("Succeeded:"));
             assertTrue(out.contains("Failed:"));
             assertTrue(out.contains("style.css"));
-            assertTrue(out.contains("old_string not found"));
+            // LA-F7: the row names the typed cause, not the producer message.
+            assertTrue(out.contains(
+                    "- index.html: talos.edit_file did not complete (old_string not found in the file)."), out);
             assertFalse(out.contains("title, header, hero copy, and stylesheet have all been updated"),
                     "unverified model prose must be replaced on partial-success mutation turns");
         }

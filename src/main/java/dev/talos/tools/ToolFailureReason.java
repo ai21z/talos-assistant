@@ -40,6 +40,11 @@ public enum ToolFailureReason {
     EDIT_OLD_STRING_AMBIGUOUS,
     /** Edit: old_string/new_string missing or empty. */
     EDIT_EMPTY_ARGUMENTS,
+    /**
+     * Edit refused before approval: old_string and new_string are identical, so no change would be made. Its
+     * consumer is the mutation outcome renderer, which names the cause of a proposal that did not run (LA-F7).
+     */
+    EDIT_NO_CHANGE,
     /** Edit redirected: repair requires a complete write_file replacement. */
     EDIT_FULL_REWRITE_REQUIRED,
     /** Edit blocked: target changed since last read; re-read required. */

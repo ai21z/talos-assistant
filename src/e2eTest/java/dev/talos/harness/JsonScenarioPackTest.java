@@ -235,12 +235,16 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
+            // LA-F7: the refused style.css edit never ran, so the record names style.css as an expected file
+            // without a change and lists the refusal as not run, instead of under Failed.
             result.assertApprovalCounts(1, 1, 0, 0)
                     .assertLocalTraceRecorded()
                     .assertAnswerContains("Succeeded:")
-                    .assertAnswerContains("Failed:")
-                    .assertAnswerContains("style.css")
-                    .assertAnswerContains("old_string not found")
+                    .assertAnswerNotContains("Failed:")
+                    .assertAnswerContains("Expected files not changed:\n"
+                            + "- style.css: expected by this request, but not changed in this turn.")
+                    .assertAnswerContains("Not run (these changed no file):\n- style.css: talos.edit_file not run, "
+                            + "refused before approval (old_string not found in the file).")
                     .assertAnswerNotContains("not one of the expected task targets")
                     .assertAnswerNotContains("outside the current expected target set")
                     .assertAnswerNotContains("Static verification: passed")
@@ -607,10 +611,16 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
+            // LA-F7 (D1, at file granularity): both later proposals were refused before approval and never ran,
+            // and README.md has a recorded change, so the turn completes unverified with both refusals listed.
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("some requested file changes succeeded and some failed")
-                    .assertAnswerContains("Call talos.read_file for `README.md`")
-                    .assertAnswerContains("separate follow-up")
+                    .assertAnswerContains("Task completion was not verified.")
+                    .assertAnswerContains("Not run (these changed no file):\n"
+                            + "- README.md: talos.edit_file not run, refused before approval "
+                            + "(old_string not found in the file).\n"
+                            + "- README.md: talos.edit_file not run, refused before approval "
+                            + "(the file changed after it was last read).")
+                    .assertAnswerNotContains("some requested file changes succeeded and some failed")
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("README.md", "# Talos Local")
                     .assertFileContains("README.md", "Talos is a local-first workspace assistant.")
@@ -627,12 +637,15 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
+            // LA-F7 (D1): the refused empty edit never ran, so the applied write leaves the mutation succeeded
+            // and the failed static verification decides the turn. The refused edit stays listed as not run.
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Partial verification: static checks failed")
-                    .assertAnswerContains("The turn remains partial")
-                    .assertAnswerContains("Remaining static verification problems")
+                    .assertAnswerContains("Task incomplete: Static verification failed")
+                    .assertAnswerContains("Unresolved static verification problems")
                     .assertAnswerContains("file-level verification reported warning")
-                    .assertAnswerContains("some requested file changes succeeded and some failed")
+                    .assertAnswerContains("Not run (these changed no file):\n- index.html: talos.edit_file not run, "
+                            + "refused before approval (old_string or new_string missing or empty).")
+                    .assertAnswerNotContains("some requested file changes succeeded and some failed")
                     .assertFileContains("index.html", "<title>Broken Repair</title>")
                     .assertFileContains("index.html", "<script src=\"script.js\">")
                     .assertFileNotContains("index.html", "<script src=\"script.js\"></script>");
@@ -1629,12 +1642,13 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
+            // LA-F7: the forbidden write was refused before approval and never ran, so it is listed as not run.
             result.assertApprovalCounts(1, 1, 0, 0)
                     .assertAnswerContains("Succeeded:")
                     .assertAnswerContains("styles.css")
-                    .assertAnswerContains("Failed:")
-                    .assertAnswerContains("index.html")
-                    .assertAnswerContains("forbidden")
+                    .assertAnswerNotContains("Failed:")
+                    .assertAnswerContains("Not run (these changed no file):\n- index.html: talos.write_file not run, "
+                            + "refused before approval (the request marked this file as forbidden).")
                     .assertFileContains("styles.css", "background: #101820")
                     .assertFileContains("styles.css", "border: 1px solid #f2aa4c")
                     .assertFileContains("index.html", "<title>Scoped Check</title>")
@@ -1842,12 +1856,15 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertAnswerContains("Succeeded:")
-                    .assertAnswerContains("Failed:")
-                    .assertAnswerContains("old_string not found")
+            // LA-F7 (D1): the refused title edit never ran, so the applied changes leave the mutation succeeded
+            // and the failed static verification decides the turn. The refusal stays listed as not run.
+            result.assertAnswerContains("Applied mutating tool calls:")
+                    .assertAnswerNotContains("Failed:")
+                    .assertAnswerContains("Not run (these changed no file):\n- index.html: talos.edit_file not run, "
+                            + "refused before approval (old_string not found in the file).")
                     .assertAnswerContains("style.css")
                     .assertAnswerNotContains("The title was changed to Melodic Horror Synthwave");
-            assertEquals("PARTIAL", result.localTrace().outcome().status());
+            assertEquals("FAILED", result.localTrace().outcome().status());
             assertFalse(result.localTrace().events().stream().anyMatch(event ->
                     "MUTATION_FAILURE_RECOVERY_EVALUATED".equals(event.type())
                             && "RESOLVED_TYPED_REPAIR_SEQUENCE_UNPROVEN".equals(
