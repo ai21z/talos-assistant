@@ -342,11 +342,13 @@ public final class MutationFailureAnswerRenderer {
         return out.toString();
     }
 
+    /** The row target. Only displayable path text is shown, so a model-supplied path cannot add a row of its own. */
     private static String target(ToolCallLoop.ToolOutcome outcome) {
         if (outcome.workspaceOperationPlan() != null && !outcome.workspaceOperationPlan().changedPaths().isEmpty()) {
-            return String.join(", ", outcome.workspaceOperationPlan().changedPaths());
+            String paths = String.join(", ", outcome.workspaceOperationPlan().changedPaths());
+            if (dev.talos.runtime.ToolCallDispatch.displayable(paths)) return paths;
         }
-        if (!outcome.pathHint().isBlank()) return outcome.pathHint();
+        if (dev.talos.runtime.ToolCallDispatch.displayable(outcome.pathHint())) return outcome.pathHint();
         if (!outcome.dispatch().proposedTarget().isBlank()) return outcome.dispatch().proposedTarget();
         return "target not recorded";
     }

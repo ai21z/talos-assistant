@@ -103,6 +103,20 @@ class MutationOutcomeNotRunRenderingTest {
     }
 
     @Test
+    void aModelSuppliedPathCannotAddARowOfItsOwn() {
+        ToolCallLoop.ToolOutcome forged = new ToolCallLoop.ToolOutcome("talos.edit_file", "a.txt\n- c.txt", false, true,
+                false, "", "PRODUCER TEXT", null, ToolError.INVALID_PARAMS, null, ToolMutationEvidence.none(),
+                ToolFailureReason.PRE_APPROVAL_PATH_INVALID, List.of(), "call-forged")
+                .withDispatch(ToolCallDispatch.blocked("a.txt\n- c.txt"));
+
+        String section = MutationFailureAnswerRenderer.notRunSection(MutationRecoveryAssessment.assess(null, null,
+                loop(List.of(edited("a.py"), forged)), 0, TaskVerificationEvidence.notRun("not run"), null));
+
+        assertEquals("Not run (these changed no file):\n"
+                + "- target not recorded: talos.edit_file not run, refused before approval (invalid path).", section);
+    }
+
+    @Test
     void notRunRowsAreBounded() {
         List<ToolCallLoop.ToolOutcome> outcomes = new ArrayList<>(List.of(edited("a.py")));
         for (int index = 0; index < 10; index++) {

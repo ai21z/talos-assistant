@@ -49,14 +49,20 @@ public record ToolCallDispatch(TurnRecord.ToolCallDisposition disposition, Strin
         return disposition == TurnRecord.ToolCallDisposition.BLOCKED;
     }
 
-    /** A path argument is kept for display only when it is short and has no control characters. */
-    private static String displayableTarget(String value) {
-        if (value == null) return "";
-        String target = value.strip().replace('\\', '/');
-        if (target.length() > PROPOSED_TARGET_LIMIT) return "";
-        for (int i = 0; i < target.length(); i++) {
-            if (Character.isISOControl(target.charAt(i))) return "";
+    /**
+     * True when a path text can be shown in a recorded-outcome row: not blank, at most 240 characters and without
+     * control characters, so a model-supplied path cannot add a row of its own.
+     */
+    public static boolean displayable(String value) {
+        if (value == null || value.isBlank() || value.strip().length() > PROPOSED_TARGET_LIMIT) return false;
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isISOControl(value.charAt(i))) return false;
         }
-        return target;
+        return true;
+    }
+
+    /** A path argument is kept for display only when it is displayable. */
+    private static String displayableTarget(String value) {
+        return displayable(value) ? value.strip().replace('\\', '/') : "";
     }
 }

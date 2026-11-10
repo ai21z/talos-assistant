@@ -588,7 +588,11 @@ record ExecutionOutcome(
         boolean partialMutation = mutationAssessment.partial();
         // LA-F7: when every unresolved proposal never ran, the recorded outcome replaces the model prose, so claims
         // in that prose no longer decide the outcome. Warnings and the outcome fields keep the raw flags.
-        boolean proposalsNotRunOnly = mutationAssessment.completedWithProposalsNotRun();
+        // When every unresolved proposal never ran, the renderer keeps the input only in its action-obligation branch.
+        // Then the prose stays, so its claims still decide the outcome, which a forged marker can only make stricter.
+        boolean proposalsNotRunOnly = mutationAssessment.completedWithProposalsNotRun()
+                && !MutationFailureAnswerRenderer.selectPartialMutationAnswerIfNeeded(current, mutationAssessment)
+                        .inputRetained();
         OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
                 contract,
                 invalidMutation,
