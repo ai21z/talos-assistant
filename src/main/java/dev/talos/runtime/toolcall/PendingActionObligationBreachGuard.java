@@ -135,7 +135,11 @@ final class PendingActionObligationBreachGuard {
             String name = call.toolName() == null || call.toolName().isBlank()
                     ? "(unknown mutating tool)"
                     : call.toolName();
-            rejectedMutations.add(path.isBlank() ? name : name + "(" + path + ")");
+            boolean changedTarget = !path.isBlank()
+                    && (normalizedChangedTargets.contains(normalizeScopedTargetPreservingCase(path))
+                    || sameWorkspaceFileAsTarget(workspace, changedTargets, rawPath));
+            rejectedMutations.add(path.isBlank() ? name : name + "(" + path + ")"
+                    + (changedTarget ? " [changed in this turn, only an exact edit with arguments is accepted]" : ""));
         }
         if (rejectedMutations.isEmpty()) {
             return null;
@@ -185,13 +189,37 @@ final class PendingActionObligationBreachGuard {
     }
 
     /**
+     * HC-F6b: the call is admitted by the pending expected-target obligation only because it is an exact edit
+     * of a target that this turn already changed. Such a call answers the runtime's progress request, so the
+     * tool loop treats it as proposed after a continuation: a remembered approval does not cover it, and it is
+     * asked once without the session option (P23, D20 option A). A call to a remaining target is not counted.
+     */
+    static boolean admitsAsChangedTargetEdit(PendingActionObligation obligation, ToolCall call, Path workspace) {
+        if (obligation == null || call == null
+                || obligation.kind() != PendingActionObligation.Kind.EXPECTED_TARGETS_REMAINING
+                || obligation.changedTargets().isEmpty()
+                || !ToolCallSupport.isMutatingTool(call.toolName())) {
+            return false;
+        }
+        String rawPath = ToolCallSupport.resolvePathHint(call);
+        String path = ToolCallSupport.normalizePath(rawPath);
+        if (path.isBlank()) return false;
+        List<String> targets = obligation.targets();
+        if (matchesPendingExpectedTarget(call.toolName(), path, normalizedExpectedProgressTargets(targets))
+                || sameWorkspaceFileAsTarget(workspace, targets, rawPath)) {
+            return false;
+        }
+        return exactEditOfChangedTarget(call, path, rawPath,
+                normalizedExpectedProgressTargets(obligation.changedTargets()), obligation.changedTargets(), workspace);
+    }
+
+    /**
      * HC-F6: an exact edit of a request target that this turn already changed is in scope, because an exact
      * edit replaces one occurrence and a file can need several. The call still passes every pre-approval
      * check, so it stays inside the request targets and applies only where its old_string occurs exactly
-     * once in the named file. An edit meant for another target whose old_string also occurs once in the
-     * changed file is not told apart, and it is approved as any edit is, without a prompt under a
-     * remembered approval. An edit with empty arguments, a full write and every other mutation of a changed
-     * target are not admitted, so the edit-recovery full rewrite is never reached for a changed target.
+     * once in the named file. It is asked once without the session option (admitsAsChangedTargetEdit), so an
+     * unrequested repeat or an edit meant for another target is shown before it runs. An edit with empty
+     * arguments, a full write and every other mutation of a changed target are not admitted here.
      */
     private static boolean exactEditOfChangedTarget(
             ToolCall call,

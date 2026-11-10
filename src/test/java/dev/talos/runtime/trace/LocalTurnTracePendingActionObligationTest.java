@@ -100,15 +100,22 @@ class LocalTurnTracePendingActionObligationTest {
                 "pending action-obligation event construction should have a dedicated owner");
 
         String captureSource = Files.readString(capturePath);
-        String methodBody = methodBody(captureSource, "recordPendingActionObligation");
+        // Every overload is checked, so a delegating overload cannot hide the one that records the event (HC-F6b).
+        List<String> methodBodies = methodBodies(captureSource, "public static void recordPendingActionObligation(");
         String factorySource = Files.readString(factoryPath);
 
         assertTrue(captureSource.contains("PendingActionObligationTraceEventFactory."), captureSource);
-        assertFalse(methodBody.contains("switch"), methodBody);
-        assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_RAISED"), methodBody);
-        assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_BREACHED"), methodBody);
-        assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_EVALUATED"), methodBody);
-        assertFalse(methodBody.contains("targets == null"), methodBody);
+        assertEquals(2, methodBodies.size(), String.join("\n", methodBodies));
+        assertTrue(methodBodies.stream().anyMatch(body -> body.contains("PendingActionObligationTraceEventFactory.")),
+                String.join("\n", methodBodies));
+        for (String methodBody : methodBodies) {
+            assertFalse(methodBody.contains("switch"), methodBody);
+            assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_RAISED"), methodBody);
+            assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_BREACHED"), methodBody);
+            assertFalse(methodBody.contains("PENDING_ACTION_OBLIGATION_EVALUATED"), methodBody);
+            assertFalse(methodBody.contains("targets == null"), methodBody);
+            assertFalse(methodBody.contains("Targets == null"), methodBody);
+        }
 
         assertTrue(factorySource.contains("PENDING_ACTION_OBLIGATION_RAISED"), factorySource);
         assertTrue(factorySource.contains("PENDING_ACTION_OBLIGATION_BREACHED"), factorySource);
@@ -117,9 +124,17 @@ class LocalTurnTracePendingActionObligationTest {
         assertTrue(factorySource.contains("\"targets\""), factorySource);
     }
 
-    private static String methodBody(String source, String methodName) {
-        int start = source.indexOf(methodName);
-        assertTrue(start >= 0, "method not found: " + methodName);
+    private static List<String> methodBodies(String source, String declaration) {
+        List<String> bodies = new java.util.ArrayList<>();
+        for (int start = source.indexOf(declaration); start >= 0;
+                start = source.indexOf(declaration, start + declaration.length())) {
+            bodies.add(methodBody(source, start, declaration));
+        }
+        assertFalse(bodies.isEmpty(), "method not found: " + declaration);
+        return bodies;
+    }
+
+    private static String methodBody(String source, int start, String methodName) {
         int brace = source.indexOf('{', start);
         assertTrue(brace >= 0, "method opening brace not found: " + methodName);
         int depth = 0;

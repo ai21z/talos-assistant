@@ -8,15 +8,6 @@ import java.util.Map;
 final class PendingActionObligationTraceEventFactory {
     private PendingActionObligationTraceEventFactory() {}
 
-    static TurnTraceEvent evaluated(
-            String status,
-            String kind,
-            List<String> targets,
-            String reason
-    ) {
-        return evaluated(status, kind, targets, List.of(), reason);
-    }
-
     /** {@code changedTargets} is written only when it holds a path, so every other event keeps its shape. */
     static TurnTraceEvent evaluated(
             String status,

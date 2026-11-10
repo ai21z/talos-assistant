@@ -53,7 +53,10 @@ final class EditFailureRepairStateAccounting {
         if (oldStringNotFound && wasMutatedSinceRead(state, pathHint)) {
             recordStaleEditFailure(state, pathHint);
         }
-        if (oldStringNotFound && shouldRecoverStaticWebEditFailureWithFullRewrite(state, pathHint)) {
+        // HC-F6b: a target the pending obligation lists as changed is recovered by a reread and an exact edit. A full
+        // rewrite would be refused for it, and planning one would clear the obligation of the remaining targets.
+        if (oldStringNotFound && !state.editsChangedTargetOfPendingObligation(call)
+                && shouldRecoverStaticWebEditFailureWithFullRewrite(state, pathHint)) {
             recordStaticWebFullRewriteRequired(state, pathHint);
         }
         if (ToolCallSupport.hasEmptyEditArguments(call)) {

@@ -44,6 +44,8 @@ class ToolRepromptObligationSelectorTest {
         assertFalse(stage.contains("ExpectedTargetProgressAccounting.expectedMutationProgress"), stage);
         assertFalse(stage.contains("PendingActionObligation.staticRepairTargets"), stage);
         assertFalse(stage.contains("PendingActionObligation.expectedTargets"), stage);
+        assertFalse(stage.contains("PendingActionObligation.expectedTargetProgress"), stage);
+        assertTrue(selector.contains("PendingActionObligation.expectedTargetProgress("), selector);
         assertFalse(stage.contains("ToolRepromptRequestBuilder.toolSpecs("), stage);
 
         assertTrue(selector.contains("StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets"),

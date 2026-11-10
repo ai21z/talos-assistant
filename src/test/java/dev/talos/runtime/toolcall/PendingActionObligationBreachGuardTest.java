@@ -242,6 +242,51 @@ class PendingActionObligationBreachGuardTest {
         }
     }
 
+    /** HC-F6b: only an admitted exact edit of a changed target counts as answering the progress request. */
+    @Test
+    void changedTargetEditIsRecognizedOnlyForAnExactEditOfAChangedTarget() {
+        PendingActionObligation progress = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        assertTrue(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress, edit("orders.py"), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress, edit("report.py"), null),
+                "an edit of a remaining target is ordinary progress");
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress, edit("notes.py"), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress,
+                new ToolCall("talos.write_file", Map.of("path", "orders.py", "content", "x\n")), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress,
+                new ToolCall("talos.read_file", Map.of("path", "orders.py")), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(progress,
+                new ToolCall("talos.edit_file", Map.of("path", "orders.py", "old_string", "", "new_string", "x")),
+                null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(
+                PendingActionObligation.expectedTargets(List.of("report.py")), edit("orders.py"), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(null, edit("orders.py"), null));
+        assertFalse(PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(
+                new PendingActionObligation(PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR,
+                        List.of("report.py"), "", List.of("orders.py")),
+                edit("orders.py"), null));
+    }
+
+    @Test
+    void breachDetailStatesWhyAMutationOfAChangedTargetWasRefused() {
+        PendingActionObligation obligation = PendingActionObligation.expectedTargetProgress(
+                List.of("report.py"), List.of("orders.py"));
+
+        PendingActionObligationBreachGuard.Decision decision = PendingActionObligationBreachGuard.assess(
+                obligation, List.of(
+                        new ToolCall("talos.write_file", Map.of("path", "orders.py", "content", "x\n")),
+                        edit("notes.py")));
+
+        assertTrue(decision.breach());
+        assertTrue(decision.detail().contains(
+                "talos.write_file(orders.py) [changed in this turn, only an exact edit with arguments is accepted]"),
+                decision.detail());
+        assertTrue(decision.detail().contains("talos.edit_file(notes.py),")
+                || decision.detail().contains("talos.edit_file(notes.py)."), decision.detail());
+        assertFalse(decision.detail().contains("talos.edit_file(notes.py) ["), decision.detail());
+    }
+
     private static ToolCall edit(String path) {
         return new ToolCall("talos.edit_file", Map.of("path", path, "old_string", "get_qty", "new_string",
                 "quantity_on_hand"));

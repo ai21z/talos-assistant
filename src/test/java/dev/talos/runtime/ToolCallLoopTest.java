@@ -4632,6 +4632,167 @@ class ToolCallLoopTest {
         }
     }
 
+    /**
+     * HC-F6b, review findings 4 and 13: under a remembered approval, an exact edit of a target the turn already
+     * changed answers the runtime's progress request, so it is asked once without the session option. An
+     * unrequested insert into the changed file is shown before it runs instead of running silently.
+     */
+    @Test
+    void changedTargetEditUnderARememberedApprovalIsAskedOnceWithoutTheSessionOption() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-remembered-ask-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=old\nfooter\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            var full = new int[]{0};
+            var once = new int[]{0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            full[0]++;
+                            return ApprovalResponse.APPROVED_REMEMBER;
+                        }
+
+                        @Override
+                        public ApprovalResponse approveOnce(String description, String detail) {
+                            once[0]++;
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry,
+                    new SessionApprovalPolicy());
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                    + "Then replace status2=old with status2=new in more.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            editFileCall("notes.md", "footer\n", "footer\nreviewed\n"),
+                            editFileCall("more.md", "status2=old", "status2=new"),
+                            "Both replacements are done.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-remembered-ask", "session", 1,
+                    "2026-11-10T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, editFileCall("notes.md", "status=old", "status=new"),
+                        List.of("talos.read_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            var writeDecisions = trace.events().stream()
+                    .filter(event -> "PERMISSION_DECISION".equals(event.type()))
+                    .map(event -> event.data())
+                    .filter(data -> !"DEFAULT_READ_ALLOW".equals(data.get("reasonCode")))
+                    .toList();
+            assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK", "SESSION_REMEMBER_ALLOW"),
+                    writeDecisions.stream().map(data -> String.valueOf(data.get("reasonCode"))).toList(),
+                    writeDecisions.toString());
+            assertEquals(false, writeDecisions.get(1).get("rememberEligible"), writeDecisions.toString());
+            assertEquals(1, full[0], "Only the first change is offered the session option.");
+            assertEquals(1, once[0], "The unrequested edit of the changed file is asked once.");
+            assertEquals("status=new\nfooter\nreviewed\n", Files.readString(ws.resolve("notes.md")));
+            assertEquals("status2=new\n", Files.readString(ws.resolve("more.md")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
+     * HC-F6b, review findings 1 and 3: an exact edit of a changed web file whose old_string is missing is refused
+     * before approval, and it no longer plans a static-web full rewrite of that file. The remaining target stays
+     * required, so a reply without a call cannot end the turn as if both files had changed.
+     */
+    @Test
+    void refusedEditOfAChangedWebFileKeepsTheRemainingTargetRequired() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-web-refused-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <body>
+                    <button id="add">Add</button>
+                    <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("script.js"),
+                    "document.querySelector('#add').addEventListener('click', () => {});\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            String request = "Rename the button id add to increment in index.html and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            readFileCall("script.js"),
+                            editFileCall("index.html", "id=\"add\"", "id=\"increment\""),
+                            editFileCall("index.html", "querySelector('#add')", "querySelector('#increment')"),
+                            "Renamed the id in both files.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool(), new FileEditTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-web-refused", "session", 1,
+                    "2026-11-10T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, readFileCall("index.html"),
+                        List.of("talos.read_file", "talos.write_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            String reason = result.failureDecision() == null ? "" : result.failureDecision().reason();
+            String diagnostic = "reason=" + reason + " answer=" + result.finalAnswer()
+                    + " outcomes=" + result.toolOutcomes();
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> String.valueOf(event.data())
+                                    .contains("static-web-edit-rewrite target=index.html")),
+                    diagnostic);
+            assertTrue(reason.contains("EXPECTED_TARGETS_REMAINING") && reason.contains("script.js"), diagnostic);
+            assertTrue(Files.readString(ws.resolve("index.html")).contains("id=\"increment\""), diagnostic);
+            assertTrue(Files.readString(ws.resolve("script.js")).contains("'#add'"), diagnostic);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     private static String editFileCall(String path, String oldString, String newString) {
         return "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"" + jsonEscape(path)
                 + "\",\"old_string\":\"" + jsonEscape(oldString)
