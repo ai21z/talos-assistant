@@ -58,6 +58,14 @@ public final class MutationFailureAnswerRenderer {
             + "it would change did not run. Recorded outcomes for this turn are listed below.]\n\n";
 
     /**
+     * D25 option B, round 6: every expected file has a recorded change, and a later complete proposal names a path
+     * that cannot be placed in the workspace, so whether it was meant for a requested file is not known.
+     */
+    public static final String PARTIAL_UNPLACED_PROPOSAL_ANNOTATION =
+            "[Truth check: some file changes were applied, but a later proposed change names a path that could not be "
+            + "placed in the workspace and did not run. Recorded outcomes for this turn are listed below.]\n\n";
+
+    /**
      * D25 option B, round 3: every expected file has a recorded change, and a later proposal that never ran only may
      * affect one of them.
      */
@@ -337,9 +345,12 @@ public final class MutationFailureAnswerRenderer {
                 && coverage.changeNotRunPossible().containsAll(coverage.changeNotRun());
         boolean unidentifiedProposal = partial
                 && coverage.gap() == MutationRecoveryAssessment.CoverageGap.UNIDENTIFIED_PROPOSAL;
+        boolean unplacedProposal = partial
+                && coverage.gap() == MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL;
         StringBuilder out = new StringBuilder(!failures.isEmpty() ? PARTIAL_MUTATION_ANNOTATION
                 : !partial ? CHANGES_WITH_NOT_RUN_ANNOTATION
                 : unidentifiedProposal ? PARTIAL_UNIDENTIFIED_PROPOSAL_ANNOTATION
+                : unplacedProposal ? PARTIAL_UNPLACED_PROPOSAL_ANNOTATION
                 : requestedChangeNotRun && !expectedWithoutChange
                         ? onlyPossible ? PARTIAL_POSSIBLE_REQUESTED_CHANGE_NOT_RUN_ANNOTATION
                                 : PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION
@@ -369,6 +380,9 @@ public final class MutationFailureAnswerRenderer {
             out.append("Expected files:\n").append(unidentifiedProposal
                     ? "- A later proposed change does not record every file that it would change, so a change of every "
                             + "requested file after it is not established.\n"
+                    : unplacedProposal
+                    ? "- A later proposed change names a path that could not be placed in the workspace, so a change of "
+                            + "every requested file after it is not established.\n"
                     : "- A change to every file this request expects is not established by this turn's records.\n");
         }
         out.append(notRunSection(notRun));

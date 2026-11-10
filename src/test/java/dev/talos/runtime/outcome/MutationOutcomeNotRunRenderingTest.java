@@ -139,6 +139,7 @@ class MutationOutcomeNotRunRenderingTest {
                 MutationFailureAnswerRenderer.PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION,
                 MutationFailureAnswerRenderer.PARTIAL_UNIDENTIFIED_PROPOSAL_ANNOTATION,
                 MutationFailureAnswerRenderer.PARTIAL_POSSIBLE_REQUESTED_CHANGE_NOT_RUN_ANNOTATION,
+                MutationFailureAnswerRenderer.PARTIAL_UNPLACED_PROPOSAL_ANNOTATION,
                 MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION)) {
             assertPlainText(text);
         }

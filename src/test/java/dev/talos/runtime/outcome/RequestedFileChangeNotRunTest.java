@@ -487,6 +487,114 @@ class RequestedFileChangeNotRunTest {
         assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status());
     }
 
+    /**
+     * Round 6, security regression: a refused proposal path whose root is not the workspace root, such as a UNC share
+     * or another drive, is placed outside the workspace from its text, without any file-system access, so a
+     * model-chosen host is never contacted.
+     */
+    @Test
+    void aProposalPathOnAnotherRootIsPlacedOutsideWithoutTouchingTheFileSystem(@TempDir Path workspace)
+            throws Exception {
+        for (String file : List.of("inventory.py", "orders.py", "report.py")) {
+            Files.writeString(workspace.resolve(file), "x\n");
+        }
+        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+        assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, "orders.py"));
+        assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, workspace.resolve("docs/x.md").toString()));
+        if (windows) {
+            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "//host.invalid/share/x.md"));
+            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "\\\\host.invalid\\share\\x.md"));
+            String otherDrive = workspace.getRoot().toString().toUpperCase(java.util.Locale.ROOT).startsWith("Z")
+                    ? "Y:/x.md" : "Z:/x.md";
+            assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, otherDrive));
+
+            MutationRecoveryAssessment unc = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied("//host.invalid/share/orders.py",
+                            ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+            assertEquals(MutationOutcomeStatus.SUCCEEDED, unc.mutationOutcome().status());
+        }
+    }
+
+    /**
+     * Round 6: a spelling of a requested file through a link inside the workspace is read as that file by its real
+     * path, so a refused change through it keeps the turn partial. A folder operand that is itself a link is not
+     * followed, because the operation acts on the link. Where links cannot be made the cases do not arise.
+     */
+    @Test
+    void aLinkInsideTheWorkspaceIsResolvedAndALinkOperandIsNotFollowed(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/guide.md"), "alpha\n");
+        try {
+            Files.createSymbolicLink(workspace.resolve("manual"), workspace.resolve("docs"));
+            Files.createSymbolicLink(workspace.resolve("home"), workspace);
+        } catch (java.io.IOException | UnsupportedOperationException | SecurityException unavailable) {
+            org.junit.jupiter.api.Assumptions.abort("symbolic links are not available: " + unavailable);
+        }
+        String request = "In docs/guide.md, replace alpha with beta.";
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        RequestObligation obligation = RequestObligationCompiler.compile(contract);
+        assertEquals(List.of("docs/guide.md"), obligation.requiredMutationTargets());
+
+        MutationRecoveryAssessment throughLink = MutationRecoveryAssessment.assess(contract, obligation,
+                loop(List.of(edited("docs/guide.md"), denied("manual/guide.md",
+                        ToolFailureReason.USER_APPROVAL_DENIED))), 0, TaskVerificationEvidence.notRun("not run"),
+                workspace);
+        MutationRecoveryAssessment linkOperand = MutationRecoveryAssessment.assess(contract, obligation,
+                loop(List.of(edited("docs/guide.md"), folderOperation("talos.delete_path",
+                        ToolCallDispatch.OperationKind.DELETE, "home", ToolError.DENIED, true,
+                        ToolFailureReason.USER_APPROVAL_DENIED))), 0, TaskVerificationEvidence.notRun("not run"),
+                workspace);
+
+        assertEquals(MutationOutcomeStatus.PARTIAL, throughLink.mutationOutcome().status());
+        assertEquals(List.of("docs/guide.md"), throughLink.requiredTargetCoverage().changeNotRunPossible());
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, linkOperand.mutationOutcome().status());
+    }
+
+    /**
+     * Round 6: on a file system that keeps letter case, a declined delete of a different folder whose name differs
+     * only in case does not hold the requested files. Where the file system ignores case the case does not arise.
+     */
+    @Test
+    void aDistinctFolderInAnotherCaseDoesNotHoldTheRequestedFiles(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/a.md"), "alpha\n");
+        Files.writeString(workspace.resolve("docs/b.md"), "alpha\n");
+        Path variant = workspace.resolve("DOCS");
+        if (!Files.exists(variant)) Files.createDirectories(variant);
+        org.junit.jupiter.api.Assumptions.assumeFalse(Files.isSameFile(workspace.resolve("docs"), variant),
+                "the file system ignores letter case");
+        String request = "In docs/a.md and docs/b.md, replace alpha with beta.";
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+        MutationRecoveryAssessment assessment = MutationRecoveryAssessment.assess(contract,
+                RequestObligationCompiler.compile(contract), loop(List.of(edited("docs/a.md"), edited("docs/b.md"),
+                        folderOperation("talos.delete_path", ToolCallDispatch.OperationKind.DELETE, "DOCS",
+                                ToolError.DENIED, true, ToolFailureReason.USER_APPROVAL_DENIED))), 0,
+                TaskVerificationEvidence.notRun("not run"), workspace);
+
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, assessment.mutationOutcome().status());
+    }
+
+    /**
+     * Round 6: a complete proposal whose path cannot be placed in the workspace keeps the turn partial with its own
+     * typed gap and a sentence that does not say the proposal recorded no file.
+     */
+    @Test
+    void aCompleteProposalWhosePathCannotBePlacedHasItsOwnGap() {
+        MutationRecoveryAssessment assessment = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                edited("report.py"), denied("/srv/elsewhere/orders.py", ToolFailureReason.USER_APPROVAL_DENIED)));
+
+        assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status());
+        assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL,
+                assessment.requiredTargetCoverage().gap());
+        String answer = MutationFailureAnswerRenderer.selectPartialMutationAnswerIfNeeded("Model prose.", assessment)
+                .answer();
+        assertTrue(answer.startsWith(MutationFailureAnswerRenderer.PARTIAL_UNPLACED_PROPOSAL_ANNOTATION), answer);
+        assertTrue(answer.contains("Expected files:\n- A later proposed change names a path that could not be placed "
+                + "in the workspace, so a change of every requested file after it is not established.\n"), answer);
+        assertFalse(answer.contains("does not record every file"), answer);
+    }
+
     private static ToolCallLoop.ToolOutcome folderOperation(String toolName, ToolCallDispatch.OperationKind kind,
                                                             String folder, String code, boolean denied,
                                                             ToolFailureReason reason) {

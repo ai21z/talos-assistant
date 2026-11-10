@@ -187,7 +187,25 @@ public record MutationRecoveryAssessment(
         /** A success with an unknown or uncertain changed path sits next to an open required target. */
         UNIDENTIFIED_SUCCESS,
         /** Every required target changed, and a later proposal that never ran names no identifiable file. */
-        UNIDENTIFIED_PROPOSAL
+        UNIDENTIFIED_PROPOSAL,
+        /** Every required target changed, and a later complete proposal names a path that cannot be placed. */
+        UNPLACED_PROPOSAL
+    }
+
+    /**
+     * Round 6: the file system is probed for a proposal path only when its lexical root is the workspace root. A path
+     * on another drive, a UNC share or a device is placed outside the workspace from its text, so the path of a
+     * refused or declined call never makes Talos contact a host or another volume that the model chose.
+     */
+    static boolean probesFileSystemFor(Path workspace, String path) {
+        if (workspace == null || path == null || path.isBlank()) return false;
+        try {
+            Path root = workspace.toAbsolutePath().normalize();
+            Path resolved = root.resolve(path.strip()).normalize();
+            return resolved.getRoot() != null && resolved.getRoot().equals(root.getRoot());
+        } catch (RuntimeException unresolvable) {
+            return false;
+        }
     }
 
     public enum Decision {
@@ -652,6 +670,7 @@ public record MutationRecoveryAssessment(
         List<IndexedOutcome> openProposals = notRun.stream()
                 .filter(proposal -> !provableNoOp(proposal.outcome()))
                 .toList();
+        Placements placements = new Placements(workspace, obligation);
         List<String> withoutChange = new ArrayList<>();
         List<String> changeNotRun = new ArrayList<>();
         List<String> changeNotRunPossible = new ArrayList<>();
@@ -679,8 +698,8 @@ public record MutationRecoveryAssessment(
                     proven = true;
                     break;
                 }
-                if (mayName(paths, target, workspace, obligation)
-                        || holdsByFolderOperation(proposal.outcome(), paths, target, workspace)) {
+                if (mayName(paths, target, placements)
+                        || holdsByFolderOperation(proposal.outcome(), paths, target, placements)) {
                     possible = true;
                 }
             }
@@ -694,9 +713,11 @@ public record MutationRecoveryAssessment(
         }
         if (withoutChange.isEmpty() && changeNotRun.isEmpty()) {
             for (IndexedOutcome proposal : openProposals) {
-                if (!identifiable(proposal.outcome(), workspace, obligation)
-                        && proposal.ordinal() > earliestLastChange) {
-                    return RequiredTargetCoverage.notEstablished(CoverageGap.UNIDENTIFIED_PROPOSAL);
+                if (proposal.ordinal() <= earliestLastChange) continue;
+                if (!identifiable(proposal.outcome(), placements)) {
+                    return RequiredTargetCoverage.notEstablished(completeChange(proposal.outcome())
+                            ? CoverageGap.UNPLACED_PROPOSAL
+                            : CoverageGap.UNIDENTIFIED_PROPOSAL);
                 }
             }
         }
@@ -715,70 +736,150 @@ public record MutationRecoveryAssessment(
             ToolCallLoop.ToolOutcome proposal,
             List<String> paths,
             String target,
-            Path workspace
+            Placements placements
     ) {
         if (!proposalKind(proposal).folderScoped()) return false;
+        Path root = placements.root();
         for (String path : paths) {
-            PlacedPath placed = place(path, workspace, null);
+            PlacedPath placed = placements.place(path);
             // A folder that is the workspace root or holds it holds every requested file.
             if (placed.root()) return true;
-            if (workspace != null) {
+            if (root != null && probesFileSystemFor(root, path)) {
                 try {
-                    Path root = workspace.toAbsolutePath().normalize();
                     Path folder = root.resolve(path.strip()).normalize();
                     Path file = root.resolve(target).normalize();
                     if (root.startsWith(folder)) return true;
                     if (folder.startsWith(root) && file.startsWith(folder) && !file.equals(folder)) return true;
-                    // Round 5: the same folder under another spelling, such as a link or the real path, by real paths.
-                    Path realRoot = realPath(root);
-                    Path realFolder = realPath(folder);
-                    Path realFile = realPath(file);
-                    if (realRoot.startsWith(realFolder)) return true;
-                    if (realFile.startsWith(realFolder) && !realFile.equals(realFolder)) return true;
+                    // Rounds 5 and 6: the same folder under another spelling, by real paths. The operand's own name is
+                    // not followed, because a delete, move or rename of a link acts on the link.
+                    Path realRoot = placements.realRoot();
+                    if (realRoot != null) {
+                        Path realFolder = realPathOfOperand(folder);
+                        Path realFile = realPath(file);
+                        if (realRoot.startsWith(realFolder)) return true;
+                        if (realFile.startsWith(realFolder) && !realFile.equals(realFolder)) return true;
+                    }
                 } catch (java.io.IOException | RuntimeException unresolvable) {
                     // A path the workspace cannot resolve is judged on its placed text below.
                 }
             }
-            String folder = placed.canonical().toLowerCase(java.util.Locale.ROOT);
-            if (!folder.isEmpty() && target.toLowerCase(java.util.Locale.ROOT).startsWith(folder + "/")) return true;
+            // A folder spelled in another letter case may be the same folder on a file system that ignores case,
+            // unless both spellings exist as different folders.
+            for (String canonical : List.of(placed.canonical(), placed.realCanonical())) {
+                if (canonical.isEmpty()) continue;
+                String lowerTarget = target.toLowerCase(java.util.Locale.ROOT);
+                if (lowerTarget.startsWith(canonical.toLowerCase(java.util.Locale.ROOT) + "/")
+                        && !distinctExistingFiles(placements.workspace(), target.substring(0, canonical.length()),
+                                canonical)) {
+                    return true;
+                }
+            }
         }
         return false;
     }
 
     /**
-     * Round 5: where a proposal path lies. {@code canonical} is its canonical workspace-relative text, from its own
-     * text, from proven identity to a required target, or from resolving it inside the workspace lexically or by real
-     * path, so an absolute, dot-segment or linked spelling of a workspace file is read as that file. {@code root} is
-     * true when it names the workspace root. {@code outside} is true when it resolves outside the workspace both
-     * lexically and by real path.
+     * Rounds 5 and 6: where a proposal path lies. {@code canonical} is its canonical workspace-relative text, from its
+     * own text, from proven identity to a required target, or from resolving it inside the workspace lexically.
+     * {@code realCanonical} is the same for its real path inside the workspace, so a spelling through a link or a
+     * file-system alias is read as the file it reaches. {@code root} is true when it names the workspace root.
+     * {@code outside} is true when it lies outside the workspace: by its text when its root is not the workspace
+     * root, else both lexically and by real path.
      */
-    private record PlacedPath(String canonical, boolean root, boolean outside) {
+    private record PlacedPath(String canonical, String realCanonical, boolean root, boolean outside) {
         boolean placed() {
-            return !canonical.isEmpty() || root || outside;
+            return !canonical.isEmpty() || !realCanonical.isEmpty() || root || outside;
         }
     }
 
-    private static PlacedPath place(String path, Path workspace, RequestObligation obligation) {
-        String canonical = canonicalPath(path, workspace, obligation);
-        if (!canonical.isEmpty()) return new PlacedPath(canonical, false, false);
-        if (workspace == null || path == null || path.isBlank()) return new PlacedPath("", false, false);
-        try {
-            Path root = workspace.toAbsolutePath().normalize();
-            Path resolved = root.resolve(path.strip()).normalize();
-            if (resolved.equals(root)) return new PlacedPath("", true, false);
-            if (resolved.startsWith(root)) {
-                return new PlacedPath(canonicalPath(root.relativize(resolved).toString()), false, false);
+    /**
+     * Round 6: the placement of each proposal path, computed once per assessment, with the workspace's real path
+     * resolved once. The file system is touched only for paths that {@link #probesFileSystemFor} admits.
+     */
+    private static final class Placements {
+        private final Path workspace;
+        private final Path root;
+        private final RequestObligation obligation;
+        private final java.util.Map<String, PlacedPath> cache = new java.util.HashMap<>();
+        private Path realRoot;
+        private boolean realRootResolved;
+
+        Placements(Path workspace, RequestObligation obligation) {
+            this.workspace = workspace;
+            this.obligation = obligation;
+            Path normalized = null;
+            if (workspace != null) {
+                try {
+                    normalized = workspace.toAbsolutePath().normalize();
+                } catch (RuntimeException unresolvable) {
+                    normalized = null;
+                }
             }
-            Path realRoot = realPath(root);
-            Path real = realPath(resolved);
-            if (real.equals(realRoot)) return new PlacedPath("", true, false);
-            if (real.startsWith(realRoot)) {
-                return new PlacedPath(canonicalPath(realRoot.relativize(real).toString()), false, false);
-            }
-            return new PlacedPath("", false, true);
-        } catch (java.io.IOException | RuntimeException unresolvable) {
-            return new PlacedPath("", false, false);
+            this.root = normalized;
         }
+
+        Path workspace() {
+            return workspace;
+        }
+
+        Path root() {
+            return root;
+        }
+
+        Path realRoot() {
+            if (!realRootResolved) {
+                realRootResolved = true;
+                try {
+                    realRoot = root == null ? null : realPath(root);
+                } catch (java.io.IOException | RuntimeException unresolvable) {
+                    realRoot = null;
+                }
+            }
+            return realRoot;
+        }
+
+        PlacedPath place(String path) {
+            return cache.computeIfAbsent(path == null ? "" : path, this::placeOnce);
+        }
+
+        private PlacedPath placeOnce(String path) {
+            String own = canonicalPath(path, workspace, obligation);
+            if (root == null || path.isBlank()) return new PlacedPath(own, "", false, false);
+            if (!probesFileSystemFor(root, path)) return new PlacedPath(own, "", false, own.isEmpty());
+            try {
+                Path resolved = root.resolve(path.strip()).normalize();
+                boolean lexicalRoot = resolved.equals(root);
+                boolean lexicallyInside = resolved.startsWith(root);
+                String lexical = lexicalRoot || !lexicallyInside
+                        ? ""
+                        : canonicalPath(root.relativize(resolved).toString());
+                String canonical = own.isEmpty() ? lexical : own;
+                String real = "";
+                boolean realIsRoot = false;
+                boolean realOutside = true;
+                Path resolvedRoot = realRoot();
+                if (resolvedRoot != null) {
+                    Path realResolved = realPath(resolved);
+                    realIsRoot = realResolved.equals(resolvedRoot);
+                    realOutside = !realResolved.startsWith(resolvedRoot);
+                    if (!realIsRoot && !realOutside) {
+                        real = canonicalPath(resolvedRoot.relativize(realResolved).toString());
+                    }
+                }
+                boolean isRoot = lexicalRoot || canonical.isEmpty() && realIsRoot;
+                boolean outside = canonical.isEmpty() && !isRoot && !lexicallyInside && realOutside;
+                return new PlacedPath(canonical, real, isRoot, outside);
+            } catch (java.io.IOException | RuntimeException unresolvable) {
+                return new PlacedPath(own, "", false, false);
+            }
+        }
+    }
+
+    /** The real path of a folder operand's parent followed by the operand's own name, which is not followed. */
+    private static Path realPathOfOperand(Path folder) throws java.io.IOException {
+        Path parent = folder.getParent();
+        if (parent == null || folder.getFileName() == null) return realPath(folder);
+        return realPath(parent).resolve(folder.getFileName().toString()).normalize();
     }
 
     /** The real path of the nearest existing ancestor, followed by the names below it that do not exist. */
@@ -839,23 +940,25 @@ public record MutationRecoveryAssessment(
     }
 
     /**
-     * A proposal names every file it would change when its witness records a complete change, or, for an outcome
-     * without a witness, when it names a path and is not a workspace operation, and every path is placed: it has
-     * canonical workspace-relative text, names the workspace root, or lies outside the workspace (round 5). A complete
-     * proposal whose placed paths neither may be a required target nor name a folder holding one, by a folder
-     * operation, is outside the request.
+     * A proposal names every file it would change when its change is complete (completeChange) and every path is
+     * placed: it has canonical workspace-relative text, names the workspace root, or lies outside the workspace
+     * (rounds 5 and 6). A complete proposal whose placed paths neither may be a required target nor name a folder
+     * holding one, by a folder operation, is outside the request.
      */
-    private static boolean identifiable(
-            ToolCallLoop.ToolOutcome outcome,
-            Path workspace,
-            RequestObligation obligation
-    ) {
+    private static boolean identifiable(ToolCallLoop.ToolOutcome outcome, Placements placements) {
+        if (!completeChange(outcome)) return false;
+        return proposedPaths(outcome).stream().allMatch(path -> placements.place(path).placed());
+    }
+
+    /**
+     * True when a proposal's typed records name every file it would change: its witness records a complete change,
+     * or, for an outcome without a witness, it is a file tool's call with a recorded path.
+     */
+    private static boolean completeChange(ToolCallLoop.ToolOutcome outcome) {
         boolean complete = outcome.dispatch().neverRan()
                 ? outcome.dispatch().proposedChange().complete()
                 : proposalKind(outcome) == dev.talos.runtime.ToolCallDispatch.OperationKind.FILE;
-        List<String> paths = proposedPaths(outcome);
-        if (!complete || paths.isEmpty()) return false;
-        return paths.stream().allMatch(path -> place(path, workspace, obligation).placed());
+        return complete && !proposedPaths(outcome).isEmpty();
     }
 
     /**
@@ -900,24 +1003,23 @@ public record MutationRecoveryAssessment(
      * A proposal names a target when one of its paths may be that file, including an unproven or rejected identity,
      * as where a forbidden target must be assumed.
      */
-    private static boolean mayName(
-            List<String> paths,
-            String target,
-            Path workspace,
-            RequestObligation obligation
-    ) {
+    private static boolean mayName(List<String> paths, String target, Placements placements) {
+        Path workspace = placements.workspace();
         for (String path : paths) {
-            String canonical = place(path, workspace, obligation).canonical();
-            // Rounds 4 and 5: a spelling that differs only in letter case may name the file on a file system that
-            // ignores case, which WorkspacePathIdentity does not assume outside Windows. It is a possible match unless
-            // both spellings exist as different files.
-            if (target.equals(canonical)
-                    || !canonical.isEmpty() && target.toLowerCase(java.util.Locale.ROOT)
-                            .equals(canonical.toLowerCase(java.util.Locale.ROOT))
-                            && !distinctExistingFiles(workspace, target, canonical)
-                    || workspace != null && WorkspacePathIdentity.mayMatch(workspace, target, path)) {
-                return true;
+            PlacedPath placed = placements.place(path);
+            // Rounds 4 to 6: the placed text or the real-path text of the proposal, and a spelling that differs only
+            // in letter case, which may name the file on a file system that ignores case. WorkspacePathIdentity does
+            // not assume that outside Windows. A case variant is a possible match unless both spellings exist as
+            // different files.
+            for (String canonical : List.of(placed.canonical(), placed.realCanonical())) {
+                if (canonical.isEmpty()) continue;
+                if (target.equals(canonical)) return true;
+                if (target.toLowerCase(java.util.Locale.ROOT).equals(canonical.toLowerCase(java.util.Locale.ROOT))
+                        && !distinctExistingFiles(workspace, target, canonical)) {
+                    return true;
+                }
             }
+            if (workspace != null && WorkspacePathIdentity.mayMatch(workspace, target, path)) return true;
         }
         return false;
     }
