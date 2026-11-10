@@ -51,6 +51,47 @@ class ExecutionOutcomeNotRunProposalTest {
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FALSE_MUTATION_CLAIM), outcome.finalAnswer());
     }
 
+    /**
+     * Second review, defect F: when a failure with file effects decides the answer, the delivered answer still names
+     * the requested file whose later change did not run.
+     */
+    @Test
+    void theDeliveredEffectsAnswerNamesTheRequestedFileWhoseLaterChangeDidNotRun() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Change the function name get_qty to quantity_on_hand in inventory.py, orders.py "
+                + "and report.py, including its definition, imports and calls, so that the code works as before."));
+        List<ToolCallLoop.ToolOutcome> outcomes = List.of(
+                edited("inventory.py", "call-1-1"),
+                edited("orders.py", "call-1-2"),
+                new ToolCallLoop.ToolOutcome("talos.edit_file", "report.py", false, true, false, "", "PRODUCER TEXT",
+                        null, ToolError.TOOL_ERROR, null, ToolMutationEvidence.none(), ToolFailureReason.NONE,
+                        List.of(), "call-1-3")
+                        .withMutationEffects(new dev.talos.tools.ToolMutationEffects(List.of("report.py"), List.of()))
+                        .withDispatch(ToolCallDispatch.executed()),
+                new ToolCallLoop.ToolOutcome("talos.edit_file", "orders.py", false, true, true, "", "PRODUCER TEXT",
+                        null, ToolError.DENIED, null, ToolMutationEvidence.none(),
+                        ToolFailureReason.USER_APPROVAL_DENIED, List.of(), "call-1-4")
+                        .withDispatch(ToolCallDispatch.blocked("orders.py")));
+        var loopResult = new ToolCallLoop.LoopResult("Renamed it everywhere.", 2, 4,
+                outcomes.stream().map(ToolCallLoop.ToolOutcome::toolName).toList(), List.of(), 2, 0, false, 2,
+                List.of(), 0, 0, 0, 0, FailureDecision.continueLoop(), outcomes);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertTrue(outcome.finalAnswer().contains("The operation did not complete successfully."), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Requested files with a later change that did not run:\n"
+                + "- orders.py: changed earlier in this turn, but a later proposed change to it did not run."),
+                outcome.finalAnswer());
+        assertNotEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), outcome.finalAnswer());
+    }
+
+    private static ToolCallLoop.ToolOutcome edited(String path, String toolCallId) {
+        return new ToolCallLoop.ToolOutcome("talos.edit_file", path, true, true, false, "Edited " + path, "", null, "",
+                null, ToolMutationEvidence.exactEdit("get_qty", "quantity_on_hand"), ToolFailureReason.NONE,
+                List.of(), toolCallId).withDispatch(ToolCallDispatch.executed());
+    }
+
     private static ExecutionOutcome outcome(String answer) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

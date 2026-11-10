@@ -91,8 +91,8 @@ public final class TaskOutcomeWarningBuilder {
         if (facts.partialMutation()) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.PARTIAL_MUTATION,
-                    "At least one mutating tool call succeeded, and another call failed or a change to every "
-                            + "requested file is not established."));
+                    "At least one file change was applied in this turn, and a call failed or a requested change is "
+                            + "not established."));
         }
         if (facts.falseMutationClaim()) {
             warnings.add(TruthWarning.of(

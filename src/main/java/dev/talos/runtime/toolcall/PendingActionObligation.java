@@ -10,7 +10,8 @@ import java.util.Objects;
  * {@code changedTargets} are request-bound expected targets that this turn has already changed. Only
  * {@link Kind#EXPECTED_TARGETS_REMAINING} carries them, and they never repeat a required target. An exact
  * edit of a changed target stays in scope while the obligation is pending, because an exact edit
- * replaces one occurrence and a file can need several (HC-F6).
+ * replaces one occurrence and a file can need several (HC-F6). A complete write with content of a
+ * changed target stays in scope as well (D26 option A).
  */
 public record PendingActionObligation(
         Kind kind,

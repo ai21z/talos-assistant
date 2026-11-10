@@ -170,6 +170,16 @@ public final class ToolCallSupport {
         return missingOldString || missingNewString;
     }
 
+    /**
+     * D26: true when a talos.write_file call carries non-blank content under one of the content parameter names that
+     * the write tool reads, in the tool's order.
+     */
+    public static boolean hasNonBlankWriteContent(ToolCall call) {
+        if (call == null || !"talos.write_file".equals(call.canonicalToolName())) return false;
+        String content = firstPresentParam(call, "content", "text", "body", "data", "file_content");
+        return content != null && !content.isBlank();
+    }
+
     private static String firstPresentParam(ToolCall call, String... keys) {
         if (call == null || keys == null) return null;
         for (String key : keys) {

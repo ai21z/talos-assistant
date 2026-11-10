@@ -41,6 +41,30 @@ public final class MutationFailureAnswerRenderer {
             "[Truth check: some file changes were applied, but this turn's records do not show a change to every "
             + "file this request expects. Recorded outcomes for this turn are listed below.]\n\n";
 
+    /**
+     * D25 option B: every expected file has a recorded change, but a later proposed change to one of them never ran
+     * and no later change of that file followed it.
+     */
+    public static final String PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION =
+            "[Truth check: some file changes were applied, but a proposed change to a file this request expects did "
+            + "not run. Recorded outcomes for this turn are listed below.]\n\n";
+
+    /**
+     * D25 option B: every expected file has a recorded change, but a later proposal that never ran names no
+     * identifiable file, so whether it was meant for a requested file is not known.
+     */
+    public static final String PARTIAL_UNIDENTIFIED_PROPOSAL_ANNOTATION =
+            "[Truth check: some file changes were applied, but a later proposed change that does not record every file "
+            + "it would change did not run. Recorded outcomes for this turn are listed below.]\n\n";
+
+    /**
+     * D25 option B, round 3: every expected file has a recorded change, and a later proposal that never ran only may
+     * affect one of them.
+     */
+    public static final String PARTIAL_POSSIBLE_REQUESTED_CHANGE_NOT_RUN_ANNOTATION =
+            "[Truth check: some file changes were applied, but a later proposed change that may affect a file this "
+            + "request expects did not run. Recorded outcomes for this turn are listed below.]\n\n";
+
     /** LA-F7: every expected change was applied and the other proposals of the turn never ran. */
     public static final String CHANGES_WITH_NOT_RUN_ANNOTATION =
             "[Truth check: the file changes listed below were applied. Other proposed changes in this turn did not "
@@ -205,8 +229,9 @@ public final class MutationFailureAnswerRenderer {
         }
         MutationOutcome mutationOutcome = assessment.mutationOutcome();
         if (mutationOutcome.failed().stream().anyMatch(outcome -> outcome.mutationEffects().hasEffects())) {
-            return new PartialMutationAnswer(failedMutationEffectsSummary(
-                    mutationOutcome.failed(), mutationOutcome.notRun(), mutationOutcome.successful()), false);
+            return new PartialMutationAnswer(failedMutationEffectsSummary(mutationOutcome.failed(),
+                    mutationOutcome.notRun(), mutationOutcome.successful(),
+                    requestedChangeNotRunSection(assessment.requiredTargetCoverage())), false);
         }
         if (mutationOutcome.extraSuccesses() > 0) return new PartialMutationAnswer(answer, true);
         boolean actionObligationAnswer = answer != null
@@ -229,7 +254,25 @@ public final class MutationFailureAnswerRenderer {
                         && outcome.mutationEffects().hasEffects());
     }
 
+    /**
+     * The failed-effects summary of the loop result, with the requested files whose later change did not run
+     * (D25 option B) before the Not run section, or empty when no failed call has file effects. The requested files
+     * without a change are not listed here, because a requested file whose failed call applied effects has no
+     * recorded success and is not unchanged. The effect rows above name such files.
+     */
+    public static String failedMutationEffectsSummary(
+            ToolCallLoop.LoopResult loopResult,
+            MutationRecoveryAssessment assessment
+    ) {
+        return failedMutationEffectsSummary(loopResult,
+                assessment == null ? "" : requestedChangeNotRunSection(assessment.requiredTargetCoverage()));
+    }
+
     public static String failedMutationEffectsSummary(ToolCallLoop.LoopResult loopResult) {
+        return failedMutationEffectsSummary(loopResult, "");
+    }
+
+    private static String failedMutationEffectsSummary(ToolCallLoop.LoopResult loopResult, String requested) {
         if (!hasFailedMutationEffects(loopResult)) return "";
         List<ToolCallLoop.ToolOutcome> unsuccessful = loopResult.toolOutcomes().stream()
                 .filter(outcome -> outcome != null && outcome.mutating() && !outcome.success()).toList();
@@ -239,12 +282,14 @@ public final class MutationFailureAnswerRenderer {
                 unsuccessful.stream().filter(outcome -> MutationRecoveryAssessment.dispositionOf(outcome).neverRan())
                         .toList(),
                 loopResult.toolOutcomes().stream()
-                        .filter(outcome -> outcome != null && outcome.mutating() && outcome.success()).toList());
+                        .filter(outcome -> outcome != null && outcome.mutating() && outcome.success()).toList(),
+                requested);
     }
 
     private static String failedMutationEffectsSummary(List<ToolCallLoop.ToolOutcome> failures,
                                                        List<ToolCallLoop.ToolOutcome> notRun,
-                                                       List<ToolCallLoop.ToolOutcome> successes) {
+                                                       List<ToolCallLoop.ToolOutcome> successes,
+                                                       String requested) {
         StringBuilder out = new StringBuilder("The operation did not complete successfully. "
                 + "Applied and uncertain effects must not be treated as no changes.\n");
         for (ToolCallLoop.ToolOutcome outcome : failures) {
@@ -262,6 +307,7 @@ public final class MutationFailureAnswerRenderer {
                     .append(" via ").append(outcome.toolName())
                     .append("; matching a prior path does not by itself prove recovery.\n");
         }
+        if (requested != null && !requested.isEmpty()) out.append('\n').append(requested);
         if (!notRun.isEmpty()) out.append('\n').append(notRunSection(notRun));
         return out.toString().stripTrailing();
     }
@@ -285,8 +331,19 @@ public final class MutationFailureAnswerRenderer {
                 .toList();
         boolean partial = assessment.partial();
         MutationRecoveryAssessment.RequiredTargetCoverage coverage = assessment.requiredTargetCoverage();
+        boolean expectedWithoutChange = partial && coverage.established() && !coverage.withoutChange().isEmpty();
+        boolean requestedChangeNotRun = partial && coverage.established() && !coverage.changeNotRun().isEmpty();
+        boolean onlyPossible = requestedChangeNotRun
+                && coverage.changeNotRunPossible().containsAll(coverage.changeNotRun());
+        boolean unidentifiedProposal = partial
+                && coverage.gap() == MutationRecoveryAssessment.CoverageGap.UNIDENTIFIED_PROPOSAL;
         StringBuilder out = new StringBuilder(!failures.isEmpty() ? PARTIAL_MUTATION_ANNOTATION
-                : partial ? PARTIAL_EXPECTED_TARGET_ANNOTATION : CHANGES_WITH_NOT_RUN_ANNOTATION);
+                : !partial ? CHANGES_WITH_NOT_RUN_ANNOTATION
+                : unidentifiedProposal ? PARTIAL_UNIDENTIFIED_PROPOSAL_ANNOTATION
+                : requestedChangeNotRun && !expectedWithoutChange
+                        ? onlyPossible ? PARTIAL_POSSIBLE_REQUESTED_CHANGE_NOT_RUN_ANNOTATION
+                                : PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION
+                : PARTIAL_EXPECTED_TARGET_ANNOTATION);
         out.append("Succeeded:\n");
         for (ToolCallLoop.ToolOutcome outcome : successes) {
             out.append("- ")
@@ -301,14 +358,18 @@ public final class MutationFailureAnswerRenderer {
                 out.append("- ").append(target(outcome)).append(": ").append(failedRow(outcome)).append('\n');
             }
         }
-        if (partial && coverage.established() && !coverage.withoutChange().isEmpty()) {
+        if (expectedWithoutChange) {
             out.append("Expected files not changed:\n");
             for (String target : coverage.withoutChange()) {
                 out.append("- ").append(target).append(": expected by this request, but not changed in this turn.\n");
             }
-        } else if (partial && !coverage.established() && failures.isEmpty()) {
-            out.append("Expected files:\n")
-                    .append("- A change to every file this request expects is not established by this turn's records.\n");
+        }
+        if (partial) out.append(requestedChangeNotRunSection(coverage));
+        if (partial && !coverage.established() && failures.isEmpty()) {
+            out.append("Expected files:\n").append(unidentifiedProposal
+                    ? "- A later proposed change does not record every file that it would change, so a change of every "
+                            + "requested file after it is not established.\n"
+                    : "- A change to every file this request expects is not established by this turn's records.\n");
         }
         out.append(notRunSection(notRun));
         if (includeReplacementNote) {
@@ -318,6 +379,57 @@ public final class MutationFailureAnswerRenderer {
                             + "in this turn did not run.");
         }
         return out.toString().stripTrailing();
+    }
+
+    /**
+     * D25 option B: the requested files whose later proposed change did not run, or empty. A file that the proposal
+     * is proven to name is stated as the proposal's file, and a file it only may affect is stated as a possibility.
+     */
+    public static String requestedChangeNotRunSection(MutationRecoveryAssessment assessment) {
+        return assessment == null ? "" : requestedChangeNotRunSection(assessment.requiredTargetCoverage()).stripTrailing();
+    }
+
+    /**
+     * The requested files without a change and those whose later proposed change did not run, from established
+     * coverage of a partial mutation, for an answer that no failed call with file effects decides. Empty otherwise.
+     */
+    public static String requestedCoverageSection(MutationRecoveryAssessment assessment) {
+        if (assessment == null || !assessment.partial()) return "";
+        MutationRecoveryAssessment.RequiredTargetCoverage coverage = assessment.requiredTargetCoverage();
+        if (!coverage.established()) return "";
+        StringBuilder out = new StringBuilder();
+        if (!coverage.withoutChange().isEmpty()) {
+            out.append("Expected files not changed:\n");
+            for (String target : coverage.withoutChange()) {
+                out.append("- ").append(target).append(": expected by this request, but not changed in this turn.\n");
+            }
+        }
+        out.append(requestedChangeNotRunSection(coverage));
+        return out.toString().stripTrailing();
+    }
+
+    private static String requestedChangeNotRunSection(MutationRecoveryAssessment.RequiredTargetCoverage coverage) {
+        if (coverage == null || !coverage.established() || coverage.changeNotRun().isEmpty()) return "";
+        List<String> proven = coverage.changeNotRun().stream()
+                .filter(target -> !coverage.changeNotRunPossible().contains(target)).toList();
+        List<String> possible = coverage.changeNotRun().stream()
+                .filter(target -> coverage.changeNotRunPossible().contains(target)).toList();
+        StringBuilder out = new StringBuilder();
+        if (!proven.isEmpty()) {
+            out.append("Requested files with a later change that did not run:\n");
+            for (String target : proven) {
+                out.append("- ").append(target)
+                        .append(": changed earlier in this turn, but a later proposed change to it did not run.\n");
+            }
+        }
+        if (!possible.isEmpty()) {
+            out.append("Requested files that a later proposed change may affect:\n");
+            for (String target : possible) {
+                out.append("- ").append(target).append(": changed earlier in this turn, and a later proposed change "
+                        + "that did not run may affect it.\n");
+            }
+        }
+        return out.toString();
     }
 
     /** LA-F7: the typed Not run section of the assessment's unresolved proposals that never ran, or empty. */
@@ -344,6 +456,14 @@ public final class MutationFailureAnswerRenderer {
 
     /** The row target. Only displayable path text is shown, so a model-supplied path cannot add a row of its own. */
     private static String target(ToolCallLoop.ToolOutcome outcome) {
+        // D25 option B: a workspace operation that never ran is named by the operands it names, in role order, so a
+        // copy, move or rename row names its source and its destination.
+        dev.talos.runtime.ToolCallDispatch.ProposedChange change = outcome.dispatch().proposedChange();
+        if (outcome.dispatch().neverRan() && change.kind() != dev.talos.runtime.ToolCallDispatch.OperationKind.FILE
+                && !change.namedPaths().isEmpty()) {
+            String paths = String.join(" -> ", change.namedPaths());
+            if (dev.talos.runtime.ToolCallDispatch.displayable(paths)) return paths;
+        }
         if (outcome.workspaceOperationPlan() != null && !outcome.workspaceOperationPlan().changedPaths().isEmpty()) {
             String paths = String.join(", ", outcome.workspaceOperationPlan().changedPaths());
             if (dev.talos.runtime.ToolCallDispatch.displayable(paths)) return paths;
@@ -373,7 +493,7 @@ public final class MutationFailureAnswerRenderer {
     }
 
     private static String refusedBeforeApproval(ToolCallLoop.ToolOutcome outcome) {
-        String reason = reasonCause(outcome.failureReason());
+        String reason = reasonCause(outcome);
         if (!reason.isEmpty()) return "refused before approval (" + reason + ")";
         if (ToolError.NOT_FOUND.equals(outcome.errorCode())) {
             return "refused before approval (the tool or target was not found)";
@@ -384,8 +504,13 @@ public final class MutationFailureAnswerRenderer {
         return "refused before approval by runtime checks";
     }
 
+    /** The typed cause of an outcome, from its failure reason. */
+    private static String reasonCause(ToolCallLoop.ToolOutcome outcome) {
+        return reasonCause(outcome.failureReason());
+    }
+
     private static String cause(ToolCallLoop.ToolOutcome outcome) {
-        String reason = reasonCause(outcome.failureReason());
+        String reason = reasonCause(outcome);
         if (!reason.isEmpty()) return reason;
         String code = outcome.errorCode();
         if (ToolError.INVALID_PARAMS.equals(code)) return "the tool rejected its arguments";
@@ -406,7 +531,8 @@ public final class MutationFailureAnswerRenderer {
             case PRE_APPROVAL_PATH_INVALID -> "invalid path";
             case PRE_APPROVAL_PATH_NOT_ALLOWED -> "path outside the allowed workspace";
             case PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED -> "outside the files and operations this request authorizes";
-            case PRE_APPROVAL_TARGET_FORBIDDEN -> "the request marked this file as forbidden";
+            // The forbidden check reads every path parameter of the call, so the cause names no single operand.
+            case PRE_APPROVAL_TARGET_FORBIDDEN -> "a file this call names is forbidden by the request";
             case EDIT_OLD_STRING_NOT_FOUND -> "old_string not found in the file";
             case EDIT_OLD_STRING_AMBIGUOUS -> "old_string occurs more than once in the file";
             case EDIT_EMPTY_ARGUMENTS -> "old_string or new_string missing or empty";

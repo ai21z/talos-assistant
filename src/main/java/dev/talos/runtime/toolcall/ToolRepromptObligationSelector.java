@@ -69,7 +69,7 @@ final class ToolRepromptObligationSelector {
                                     + "talos.write_file call. The requested edit was not applied to "
                                     + "this target."));
         } else if (expectedTargetObligationActive) {
-            // HC-F6: the targets already changed stay open to a further exact edit.
+            // HC-F6 and D26 option A: the targets already changed stay open to a further exact edit or complete write.
             state.setPendingActionObligation(
                     PendingActionObligation.expectedTargetProgress(
                             remainingExpectedTargets,

@@ -4722,6 +4722,102 @@ class ToolCallLoopTest {
     }
 
     /**
+     * D26 option A (HC4-F1): a complete write of a target the turn already changed, while another target remains, is
+     * admitted instead of stopping the turn. Under a remembered approval it is asked once without the session option,
+     * and the approval diff shows that the write would undo the earlier change.
+     */
+    @Test
+    void changedTargetWriteUnderARememberedApprovalIsAskedOnceAndShowsTheLossOfTheEarlierChange() throws Exception {
+        Path ws = Files.createTempDirectory("talos-changed-target-write-ask-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=old\nfooter\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            registry.register(new FileEditTool());
+            var full = new int[]{0};
+            var onceDetails = new ArrayList<String>();
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            full[0]++;
+                            return ApprovalResponse.APPROVED_REMEMBER;
+                        }
+
+                        @Override
+                        public ApprovalResponse approveOnce(String description, String detail) {
+                            onceDetails.add(detail);
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry,
+                    new SessionApprovalPolicy());
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "In notes.md, replace status=old with status=new. "
+                    + "In more.md, replace status2=old with status2=new.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(textProvider(registry, List.of(
+                            writeFileCall("notes.md", "status=old\nfooter\nreviewed\n"),
+                            editFileCall("more.md", "status2=old", "status2=new"),
+                            "Both replacements are done.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-changed-target-write-ask", "session", 1,
+                    "2026-11-10T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = runCapturedProviderText(loop, editFileCall("notes.md", "status=old", "status=new"),
+                        List.of("talos.read_file", "talos.write_file", "talos.edit_file"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            String diagnostic = result.failureDecision().reason() + " " + trace.events();
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    diagnostic);
+            var writeDecisions = trace.events().stream()
+                    .filter(event -> "PERMISSION_DECISION".equals(event.type()))
+                    .map(event -> event.data())
+                    .filter(data -> !"DEFAULT_READ_ALLOW".equals(data.get("reasonCode")))
+                    .toList();
+            assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK", "SESSION_REMEMBER_ALLOW"),
+                    writeDecisions.stream().map(data -> String.valueOf(data.get("reasonCode"))).toList(),
+                    writeDecisions.toString());
+            assertEquals(false, writeDecisions.get(1).get("rememberEligible"), writeDecisions.toString());
+            assertEquals(1, full[0], "Only the first change is offered the session option.");
+            assertEquals(1, onceDetails.size(), "The complete write of the changed file is asked once.");
+            assertTrue(onceDetails.getFirst().contains("-status=new")
+                    && onceDetails.getFirst().contains("+status=old"), onceDetails.getFirst());
+            assertEquals("status=old\nfooter\nreviewed\n", Files.readString(ws.resolve("notes.md")));
+            assertEquals("status2=new\n", Files.readString(ws.resolve("more.md")));
+            assertEquals(3, result.mutatingToolSuccesses(), diagnostic);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    /**
      * HC-F6b, review findings 1 and 3: an exact edit of a changed web file whose old_string is missing is refused
      * before approval, and it no longer plans a static-web full rewrite of that file. The remaining target stays
      * required, so a reply without a call cannot end the turn as if both files had changed.
@@ -4792,6 +4888,11 @@ class ToolCallLoopTest {
         } finally {
             deleteRecursive(ws);
         }
+    }
+
+    private static String writeFileCall(String path, String content) {
+        return "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"" + jsonEscape(path)
+                + "\",\"content\":\"" + jsonEscape(content) + "\"}}";
     }
 
     private static String editFileCall(String path, String oldString, String newString) {

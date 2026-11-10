@@ -38,7 +38,7 @@ class MutationRecoveryNotRunAssessmentTest {
             + "and report.py, including its definition, imports and calls, so that the code works as before.";
 
     @Test
-    void refusedNoOpEditsWithEveryRequiredTargetChangedAreSucceeded() {
+    void aRefusedNoOpEditWithEveryRequiredTargetChangedIsSucceededAndARefusedLaterEditIsPartial() {
         TaskContract contract = TaskContractResolver.fromUserRequest(H2);
         RequestObligation obligation = RequestObligationCompiler.compile(contract);
         assertEquals(Set.of("inventory.py", "orders.py", "report.py"), Set.copyOf(obligation.requiredMutationTargets()));
@@ -51,6 +51,8 @@ class MutationRecoveryNotRunAssessmentTest {
                 refused("inventory.py", ToolFailureReason.EDIT_NO_CHANGE, "call-4-1"),
                 refused("inventory.py", ToolFailureReason.EDIT_EMPTY_ARGUMENTS, "call-4-2"));
 
+        MutationRecoveryAssessment noOpOnly = MutationRecoveryAssessment.assess(
+                contract, obligation, loop(outcomes.subList(0, 6)), 0, passed(), null);
         MutationRecoveryAssessment assessment = MutationRecoveryAssessment.assess(
                 contract, obligation, loop(outcomes), 0, passed(), null);
         MutationRecoveryAssessment unwitnessed = MutationRecoveryAssessment.assess(
@@ -58,13 +60,17 @@ class MutationRecoveryNotRunAssessmentTest {
                         .map(outcome -> outcome.success() ? outcome : outcome.withDispatch(ToolCallDispatch.unknown()))
                         .toList()), 0, passed(), null);
 
-        assertEquals(MutationOutcomeStatus.SUCCEEDED, assessment.mutationOutcome().status());
-        assertTrue(assessment.completedWithProposalsNotRun());
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, noOpOnly.mutationOutcome().status());
+        assertTrue(noOpOnly.completedWithProposalsNotRun());
+        assertTrue(noOpOnly.requiredTargetCoverage().complete());
+        // D25 option B: the empty edit of inventory.py is not a provable no-op and no later change followed it.
+        assertEquals(MutationOutcomeStatus.PARTIAL, assessment.mutationOutcome().status());
+        assertFalse(assessment.completedWithProposalsNotRun());
         assertTrue(assessment.changesWithUnresolvedProposals());
         assertEquals(List.of(), assessment.mutationOutcome().failed());
         assertEquals(outcomes.subList(5, 7), assessment.mutationOutcome().notRun());
         assertEquals(2, assessment.mutationOutcome().failureCount());
-        assertTrue(assessment.requiredTargetCoverage().complete());
+        assertEquals(List.of("inventory.py"), assessment.requiredTargetCoverage().changeNotRun());
         assertEquals(List.of(REFUSED_BEFORE_APPROVAL, REFUSED_BEFORE_APPROVAL),
                 assessment.failureAssessments().stream().map(MutationRecoveryAssessment.FailureAssessment::disposition)
                         .toList());

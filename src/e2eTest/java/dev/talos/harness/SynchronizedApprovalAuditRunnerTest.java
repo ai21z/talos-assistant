@@ -1143,7 +1143,13 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("static-web-selector-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-similar-target-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-forbidden-sibling-target-blocked-before-approval"));
-        assertTrue(Files.readString(run.summary()).contains("PASS_WITH_RUNTIME_REPAIR"));
+        // LA-F7 and D25 option B: the forbidden sibling write was refused before approval and never ran, and it names
+        // no requested file, so that scenario completes and scores PASS instead of PASS_WITH_RUNTIME_REPAIR. The
+        // runtime-repair scoring rule itself is pinned by its own tests below.
+        String scoring = Files.readString(run.summary());
+        assertTrue(scoring.contains("| mutation-forbidden-sibling-target-blocked-before-approval | COMPLETE | PASSED "
+                + "| PASS |"), scoring);
+        assertFalse(scoring.contains("FAIL_REVIEW_REQUIRED"), scoring);
         assertTrue(Files.readString(run.summary()).contains("t325-python-command-boundary"));
         assertTrue(Files.readString(run.summary()).contains("command-profile-gradle-test-approved"));
         assertTrue(Files.readString(run.summary()).contains("command-profile-policy-rejected"));
@@ -1220,7 +1226,8 @@ class SynchronizedApprovalAuditRunnerTest {
                 .resolve("audit-transcript.json"));
         assertTrue(forbiddenSiblingTranscript.contains("\"approvalResponses\" : [ \"APPROVED\" ]"),
                 forbiddenSiblingTranscript);
-        assertTrue(forbiddenSiblingTranscript.contains("\"traceStatus\" : \"PARTIAL\""),
+        // LA-F7 and D25 option B: the refused forbidden-sibling write names no requested file, so the turn completes.
+        assertTrue(forbiddenSiblingTranscript.contains("\"traceStatus\" : \"COMPLETE\""),
                 forbiddenSiblingTranscript);
         assertTrue(forbiddenSiblingTranscript.contains("\"verificationStatus\" : \"PASSED\""),
                 forbiddenSiblingTranscript);

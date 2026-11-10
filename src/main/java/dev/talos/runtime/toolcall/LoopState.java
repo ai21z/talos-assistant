@@ -310,11 +310,12 @@ public final class LoopState {
     }
 
     /**
-     * HC-F6b: true when the pending expected-target obligation admits the call only as an exact edit of a target
-     * that this turn already changed. Such a call answers the runtime's progress request.
+     * HC-F6b and D26 option A: true when the pending expected-target obligation admits the call only as an exact
+     * edit or a complete write of a target that this turn already changed. Such a call answers the runtime's
+     * progress request.
      */
-    boolean editsChangedTargetOfPendingObligation(ToolCall call) {
-        return PendingActionObligationBreachGuard.admitsAsChangedTargetEdit(pendingActionObligation, call, workspace);
+    boolean changesChangedTargetOfPendingObligation(ToolCall call) {
+        return PendingActionObligationBreachGuard.admitsAsChangedTargetChange(pendingActionObligation, call, workspace);
     }
 
     public boolean failPendingActionObligationAfterInvalidToolCalls(List<ToolCall> calls) {

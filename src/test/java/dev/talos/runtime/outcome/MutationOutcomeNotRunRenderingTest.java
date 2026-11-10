@@ -90,8 +90,11 @@ class MutationOutcomeNotRunRenderingTest {
                         TaskVerificationEvidence.notRun("not run"), null)).answer();
 
         assertTrue(unchanged.startsWith(MutationFailureAnswerRenderer.PARTIAL_EXPECTED_TARGET_ANNOTATION), unchanged);
+        // D25 option B: the refused later change of orders.py is named as well.
         assertTrue(unchanged.contains("Expected files not changed:\n"
                 + "- report.py: expected by this request, but not changed in this turn.\n"
+                + "Requested files with a later change that did not run:\n"
+                + "- orders.py: changed earlier in this turn, but a later proposed change to it did not run.\n"
                 + "Not run (these changed no file):\n"
                 + "- orders.py: talos.edit_file not run, refused before approval "
                 + "(the file changed after it was last read)."), unchanged);
@@ -133,6 +136,9 @@ class MutationOutcomeNotRunRenderingTest {
     @Test
     void newAnnotationsArePlainTextWithoutVerifiedOutcomeMarkers() {
         for (String text : List.of(MutationFailureAnswerRenderer.PARTIAL_EXPECTED_TARGET_ANNOTATION,
+                MutationFailureAnswerRenderer.PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION,
+                MutationFailureAnswerRenderer.PARTIAL_UNIDENTIFIED_PROPOSAL_ANNOTATION,
+                MutationFailureAnswerRenderer.PARTIAL_POSSIBLE_REQUESTED_CHANGE_NOT_RUN_ANNOTATION,
                 MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION)) {
             assertPlainText(text);
         }

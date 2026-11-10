@@ -101,7 +101,7 @@ class ToolRepromptObligationSelectorTest {
 
     /** HC-F6: the changed target stays open to a further exact edit, not to a full write or an unrelated path. */
     @Test
-    void expectedTargetObligationKeepsAChangedTargetOpenToAFurtherExactEditOnly() {
+    void expectedTargetObligationKeepsAChangedTargetOpenToAFurtherExactEditOrCompleteWriteOnly() {
         LoopState state = loopState(
                 List.of(ChatMessage.system("sys"), ChatMessage.user("Create README.md and notes.md.")),
                 broadTools());
@@ -114,8 +114,12 @@ class ToolRepromptObligationSelectorTest {
         assertFalse(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
                 edit("README.md"))));
         assertTrue(state.hasPendingActionObligation());
-        assertTrue(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
+        // D26 option A: a complete write with content of the changed target is admitted as well.
+        assertFalse(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
                 new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "x\n")))));
+        assertTrue(state.hasPendingActionObligation());
+        assertTrue(state.failPendingActionObligationAfterInvalidToolCalls(List.of(
+                new ToolCall("talos.delete_path", Map.of("path", "README.md")))));
         assertFalse(state.hasPendingActionObligation());
     }
 

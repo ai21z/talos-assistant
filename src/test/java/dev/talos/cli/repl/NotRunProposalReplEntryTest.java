@@ -35,6 +35,7 @@ import dev.talos.runtime.command.CommandProfileRegistry;
 import dev.talos.runtime.command.ProcessCommandRunner;
 import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.runtime.toolcall.DocumentComparisonTool;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -105,7 +106,7 @@ class NotRunProposalReplEntryTest {
     Path temp;
 
     @Test
-    void refusedEditsAfterEveryRequestedFileChangedAreListedAsNotRunAndTheTurnCompletes() throws Exception {
+    void refusedLaterEditsOfARequestedFileAreListedAsNotRunAndKeepTheTurnPartial() throws Exception {
         Run run = run(H2, List.of(
                 calls(read("inventory.py"), read("orders.py"), read("report.py")),
                 calls(editCall("inventory.py", "def get_qty(", "def quantity_on_hand("),
@@ -124,13 +125,16 @@ class NotRunProposalReplEntryTest {
             assertTrue(text.contains("quantity_on_hand"), file + ": " + text);
         }
         assertEquals(5, run.prompts().size(), run.transcript());
-        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
-        assertEquals("COMPLETED_UNVERIFIED", outcomeClassification(run), run.transcript());
+        // D25 option B: the empty edit of inventory.py is a later proposed change to a requested file. It is not a
+        // provable no-op and no change of inventory.py followed it, so the turn stays partial and says why.
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
+        assertEquals("PARTIAL", outcomeClassification(run), run.transcript());
         String answer = run.onlyRow().assistantText();
-        assertTrue(answer.startsWith("[Checks passed - "), answer);
-        assertTrue(answer.contains("[Truth check: the file changes listed below were applied. Other proposed changes "
-                + "in this turn did not run and changed no file.]"), answer);
-        assertTrue(answer.contains("Not run (these changed no file):\n"
+        assertTrue(answer.startsWith("[Truth check: some file changes were applied, but a proposed change to a file "
+                + "this request expects did not run."), answer);
+        assertTrue(answer.contains("Requested files with a later change that did not run:\n"
+                + "- inventory.py: changed earlier in this turn, but a later proposed change to it did not run.\n"
+                + "Not run (these changed no file):\n"
                 + "- inventory.py: talos.edit_file not run, refused before approval "
                 + "(old_string and new_string were identical).\n"
                 + "- inventory.py: talos.edit_file not run, refused before approval "
@@ -165,6 +169,8 @@ class NotRunProposalReplEntryTest {
                 + "show a change to every file this request expects."), answer);
         assertTrue(answer.contains("Expected files not changed:\n"
                 + "- report.py: expected by this request, but not changed in this turn.\n"
+                + "Requested files with a later change that did not run:\n"
+                + "- orders.py: changed earlier in this turn, but a later proposed change to it did not run.\n"
                 + "Not run (these changed no file):\n"
                 + "- orders.py: talos.edit_file not run, refused before approval (old_string not found in the file)."),
                 answer);
@@ -175,14 +181,123 @@ class NotRunProposalReplEntryTest {
         assertFalse(box.contains(" failed]"), box);
     }
 
-    private static Map<String, String> fixtures() {
-        return Map.of("inventory.py", INVENTORY, "orders.py", ORDERS, "report.py", REPORT);
+    /**
+     * D25 option B, round 4 test gap: an exact edit refused because old_string and new_string are identical is a
+     * provable no-op, so when it is the only proposal that did not run the turn completes and lists it as not run.
+     */
+    @Test
+    void aRefusedNoOpEditAfterEveryRequestedFileChangedLetsTheTurnComplete() throws Exception {
+        Run run = run(H2, List.of(
+                calls(read("inventory.py"), read("orders.py"), read("report.py")),
+                calls(editCall("inventory.py", "def get_qty(", "def quantity_on_hand("),
+                        editCall("orders.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                        editCall("orders.py", "get_qty(stock, sku) >= qty", "quantity_on_hand(stock, sku) >= qty")),
+                edit("report.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                edit("report.py", "if get_qty(stock, sku) < threshold", "if quantity_on_hand(stock, sku) < threshold"),
+                edit("inventory.py", "def quantity_on_hand(", "def quantity_on_hand("),
+                text("Renamed get_qty to quantity_on_hand in all three files.")),
+                List.of("y", "y", "y", "y", "y"), fixtures());
+
+        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains(MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION.strip()), answer);
+        assertTrue(answer.contains("- inventory.py: talos.edit_file not run, refused before approval "
+                + "(old_string and new_string were identical)."), answer);
+        assertFalse(answer.contains("Requested files with a later change that did not run:"), answer);
+    }
+
+    /**
+     * D25 option B, review finding 1: a refused copy onto a requested file is a proposed change to that file. It is
+     * named by its destination, so the turn stays partial and the answer names the requested file.
+     */
+    @Test
+    void aRefusedCopyOntoARequestedFileKeepsTheTurnPartial() throws Exception {
+        Run run = run(H2, List.of(
+                calls(read("inventory.py"), read("orders.py"), read("report.py")),
+                calls(editCall("inventory.py", "def get_qty(", "def quantity_on_hand("),
+                        editCall("orders.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                        editCall("orders.py", "get_qty(stock, sku) >= qty", "quantity_on_hand(stock, sku) >= qty")),
+                edit("report.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                edit("report.py", "if get_qty(stock, sku) < threshold", "if quantity_on_hand(stock, sku) < threshold"),
+                calls(new ChatMessage.NativeToolCall("call-copy-onto", "talos.copy_path",
+                        Map.of("from", "inventory_old.py", "to", "inventory.py"))),
+                text("Renamed get_qty to quantity_on_hand in all three files.")),
+                List.of("y", "y", "y", "y", "y"), withOldCopy());
+
+        assertFalse(Files.readString(run.workspace().resolve("inventory.py")).contains("get_qty"), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("Requested files with a later change that did not run:\n"
+                + "- inventory.py: changed earlier in this turn, but a later proposed change to it did not run.\n"),
+                answer);
+        assertTrue(answer.contains("- inventory_old.py -> inventory.py: talos.copy_path not run, "), answer);
+    }
+
+    /**
+     * Round 3, defect 2: a rename whose new name uses a key the tool does not read names only its source. The source
+     * is a requested file that a rename changes, so the answer names it as a requested file whose later change did not
+     * run.
+     */
+    @Test
+    void aRefusedIncompleteRenameOfARequestedFileKeepsTheTurnPartialAndNamesTheFile() throws Exception {
+        Run run = run(H2, List.of(
+                calls(read("inventory.py"), read("orders.py"), read("report.py")),
+                calls(editCall("inventory.py", "def get_qty(", "def quantity_on_hand("),
+                        editCall("orders.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                        editCall("orders.py", "get_qty(stock, sku) >= qty", "quantity_on_hand(stock, sku) >= qty")),
+                edit("report.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                edit("report.py", "if get_qty(stock, sku) < threshold", "if quantity_on_hand(stock, sku) < threshold"),
+                calls(new ChatMessage.NativeToolCall("call-rename", "talos.rename_path",
+                        Map.of("from", "inventory.py", "to", "inventory_v2.py"))),
+                text("Renamed get_qty to quantity_on_hand in all three files.")),
+                List.of("y", "y", "y", "y", "y"), fixtures());
+
+        assertTrue(Files.exists(run.workspace().resolve("inventory.py")), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("Requested files with a later change that did not run:\n"
+                + "- inventory.py: changed earlier in this turn, but a later proposed change to it did not run.\n"),
+                answer);
+        assertFalse(answer.contains("does not record every file"), answer);
+    }
+
+    /**
+     * D25 option B, review finding 2: a copy never changes its source, so a refused copy from a requested file to a
+     * file outside the request leaves the turn complete and names no requested file as a change that did not run.
+     */
+    @Test
+    void aRefusedCopyFromARequestedFileDoesNotKeepTheTurnPartial() throws Exception {
+        Run run = run(H2, List.of(
+                calls(read("inventory.py"), read("orders.py"), read("report.py")),
+                calls(editCall("inventory.py", "def get_qty(", "def quantity_on_hand("),
+                        editCall("orders.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                        editCall("orders.py", "get_qty(stock, sku) >= qty", "quantity_on_hand(stock, sku) >= qty")),
+                edit("report.py", "from inventory import get_qty", "from inventory import quantity_on_hand"),
+                edit("report.py", "if get_qty(stock, sku) < threshold", "if quantity_on_hand(stock, sku) < threshold"),
+                calls(new ChatMessage.NativeToolCall("call-copy-from", "talos.copy_path",
+                        Map.of("from", "inventory.py", "to", "inventory_backup.py"))),
+                text("Renamed get_qty to quantity_on_hand in all three files.")),
+                List.of("y", "y", "y", "y", "y"), fixtures());
+
+        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertFalse(answer.contains("Requested files with a later change that did not run:"), answer);
+        assertTrue(answer.contains("- inventory.py -> inventory_backup.py: talos.copy_path not run, "), answer);
     }
 
     private static String outcomeClassification(Run run) {
         List<Map<String, Object>> outcomes = events(run, "OUTCOME_EVALUATED");
         assertEquals(1, outcomes.size(), run.transcript());
         return String.valueOf(outcomes.getFirst().get("classification"));
+    }
+
+    private static Map<String, String> withOldCopy() {
+        return Map.of("inventory.py", INVENTORY, "orders.py", ORDERS, "report.py", REPORT,
+                "inventory_old.py", INVENTORY);
+    }
+
+    private static Map<String, String> fixtures() {
+        return Map.of("inventory.py", INVENTORY, "orders.py", ORDERS, "report.py", REPORT);
     }
 
     private static ChatMessage.NativeToolCall read(String path) {

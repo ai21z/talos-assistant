@@ -60,8 +60,8 @@ class TaskOutcomeWarningBuilderTest {
                         "A mutating tool call had invalid arguments and no file changed."),
                 new TruthWarning(
                         TruthWarningType.PARTIAL_MUTATION,
-                        "At least one mutating tool call succeeded, and another call failed or a change to every "
-                                + "requested file is not established."),
+                        "At least one file change was applied in this turn, and a call failed or a requested change is "
+                                + "not established."),
                 new TruthWarning(
                         TruthWarningType.FALSE_MUTATION_CLAIM,
                         "A current Talos mutation claim has no matching successful execution record."),

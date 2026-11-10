@@ -644,6 +644,9 @@ record ExecutionOutcome(
                 current = StaticVerificationAnswerRenderer.failedReplacement(
                         taskVerification, loopResult, repairOffered(loopResult));
                 // LA-F7: a proposal that never ran stays visible when verification decides that the turn failed.
+                // D25 option B: so does a requested file whose later change did not run.
+                String requested = MutationFailureAnswerRenderer.requestedCoverageSection(mutationAssessment);
+                if (!requested.isEmpty()) current = current.stripTrailing() + "\n\n" + requested;
                 String notRun = MutationFailureAnswerRenderer.notRunSection(mutationAssessment);
                 if (!notRun.isEmpty()) current = current.stripTrailing() + "\n\n" + notRun;
                 outputLimitRelevant = false;
@@ -680,7 +683,7 @@ record ExecutionOutcome(
             outputLimitRelevant = false;
             // Never leave contradictory model prose (including 'no changes') next
             // to authoritative effect evidence. This is not a successful retry.
-            current = MutationFailureAnswerRenderer.failedMutationEffectsSummary(loopResult);
+            current = MutationFailureAnswerRenderer.failedMutationEffectsSummary(loopResult, mutationAssessment);
         }
         var workspaceResults = WorkspaceResultEvidencePolicy.assess(safePlan, loopResult, workspace);
         var requestFrame = dev.talos.runtime.observation.TurnRequestFrame.current();

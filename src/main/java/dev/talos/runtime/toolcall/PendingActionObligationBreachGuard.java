@@ -128,7 +128,7 @@ final class PendingActionObligationBreachGuard {
                     || sameWorkspaceFileAsTarget(workspace, targets, rawPath)
                     || caseVariantOfMissingTarget(workspace, targets, rawPath)
                     || mkdirOfTargetParent(call.toolName(), workspace, targets, rawPath)
-                    || exactEditOfChangedTarget(call, path, rawPath, normalizedChangedTargets,
+                    || admittedChangeOfChangedTarget(call, path, rawPath, normalizedChangedTargets,
                             changedTargets, workspace))) {
                 continue;
             }
@@ -139,7 +139,8 @@ final class PendingActionObligationBreachGuard {
                     && (normalizedChangedTargets.contains(normalizeScopedTargetPreservingCase(path))
                     || sameWorkspaceFileAsTarget(workspace, changedTargets, rawPath));
             rejectedMutations.add(path.isBlank() ? name : name + "(" + path + ")"
-                    + (changedTarget ? " [changed in this turn, only an exact edit with arguments is accepted]" : ""));
+                    + (changedTarget ? " [changed in this turn, only an exact edit with arguments or a complete "
+                            + "write with content is accepted]" : ""));
         }
         if (rejectedMutations.isEmpty()) {
             return null;
@@ -189,12 +190,13 @@ final class PendingActionObligationBreachGuard {
     }
 
     /**
-     * HC-F6b: the call is admitted by the pending expected-target obligation only because it is an exact edit
-     * of a target that this turn already changed. Such a call answers the runtime's progress request, so the
-     * tool loop treats it as proposed after a continuation: a remembered approval does not cover it, and it is
-     * asked once without the session option (P23, D20 option A). A call to a remaining target is not counted.
+     * HC-F6b and D26 option A: the call is admitted by the pending expected-target obligation only because it is
+     * an exact edit or a complete write of a target that this turn already changed. Such a call answers the
+     * runtime's progress request, so the tool loop treats it as proposed after a continuation: a remembered
+     * approval does not cover it, and it is asked once without the session option (P23, D20 option A). A call to
+     * a remaining target is not counted.
      */
-    static boolean admitsAsChangedTargetEdit(PendingActionObligation obligation, ToolCall call, Path workspace) {
+    static boolean admitsAsChangedTargetChange(PendingActionObligation obligation, ToolCall call, Path workspace) {
         if (obligation == null || call == null
                 || obligation.kind() != PendingActionObligation.Kind.EXPECTED_TARGETS_REMAINING
                 || obligation.changedTargets().isEmpty()
@@ -209,7 +211,7 @@ final class PendingActionObligationBreachGuard {
                 || sameWorkspaceFileAsTarget(workspace, targets, rawPath)) {
             return false;
         }
-        return exactEditOfChangedTarget(call, path, rawPath,
+        return admittedChangeOfChangedTarget(call, path, rawPath,
                 normalizedExpectedProgressTargets(obligation.changedTargets()), obligation.changedTargets(), workspace);
     }
 
@@ -217,11 +219,15 @@ final class PendingActionObligationBreachGuard {
      * HC-F6: an exact edit of a request target that this turn already changed is in scope, because an exact
      * edit replaces one occurrence and a file can need several. The call still passes every pre-approval
      * check, so it stays inside the request targets and applies only where its old_string occurs exactly
-     * once in the named file. It is asked once without the session option (admitsAsChangedTargetEdit), so an
-     * unrequested repeat or an edit meant for another target is shown before it runs. An edit with empty
-     * arguments, a full write and every other mutation of a changed target are not admitted here.
+     * once in the named file. D26 option A (HC4-F1): a complete write with non-blank content of such a target
+     * is in scope for the same reason, because a model may finish a file it already changed by writing it whole.
+     * Both are asked once without the session option (admitsAsChangedTargetChange), and the approval diff is
+     * taken against the file as this turn left it. That diff is a bounded preview: its counts cover the whole
+     * change and a cut is stated, but a removed earlier change beyond the cut is not named (finding D26-F5, open).
+     * An edit with empty arguments, a write without content and every other mutation of a changed target are not
+     * admitted here.
      */
-    private static boolean exactEditOfChangedTarget(
+    private static boolean admittedChangeOfChangedTarget(
             ToolCall call,
             String path,
             String rawPath,
@@ -229,9 +235,11 @@ final class PendingActionObligationBreachGuard {
             List<String> changedTargets,
             Path workspace
     ) {
-        if (normalizedChangedTargets.isEmpty()
-                || !"talos.edit_file".equals(call.canonicalToolName())
-                || ToolCallSupport.hasEmptyEditArguments(call)) {
+        if (normalizedChangedTargets.isEmpty()) return false;
+        String tool = call.canonicalToolName();
+        boolean exactEdit = "talos.edit_file".equals(tool) && !ToolCallSupport.hasEmptyEditArguments(call);
+        boolean completeWrite = "talos.write_file".equals(tool) && ToolCallSupport.hasNonBlankWriteContent(call);
+        if (!exactEdit && !completeWrite) {
             return false;
         }
         return normalizedChangedTargets.contains(normalizeScopedTargetPreservingCase(path))

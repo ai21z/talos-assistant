@@ -5,6 +5,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
@@ -242,7 +243,7 @@ final class ToolOutcomeFactory {
         boolean success = result != null && result.success();
         ToolCallDispatch dispatch = result == null
                 ? ToolCallDispatch.unknown()
-                : ToolCallDispatch.of(disposition, proposedTarget(call));
+                : ToolCallDispatch.of(disposition, proposedTarget(call), proposedChange(call));
         return new ToolCallLoop.ToolOutcome(
                 toolName(call),
                 pathHint,
@@ -268,11 +269,75 @@ final class ToolOutcomeFactory {
 
     /** LA-F7: an outcome built by a refusal factory precedes dispatch, so its call never reached the registry. */
     private static ToolCallDispatch notRun(ToolCall call) {
-        return ToolCallDispatch.blocked(proposedTarget(call));
+        return ToolCallDispatch.blocked(proposedTarget(call), proposedChange(call));
     }
 
     private static String proposedTarget(ToolCall call) {
         return call == null ? "" : ToolCallSupport.resolvePathHint(call);
+    }
+
+    /**
+     * D25 option B: the change a call that never ran proposed, by the typed role of each operand. The operation kind
+     * comes from the same tool-name resolution that chooses the roles. A copy changes its destination, a move or
+     * rename its source and destination, a mkdir or delete its target. The change is complete only when every operand
+     * the kind changes is named. A batch names no operand here. Any other mutating call changes its path argument.
+     */
+    private static ToolCallDispatch.ProposedChange proposedChange(ToolCall call) {
+        if (call == null) return ToolCallDispatch.ProposedChange.none();
+        if (!WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            // Round 4: only a path under a key that the file tools read names the file the call would change. A path
+            // under any other key is shown, but the change stays incomplete, so the proposal is not identified by it.
+            String accepted = firstNonBlankParam(call, FILE_TOOL_PATH_KEYS);
+            if (!accepted.isEmpty()) return ToolCallDispatch.ProposedChange.file(accepted);
+            String shown = ToolCallSupport.resolvePathHint(call);
+            return new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.FILE, List.of(),
+                    shown == null || shown.isBlank() ? List.of() : List.of(shown), false);
+        }
+        String source = "";
+        String destination = "";
+        String target = "";
+        for (WorkspaceOperationPlanner.NamedOperand operand : WorkspaceOperationPlanner.namedOperands(call)) {
+            switch (operand.role()) {
+                case SOURCE -> source = operand.path();
+                case DESTINATION -> destination = operand.path();
+                case TARGET -> target = operand.path();
+            }
+        }
+        List<String> named = present(source, destination, target);
+        return switch (dev.talos.tools.ToolAliasPolicy.localCanonicalName(call.toolName())) {
+            case "copy_path" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.COPY,
+                    present(destination), named, !destination.isBlank());
+            case "move_path" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.MOVE,
+                    present(source, destination), named, !source.isBlank() && !destination.isBlank());
+            case "rename_path" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.RENAME,
+                    present(source, destination), named, !source.isBlank() && !destination.isBlank());
+            case "delete_path" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.DELETE,
+                    present(target), named, !target.isBlank());
+            case "mkdir" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.MKDIR,
+                    present(target), named, !target.isBlank());
+            case "apply_workspace_batch" -> new ToolCallDispatch.ProposedChange(ToolCallDispatch.OperationKind.BATCH,
+                    List.of(), List.of(), false);
+            default -> ToolCallDispatch.ProposedChange.none();
+        };
+    }
+
+    /** The path parameters that FileWriteTool and FileEditTool read for the file they change, in their order. */
+    private static final List<String> FILE_TOOL_PATH_KEYS = List.of("path", "file_path", "filepath", "file", "filename");
+
+    private static String firstNonBlankParam(ToolCall call, List<String> keys) {
+        for (String key : keys) {
+            String value = call.param(key);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static List<String> present(String... paths) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String path : paths) {
+            if (path != null && !path.isBlank()) out.add(path);
+        }
+        return List.copyOf(out);
     }
 
     private static String toolCallId(LocalTurnTraceCapture.ParsedToolCallPermit permit) {

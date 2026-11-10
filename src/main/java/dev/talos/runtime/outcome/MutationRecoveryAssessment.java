@@ -29,9 +29,10 @@ import java.util.Set;
  * proof; qualification must keep that sequence unproven.
  *
  * <p>LA-F7: a proposal that never reached the tool registry is not a failed change. The status is PARTIAL only when
- * a call that ran, or that cannot be proven not to have run, failed unresolved, or when a file the request expects
- * has no recorded change. Otherwise a turn whose other proposals never ran is SUCCEEDED, and the proposals are kept
- * as not run.
+ * a call that ran, or that cannot be proven not to have run, failed unresolved, when a file the request expects
+ * has no recorded change, or when a later proposed change to such a file never ran and is neither a provable no-op
+ * nor followed by a later change of that file (D25 option B). Otherwise a turn whose other proposals never ran is
+ * SUCCEEDED, and the proposals are kept as not run.
  */
 public record MutationRecoveryAssessment(
         MutationOutcome mutationOutcome,
@@ -120,26 +121,73 @@ public record MutationRecoveryAssessment(
     }
 
     /**
-     * Whether every file the request expects to change has a recorded change in this turn (LA-F7, D1). Coverage is
-     * established only for a typed request with at least one required mutation target, no successes outside the tool
-     * loop, and no unmatched target next to a success whose changed path is unknown.
+     * Whether every file the request expects to change has a recorded change in this turn, and no later proposed
+     * change to it is left without one (LA-F7, D1, D25 option B). Coverage is established only for a typed request
+     * with at least one required mutation target and no successes outside the tool loop. It is not established when
+     * an open target sits next to a success whose changed path is unknown, or when every target changed and a later
+     * proposal that never ran names no identifiable file.
      *
      * @param established   whether the coverage could be decided from this turn's records
      * @param withoutChange the required targets without a recorded change, empty when coverage is not established
+     * @param changeNotRun  the required targets with a recorded change after which a proposed change to the same file
+     *                      never ran, is not a provable no-op and is followed by no later change of that file, empty
+     *                      when coverage is not established
+     * @param gap           why coverage is not established, {@link CoverageGap#NONE} when it is
+     * @param changeNotRunPossible the targets of changeNotRun that a later proposal only may affect: its path is not
+     *                      proven to be the file, or it is a folder operation that holds the file
      */
-    public record RequiredTargetCoverage(boolean established, List<String> withoutChange) {
+    public record RequiredTargetCoverage(
+            boolean established,
+            List<String> withoutChange,
+            List<String> changeNotRun,
+            CoverageGap gap,
+            List<String> changeNotRunPossible
+    ) {
         public RequiredTargetCoverage {
             withoutChange = !established || withoutChange == null ? List.of() : List.copyOf(withoutChange);
+            changeNotRun = !established || changeNotRun == null ? List.of() : List.copyOf(changeNotRun);
+            List<String> named = changeNotRun;
+            changeNotRunPossible = changeNotRunPossible == null ? List.of()
+                    : changeNotRunPossible.stream().filter(named::contains).distinct().toList();
+            gap = established ? CoverageGap.NONE
+                    : gap == null || gap == CoverageGap.NONE ? CoverageGap.NO_TYPED_TARGETS : gap;
         }
 
         public static RequiredTargetCoverage notEstablished() {
-            return new RequiredTargetCoverage(false, List.of());
+            return notEstablished(CoverageGap.NO_TYPED_TARGETS);
         }
 
-        /** True when coverage is established and every required target changed. */
-        public boolean complete() {
-            return established && withoutChange.isEmpty();
+        public static RequiredTargetCoverage notEstablished(CoverageGap gap) {
+            return new RequiredTargetCoverage(false, List.of(), List.of(), gap, List.of());
         }
+
+        static RequiredTargetCoverage established(
+                List<String> withoutChange,
+                List<String> changeNotRun,
+                List<String> changeNotRunPossible
+        ) {
+            return new RequiredTargetCoverage(true, withoutChange, changeNotRun, CoverageGap.NONE,
+                    changeNotRunPossible);
+        }
+
+        /** True when coverage is established, every required target changed and no later change to one did not run. */
+        public boolean complete() {
+            return established && withoutChange.isEmpty() && changeNotRun.isEmpty();
+        }
+    }
+
+    /** Why request-bound target coverage could not be established from this turn's records. */
+    public enum CoverageGap {
+        /** Coverage is established. */
+        NONE,
+        /** The request has no typed contract or no required mutation target. */
+        NO_TYPED_TARGETS,
+        /** A change was recorded outside the tool loop, so its file is not known here. */
+        EXTRA_SUCCESSES,
+        /** A success with an unknown or uncertain changed path sits next to an open required target. */
+        UNIDENTIFIED_SUCCESS,
+        /** Every required target changed, and a later proposal that never ran names no identifiable file. */
+        UNIDENTIFIED_PROPOSAL
     }
 
     public enum Decision {
@@ -382,6 +430,7 @@ public record MutationRecoveryAssessment(
                 .toList();
         List<ToolCallLoop.ToolOutcome> failed = new ArrayList<>();
         List<ToolCallLoop.ToolOutcome> notRun = new ArrayList<>();
+        List<IndexedOutcome> notRunIndexed = new ArrayList<>();
         List<FailureAssessment> assessments = new ArrayList<>();
 
         RequestObligation compiled = RequestObligationCompiler.compile(contract);
@@ -403,6 +452,7 @@ public record MutationRecoveryAssessment(
                         workspace,
                         disposition));
                 notRun.add(outcome);
+                notRunIndexed.add(indexed);
                 continue;
             }
 
@@ -458,6 +508,7 @@ public record MutationRecoveryAssessment(
                     failed.add(outcome);
                 } else {
                     notRun.add(outcome);
+                    notRunIndexed.add(indexed);
                 }
             }
         }
@@ -467,7 +518,8 @@ public record MutationRecoveryAssessment(
                 contract,
                 requestObligation,
                 compiled,
-                successful,
+                mutating.stream().filter(indexed -> indexed.outcome().success()).toList(),
+                notRunIndexed,
                 extraMutationSuccesses,
                 workspace);
         MutationOutcomeStatus status = classify(
@@ -563,47 +615,311 @@ public record MutationRecoveryAssessment(
 
     /**
      * The required mutation targets of the obligation, supplied or else compiled, that no successful mutating outcome
-     * of this turn changed (LA-F7, D1). A target is changed when a success names it by its path or by its workspace
-     * operation's changed paths, as canonical text or as the same workspace file.
+     * of this turn changed, and those whose later proposed change never ran (LA-F7, D1, D25 option B).
+     *
+     * <p>A success names a target only when its path or its workspace operation's changed paths are proven to be that
+     * file, because a success grants coverage. A proposal that never ran names a target when one of the paths it would
+     * have changed may be that file, or when a folder operation would change a folder that holds it, because a
+     * proposal that may have been meant for a requested file must not let the turn complete. A target named only in
+     * one of those possible ways is listed in changeNotRunPossible, so the answer states it as a possibility. A
+     * proposal is left out when it is a provable no-op, when a later success changed the same
+     * target, or when every path it would have changed is outside the required targets. A proposal that names no
+     * identifiable file is resolved only when every required target changed after it. Otherwise, when no other target
+     * is open, coverage is not established for that reason. When another target is open, that target already keeps
+     * the turn partial with a true row.
      */
     private static RequiredTargetCoverage requiredTargetCoverage(
             TaskContract contract,
             RequestObligation supplied,
             RequestObligation compiled,
-            List<ToolCallLoop.ToolOutcome> successful,
+            List<IndexedOutcome> successful,
+            List<IndexedOutcome> notRun,
             int extraMutationSuccesses,
             Path workspace
     ) {
         RequestObligation obligation = supplied != null ? supplied : compiled;
-        if (contract == null || extraMutationSuccesses > 0 || obligation == null
-                || obligation.requiredMutationTargets().isEmpty()) {
-            return RequiredTargetCoverage.notEstablished();
+        if (contract == null || obligation == null || obligation.requiredMutationTargets().isEmpty()) {
+            return RequiredTargetCoverage.notEstablished(CoverageGap.NO_TYPED_TARGETS);
         }
+        if (extraMutationSuccesses > 0) return RequiredTargetCoverage.notEstablished(CoverageGap.EXTRA_SUCCESSES);
         boolean unidentifiedSuccess = false;
-        for (ToolCallLoop.ToolOutcome success : successful) {
-            if (changedPaths(success).isEmpty() || !success.mutationEffects().uncertainPaths().isEmpty()) {
+        for (IndexedOutcome success : successful) {
+            if (changedPaths(success.outcome()).isEmpty()
+                    || !success.outcome().mutationEffects().uncertainPaths().isEmpty()) {
                 unidentifiedSuccess = true;
             }
         }
+        List<IndexedOutcome> openProposals = notRun.stream()
+                .filter(proposal -> !provableNoOp(proposal.outcome()))
+                .toList();
         List<String> withoutChange = new ArrayList<>();
+        List<String> changeNotRun = new ArrayList<>();
+        List<String> changeNotRunPossible = new ArrayList<>();
+        int earliestLastChange = Integer.MAX_VALUE;
         for (String target : obligation.requiredMutationTargets()) {
-            boolean changed = false;
-            for (ToolCallLoop.ToolOutcome success : successful) {
-                for (String path : changedPaths(success)) {
-                    if (target.equals(canonicalPath(path, workspace, obligation))
-                            || workspace != null && WorkspacePathIdentity.matches(workspace, target, path)) {
-                        changed = true;
-                        break;
-                    }
+            int lastChange = 0;
+            for (IndexedOutcome success : successful) {
+                if (namesProven(changedPaths(success.outcome()), target, workspace, obligation)) {
+                    lastChange = Math.max(lastChange, success.ordinal());
                 }
-                if (changed) break;
             }
-            if (!changed) withoutChange.add(target);
+            earliestLastChange = Math.min(earliestLastChange, lastChange);
+            if (lastChange == 0) {
+                withoutChange.add(target);
+                continue;
+            }
+            boolean proven = false;
+            boolean possible = false;
+            for (IndexedOutcome proposal : openProposals) {
+                if (proposal.ordinal() <= lastChange) continue;
+                // A named operand that the operation changes is a file the call would change, even when another
+                // operand is missing, so an incomplete proposal is matched by the operands it names.
+                List<String> paths = proposedPaths(proposal.outcome());
+                if (namesProven(paths, target, workspace, obligation)) {
+                    proven = true;
+                    break;
+                }
+                if (mayName(paths, target, workspace, obligation)
+                        || holdsByFolderOperation(proposal.outcome(), paths, target, workspace)) {
+                    possible = true;
+                }
+            }
+            if (proven || possible) changeNotRun.add(target);
+            if (!proven && possible) changeNotRunPossible.add(target);
         }
+        // A row of changeNotRun is true whatever an unidentified success changed, so only an open target without a
+        // change makes the coverage undecidable.
         if (!withoutChange.isEmpty() && unidentifiedSuccess) {
-            return RequiredTargetCoverage.notEstablished();
+            return RequiredTargetCoverage.notEstablished(CoverageGap.UNIDENTIFIED_SUCCESS);
         }
-        return new RequiredTargetCoverage(true, withoutChange);
+        if (withoutChange.isEmpty() && changeNotRun.isEmpty()) {
+            for (IndexedOutcome proposal : openProposals) {
+                if (!identifiable(proposal.outcome(), workspace, obligation)
+                        && proposal.ordinal() > earliestLastChange) {
+                    return RequiredTargetCoverage.notEstablished(CoverageGap.UNIDENTIFIED_PROPOSAL);
+                }
+            }
+        }
+        return RequiredTargetCoverage.established(withoutChange, changeNotRun, changeNotRunPossible);
+    }
+
+    /**
+     * A delete, move or rename of a folder, or a copy or move into one, may affect every file below it, so a target
+     * inside a folder that such a proposal would change is held by it. A folder that is the workspace root or holds
+     * it holds every target. The operation kind is the one its producer recorded, so the
+     * same tool-name resolution decides the roles and this relation. The folder holds the target when resolved
+     * workspace paths contain it, or when canonical text contains it without regard to letter case, because a match
+     * that may hold must be assumed for a proposal. A mkdir changes no file below its folder.
+     */
+    private static boolean holdsByFolderOperation(
+            ToolCallLoop.ToolOutcome proposal,
+            List<String> paths,
+            String target,
+            Path workspace
+    ) {
+        if (!proposalKind(proposal).folderScoped()) return false;
+        for (String path : paths) {
+            PlacedPath placed = place(path, workspace, null);
+            // A folder that is the workspace root or holds it holds every requested file.
+            if (placed.root()) return true;
+            if (workspace != null) {
+                try {
+                    Path root = workspace.toAbsolutePath().normalize();
+                    Path folder = root.resolve(path.strip()).normalize();
+                    Path file = root.resolve(target).normalize();
+                    if (root.startsWith(folder)) return true;
+                    if (folder.startsWith(root) && file.startsWith(folder) && !file.equals(folder)) return true;
+                    // Round 5: the same folder under another spelling, such as a link or the real path, by real paths.
+                    Path realRoot = realPath(root);
+                    Path realFolder = realPath(folder);
+                    Path realFile = realPath(file);
+                    if (realRoot.startsWith(realFolder)) return true;
+                    if (realFile.startsWith(realFolder) && !realFile.equals(realFolder)) return true;
+                } catch (java.io.IOException | RuntimeException unresolvable) {
+                    // A path the workspace cannot resolve is judged on its placed text below.
+                }
+            }
+            String folder = placed.canonical().toLowerCase(java.util.Locale.ROOT);
+            if (!folder.isEmpty() && target.toLowerCase(java.util.Locale.ROOT).startsWith(folder + "/")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Round 5: where a proposal path lies. {@code canonical} is its canonical workspace-relative text, from its own
+     * text, from proven identity to a required target, or from resolving it inside the workspace lexically or by real
+     * path, so an absolute, dot-segment or linked spelling of a workspace file is read as that file. {@code root} is
+     * true when it names the workspace root. {@code outside} is true when it resolves outside the workspace both
+     * lexically and by real path.
+     */
+    private record PlacedPath(String canonical, boolean root, boolean outside) {
+        boolean placed() {
+            return !canonical.isEmpty() || root || outside;
+        }
+    }
+
+    private static PlacedPath place(String path, Path workspace, RequestObligation obligation) {
+        String canonical = canonicalPath(path, workspace, obligation);
+        if (!canonical.isEmpty()) return new PlacedPath(canonical, false, false);
+        if (workspace == null || path == null || path.isBlank()) return new PlacedPath("", false, false);
+        try {
+            Path root = workspace.toAbsolutePath().normalize();
+            Path resolved = root.resolve(path.strip()).normalize();
+            if (resolved.equals(root)) return new PlacedPath("", true, false);
+            if (resolved.startsWith(root)) {
+                return new PlacedPath(canonicalPath(root.relativize(resolved).toString()), false, false);
+            }
+            Path realRoot = realPath(root);
+            Path real = realPath(resolved);
+            if (real.equals(realRoot)) return new PlacedPath("", true, false);
+            if (real.startsWith(realRoot)) {
+                return new PlacedPath(canonicalPath(realRoot.relativize(real).toString()), false, false);
+            }
+            return new PlacedPath("", false, true);
+        } catch (java.io.IOException | RuntimeException unresolvable) {
+            return new PlacedPath("", false, false);
+        }
+    }
+
+    /** The real path of the nearest existing ancestor, followed by the names below it that do not exist. */
+    private static Path realPath(Path path) throws java.io.IOException {
+        Path current = path;
+        java.util.ArrayDeque<String> missing = new java.util.ArrayDeque<>();
+        while (current != null && !java.nio.file.Files.exists(current)) {
+            if (current.getFileName() == null) return path;
+            missing.push(current.getFileName().toString());
+            current = current.getParent();
+        }
+        if (current == null) return path;
+        Path real = current.toRealPath();
+        while (!missing.isEmpty()) real = real.resolve(missing.pop());
+        return real.normalize();
+    }
+
+    /**
+     * Round 5: true when both spellings exist in the workspace as different files, as a case variant does on a file
+     * system that keeps letter case, so the variant cannot have named the target.
+     */
+    private static boolean distinctExistingFiles(Path workspace, String target, String canonical) {
+        if (workspace == null) return false;
+        try {
+            Path root = workspace.toAbsolutePath().normalize();
+            Path first = root.resolve(target).normalize();
+            Path second = root.resolve(canonical).normalize();
+            return java.nio.file.Files.exists(first, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    && java.nio.file.Files.exists(second, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    && !java.nio.file.Files.isSameFile(first, second);
+        } catch (java.io.IOException | RuntimeException unresolvable) {
+            return false;
+        }
+    }
+
+    /**
+     * The operation kind of a proposal: the one its producer recorded for a call that never ran, else, for an outcome
+     * without a witness, the kind of its canonical tool name.
+     */
+    private static dev.talos.runtime.ToolCallDispatch.OperationKind proposalKind(ToolCallLoop.ToolOutcome proposal) {
+        if (proposal.dispatch().neverRan()) return proposal.dispatch().proposedChange().kind();
+        // The producer's resolution, which keeps the operation of a rejected namespace.
+        return switch (dev.talos.tools.ToolAliasPolicy.localCanonicalName(proposal.toolName())) {
+            case "copy_path" -> dev.talos.runtime.ToolCallDispatch.OperationKind.COPY;
+            case "move_path" -> dev.talos.runtime.ToolCallDispatch.OperationKind.MOVE;
+            case "rename_path" -> dev.talos.runtime.ToolCallDispatch.OperationKind.RENAME;
+            case "delete_path" -> dev.talos.runtime.ToolCallDispatch.OperationKind.DELETE;
+            case "mkdir" -> dev.talos.runtime.ToolCallDispatch.OperationKind.MKDIR;
+            case "apply_workspace_batch" -> dev.talos.runtime.ToolCallDispatch.OperationKind.BATCH;
+            default -> dev.talos.runtime.ToolCallDispatch.OperationKind.FILE;
+        };
+    }
+
+    /** D25 option B: an exact edit refused before approval because old_string and new_string were identical. */
+    private static boolean provableNoOp(ToolCallLoop.ToolOutcome proposal) {
+        return proposal.failureReason() == ToolFailureReason.EDIT_NO_CHANGE
+                && dispositionOf(proposal) == ProposalDisposition.REFUSED_BEFORE_APPROVAL;
+    }
+
+    /**
+     * A proposal names every file it would change when its witness records a complete change, or, for an outcome
+     * without a witness, when it names a path and is not a workspace operation, and every path is placed: it has
+     * canonical workspace-relative text, names the workspace root, or lies outside the workspace (round 5). A complete
+     * proposal whose placed paths neither may be a required target nor name a folder holding one, by a folder
+     * operation, is outside the request.
+     */
+    private static boolean identifiable(
+            ToolCallLoop.ToolOutcome outcome,
+            Path workspace,
+            RequestObligation obligation
+    ) {
+        boolean complete = outcome.dispatch().neverRan()
+                ? outcome.dispatch().proposedChange().complete()
+                : proposalKind(outcome) == dev.talos.runtime.ToolCallDispatch.OperationKind.FILE;
+        List<String> paths = proposedPaths(outcome);
+        if (!complete || paths.isEmpty()) return false;
+        return paths.stream().allMatch(path -> place(path, workspace, obligation).placed());
+    }
+
+    /**
+     * The paths a proposal would have changed, as far as its typed records name them: those of its authorized
+     * workspace operation plan, and those its producer recorded in the dispatch witness by the typed role of each
+     * operand. The display path of a proposal is not one of them, because for a copy, move or rename without a plan it
+     * names the source. An outcome without a witness falls back to its recorded path only when it is a file tool's.
+     */
+    private static List<String> proposedPaths(ToolCallLoop.ToolOutcome proposal) {
+        List<String> paths = new ArrayList<>();
+        if (proposal.workspaceOperationPlan() != null) {
+            for (String path : proposal.workspaceOperationPlan().changedPaths()) {
+                if (path != null && !path.isBlank()) paths.add(path);
+            }
+        }
+        if (proposal.dispatch().neverRan()) {
+            paths.addAll(proposal.dispatch().proposedChangedPaths());
+        } else if (!proposal.pathHint().isBlank()
+                && proposalKind(proposal) == dev.talos.runtime.ToolCallDispatch.OperationKind.FILE) {
+            paths.add(proposal.pathHint());
+        }
+        return paths;
+    }
+
+    /** A success names a target only when one of its paths is proven to be that file. */
+    private static boolean namesProven(
+            List<String> paths,
+            String target,
+            Path workspace,
+            RequestObligation obligation
+    ) {
+        for (String path : paths) {
+            if (target.equals(canonicalPath(path, workspace, obligation))
+                    || workspace != null && WorkspacePathIdentity.matches(workspace, target, path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A proposal names a target when one of its paths may be that file, including an unproven or rejected identity,
+     * as where a forbidden target must be assumed.
+     */
+    private static boolean mayName(
+            List<String> paths,
+            String target,
+            Path workspace,
+            RequestObligation obligation
+    ) {
+        for (String path : paths) {
+            String canonical = place(path, workspace, obligation).canonical();
+            // Rounds 4 and 5: a spelling that differs only in letter case may name the file on a file system that
+            // ignores case, which WorkspacePathIdentity does not assume outside Windows. It is a possible match unless
+            // both spellings exist as different files.
+            if (target.equals(canonical)
+                    || !canonical.isEmpty() && target.toLowerCase(java.util.Locale.ROOT)
+                            .equals(canonical.toLowerCase(java.util.Locale.ROOT))
+                            && !distinctExistingFiles(workspace, target, canonical)
+                    || workspace != null && WorkspacePathIdentity.mayMatch(workspace, target, path)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> changedPaths(ToolCallLoop.ToolOutcome success) {
@@ -998,8 +1314,8 @@ public record MutationRecoveryAssessment(
 
     /**
      * The first matching rule decides. LA-F7 (D1): with a success, an unresolved failure gives PARTIAL, and a
-     * proposal that never ran gives PARTIAL only when a required target has no recorded change or coverage cannot be
-     * established.
+     * proposal that never ran gives PARTIAL only when a required target has no recorded change, a later proposed
+     * change to a required target never ran (D25 option B), or coverage cannot be established.
      */
     private static MutationOutcomeStatus classify(
             TaskContract contract,

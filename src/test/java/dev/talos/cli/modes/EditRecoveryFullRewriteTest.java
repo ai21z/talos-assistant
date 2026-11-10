@@ -243,13 +243,17 @@ class EditRecoveryFullRewriteTest {
         assertFalse(out.text().contains("No approval was requested"),
                 "approval was requested and granted: " + out.text());
         // LA-F7: the later attempt was not accepted as an executable call, so it is listed as not run next to
-        // the approved change instead of as a failure.
+        // the approved change instead of as a failure. D25 option B: it was a later proposed change to the
+        // requested file and no change followed it, so the turn stays partial and says so.
         assertTrue(
                 out.text().contains(
-                        MutationFailureAnswerRenderer.CHANGES_WITH_NOT_RUN_ANNOTATION),
+                        MutationFailureAnswerRenderer.PARTIAL_REQUESTED_CHANGE_NOT_RUN_ANNOTATION),
                 "the successful write and the later refused attempt must both stay visible: "
                         + out.text());
         assertTrue(out.text().contains("Succeeded:\n- README.md: "), out.text());
+        assertTrue(out.text().contains("Requested files with a later change that did not run:\n"
+                + "- README.md: changed earlier in this turn, but a later proposed change to it did not run.\n"),
+                out.text());
         assertTrue(out.text().contains(
                         "- README.md: talos.edit_file not run, it was not accepted as an executable tool call."),
                 out.text());

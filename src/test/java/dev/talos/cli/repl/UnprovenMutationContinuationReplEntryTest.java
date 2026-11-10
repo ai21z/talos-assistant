@@ -74,6 +74,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -97,6 +98,8 @@ class UnprovenMutationContinuationReplEntryTest {
             + "<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n<h1>Dead Synth</h1>\n</body>\n</html>\n";
     private static final String STYLE = "h1 {\n  color: black;\n}\n";
     private static final String NOT_VERIFIED = "Task completion was not verified.";
+    private static final String TWO_FILES =
+            "In notes.md, replace status=old with status=new. In more.md, replace status2=old with status2=new.";
     private static final String DECIDED = "MUTATION_CONTINUATION_DECIDED";
 
     @TempDir
@@ -304,9 +307,9 @@ class UnprovenMutationContinuationReplEntryTest {
 
     @Test
     void aRefusedTextFormEditAfterTheContinuationNeverRuns() throws Exception {
-        // P21 review: the refused call is an edit, so its never running is visible in the file. LA-F7 (D1): the
-        // refused proposal never ran and the requested file has a recorded change, so the turn completes unverified
-        // and the answer lists the proposal as not run (finding P21-F1).
+        // P21 review: the refused call is an edit, so its never running is visible in the file. LA-F7: the refused
+        // proposal never ran, so the answer lists it as not run (finding P21-F1). D25 option B: it was a later
+        // proposed change to the requested file and no change followed it, so the turn stays partial and says so.
         Run run = run(TWO_PART, List.of(
                 nativeCall("talos.read_file", Map.of("path", "notes.md")),
                 edit("notes.md", "# Notes", "# Session Notes"),
@@ -320,13 +323,16 @@ class UnprovenMutationContinuationReplEntryTest {
         assertEquals(1, run.prompts().size(), run.transcript());
         assertEquals(3, run.requests().size(), run.transcript());
         assertEquals(List.of("TOOL_AUTHORITY_REJECTED"), unansweredReasons(run), run.transcript());
-        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
         String answerBox = answerBox(run);
         assertTrue(answerBox.contains("[1 not run]"), answerBox);
         assertFalse(answerBox.contains(" failed]"), answerBox);
         assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
-        assertTrue(answerBox.contains("- notes.md: talos.edit_file not run, it was not accepted as an executable tool "
-                + "call."), answerBox);
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("Requested files with a later change that did not run:\n"
+                + "- notes.md: changed earlier in this turn, but a later proposed change to it did not run.\n"
+                + "Not run (these changed no file):\n"
+                + "- notes.md: talos.edit_file not run, it was not accepted as an executable tool call."), answer);
     }
 
     @Test
@@ -400,9 +406,9 @@ class UnprovenMutationContinuationReplEntryTest {
     @Test
     void aDeniedContinuationChangeEndsWithTheCompletedChange() throws Exception {
         // P23 (D20 option A): a denial of the change after the continuation leaves the file as its completed change
-        // left it and sends no further request. LA-F7 (D1, at file granularity): the declined change never ran and
-        // the requested file has a recorded change, so the turn completes unverified and the answer lists the
-        // declined change as not run.
+        // left it and sends no further request. LA-F7: the declined change never ran, so the answer lists it as not
+        // run. D25 option B: it was a later proposed change to the requested file and no change followed it, so the
+        // turn stays partial and says so (finding P23-F1).
         Run run = run(TWO_PART, List.of(
                 nativeCall("talos.read_file", Map.of("path", "notes.md")),
                 edit("notes.md", "# Notes", "# Session Notes"),
@@ -416,13 +422,73 @@ class UnprovenMutationContinuationReplEntryTest {
         assertEquals(3, run.requests().size(), run.transcript());
         assertEquals(List.of("CONTINUED"), decisions(run), run.transcript());
         assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK"), writeReasons(run), run.transcript());
-        assertEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
         String answerBox = answerBox(run);
         assertTrue(answerBox.contains("Edited notes.md"), answerBox);
-        assertTrue(answerBox.contains("- notes.md: talos.edit_file not run, approval was declined."), answerBox);
-        assertTrue(answerBox.contains(NOT_VERIFIED), answerBox);
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.startsWith("[Truth check: some file changes were applied, but a proposed change to a file "
+                + "this request expects did not run."), answer);
+        assertTrue(answer.contains("Requested files with a later change that did not run:\n"
+                + "- notes.md: changed earlier in this turn, but a later proposed change to it did not run.\n"
+                + "Not run (these changed no file):\n"
+                + "- notes.md: talos.edit_file not run, approval was declined."), answer);
         assertFalse(answerBox.contains("[failure policy stopped]"), answerBox);
         assertFalse(answerBox.contains("Tool loop stopped"), answerBox);
+    }
+
+    /**
+     * D26 option A, critic item 1: a complete write of a file the turn already changed, while another requested file
+     * remains, is asked once without the session option. When the approved write undoes the requested change, the
+     * turn does not complete and the model's claim is not shown.
+     */
+    @Test
+    void anAdmittedCompleteWriteThatUndoesTheRequestedChangeDoesNotCompleteTheTurn() throws Exception {
+        Run run = run(TWO_FILES, List.of(
+                edit("notes.md", "status=old", "status=new"),
+                nativeCall("talos.write_file", Map.of("path", "notes.md", "content", "status=old\nfooter\nreviewed\n")),
+                edit("more.md", "status2=old", "status2=new"),
+                text("Both replacements are done.")), List.of("a", "y"),
+                Map.of("notes.md", "status=old\nfooter\n", "more.md", "status2=old\n"));
+
+        assertEquals("status=old\nfooter\nreviewed\n", Files.readString(run.workspace().resolve("notes.md")),
+                run.transcript());
+        assertEquals("status2=new\n", Files.readString(run.workspace().resolve("more.md")), run.transcript());
+        assertEquals(List.of("DEFAULT_WRITE_ASK", "CONTINUATION_WRITE_ASK", "SESSION_REMEMBER_ALLOW"),
+                writeReasons(run), run.transcript());
+        assertEquals(2, run.prompts().size(), run.transcript());
+        assertFalse(run.prompts().get(1).contains("a=yes for session"), run.prompts().toString());
+        assertTrue(events(run, "PENDING_ACTION_OBLIGATION_BREACHED").isEmpty(), run.transcript());
+        assertNotEquals("COMPLETE", outcomeStatus(run), run.transcript());
+        assertFalse(run.onlyRow().assistantText().contains("Both replacements are done."),
+                run.onlyRow().assistantText());
+    }
+
+    /**
+     * D26 option A with D25 option B: a declined complete write of a file the turn already changed is admitted and
+     * asked instead of stopping the turn. The decline ends the loop, so more.md stays unchanged and the turn is
+     * partial for that reason. The notes.md row is the D25 option B statement that a later proposed change to a
+     * requested file did not run.
+     */
+    @Test
+    void aDeclinedCompleteWriteOfAChangedFileKeepsTheTurnPartial() throws Exception {
+        Run run = run(TWO_FILES, List.of(
+                edit("notes.md", "status=old", "status=new"),
+                nativeCall("talos.write_file", Map.of("path", "notes.md", "content", "status=new\nfooter\nreviewed\n")),
+                edit("more.md", "status2=old", "status2=new"),
+                text("Both replacements are done.")), List.of("a", "n"),
+                Map.of("notes.md", "status=old\nfooter\n", "more.md", "status2=old\n"));
+
+        assertEquals("status=new\nfooter\n", Files.readString(run.workspace().resolve("notes.md")), run.transcript());
+        assertEquals("status2=old\n", Files.readString(run.workspace().resolve("more.md")), run.transcript());
+        assertTrue(events(run, "PENDING_ACTION_OBLIGATION_BREACHED").isEmpty(), run.transcript());
+        assertEquals("PARTIAL", outcomeStatus(run), run.transcript());
+        String answer = run.onlyRow().assistantText();
+        assertTrue(answer.contains("Expected files not changed:\n"
+                + "- more.md: expected by this request, but not changed in this turn.\n"
+                + "Requested files with a later change that did not run:\n"
+                + "- notes.md: changed earlier in this turn, but a later proposed change to it did not run.\n"),
+                answer);
+        assertTrue(answer.contains("- notes.md: talos.write_file not run, approval was declined."), answer);
     }
 
     @Test
