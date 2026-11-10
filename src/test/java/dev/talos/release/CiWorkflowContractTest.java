@@ -53,6 +53,20 @@ class CiWorkflowContractTest {
     }
 
     @Test
+    @DisplayName("Windows release staging never has less time than the Windows Gradle CI check it repeats")
+    void windowsReleaseStagingTimeoutCoversTheWindowsGradleCheckTimeout() throws IOException {
+        String ci = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
+        String staging = Files.readString(Path.of(".github", "workflows", "release-staging.yml"));
+        int ciTimeout = wholeJobTimeoutMinutes(workflowJobBlock(ci, "gradle-check"), "gradle-check");
+        int stagingTimeout = wholeJobTimeoutMinutes(
+                workflowJobBlock(staging, "windows-qa-staging"), "windows-qa-staging");
+
+        assertTrue(stagingTimeout >= ciTimeout,
+                "windows-qa-staging runs the clean check that gradle-check runs plus the release artifacts, so its "
+                        + "timeout (" + stagingTimeout + ") must not fall below gradle-check (" + ciTimeout + ")");
+    }
+
+    @Test
     @DisplayName("Linux CI runs the workspace path identity checks that differ by platform")
     void linuxCiRunsWorkspacePathIdentityChecks() throws IOException {
         String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
@@ -314,6 +328,12 @@ class CiWorkflowContractTest {
         }
         assertTrue(!workflow.contains("contents: write"),
                 label + " must not request contents: write while it only stages artifacts");
+    }
+
+    private static int wholeJobTimeoutMinutes(String job, String jobName) {
+        var matches = Pattern.compile("(?m)^    timeout-minutes:\\s*(\\d+)\\s*$").matcher(job).results().toList();
+        assertEquals(1, matches.size(), jobName + " must declare exactly one whole-job timeout");
+        return Integer.parseInt(matches.get(0).group(1));
     }
 
     private static String workflowJobBlock(String workflow, String jobName) {
