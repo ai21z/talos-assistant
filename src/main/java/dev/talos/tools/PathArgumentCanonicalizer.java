@@ -52,8 +52,10 @@ public final class PathArgumentCanonicalizer {
         }
 
         Path trimmedResolved = resolve(workspace, trimmed);
-        boolean rawExists = rawResolved != null && Files.exists(rawResolved);
-        boolean trimmedExists = trimmedResolved != null && Files.exists(trimmedResolved);
+        // The file system is probed for a model-supplied path only inside the workspace, so a path beside it, on
+        // another drive or on a network share is left as given and no host or volume it names is contacted.
+        boolean rawExists = insideWorkspace(workspace, rawResolved) && Files.exists(rawResolved);
+        boolean trimmedExists = insideWorkspace(workspace, trimmedResolved) && Files.exists(trimmedResolved);
         if (!rawExists && trimmedExists) {
             return new Resolution(raw, trimmed, trimmedResolved, true);
         }
@@ -83,6 +85,16 @@ public final class PathArgumentCanonicalizer {
             return new ToolCallNormalization(call, List.of());
         }
         return new ToolCallNormalization(new ToolCall(call.toolName(), updated), changes);
+    }
+
+    /** True when a resolved path lies lexically inside the workspace. */
+    private static boolean insideWorkspace(Path workspace, Path resolved) {
+        if (workspace == null || resolved == null) return false;
+        try {
+            return resolved.toAbsolutePath().normalize().startsWith(workspace.toAbsolutePath().normalize());
+        } catch (RuntimeException unresolvable) {
+            return false;
+        }
     }
 
     private static Path resolve(Path workspace, String value) {

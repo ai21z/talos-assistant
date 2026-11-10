@@ -434,8 +434,10 @@ class RequestedFileChangeNotRunTest {
 
         assertEquals(MutationOutcomeStatus.PARTIAL, dotSegments.mutationOutcome().status());
         assertEquals(List.of("orders.py"), dotSegments.requiredTargetCoverage().changeNotRun());
-        assertEquals(MutationOutcomeStatus.SUCCEEDED, outside.mutationOutcome().status());
-        assertEquals(MutationRecoveryAssessment.CoverageGap.NONE, outside.requiredTargetCoverage().gap());
+        // Round 7: a path outside the workspace is not probed, so it may be an alias into the workspace that cannot
+        // be ruled out. It is unplaced and keeps the turn partial with its own gap.
+        assertEquals(MutationOutcomeStatus.PARTIAL, outside.mutationOutcome().status());
+        assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL, outside.requiredTargetCoverage().gap());
     }
 
     /**
@@ -501,6 +503,10 @@ class RequestedFileChangeNotRunTest {
         boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
         assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, "orders.py"));
         assertTrue(MutationRecoveryAssessment.probesFileSystemFor(workspace, workspace.resolve("docs/x.md").toString()));
+        // Round 7: only a path inside the workspace is probed, not one beside it on the same root.
+        assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace,
+                workspace.getParent().resolve("x.md").toString()));
+        assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "../x.md"));
         if (windows) {
             assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "//host.invalid/share/x.md"));
             assertFalse(MutationRecoveryAssessment.probesFileSystemFor(workspace, "\\\\host.invalid\\share\\x.md"));
@@ -511,7 +517,17 @@ class RequestedFileChangeNotRunTest {
             MutationRecoveryAssessment unc = assess(List.of(edited("inventory.py"), edited("orders.py"),
                     edited("report.py"), denied("//host.invalid/share/orders.py",
                             ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
-            assertEquals(MutationOutcomeStatus.SUCCEEDED, unc.mutationOutcome().status());
+            // Round 7: unplaced rather than outside, because an alias on another root cannot be ruled out unprobed.
+            assertEquals(MutationOutcomeStatus.PARTIAL, unc.mutationOutcome().status());
+            assertEquals(MutationRecoveryAssessment.CoverageGap.UNPLACED_PROPOSAL, unc.requiredTargetCoverage().gap());
+
+            // Round 7: the Win32 file namespace prefix, which the dispatch witness keeps as //?/, names the file
+            // without it, as the JDK reads it.
+            String longPath = "//?/" + workspace.resolve("orders.py").toString().replace('\\', '/');
+            MutationRecoveryAssessment prefixed = assess(List.of(edited("inventory.py"), edited("orders.py"),
+                    edited("report.py"), denied(longPath, ToolFailureReason.USER_APPROVAL_DENIED)), workspace);
+            assertEquals(MutationOutcomeStatus.PARTIAL, prefixed.mutationOutcome().status(), longPath);
+            assertEquals(List.of("orders.py"), prefixed.requiredTargetCoverage().changeNotRun(), longPath);
         }
     }
 
@@ -548,6 +564,21 @@ class RequestedFileChangeNotRunTest {
         assertEquals(MutationOutcomeStatus.PARTIAL, throughLink.mutationOutcome().status());
         assertEquals(List.of("docs/guide.md"), throughLink.requiredTargetCoverage().changeNotRunPossible());
         assertEquals(MutationOutcomeStatus.SUCCEEDED, linkOperand.mutationOutcome().status());
+
+        // Round 7: a delete of a link to a subfolder acts on the link, while a copy into it writes below its target.
+        MutationRecoveryAssessment deleteLink = MutationRecoveryAssessment.assess(contract, obligation,
+                loop(List.of(edited("docs/guide.md"), folderOperation("talos.delete_path",
+                        ToolCallDispatch.OperationKind.DELETE, "manual", ToolError.DENIED, true,
+                        ToolFailureReason.USER_APPROVAL_DENIED))), 0, TaskVerificationEvidence.notRun("not run"),
+                workspace);
+        MutationRecoveryAssessment copyIntoLink = MutationRecoveryAssessment.assess(contract, obligation,
+                loop(List.of(edited("docs/guide.md"), folderOperation("talos.copy_path",
+                        ToolCallDispatch.OperationKind.COPY, "manual", ToolError.DENIED, true,
+                        ToolFailureReason.USER_APPROVAL_DENIED))), 0, TaskVerificationEvidence.notRun("not run"),
+                workspace);
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, deleteLink.mutationOutcome().status());
+        assertEquals(MutationOutcomeStatus.PARTIAL, copyIntoLink.mutationOutcome().status());
+        assertEquals(List.of("docs/guide.md"), copyIntoLink.requiredTargetCoverage().changeNotRunPossible());
     }
 
     /**
